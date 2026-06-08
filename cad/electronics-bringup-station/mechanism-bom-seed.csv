@@ -1,0 +1,52 @@
+Subsystem,Item,Qty,Representative Specification,Notes
+Base Frame,Base frame weldment or plate frame,1,680 mm W x 560 mm D max footprint,Aluminum production-intent structure
+Base Frame,Fixture support deck,1,3-6 mm sheet metal or machined plate,Supports fixture and instrument tray
+Base Frame,Gusset plates,8,6-10 mm aluminum,Corner stiffness and manufacturable fastening
+Y Axis,Linear rail,2,MGN15-class 400 mm travel,Mounted left and right front-back
+Y Axis,Linear carriage blocks,4,MGN15-compatible,Two per side rail minimum
+Y Axis,Ballscrew,2,1605-class or visually similar,Dual synchronized drive preferred
+Y Axis,Ballscrew support block set,2,Fixed/floating bearing supports,Realistic bearing blocks and fasteners
+Y Axis,Servo or closed-loop stepper motor,1-2,Compact industrial motor,Rear-mounted with coupler or synchronization belt
+Y Axis,Motor mount bracket,1-2,10-12 mm machined aluminum,Serviceable mount
+Y Axis,Synchronization belt or torsion shaft,1,Industrial timing belt or shaft,If using one motor for dual screws
+Y Axis,Drag chain,1,Low-profile cable carrier,Fixed frame to moving gantry
+Gantry,Crossbeam,1,Stiff machined or welded aluminum beam,Spans left-right across work area
+Gantry,Gantry end plates,2,12 mm aluminum,Connect crossbeam to Y carriages
+X Axis,Linear rail,2,MGN15-class 500 mm travel,Mounted to crossbeam
+X Axis,Linear carriage blocks,4,MGN15-compatible,X carriage support
+X Axis,Ballscrew,1,1605-class or visually similar,Left-right drive
+X Axis,Ballscrew support block set,1,Fixed/floating bearing supports,Mounted at crossbeam ends
+X Axis,Servo or closed-loop stepper motor,1,Compact industrial motor,Mounted at crossbeam end
+X Axis,X carriage plate,1,10-12 mm machined aluminum,Holds Z stage and cable chain anchor
+X Axis,Drag chain,1,Compact cable carrier,Along rear/top of crossbeam
+Z Axis,Linear rail,2,MGN12-class 100 mm travel,Vertical rails on X carriage
+Z Axis,Linear carriage blocks,4,MGN12-compatible,Z carriage support
+Z Axis,Ballscrew,1,1204-class or visually similar,Vertical drive
+Z Axis,Ballscrew support block set,1,Compact fixed/floating supports,Includes travel stops
+Z Axis,Servo or closed-loop stepper motor,1,Compact industrial motor,Mounted above or behind Z stage
+Z Axis,Z carriage plate,1,8-10 mm machined aluminum,Holds probe head
+Probe Head,Machined probe head housing,1,90 mm W x 70 mm D x 75 mm H,Dark gray anodized aluminum
+Probe Head,Replaceable lower probe cartridge,1,60 mm x 50 mm lower probe zone,Serviceable pogo-pin plate
+Probe Head,Spring-loaded pogo probe,4,Signal/ground/differential pair,Visible below head
+Probe Head,Miniature camera module,1,Downward-facing close-range camera,Integrated lens bezel
+Probe Head,Force sensor or load-cell stack,1,Thin load cell or flexure block,Contact detection
+Probe Head,Mechanical overtravel stops,2-4,Hard stop features,Protect probes and PCB pads
+Probe Head,Tool changer interface,1,Dowel-pin or kinematic mount pattern,Future-compatible
+Probe Head,Mini drag chain or cable loop,1,Compact cable carrier,X carriage to probe head
+Vision,Fixed overhead camera,1,Downward-facing industrial camera,Mounted above fixture
+Vision,Overhead camera bracket,1,Slotted adjustable aluminum bracket,Frame-mounted
+Fixture,PCB fixture plate,1,520 mm x 420 mm x 18 mm aluminum,25 mm hole grid
+Fixture,Adjustable edge clamp,8,Low-profile machined clamp,At least two per side
+Fixture,Tooling pins,8,4 mm and 6 mm representative pins,Removable locating pins
+Fixture,Vacuum hold-down port,4,Small through-port features,Optional first prototype feature
+Instrumentation,Instrument tray,1,Sheet metal tray below fixture,Placeholder mounting volume
+Instrumentation,Relay matrix placeholder,1,Internal module block,Routes probes to instruments
+Instrumentation,Oscilloscope placeholder,1,4-channel module block,No front-panel details
+Instrumentation,Logic analyzer placeholder,1,16-channel module block,No front-panel details
+Instrumentation,DMM placeholder,1,Precision measurement module block,No front-panel details
+Instrumentation,Programmable power supply placeholder,1,0-30 V class module block,No front-panel details
+Instrumentation,Electronic load placeholder,1,Internal load module block,Provide ventilation clearance
+Cable Management,Cable pass-throughs,Multiple,Rubber grommet or sheet metal openings,Probe and camera harness routing
+Cable Management,Cable brackets,Multiple,Small sheet metal brackets,Support all harnesses
+Fasteners,Rail fasteners,Multiple,M3/M4/M5 socket head screws,Represent realistic rail mounting
+Fasteners,Frame fasteners,Multiple,M6/M8 socket head screws,Represent serviceable assembly
