@@ -34,12 +34,14 @@ Sequence executed (chronological):
 10. SIDE VENTS — 132 O5 holes (16 mm grid, Y -420..-260, Z 240..420) cut
     through BOTH shells with one Right-plane sketch + one scoped REMOVE
     extrude spanning the full width (booleanScope = the two shells).
-11. CONTOURED TOP — "Top Slab" X +/-435, Y +/-460, Z 460..482 with
-    fillet_edge_at roundovers: R20 front, R10 rear. R10 is chosen so the
-    curve lands EXACTLY tangent to the rear panel top at Z=480
-    (482 - r + sqrt(r^2 - (r-4)^2) = 480 at the panel's 4 mm face offset),
-    avoiding a boolean cut that Onshape rejected when the cut boundary was
-    coincident with target faces.
+11. CONTOURED TOP (final) — "Top Slab" X +/-435, Y +/-460, Z 452..482 with
+    R30 roundovers front AND rear, matching the shells' measured top-edge
+    radius (evSurfaceDefinition over the shell's cylindrical faces: R30 top
+    edges, R60 vertical corners, R2.5 vents). To clear the R30 curve, all
+    face assemblies top out at Z=452: front frame/fillers rebuilt, rear
+    panel + fillers cut by a SCOPED REMOVE extrude inset to X +/-436 — the
+    earlier cut failures were the cut boundary exactly coincident with the
+    filler faces at X=435.
 
 Known residue (manual cleanup): one errored feature "EVT - Rear Top Cut"
 + its sketch in the tree (delete in UI); rear top screw row sits 10 mm
@@ -49,7 +51,8 @@ Final front-plane stack (outer faces):
     fascia/surround/trim/glass at Y=-460 (glass 4 mm thick, frame strips
     X +/-(375..395)); accent strip 1 mm proud at the fascia lower edge.
 Final rear plane: panel + fillers at Y=460, connectors/labels/screws proud.
-Top: slab Z 460-482 flush between shells, contoured front/rear.
+Top: slab Z 452-482 flush between shells, R30 roundovers both ends mating
+the shell contour exactly.
 """
 
 from __future__ import annotations
