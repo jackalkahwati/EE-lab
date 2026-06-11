@@ -1,11 +1,25 @@
 # Adam CAD Prompt: EVT Pass 1 — Motion Architecture Detail
 
+> **Do not paste this file into Adam.** Monolithic prompts stall the agent and
+> burn tokens. Use `adam-cad-evt-pass-1-run-prompts.md` — the same scope split
+> into 5 one-session blocks. This file remains as the reference plan.
+
 Continue the existing Onshape Part Studio. This pass changes the rules: the
-mechanism freeze is lifted for the motion system only. The goal is no longer
-packaging or appearance — it is resolving the motion-hardware interfaces so this
-geometry can drive an EVT build and real component procurement. The independent
+mechanism freeze is lifted for the motion system only, but this must be done
+non-destructively. The goal is no longer packaging or appearance — it is grouping
+systems of parts and adding vendor-true motion-hardware interfaces so each
+subsystem can be worked on separately for EVT and procurement. The independent
 STEP review found the motion system is envelopes with major collisions; this pass
-replaces it with vendor-true geometry.
+adds vendor-true geometry while preserving the current simplified/original bodies
+as reference.
+
+Critical rule: do not delete, suppress, overwrite, or remove existing bodies.
+If old envelope bodies need to be distinguished from new vendor-true bodies,
+rename them with `Legacy -` or `Reference -` prefixes. New bodies should use
+clear subsystem prefixes such as `X Axis -`, `Y Axis -`, `Z Axis -`,
+`Motion Sensors -`, or `Analysis -`. If Onshape supports Composite Parts or
+folders in this context, group related parts into subsystem groups; otherwise
+use naming prefixes only.
 
 Do not touch: enclosure bodies, plinth instruments, fixture plate, sample PCB,
 overhead camera, probe head detail bodies (those are EVT Pass 2). Preserve the
@@ -28,15 +42,16 @@ ball tracks and seals is not needed):
   (or 1004), BK10 fixed support top, simple bushing at bottom.
 - Motors: NEMA 23 closed-loop steppers (57 x 57 mm flange, Ø38.1 pilot, 4x M4
   on Ø47.14 bolt circle pattern, Ø8 shaft x 20 mm) for all three axes, driven by
-  the Galil DMC-4133 already in the plinth. Replace the oversized servo
-  envelopes with these.
+  the Galil DMC-4133 already in the plinth. Add these as new vendor-true motor
+  bodies and keep oversized servo envelopes as legacy/reference geometry.
 
-## Step 1: Fix the three structural collisions first
+## Step 1: Document and non-destructively resolve the three structural collisions first
 
 The review found these; resolve them with real mounting geometry, not by nudging
 envelopes:
 
-1. X servo intersects the base frame (~11% of motor volume). Build an X motor
+1. X servo intersects the base frame (~11% of motor volume). Keep that old body
+   as `Legacy - X Servo Envelope`. Build an X motor
    mount plate (10 mm aluminum) bolted to the frame end face beyond the BK12
    support, with the NEMA 23 on its 4-hole pattern and pilot bore. The motor
    body must sit fully outside the frame solid with the coupling spanning the
@@ -46,17 +61,19 @@ envelopes:
    section, coupling inline with the Y ballscrew. Zero overlap with the beam
    solid.
 3. Z-stage slide is fully embedded in the moving beam, and the Z-stage plate
-   overlaps the beam ~40%. Rebuild the Z stack positions: Y carriage rides on
-   top of the beam on its four HGH15 blocks; the Z mounting plate hangs on the
-   FRONT (-Y) face of the carriage, fully clear of the beam; the Z slide and
-   rails sit on the front of that plate. Verify zero solid overlap among beam,
-   carriage, plate, slide at park.
+   overlaps the beam ~40%. Keep those old bodies as legacy/reference geometry.
+   Add a new grouped Z stack position: Y carriage rides on top of the beam on
+   its four HGH15 blocks; the new Z mounting plate hangs on the FRONT (-Y) face
+   of the carriage, fully clear of the beam; the new Z slide and rails sit on
+   the front of that plate. Verify zero solid overlap among beam, carriage, new
+   plate, new slide at park.
 
 ## Step 2: Rails and carriage blocks
 
-- Replace the four rail envelopes (X Rail Front/Rear, Y Rail Left/Right) and add
-  the Z rails with vendor-true rail cross-sections including counterbored
-  mounting hole representations at correct pitch.
+- Keep the four rail envelopes (X Rail Front/Rear, Y Rail Left/Right) as
+  legacy/reference geometry. Add new vendor-true rails with vendor-true rail
+  cross-sections including counterbored mounting hole representations at correct
+  pitch.
 - Add the carriage blocks the review found missing: 4x HGH20 under the moving X
   beam (two per X rail), 4x HGH15 under the Y carriage, 2x MGN12H behind the Z
   slide. Blocks wrap their rail with the catalog block cross-section — rail
@@ -67,12 +84,13 @@ envelopes:
 
 ## Step 3: Ballscrew assemblies
 
-For each axis: screw shaft with turned-down journal ends, flanged ballnut at the
-moving member with a nut housing block bolted to it (beam, carriage, or slide),
-BK-class fixed bearing block at the motor end, BF-class floating block at the far
-end, jaw coupling connecting motor shaft to screw journal. The existing bare
-screw cylinders get replaced. Nut housings must transmit to the moving member
-with a real bolted joint face — no floating nuts.
+For each axis: add a new screw shaft with turned-down journal ends, flanged
+ballnut at the moving member with a nut housing block bolted to it (beam,
+carriage, or slide), BK-class fixed bearing block at the motor end, BF-class
+floating block at the far end, jaw coupling connecting motor shaft to screw
+journal. Keep the existing bare screw cylinders as legacy/reference geometry.
+Nut housings must transmit to the moving member with a real bolted joint face —
+no floating nuts.
 
 ## Step 4: Travel definition and sensors
 
@@ -87,16 +105,18 @@ with a real bolted joint face — no floating nuts.
 ## Step 5: Verify and report
 
 - Regenerate with zero errors.
-- Run an interference report across all motion-system bodies: the only permitted
+- Run an interference report across all new motion-system bodies: the only permitted
   containments are rail-through-block bores and screw-through-nut bores. List
-  any other intersecting pair; the target is zero.
+  any other intersecting pair; the target is zero for new EVT geometry. Do not
+  delete legacy/reference bodies to achieve this.
 - Report: per-axis stack heights (rail + block + plate), coupling alignment
   (motor shaft and screw journal coaxial within 0.1 mm in the model), and the
   clearance between the Y-motor bracket at X = ±250 mm travel extremes and the
   enclosure shells.
-- Rename all new bodies descriptively (X Carriage Block 1–4, X Ballnut, X Nut
-  Housing, BK12 Fixed Support, X Motor Mount Plate, X Limit Switch Min/Max, …).
-  Zero "Part NNN" names.
+- Rename all new bodies descriptively with subsystem prefixes (X Axis - Carriage
+  Block 1–4, X Axis - Ballnut, X Axis - Nut Housing, X Axis - BK12 Fixed
+  Support, X Axis - Motor Mount Plate, X Axis - Limit Switch Min/Max, …). Zero
+  new "Part NNN" names. Preserve legacy/reference parts.
 - Screenshots: full gantry three-quarter view, close-up of each motor mount,
   close-up of one carriage block on rail, and the Z stack from the side.
 
