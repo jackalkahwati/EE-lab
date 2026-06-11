@@ -13,6 +13,26 @@ The production machine should not contain screened benchtop instruments inside t
 
 Screened instruments such as Keysight DAQ970A, Keysight 34465A, Siglent SPD1305X, Siglent SDL1030X, and similar bench instruments are allowed as external lab references or early bench-prototype stand-ins, but they are not production internal parts.
 
+## Locked Build Decisions (June 2026)
+
+Decision: COTS for every precision instrument, custom only for the switching/probe-interface layer. We do not rebuild instruments whose value is in calibrated analog front-ends (scope, DMM, logic analyzer) — the NRE is 12-18 months each and the result would be uncalibrated and untrusted. The custom boards are the parts that cannot be bought and that carry the product IP.
+
+| Subsystem | V1 Prototype | Production (V2) |
+|---|---|---|
+| Oscilloscope | BUY: PicoScope 5444D MSO | Same. Never custom. |
+| Logic analyzer | BUY: Saleae Logic Pro 16 | Same. Never custom. |
+| Precision DC / DMM role | BUY: MCC USB-2416-4AO | Same. Never custom. |
+| Utility I/O | BUY: LabJack T7-OEM | Same or fold into interlock/utility board. |
+| DUT power | BUY: Siglent SPD1305X (service-bay stand-in, screen hidden) | BUILD: custom protected programmable power board. |
+| Electronic load | BUY: Siglent SDL1030X (service-bay stand-in, screen hidden) | BUILD: custom internal e-load board. |
+| Relay/probe matrix | BUILD: custom protected reed-relay matrix PCB | Same board, revised. Core IP. |
+| Probe protection | BUILD: custom (may share PCB with matrix in v1) | Same. |
+| Probe cartridge / head interface | BUILD: custom cartridge PCB/flex with force-sensor AFE | Same. |
+| Calibration/self-test board | Defer (pull into v1 if schedule allows) | BUILD. |
+| PXI/PXIe modules (NI 4112/4110/4051, Pickering matrix) | Not used | Enterprise/defense configuration only. |
+
+The custom-vs-COTS migration rule: an instrument goes custom only when volume justifies the NRE, the COTS module is the BOM cost driver, and we use only a narrow slice of its capability. DUT power and e-load meet that test at production volume; the scope and DMM likely never do.
+
 ## Recommended Production Architecture
 
 - Internal control computer runs the machine application, vision, board import, test sequencing, reports, and AI workflow.
@@ -217,8 +237,8 @@ For a serious flagship prototype, buy or build:
 - 1x Saleae Logic Pro 16.
 - 1x MCC USB-2416-4AO or USB-2408-2AO.
 - 1x LabJack T7-OEM or T7-Pro-OEM.
-- 1x custom DUT power board, or NI PXIe-4112/PXI-4110 plus PXI/PXIe chassis if using COTS screenless source.
-- 1x custom electronic load board, or NI PXIe-4051 plus PXI/PXIe chassis if using COTS screenless load.
+- 1x Siglent SPD1305X as v1 DUT power stand-in (service bay, screen hidden); custom protected DUT power board is the v2 production replacement.
+- 1x Siglent SDL1030X as v1 electronic load stand-in (service bay, screen hidden); custom e-load board is the v2 production replacement.
 - 1x custom relay/probe matrix board.
 - 1x custom probe protection board.
 - 1x Galil DMC-4133.
