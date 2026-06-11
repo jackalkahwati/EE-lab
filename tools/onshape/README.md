@@ -82,3 +82,24 @@ Part Studio 1).
   face exactly (see finish_pass.py step 11).
 - Transform moves bodies but not their defining sketches — orphaned sketch
   curves remain at the old location; hide sketches in the UI.
+
+## Assembly mates via API: verdict (2026-06-11)
+
+- **Mate groups work** (`BTMMateGroup-65` + `BTMIndividualOccurrenceQuery-626`
+  paths). `motion_check.py` partitions 263 instances into Static/X/Y/Z rigid
+  groups programmatically — the bulk of manual mating.
+- **Slider mates can be created** — but only by cloning a real UI mate's full
+  serialization (found via public-document search): all 26 parameters, plus
+  implicit `BTMMateConnector-66` sub-features whose originQuery is
+  `BTMInferenceQueryWithOccurrence-1083` with `inferenceType: MID_AXIS_POINT`
+  on a cylindrical face. Raw `BTMIndividualQueryWithOccurrence-811` geometry
+  queries in `mateConnectorsQuery` get silently blanked.
+- **But don't**: implicit connectors on independently-extruded cylinders get
+  arbitrary secondary axes; the slider's rotation lock then rests the stages
+  in a rotated configuration. `matevalues` POST works (needs
+  `ownerOccurrencePath`) but cannot correct it, and `occurrencetransforms`
+  is overridden by the solver; one assembly wedged permanently (transforms
+  accepted but ignored even after deleting all mates) and had to be deleted
+  and rebuilt. Final division of labor: groups + verification via API,
+  the 3 slider mates by hand in the UI (~30 s each, screw cylinder -> nut
+  cylinder -> limits).
