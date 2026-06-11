@@ -33,6 +33,17 @@ Decision: COTS for every precision instrument, custom only for the switching/pro
 
 The custom-vs-COTS migration rule: an instrument goes custom only when volume justifies the NRE, the COTS module is the BOM cost driver, and we use only a narrow slice of its capability. DUT power and e-load meet that test at production volume; the scope and DMM likely never do.
 
+### Expansion addendum (June 2026)
+
+`hardware-expansion-spec.md` extends this lock with the bring-up/diagnosis
+capability set: J-Link programmer + Tag-Connect + SPI flash programmer, Rigol
+DP832 as primary sequenced DUT power (SPD1305X moves to auxiliary), Joulescope
+JS220 for inrush/leakage, Keithley DMM6500 for pre-power safety checks, FLIR
+Lepton 3.5 thermal camera, probe cartridge family on the tool-changer
+interface, the DUT interface panel (USB/Ethernet/CAN/UART-I2C-SPI/GPIO), and a
+machine-vision overhead camera with controlled lighting. Adds one BUILD item:
+the custom DUT interface board.
+
 ## Recommended Production Architecture
 
 - Internal control computer runs the machine application, vision, board import, test sequencing, reports, and AI workflow.

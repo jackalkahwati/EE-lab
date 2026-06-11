@@ -22,11 +22,17 @@ class MachineContext:
     config: MachineConfig
     gantry: Gantry
     router: MatrixRouter
-    psu: object
+    power: object          # PowerSystem (DP832-class, sequenced channels)
+    psu_aux: object        # auxiliary single supply (SPD1305X role)
     eload: object
     daq: object
+    smu: object            # precision DMM/SMU (DMM6500 role)
     scope: object
     logic: object
+    programmer: object     # SWD/JTAG (J-Link role)
+    dut_link: object       # UART/USB link to the DUT
+    thermal: object        # IR camera (Lepton role)
+    panel: object          # DUT interface panel (USB/Eth/CAN/...)
     safety: SafetyController
     safety_io: object
     engine: Engine
@@ -41,12 +47,23 @@ def make_sim_machine(config: "MachineConfig | None" = None) -> MachineContext:
     safety = SafetyController(safety_io)
     gantry = Gantry(config, motion, force, safety)
     router = MatrixRouter(mocks.MockRelayMatrix())
-    psu = mocks.MockPowerSupply()
+    power = mocks.MockPowerSystem()
+    psu_aux = mocks.MockPowerSupply()
     eload = mocks.MockElectronicLoad()
     daq = mocks.MockDaq()
+    smu = mocks.MockSmu()
     scope = mocks.MockOscilloscope()
     logic = mocks.MockLogicAnalyzer()
-    engine = Engine(gantry, router, psu, daq, safety)
-    return MachineContext(config=config, gantry=gantry, router=router, psu=psu,
-                          eload=eload, daq=daq, scope=scope, logic=logic,
+    programmer = mocks.MockProgrammer()
+    dut_link = mocks.MockDutLink()
+    thermal = mocks.MockThermalCamera()
+    panel = mocks.MockInterfacePanel()
+    engine = Engine(gantry, router, power, daq, safety,
+                    smu=smu, scope=scope, programmer=programmer,
+                    thermal=thermal)
+    return MachineContext(config=config, gantry=gantry, router=router,
+                          power=power, psu_aux=psu_aux, eload=eload, daq=daq,
+                          smu=smu, scope=scope, logic=logic,
+                          programmer=programmer, dut_link=dut_link,
+                          thermal=thermal, panel=panel,
                           safety=safety, safety_io=safety_io, engine=engine)

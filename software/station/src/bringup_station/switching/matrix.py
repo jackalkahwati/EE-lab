@@ -17,9 +17,10 @@ from typing import Dict, Tuple
 
 from ..hal.interfaces import RelayMatrix
 
-#: Resources the v1 matrix exposes. Relay channel layout: 4 probes x 8
-#: resources, relay_id = probe_index * 8 + resource_index.
-RESOURCES = ("daq", "scope_ch1", "scope_ch2", "logic", "psu", "eload", "gnd", "spare")
+#: Resources the v1 matrix exposes ("smu" is the DMM6500 Kelvin pair lane).
+#: Relay channel layout: relay_id = probe_index * len(RESOURCES) + resource_index.
+RESOURCES = ("daq", "smu", "scope_ch1", "scope_ch2", "logic", "psu", "eload",
+             "gnd", "spare")
 NUM_PROBES = 4
 
 SOURCE_RESOURCES = frozenset({"psu", "eload"})

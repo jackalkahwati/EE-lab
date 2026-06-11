@@ -36,10 +36,17 @@ curl -X POST localhost:8800/plans/run -H 'Content-Type: application/json' -d '{
 }'
 ```
 
+Or run a full manifest-driven bring-up (pre-power safety gate → sequenced
+power with inrush limits → firmware programming → rail checks → clock checks
+→ thermal check → power off) by POSTing a design manifest to
+`/manifests/run` — see `tests/test_manifest.py` for a complete example.
+
 ## Layout
 
 - `src/bringup_station/hal/` — device interfaces + simulated bench
   (`mocks.py`); real drivers land in `hal/drivers/` as hardware arrives
+- `manifest/` — design manifest v0 (the design↔machine contract) + compiler
+  that turns a manifest into an executable bring-up plan
 - `motion/gantry.py` — soft limits, safety gating, force-guarded probing
 - `safety/interlocks.py` — e-stop/door gating (observes the hardwired chain)
 - `switching/matrix.py` — relay routing rules incl. live-power source lock

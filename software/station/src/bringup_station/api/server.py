@@ -16,6 +16,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import Body, FastAPI, HTTPException
 
 from ..boardio.testpoints import Board, TestPoint
+from ..manifest.compile import ManifestError, compile_manifest
+from ..manifest.schema import DesignManifest
 from ..sequencer.plan import TestPlan
 from ..sim import MachineContext, make_sim_machine
 from ..vision.registration import fit_transform
@@ -39,7 +41,8 @@ def build_app(ctx: Optional[MachineContext] = None) -> FastAPI:
             "position": {"x": x, "y": y, "z": z},
             "safety": ctx.safety.state.value,
             "routes": ctx.router.routes,
-            "psu_output": ctx.psu.output_enabled,
+            "power_on": ctx.power.any_on,
+            "panel_connected": list(ctx.panel.connected()),
         }
 
     @app.post("/home")
@@ -79,6 +82,28 @@ def build_app(ctx: Optional[MachineContext] = None) -> FastAPI:
                     [tuple(f["board"]) for f in fiducials],
                     [tuple(f["machine"]) for f in fiducials])
         except (KeyError, ValueError, TypeError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        report = ctx.engine.run(plan, board, transform).to_dict()
+        report["id"] = len(reports)
+        reports.append(report)
+        return report
+
+    @app.post("/manifests/run")
+    def run_manifest(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        """Body: {"manifest": <DesignManifest dict>, "fiducials": optional
+        [{"board": [x, y], "machine": [x, y]}, ...]}. Compiles the manifest
+        into a bring-up plan (pre-power gate -> sequenced power -> firmware ->
+        rails -> clocks -> thermal) and runs it."""
+        try:
+            manifest = DesignManifest.from_dict(body["manifest"])
+            board, plan = compile_manifest(manifest)
+            transform = None
+            fiducials = body.get("fiducials") or []
+            if fiducials:
+                transform = fit_transform(
+                    [tuple(f["board"]) for f in fiducials],
+                    [tuple(f["machine"]) for f in fiducials])
+        except (KeyError, ValueError, TypeError, ManifestError) as exc:
             raise HTTPException(status_code=422, detail=str(exc))
         report = ctx.engine.run(plan, board, transform).to_dict()
         report["id"] = len(reports)
