@@ -38,6 +38,42 @@ def rect(prefix: str, x1: float, y1: float, x2: float, y2: float) -> List[Dict[s
     ]
 
 
+def arc(eid: str, cx: float, cy: float, radius: float,
+        a0: float, a1: float) -> Dict[str, Any]:
+    """Circular arc segment; angles in radians from +x of the sketch."""
+    return {
+        "btType": "BTMSketchCurveSegment-155",
+        "entityId": eid,
+        "startPointId": eid + ".start",
+        "endPointId": eid + ".end",
+        "startParam": a0, "endParam": a1,
+        "geometry": {
+            "btType": "BTCurveGeometryCircle-115",
+            "radius": radius,
+            "xCenter": cx, "yCenter": cy,
+            "xDir": 1.0, "yDir": 0.0,
+            "clockwise": False,
+        },
+    }
+
+
+def rounded_rect(prefix: str, x0: float, y0: float, x1: float, y1: float,
+                 r: float) -> List[Dict[str, Any]]:
+    """Rectangle profile with radiused corners."""
+    import math
+    p = math.pi
+    return [
+        line(prefix + ".t", x0 + r, y1, x1 - r, y1),
+        line(prefix + ".b", x0 + r, y0, x1 - r, y0),
+        line(prefix + ".l", x0, y0 + r, x0, y1 - r),
+        line(prefix + ".r", x1, y0 + r, x1, y1 - r),
+        arc(prefix + ".tr", x1 - r, y1 - r, r, 0, p / 2),
+        arc(prefix + ".tl", x0 + r, y1 - r, r, p / 2, p),
+        arc(prefix + ".bl", x0 + r, y0 + r, r, p, 3 * p / 2),
+        arc(prefix + ".br", x1 - r, y0 + r, r, 3 * p / 2, 2 * p),
+    ]
+
+
 def circle(eid: str, cx: float, cy: float, radius: float) -> Dict[str, Any]:
     return {
         "btType": "BTMSketchCurve-4",
@@ -155,6 +191,94 @@ class FeatureBuilder:
 
     def delete_feature(self, fid: str) -> None:
         self.c._request("DELETE", self._base + "/features/featureid/{}".format(fid))
+
+    def delete_bodies(self, part_ids: List[str], name: str = "Delete Bodies") -> None:
+        """Remove bodies via a deleteBodies feature (no GET /features needed)."""
+        self._post({
+            "btType": "BTMFeature-134", "featureType": "deleteBodies",
+            "name": name,
+            "parameters": [{
+                "btType": "BTMParameterQueryList-148", "parameterId": "entities",
+                "queries": [{"btType": "BTMIndividualQuery-138",
+                             "deterministicIds": part_ids}]}],
+        })
+
+    def transform_translate(self, part_ids: List[str], dx: float, dy: float,
+                            dz: float, name: str = "Transform") -> None:
+        """Translate bodies in mm via a transform feature."""
+        self._post({
+            "btType": "BTMFeature-134", "featureType": "transform", "name": name,
+            "parameters": [
+                {"btType": "BTMParameterQueryList-148", "parameterId": "entities",
+                 "queries": [{"btType": "BTMIndividualQuery-138",
+                              "deterministicIds": part_ids}]},
+                {"btType": "BTMParameterEnum-145", "parameterId": "transformType",
+                 "value": "TRANSLATION_3D", "enumName": "TransformType"},
+                {"btType": "BTMParameterQuantity-147", "parameterId": "dx",
+                 "expression": "{} mm".format(dx)},
+                {"btType": "BTMParameterQuantity-147", "parameterId": "dy",
+                 "expression": "{} mm".format(dy)},
+                {"btType": "BTMParameterQuantity-147", "parameterId": "dz",
+                 "expression": "{} mm".format(dz)},
+                {"btType": "BTMParameterBoolean-144", "parameterId": "makeCopy",
+                 "value": False},
+            ],
+        })
+
+    def fillet_edge_at(self, feature_id: str, point_mm: str, radius_mm: float,
+                       name: str = "Fillet") -> None:
+        """Fillet the edge of `feature_id`'s body passing through point_mm
+        (e.g. "0.0, -460.0, 482.0")."""
+        q = ("query = qContainsPoint(qCreatedBy(makeId(\"%s\"), EntityType.EDGE), "
+             "vector(%s) * millimeter);" % (feature_id, point_mm))
+        self._post({
+            "btType": "BTMFeature-134", "featureType": "fillet", "name": name,
+            "parameters": [
+                {"btType": "BTMParameterQueryList-148", "parameterId": "entities",
+                 "queries": [{"btType": "BTMIndividualQuery-138",
+                              "queryString": q}]},
+                {"btType": "BTMParameterQuantity-147", "parameterId": "radius",
+                 "expression": "{} mm".format(radius_mm)},
+            ],
+        })
+
+    def add_extrude_remove(self, name: str, sketch_fid: str, depth_mm: float,
+                           offset_mm: float, scope_part_ids: List[str],
+                           offset_opposite: bool = False) -> None:
+        """Material-removal extrude scoped to specific bodies. NOTE: cuts whose
+        boundary is exactly coincident with a target face can ERROR — inset
+        the sketch or prefer a tangent-fillet workaround (see finish_pass)."""
+        self._post({
+            "btType": "BTMFeature-134", "featureType": "extrude", "name": name,
+            "parameters": [
+                {"btType": "BTMParameterEnum-145", "parameterId": "bodyType",
+                 "value": "SOLID", "enumName": "ExtendedToolBodyType"},
+                {"btType": "BTMParameterEnum-145", "parameterId": "operationType",
+                 "value": "REMOVE", "enumName": "NewBodyOperationType"},
+                {"btType": "BTMParameterQueryList-148", "parameterId": "entities",
+                 "queries": [{"btType": "BTMIndividualSketchRegionQuery-140",
+                              "featureId": sketch_fid}]},
+                {"btType": "BTMParameterEnum-145", "parameterId": "endBound",
+                 "value": "BLIND", "enumName": "BoundingType"},
+                {"btType": "BTMParameterQuantity-147", "parameterId": "depth",
+                 "expression": "{} mm".format(depth_mm)},
+                {"btType": "BTMParameterBoolean-144", "parameterId": "startOffset",
+                 "value": True},
+                {"btType": "BTMParameterEnum-145", "parameterId": "startOffsetBound",
+                 "value": "BLIND", "enumName": "StartOffsetType"},
+                {"btType": "BTMParameterQuantity-147",
+                 "parameterId": "startOffsetDistance",
+                 "expression": "{} mm".format(offset_mm)},
+                {"btType": "BTMParameterBoolean-144",
+                 "parameterId": "startOffsetOppositeDirection",
+                 "value": offset_opposite},
+                {"btType": "BTMParameterBoolean-144", "parameterId": "defaultScope",
+                 "value": False},
+                {"btType": "BTMParameterQueryList-148", "parameterId": "booleanScope",
+                 "queries": [{"btType": "BTMIndividualQuery-138",
+                              "deterministicIds": scope_part_ids}]},
+            ],
+        })
 
     # -- parts ---------------------------------------------------------------
 

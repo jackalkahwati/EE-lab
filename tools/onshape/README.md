@@ -34,6 +34,18 @@ Part Studio 1).
 - `audit_run5.py` — full audit: states, naming, park interference with
   containment whitelist, per-body swept checks, coaxiality, stack heights
 
+## Capabilities proven (all via POST, no rate-limited GETs needed)
+
+- `add_sketch`/`add_extrude` (NEW bodies), with arcs via `rounded_rect()`
+- `delete_bodies()` — deleteBodies feature by partIds
+- `transform_translate()` — move bodies (sketches do NOT move with them)
+- `fillet_edge_at()` — 3D fillets, edge picked by FeatureScript
+  qContainsPoint query string
+- `add_extrude_remove()` — scoped boolean cuts (used for the 132-hole shell
+  vent fields in a single feature)
+- `all_bboxes()` — every solid's bbox in one FeatureScript eval
+- Part rename + appearance (color/opacity) via metadata
+
 ## Hard-won API facts
 
 - **Rate limits**: the per-part `boundingboxes` endpoint 429s after ~100
@@ -56,4 +68,17 @@ Part Studio 1).
   idempotent (skips features that already exist by name) so re-running
   after a crash is safe; orphan sketches from failed extrudes need cleanup.
 - Clone the `sketchPlane` parameter from an existing sketch rather than
-  guessing default-plane deterministic IDs.
+  guessing default-plane deterministic IDs — or use the probed IDs for this
+  document: Top "JDC" (xy→XY, +Z), Front "JCC" (xy→XZ, −Y), Right "JEC"
+  (xy→+Y,Z, +X). Probe with a throwaway body when in doubt.
+- `GET /features` has a long penalty window once tripped (minutes+, survives
+  8-min waits). Design scripts to avoid it: feature POSTs return the
+  featureId for later deletion; name new bodies via the parts list; use
+  `all_bboxes()` for geometry. Everything in this toolchain's helper layer
+  is GET-free except `plane_param()`/`get_features()`.
+- REMOVE extrudes ERROR (no notices) when the cut boundary is exactly
+  coincident with a target body's face. Inset the cut, or use the
+  tangent-fillet trick: radius chosen so the curve meets the obstructing
+  face exactly (see finish_pass.py step 11).
+- Transform moves bodies but not their defining sketches — orphaned sketch
+  curves remain at the old location; hide sketches in the UI.
