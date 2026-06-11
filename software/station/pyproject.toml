@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bringup-station"
+version = "0.1.0"
+description = "Control software for the autonomous electronics bring-up station"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.24",
+    "fastapi>=0.100",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "uvicorn>=0.23", "httpx>=0.24"]
+# Real hardware backends, installed per-device as hardware arrives:
+# galil: gclib is vendor-installed, not on PyPI
+hw = ["pyvisa>=1.13", "pyvisa-py>=0.7"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
