@@ -15,8 +15,8 @@ from PIL import Image
 import numpy as np
 
 c = Client()
-did, wid = "cfd5d2c28305575210ed8678", "6bf7390efd64f5e66777f769"
-asm = "7ceec0160aa48f4a537b0558"
+did, wid = "02ed72e43f8d925e0c7aa678", "80299bfade6ea16b1cd86a0e"
+asm = "d6767f7eb804454caaa2dc85"
 base = "/api/v6/assemblies/d/{}/w/{}/e/{}".format(did, wid, asm)
 
 # camera: yaw 0 (front), pitch -12 = camera above, looking down/forward

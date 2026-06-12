@@ -39,9 +39,9 @@ from onshape_client import Client
 
 M = 0.001
 
-DID = "cfd5d2c28305575210ed8678"
-WID = "6bf7390efd64f5e66777f769"
-EID = "3ebb146a22425b80a016f78c"
+DID = "02ed72e43f8d925e0c7aa678"
+WID = "80299bfade6ea16b1cd86a0e"
+EID = "8a871c2acd668dc865dda723"
 
 PLANE_TOP = {"btType": "BTMParameterQueryList-148", "parameterId": "sketchPlane",
              "queries": [{"btType": "BTMIndividualQuery-138",

@@ -20,6 +20,23 @@ Run anything with: `set -a && source .env && set +a && python3 <script>`
 Target document/IDs are hardcoded at the top of each script ("EE lab",
 Part Studio 1).
 
+## Account / quota (2026-06-11)
+
+The working document is the **pro-owned copy** ("EE lab",
+did 02ed72e43f8d925e0c7aa678) under the thestardrive.com Professional
+account — created via `POST /documents/{did}/workspaces/{wid}/copy` with
+`ownerTypeIndex: 1` after the original free account exhausted its API
+quota. The original document under the free account is a frozen archive.
+
+- `.env` = pro keys (active). `.env.pro` = same. `.env.free` = old free
+  account keys (archive document only).
+- **Onshape meters API usage per billing cycle (~2,500 requests visible
+  in My account -> Developer).** A 402 "API limit exceeded" is the quota,
+  not the rate limiter, and it blocks EVERY endpoint. Budget accordingly:
+  no bulk frame rendering via shadedviews (the 228-frame motion video is
+  what killed the free account), batch geometry via FeatureScript eval,
+  render only at verification checkpoints.
+
 ## Files
 
 - `onshape_client.py` — minimal REST client (Basic Auth, 429/5xx retry)
@@ -87,6 +104,18 @@ Part Studio 1).
   face exactly (see finish_pass.py step 11).
 - Transform moves bodies but not their defining sketches — orphaned sketch
   curves remain at the old location; hide sketches in the UI.
+- `add_extrude` takes abs() of the offset — a NEGATIVE start offset needs
+  `offset_opposite=True` or the body lands mirrored above the plane (the
+  wiring-trunk corridors briefly poked through the enclosure top this way).
+- The native **shell feature could not be created via the API** on the side
+  shells (ERROR under both the faces-`entities` and `isHollow`+
+  `partsToShell` serializations, all thicknesses, even rolled back before
+  the vent cuts). Hollowing was done with a corner-aware interior REMOVE
+  instead (see evt2_probe_fixture.py addendum).
+- **Rollback-bar insert trick**: `POST .../features/rollback
+  {"rollbackIndex": N}` then POST a feature — it is inserted AT the bar,
+  not appended. Restore the bar to len(features) afterward. Useful for
+  inserting features before dependents without round-trip edits.
 
 ## Assembly mates via API: verdict (2026-06-11)
 

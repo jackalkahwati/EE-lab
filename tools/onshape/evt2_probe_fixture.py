@@ -41,6 +41,17 @@ collars on pins, dowels in cartridge plate, vacuum bosses touching plate.
 
 Units: sketch coords in METERS (M = 0.001); depth/offset params in mm.
 Top plane JDC: sketch (x,y) -> world (X,Y), extrude +Z, offset = start Z.
+
+ADDENDUM (executed separately, same session): SHELL HOLLOWING — the side
+shells were solid 70 mm slabs (v4 review item 2). Onshape's native shell
+feature ERRORed on them under every serialization tried (entities /
+isHollow+partsToShell, 5/3/2 mm, even rolled back before the vent cuts via
+the rollback-bar insert trick). Final fix: 'EVT2 - Shell Hollow Cut' — a
+corner-aware interior REMOVE from the Right plane (profile Y +/-415,
+Z -295..460, R20, symmetric X +/-500, scoped to both shells). Limits stay
+inside the R60 plan corners (breach limit |Y|<=419 at X=500) and the R30
+top roundover (Z<=463 at X=500), leaving 5 mm side skins, solid corner
+posts, and removing 80.4 L of phantom material (0.2068 -> 0.1264 m3 total).
 """
 import time
 import warnings
@@ -58,9 +69,9 @@ from onshape_client import Client
 
 M = 0.001
 
-DID = "cfd5d2c28305575210ed8678"
-WID = "6bf7390efd64f5e66777f769"
-EID = "3ebb146a22425b80a016f78c"
+DID = "02ed72e43f8d925e0c7aa678"
+WID = "80299bfade6ea16b1cd86a0e"
+EID = "8a871c2acd668dc865dda723"
 
 PLANE_TOP = {"btType": "BTMParameterQueryList-148", "parameterId": "sketchPlane",
              "queries": [{"btType": "BTMIndividualQuery-138",

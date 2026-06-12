@@ -22,10 +22,9 @@ Coordinate conventions (probed 2026-06-11 with throwaway bodies):
 - Front plane "JCC": sketch (x,y) -> world (X, Z), extrude -Y;
   opposite=True + offset_opposite=True -> span [offset, offset+depth] in +Y.
 
-Residue from the first (mm-unit) run, harmless but delete in UI when the
-GET /features rate limit clears: sketch 'Thermal - Intake Vent Holes'
-(FbiBW9aVqfenF2Y_309) + INFO cuts 'Thermal - Intake Vents Cut' and
-'Thermal - Intake Vents Cut 2'.
+Residue from the first (mm-unit) run was deleted 2026-06-11 in the
+pro-owned document copy (along with the errored 'EVT - Rear Top Cut'
+features) once GET /features came back under the new account's quota.
 """
 import time
 import warnings
@@ -41,9 +40,9 @@ from onshape_client import Client
 
 M = 0.001  # mm -> sketch meters
 
-DID = "cfd5d2c28305575210ed8678"
-WID = "6bf7390efd64f5e66777f769"
-EID = "3ebb146a22425b80a016f78c"
+DID = "02ed72e43f8d925e0c7aa678"
+WID = "80299bfade6ea16b1cd86a0e"
+EID = "8a871c2acd668dc865dda723"
 
 PLANE_FRONT = {"btType": "BTMParameterQueryList-148", "parameterId": "sketchPlane",
                "queries": [{"btType": "BTMIndividualQuery-138",
