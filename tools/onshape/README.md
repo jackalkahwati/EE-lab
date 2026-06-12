@@ -116,6 +116,14 @@ quota. The original document under the free account is a frozen archive.
   {"rollbackIndex": N}` then POST a feature — it is inserted AT the bar,
   not appended. Restore the bar to len(features) afterward. Useful for
   inserting features before dependents without round-trip edits.
+- **Metadata in bulk**: POST `/metadata/d/{did}/w/{wid}/e/{eid}` with
+  `{"items": [{"href": ".../p/{pid}", "properties": [...]}]}` updates ~40
+  parts per call; GET the same path with `?depth=2` reads ALL parts in one
+  call. Material is an OBJECT with a DENS property (custom library works;
+  Mass then computes). **Never set Material on a composite part** — it
+  propagates to all members and overwrites their materials (see
+  phase_c.py lessons). Assembly feature ids also need URL-encoding (they
+  contain `/`).
 
 ## Assembly mates via API: verdict (2026-06-11)
 
