@@ -26,6 +26,9 @@ LEGACY_PREFIXES = (
     "Y Rail ", "Y Ballscrew", "Y Servo", "Y Carriage", "Z Stage", "Z Servo",
     "Probe ", "Pogo ", "X Drag Chain", "Y Drag Chain", "Probe Cable Loop",
     "Fastener Dowel",
+    # EVT-2 additions: dowels travel with the probe head; corridors are
+    # harness reservations that intentionally envelope moving bundles.
+    "Cartridge Dowel", "Corridor - ",
 )
 
 # park-position containment whitelist: (substring_a, substring_b)
