@@ -1,6 +1,7 @@
 # RFQ — FirstLight FL-1, EVT Build (Qty 1 + Spares)
 
-Date: 2026-06-11 · Program: FirstLight FL-1 autonomous PCB bring-up station
+Date: 2026-06-12 (rev B — drawing set added, display upsized to 10.1 in)
+· Program: FirstLight FL-1 autonomous PCB bring-up station
 · Phase: EVT (engineering validation) · Buyer contact: Jack Al-Kahwati
 
 ## 1. Scope
@@ -19,13 +20,16 @@ at qty 5 and qty 25 (DVT/pilot forecast) on machined and sheet items.
 | File | Content |
 |---|---|
 | `cad/electronics-bringup-station/Part_Studio_1_v5.step` | Full machine STEP (AP203), part names match RFQ descriptions |
-| `fl1-evt-fab-rfq.csv` | Fab line items: PN, qty, material, process, envelope, finish |
+| `fl1-evt-fab-rfq.csv` | Fab line items: PN, qty, material, process, envelope, finish, drawing ref |
 | `fl1-evt-cots-buy.csv` | COTS buy list: vendor, PN, qty |
+| `drawings/` | MBD reference sheets for the 14 key parts: 4 views + title block + critical-feature callouts (`fl1-evt-drawing-set.pdf` = combined set) |
 | `docs/images/fl1-*.png` | Orientation renders |
 
-Quote is **to 3D model + this spec** (2D drawings follow at DVT). Part
-geometry is extracted from the STEP by the part names listed in the
-`ref_parts` column.
+Quote is **to 3D model + this spec** (model-based definition). The drawing
+sheets in `drawings/` carry per-part critical-feature callouts and the
+governing tolerance note; they are reference views, not fully-dimensioned
+prints (those follow at DVT). Part geometry is extracted from the STEP by
+the part names listed in the `ref_parts` column.
 
 ## 3. General specifications
 

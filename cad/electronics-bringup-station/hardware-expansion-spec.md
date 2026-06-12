@@ -115,7 +115,7 @@ personality is a passive harness; switching is the custom DUT interface board.
 
 | Item | V1 selection | Notes |
 |---|---|---|
-| Front touch display | 7 in capacitive HDMI/USB panel, 1024x600 (Waveshare-class industrial) | Plinth band front-right beside the power cluster. Standalone operation: run jobs, progress, diagnosis verdict, calibration wizards. Full test authoring stays on the web UI. |
+| Front touch display | 10.1 in capacitive HDMI/USB panel, 1280x800 (Waveshare-class industrial) | Plinth band front-right beside the power cluster. Standalone operation: run jobs, progress, diagnosis verdict, calibration wizards. Full test authoring stays on the web UI. |
 
 The locked BOM's "screenless" rule bans embedded INSTRUMENT screens from
 showing (product identity); the product's own display reinforces that

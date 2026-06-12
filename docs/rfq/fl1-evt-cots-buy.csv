@@ -20,7 +20,7 @@ item,vendor,part_number,qty,used_as
 19,Generic (THK-class),SFU1204-C7,2,Y Axis - SFU1204 Ballscrew; Z Axis - SFU1204 Ballscrew
 20,Generic (THK-class),SFU1605 ballnut,1,X Axis - SFU1605 Ballnut
 21,Generic (THK-class),SFU1605-C7 (600 mm),1,X Axis - SFU1605 Ballscrew
-22,Generic industrial (Waveshare-class),7in HDMI capacitive touch 1024x600,1,Touch Display 7in
+22,Generic industrial (Waveshare-class),10.1in HDMI capacitive touch 1280x800,1,Touch Display 10.1in
 23,HIWIN,HGH15CA,4,Y Axis - HGH15 Carriage Block 1; Y Axis - HGH15 Carriage Block 2; Y Axis - HGH15 Carriage Block 3
 24,HIWIN,HGH20CA,4,X Axis - HGH20 Carriage Block 1; X Axis - HGH20 Carriage Block 2; X Axis - HGH20 Carriage Block 3
 25,HIWIN,HGR15R (480 mm),2,Y Axis - HGR15 Rail Left; Y Axis - HGR15 Rail Right
