@@ -12,7 +12,7 @@ DMM/Kelvin lanes: Coto/Pickering shielded dry-reed, thermal-EMF matched.
 All relays default-open; coil sinks are TPIC6B595 channels (mcu.ato).
 """
 
-import Power from "generics/interfaces.ato"
+import ElectricPower
 
 
 component RelayG6K2FY:
@@ -49,7 +49,7 @@ module LaneSelector:
     signal dmm_hi
     signal dmm_lo
     signal gnd_ref
-    coil_bus = new Power   # 5V_COIL / GND pair; sinks in mcu.ato
+    coil_bus = new ElectricPower   # 5V_COIL / GND pair; sinks in mcu.ato
 
     # stage 1: bank split
     k_bank = new RelayG6K2FY
@@ -104,7 +104,7 @@ module Matrix:
     signal dmm_hi
     signal dmm_lo
     signal gnd_ref
-    coil_bus = new Power
+    coil_bus = new ElectricPower
 
     sel_p1 = new LaneSelector
     sel_p2 = new LaneSelector

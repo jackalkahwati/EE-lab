@@ -7,13 +7,13 @@ RP2040 control + coil sinks + watchdog; reference block for self-cal.
 Connector map per spec section 7 (J1/J2/J10/J20-J25).
 """
 
-import Power from "generics/interfaces.ato"
-import PowerTree from "power.ato"
-import Matrix from "matrix.ato"
-import ProbeProtection from "protection.ato"
-import ReferenceBlock from "protection.ato"
-import Control from "mcu.ato"
-import CartridgeInterface from "cartridge.ato"
+import ElectricPower
+from "power.ato" import PowerTree
+from "matrix.ato" import Matrix
+from "protection.ato" import ProbeProtection
+from "protection.ato" import ReferenceBlock
+from "mcu.ato" import Control
+from "cartridge.ato" import CartridgeInterface
 
 
 component BNC_J20:
@@ -70,8 +70,8 @@ module MatrixRevA:
     j24_pwr_inj = new MiniFitJr_2P
 
     # power
-    j2_24v.p1 ~ power.v24.vcc
-    j2_24v.p2 ~ power.v24.gnd
+    j2_24v.p1 ~ power.v24.hv
+    j2_24v.p2 ~ power.v24.lv
     ctl.v3v3 ~ power.v3v3_dig
     ctl.v5_coil ~ power.v5_coil
     cart.v3v3 ~ power.v3v3_dig
@@ -121,8 +121,8 @@ module MatrixRevA:
     matrix.logic_1 ~ j23_daq_logic.p3
     matrix.logic_2 ~ j23_daq_logic.p4
     matrix.pwr_inj ~ j24_pwr_inj.p1
-    j24_pwr_inj.p2 ~ power.v24.gnd
-    matrix.gnd_ref ~ power.v24.gnd
+    j24_pwr_inj.p2 ~ power.v24.lv
+    matrix.gnd_ref ~ power.v24.lv
 
     # reference block rides the DMM_HI lane
     refs.ref_bus ~ matrix.dmm_hi

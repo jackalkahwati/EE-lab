@@ -54,9 +54,12 @@ chain, and cartridge contract are the custom content.
 
 ## Status / known gaps (Rev A bring-up list)
 
-- `.ato` syntax follows Tile-0's atopile ^0.2 conventions; current atopile
-  releases changed the language — expect a migration pass on first
-  `ato build` (pin the toolchain or port syntax; whichever is less work).
+- MIGRATED 2026-06-12: language ported to atopile 0.15.7; `ato build`
+  is GREEN (solver, PCB, BOM, pinout, power-tree, stackup targets pass).
+  Passives are real picked parts (LCSC); 50 warnings remain for custom
+  components without part bindings — run `ato create part` per component
+  (G6K-2F-Y, reed, TPIC6B595, TPS regs, Pico, connectors) so they join
+  the netlist, then reconcile with the rev-a floorplan board.
 - Pin maps on RP2040 QSPI flash and TPS54331 are abbreviated; finalize at
   netlist sync against real symbols (Tile-0 pattern: vendor symbols pulled
   into `output/symbols/`).

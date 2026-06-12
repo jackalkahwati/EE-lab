@@ -9,8 +9,9 @@ probe ─[PTC 50mA]─┬─ node -> LaneSelector.probe
                   └─ (discharge to GND_REF via the selector's reed)
 """
 
-import Power from "generics/interfaces.ato"
-import Resistor from "generics/resistors.ato"
+import ElectricPower
+import Resistor
+from "matrix.ato" import RelayReed5V
 
 
 component PTC_50mA:
@@ -44,9 +45,9 @@ module ProbeProtection:
     signal node         # to LaneSelector.probe
     signal vcheck_hi    # to MCU GPIO
     signal vcheck_lo
-    clamp_p = new Power  # +15V clamp rail
-    clamp_n = new Power  # -15V clamp rail
-    v3v3 = new Power
+    clamp_p = new ElectricPower  # +15V clamp rail
+    clamp_n = new ElectricPower  # -15V clamp rail
+    v3v3 = new ElectricPower
 
     ptc = new PTC_50mA
     steer = new SteeringPair_BAV99
@@ -55,25 +56,25 @@ module ProbeProtection:
     rdiv_bot = new Resistor
     comp = new WindowComparator_TLV3502
 
-    rdiv_top.value = 1Mohm
-    rdiv_top.footprint = "R_0402"
-    rdiv_bot.value = 100kohm
-    rdiv_bot.footprint = "R_0402"
+    rdiv_top.resistance = 1Mohm +/- 5%
+    rdiv_top.package = "0402"
+    rdiv_bot.resistance = 100kohm +/- 5%
+    rdiv_bot.package = "0402"
 
     tip ~ ptc.p1
     ptc.p2 ~ node
     node ~ steer.a
-    steer.clamp_p ~ clamp_p.vcc
-    steer.clamp_n ~ clamp_n.vcc
+    steer.clamp_p ~ clamp_p.hv
+    steer.clamp_n ~ clamp_n.hv
     node ~ tvs.p1
-    tvs.p2 ~ v3v3.gnd
+    tvs.p2 ~ v3v3.lv
 
-    node ~ rdiv_top.p1
-    rdiv_top.p2 ~ comp.vin
-    comp.vin ~ rdiv_bot.p1
-    rdiv_bot.p2 ~ v3v3.gnd
-    comp.vcc ~ v3v3.vcc
-    comp.gnd ~ v3v3.gnd
+    node ~ rdiv_top.unnamed[0]
+    rdiv_top.unnamed[1] ~ comp.vin
+    comp.vin ~ rdiv_bot.unnamed[0]
+    rdiv_bot.unnamed[1] ~ v3v3.lv
+    comp.vcc ~ v3v3.hv
+    comp.gnd ~ v3v3.lv
     comp.out_hi ~ vcheck_hi
     comp.out_lo ~ vcheck_lo
 
@@ -82,25 +83,24 @@ module ReferenceBlock:
     """Cal references behind a dedicated reed pair: 0.01% 1k, 0.01% 100k,
     dead short, open — routable to any lane for self-test (section 5)."""
     signal ref_bus       # lands on dmm_hi lane via its own reed
-    v3v3 = new Power
+    v3v3 = new ElectricPower
 
-    import RelayReed5V from "matrix.ato"
     r1k = new Resistor
-    r1k.value = 1kohm
-    r1k.footprint = "R_0805"
+    r1k.resistance = 1kohm +/- 5%
+    r1k.package = "0805"
     r100k = new Resistor
-    r100k.value = 100kohm
-    r100k.footprint = "R_0805"
+    r100k.resistance = 100kohm +/- 5%
+    r100k.package = "0805"
 
     k_1k = new RelayReed5V
     k_100k = new RelayReed5V
     k_short = new RelayReed5V
 
     ref_bus ~ k_1k.com
-    k_1k.no ~ r1k.p1
-    r1k.p2 ~ v3v3.gnd
+    k_1k.no ~ r1k.unnamed[0]
+    r1k.unnamed[1] ~ v3v3.lv
     ref_bus ~ k_100k.com
-    k_100k.no ~ r100k.p1
-    r100k.p2 ~ v3v3.gnd
+    k_100k.no ~ r100k.unnamed[0]
+    r100k.unnamed[1] ~ v3v3.lv
     ref_bus ~ k_short.com
-    k_short.no ~ v3v3.gnd
+    k_short.no ~ v3v3.lv

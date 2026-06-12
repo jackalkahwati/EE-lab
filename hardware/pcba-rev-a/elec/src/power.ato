@@ -11,9 +11,9 @@ signature detection per relay-probe-matrix-rev-a.md section 6).
 Same stack/idiom as resonant-computer Tile-0 power.ato.
 """
 
-import Power from "generics/interfaces.ato"
-import Resistor from "generics/resistors.ato"
-import Capacitor from "generics/capacitors.ato"
+import ElectricPower
+import Resistor
+import Capacitor
 
 
 component Polyfuse_2A:
@@ -60,10 +60,10 @@ component INA219:
 
 
 module PowerTree:
-    v24 = new Power
-    v5_coil = new Power
-    v3v3_dig = new Power
-    v3v3_ana = new Power
+    v24 = new ElectricPower
+    v5_coil = new ElectricPower
+    v3v3_dig = new ElectricPower
+    v3v3_ana = new ElectricPower
 
     fuse = new Polyfuse_2A
     tvs = new TVS_33V
@@ -72,31 +72,30 @@ module PowerTree:
     ldo_ana = new TPS7A4901
     coil_mon = new INA219
     shunt = new Resistor
-    shunt.value = 0.05ohm
-    shunt.footprint = "R_2512"
+    shunt.resistance = 0.05ohm +/- 5%
 
-    v24.vcc ~ fuse.p1
+    v24.hv ~ fuse.p1
     fuse.p2 ~ tvs.cathode
-    tvs.anode ~ v24.gnd
+    tvs.anode ~ v24.lv
     fuse.p2 ~ buck24.vin
-    buck24.gnd ~ v24.gnd
+    buck24.gnd ~ v24.lv
 
     # coil rail through the telemetry shunt
-    buck24.vout ~ shunt.p1
-    shunt.p2 ~ v5_coil.vcc
-    coil_mon.vin_p ~ shunt.p1
-    coil_mon.vin_n ~ shunt.p2
-    coil_mon.vcc ~ v3v3_dig.vcc
-    coil_mon.gnd ~ v24.gnd
+    buck24.vout ~ shunt.unnamed[0]
+    shunt.unnamed[1] ~ v5_coil.hv
+    coil_mon.vin_p ~ shunt.unnamed[0]
+    coil_mon.vin_n ~ shunt.unnamed[1]
+    coil_mon.vcc ~ v3v3_dig.hv
+    coil_mon.gnd ~ v24.lv
 
     buck24.vout ~ buck5.vin
-    buck5.gnd ~ v24.gnd
-    buck5.vout ~ v3v3_dig.vcc
+    buck5.gnd ~ v24.lv
+    buck5.vout ~ v3v3_dig.hv
 
     buck24.vout ~ ldo_ana.vin
-    ldo_ana.gnd ~ v24.gnd
-    ldo_ana.vout ~ v3v3_ana.vcc
+    ldo_ana.gnd ~ v24.lv
+    ldo_ana.vout ~ v3v3_ana.hv
 
-    v5_coil.gnd ~ v24.gnd
-    v3v3_dig.gnd ~ v24.gnd
-    v3v3_ana.gnd ~ v24.gnd
+    v5_coil.lv ~ v24.lv
+    v3v3_dig.lv ~ v24.lv
+    v3v3_ana.lv ~ v24.lv

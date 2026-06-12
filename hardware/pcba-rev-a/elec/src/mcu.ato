@@ -14,8 +14,8 @@ if the control link goes silent >250 ms.
 91 coil channels (88 matrix + 3 reference block) = 12x TPIC6B595.
 """
 
-import Power from "generics/interfaces.ato"
-import Resistor from "generics/resistors.ato"
+import ElectricPower
+import Resistor
 
 
 component PicoModule:
@@ -62,8 +62,8 @@ component EEPROM_24AA025UID:
 
 
 module Control:
-    v3v3 = new Power
-    v5_coil = new Power
+    v3v3 = new ElectricPower
+    v5_coil = new ElectricPower
     signal sda
     signal scl
 
@@ -85,18 +85,18 @@ module Control:
     sr11 = new TPIC6B595
     sr12 = new TPIC6B595
 
-    mcu.vsys ~ v3v3.vcc
-    mcu.gnd ~ v3v3.gnd
+    mcu.vsys ~ v3v3.hv
+    mcu.gnd ~ v3v3.lv
 
     mcu.sda ~ sda
     mcu.scl ~ scl
-    cal_eeprom.vcc ~ v3v3.vcc
-    cal_eeprom.gnd ~ v3v3.gnd
+    cal_eeprom.vcc ~ v3v3.hv
+    cal_eeprom.gnd ~ v3v3.lv
     cal_eeprom.sda ~ sda
     cal_eeprom.scl ~ scl
 
-    wdt.vdd ~ v3v3.vcc
-    wdt.gnd ~ v3v3.gnd
+    wdt.vdd ~ v3v3.hv
+    wdt.gnd ~ v3v3.lv
     wdt.wdi ~ mcu.wdi
     wdt.reset_n ~ mcu.oe_n   # watchdog timeout -> sinks disabled -> all open
 

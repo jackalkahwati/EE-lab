@@ -7,8 +7,8 @@ scope cartridge coax does NOT enter this connector (J11 MMCX bypass,
 off-board).
 """
 
-import Power from "generics/interfaces.ato"
-import Resistor from "generics/resistors.ato"
+import ElectricPower
+import Resistor
 
 
 component BlindMate_J10:
@@ -43,12 +43,12 @@ module CartridgeInterface:
     signal sda
     signal scl
     signal guard
-    v3v3 = new Power
+    v3v3 = new ElectricPower
 
     j10 = new BlindMate_J10
     r_pullup = new Resistor
-    r_pullup.value = 10kohm
-    r_pullup.footprint = "R_0402"
+    r_pullup.resistance = 10kohm +/- 5%
+    r_pullup.package = "0402"
 
     j10.p1 ~ tip_p1
     j10.p2 ~ tip_p2
@@ -62,9 +62,9 @@ module CartridgeInterface:
     j10.guard2 ~ guard
     j10.cart_sda ~ sda
     j10.cart_scl ~ scl
-    j10.gnd ~ v3v3.gnd
+    j10.gnd ~ v3v3.lv
 
     # presence: grounded loop on cartridge side, pull-up here
     j10.present_n ~ present_n
-    present_n ~ r_pullup.p1
-    r_pullup.p2 ~ v3v3.vcc
+    present_n ~ r_pullup.unnamed[0]
+    r_pullup.unnamed[1] ~ v3v3.hv

@@ -1,0 +1,19 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+import is_auto_generated
+
+component UNI_ROYAL_0805W8F1003T5E_package:
+    # This trait marks this file as auto-generated
+    # If you want to manually change it, remove the trait
+    trait is_auto_generated<system="ato_part", source="easyeda:C149504", date="2026-06-12T17:55:10.138998+00:00", checksum="6100f73b78b2692db732d64f1a8f4eba25ef446e471128710e76a9e25e1084fc">
+
+    trait is_atomic_part<manufacturer="UNI-ROYAL", partnumber="0805W8F1003T5E", footprint="R0805.kicad_mod", symbol="0805W8F1003T5E_C149504.kicad_sym", model="R0805_L2.0-W1.3-H0.6.step">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C149504", manufacturer="UNI-ROYAL", partno="0805W8F1003T5E">
+    trait has_designator_prefix<prefix="R">
+    trait has_datasheet<datasheet="https://www.lcsc.com/datasheet/lcsc_datasheet_2205312316_UNI-ROYAL-Uniroyal-Elec-0805W8F1003T5E_C149504.pdf">
+
+    # pins
+    pin 2
+    pin 1
