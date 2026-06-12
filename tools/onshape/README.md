@@ -55,6 +55,11 @@ Part Studio 1).
 - **FeatureScript**: `box` is a reserved word; eval responses nest values as
   `BTFSValue*` btType objects (decode `key` before `value`); the `queries`
   param must be `{}` not `[]`.
+- **Sketch entity geometry is in METERS** (Onshape internal SI) while
+  depth/offset feature parameters are mm expression strings. Passing mm
+  sketch coords puts geometry ~1000x off in space; scoped REMOVE cuts then
+  land in benign-looking INFO state and cut NOTHING (THROUGH_ALL cuts
+  ERROR). If a cut reports INFO, render and check before building on it.
 - **Extrude params**: `startOffsetBound` uses enum `StartOffsetType` (not
   `BoundingType`). `symmetric: true` works with BLIND + full depth.
 - **Plane conventions** (verified empirically): Top sketch (x,y)→world (X,Y),

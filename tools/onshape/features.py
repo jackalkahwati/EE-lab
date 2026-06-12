@@ -243,41 +243,57 @@ class FeatureBuilder:
         })
 
     def add_extrude_remove(self, name: str, sketch_fid: str, depth_mm: float,
-                           offset_mm: float, scope_part_ids: List[str],
-                           offset_opposite: bool = False) -> None:
+                           offset_mm: Optional[float], scope_part_ids: List[str],
+                           offset_opposite: bool = False,
+                           opposite: bool = False,
+                           symmetric: bool = False) -> None:
         """Material-removal extrude scoped to specific bodies. NOTE: cuts whose
         boundary is exactly coincident with a target face can ERROR — inset
-        the sketch or prefer a tangent-fillet workaround (see finish_pass)."""
-        self._post({
-            "btType": "BTMFeature-134", "featureType": "extrude", "name": name,
-            "parameters": [
-                {"btType": "BTMParameterEnum-145", "parameterId": "bodyType",
-                 "value": "SOLID", "enumName": "ExtendedToolBodyType"},
-                {"btType": "BTMParameterEnum-145", "parameterId": "operationType",
-                 "value": "REMOVE", "enumName": "NewBodyOperationType"},
-                {"btType": "BTMParameterQueryList-148", "parameterId": "entities",
-                 "queries": [{"btType": "BTMIndividualSketchRegionQuery-140",
-                              "featureId": sketch_fid}]},
-                {"btType": "BTMParameterEnum-145", "parameterId": "endBound",
-                 "value": "BLIND", "enumName": "BoundingType"},
-                {"btType": "BTMParameterQuantity-147", "parameterId": "depth",
-                 "expression": "{} mm".format(depth_mm)},
+        the sketch or prefer a tangent-fillet workaround (see finish_pass).
+        Pass offset_mm=None with symmetric=True for a centered full-span cut.
+        Offset cuts WITHOUT opposite=True can miss the model entirely (the
+        feature lands in INFO state, removes nothing) — pair opposite=True
+        with offset_opposite=True for the verified [offset, offset+depth]
+        span behavior (see README plane conventions)."""
+        params = [
+            {"btType": "BTMParameterEnum-145", "parameterId": "bodyType",
+             "value": "SOLID", "enumName": "ExtendedToolBodyType"},
+            {"btType": "BTMParameterEnum-145", "parameterId": "operationType",
+             "value": "REMOVE", "enumName": "NewBodyOperationType"},
+            {"btType": "BTMParameterQueryList-148", "parameterId": "entities",
+             "queries": [{"btType": "BTMIndividualSketchRegionQuery-140",
+                          "featureId": sketch_fid}]},
+            {"btType": "BTMParameterEnum-145", "parameterId": "endBound",
+             "value": "BLIND", "enumName": "BoundingType"},
+            {"btType": "BTMParameterQuantity-147", "parameterId": "depth",
+             "expression": "{} mm".format(depth_mm)},
+            {"btType": "BTMParameterBoolean-144", "parameterId": "oppositeDirection",
+             "value": opposite},
+            {"btType": "BTMParameterBoolean-144", "parameterId": "defaultScope",
+             "value": False},
+            {"btType": "BTMParameterQueryList-148", "parameterId": "booleanScope",
+             "queries": [{"btType": "BTMIndividualQuery-138",
+                          "deterministicIds": scope_part_ids}]},
+        ]
+        if symmetric:
+            params.append({"btType": "BTMParameterBoolean-144",
+                           "parameterId": "symmetric", "value": True})
+        if offset_mm is not None:
+            params += [
                 {"btType": "BTMParameterBoolean-144", "parameterId": "startOffset",
                  "value": True},
                 {"btType": "BTMParameterEnum-145", "parameterId": "startOffsetBound",
                  "value": "BLIND", "enumName": "StartOffsetType"},
                 {"btType": "BTMParameterQuantity-147",
                  "parameterId": "startOffsetDistance",
-                 "expression": "{} mm".format(offset_mm)},
+                 "expression": "{} mm".format(abs(offset_mm))},
                 {"btType": "BTMParameterBoolean-144",
                  "parameterId": "startOffsetOppositeDirection",
                  "value": offset_opposite},
-                {"btType": "BTMParameterBoolean-144", "parameterId": "defaultScope",
-                 "value": False},
-                {"btType": "BTMParameterQueryList-148", "parameterId": "booleanScope",
-                 "queries": [{"btType": "BTMIndividualQuery-138",
-                              "deterministicIds": scope_part_ids}]},
-            ],
+            ]
+        self._post({
+            "btType": "BTMFeature-134", "featureType": "extrude", "name": name,
+            "parameters": params,
         })
 
     # -- parts ---------------------------------------------------------------
