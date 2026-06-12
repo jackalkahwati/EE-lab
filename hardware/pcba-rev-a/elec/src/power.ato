@@ -1,0 +1,102 @@
+"""
+PowerTree — 24V control power in, relay coil rail, logic rails.
+
+J2 24V ─[F1 2A polyfuse]─[D1 TVS 33V]── 24V rail
+  24V ─[TPS54331 buck]── 5V_COIL   (relay coils via TPIC6B595 sinks)
+  5V  ─[TPS62086 buck]── 3V3_DIG   (RP2040, flash, shift registers, EEPROM)
+  5V  ─[TPS7A4901 LDO]── 3V3_ANA   (comparators, INA219, voltage-check dividers)
+
+Coil rail current telemetry: INA219 shunt on 5V_COIL (stuck-relay
+signature detection per relay-probe-matrix-rev-a.md section 6).
+Same stack/idiom as resonant-computer Tile-0 power.ato.
+"""
+
+import Power from "generics/interfaces.ato"
+import Resistor from "generics/resistors.ato"
+import Capacitor from "generics/capacitors.ato"
+
+
+component Polyfuse_2A:
+    footprint = "Fuse_1812"
+    signal p1 ~ pin 1
+    signal p2 ~ pin 2
+
+component TVS_33V:
+    # SMBJ33A
+    footprint = "D_SMB"
+    signal cathode ~ pin 1
+    signal anode ~ pin 2
+
+component TPS54331:
+    # 24V -> 5V buck, 3A
+    footprint = "SOIC-8_3.9x4.9mm_P1.27mm"
+    signal vin ~ pin 7
+    signal gnd ~ pin 9
+    signal vout ~ pin 8   # via inductor; net label for layout
+    signal en ~ pin 4
+
+component TPS62086:
+    # 5V -> 3.3V buck
+    footprint = "SON-8_2x2mm"
+    signal vin ~ pin 1
+    signal gnd ~ pin 2
+    signal vout ~ pin 8
+
+component TPS7A4901:
+    # low-noise LDO
+    footprint = "MSOP-8"
+    signal vin ~ pin 1
+    signal gnd ~ pin 2
+    signal vout ~ pin 8
+
+component INA219:
+    footprint = "SOT-23-8"
+    signal vcc ~ pin 6
+    signal gnd ~ pin 5
+    signal vin_p ~ pin 8
+    signal vin_n ~ pin 7
+    signal sda ~ pin 1
+    signal scl ~ pin 2
+
+
+module PowerTree:
+    v24 = new Power
+    v5_coil = new Power
+    v3v3_dig = new Power
+    v3v3_ana = new Power
+
+    fuse = new Polyfuse_2A
+    tvs = new TVS_33V
+    buck24 = new TPS54331
+    buck5 = new TPS62086
+    ldo_ana = new TPS7A4901
+    coil_mon = new INA219
+    shunt = new Resistor
+    shunt.value = 0.05ohm
+    shunt.footprint = "R_2512"
+
+    v24.vcc ~ fuse.p1
+    fuse.p2 ~ tvs.cathode
+    tvs.anode ~ v24.gnd
+    fuse.p2 ~ buck24.vin
+    buck24.gnd ~ v24.gnd
+
+    # coil rail through the telemetry shunt
+    buck24.vout ~ shunt.p1
+    shunt.p2 ~ v5_coil.vcc
+    coil_mon.vin_p ~ shunt.p1
+    coil_mon.vin_n ~ shunt.p2
+    coil_mon.vcc ~ v3v3_dig.vcc
+    coil_mon.gnd ~ v24.gnd
+
+    buck24.vout ~ buck5.vin
+    buck5.gnd ~ v24.gnd
+    buck5.vout ~ v3v3_dig.vcc
+
+    buck24.vout ~ ldo_ana.vin
+    ldo_ana.gnd ~ v24.gnd
+    ldo_ana.vout ~ v3v3_ana.vcc
+
+    v5_coil.gnd ~ v24.gnd
+    v3v3_dig.gnd ~ v24.gnd
+    v3v3_ana.gnd ~ v24.gnd

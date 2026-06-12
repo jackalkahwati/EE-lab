@@ -1,0 +1,21 @@
+{
+  "project": "FL-1 relay/probe matrix Rev A",
+  "source": "compiled from elec/src/*.ato (atopile) — same stack as resonant-computer Tile-0",
+  "connector_refs": ["J1", "J2", "J10", "J11", "J20", "J21", "J22", "J23", "J24", "J25"],
+  "critical_nets": [
+    "P1", "P2", "P3", "P4", "KF_P", "KF_N", "KS_P", "KS_N",
+    "DMM_HI", "DMM_LO", "SCOPE_A", "SCOPE_B", "GND_REF"
+  ],
+  "analog_refs_note": "DMM/Kelvin reed-relay bank + reference block + window comparators form the analog island; guard rings around DMM_HI/DMM_LO; moat between relay-coil/digital region and lane region per relay-probe-matrix-rev-a.md section 9",
+  "power_tree_refs_note": "24V entry (J2) -> TPS54331 -> coil rail w/ INA219 shunt; TPS62086 3V3_DIG; TPS7A4901 3V3_ANA",
+  "placement_intent": {
+    "west_edge": ["J10 cartridge blind-mate", "8x ProbeProtection channels"],
+    "center": ["8x LaneSelector relay trees, lane buses run east"],
+    "east_edge": ["J20-J24 instrument connectors"],
+    "north_edge": ["J2 24V in", "PowerTree", "12x TPIC6B595 coil sinks"],
+    "south_edge": ["RP2040 + USB-C (J1)", "reference block (analog island)"]
+  },
+  "board_outline_mm": [160, 100],
+  "layers": 4,
+  "stackup": "Sig / GND / PWR / Sig"
+}

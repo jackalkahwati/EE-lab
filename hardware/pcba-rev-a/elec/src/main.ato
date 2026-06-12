@@ -1,0 +1,128 @@
+"""
+MatrixRevA — top level. FirstLight FL-1 relay/probe matrix Rev A.
+
+Composition (relay-probe-matrix-rev-a.md): cartridge interface ->
+8x probe protection -> 8x lane-selector matrix -> instrument connectors;
+RP2040 control + coil sinks + watchdog; reference block for self-cal.
+Connector map per spec section 7 (J1/J2/J10/J20-J25).
+"""
+
+import Power from "generics/interfaces.ato"
+import PowerTree from "power.ato"
+import Matrix from "matrix.ato"
+import ProbeProtection from "protection.ato"
+import ReferenceBlock from "protection.ato"
+import Control from "mcu.ato"
+import CartridgeInterface from "cartridge.ato"
+
+
+component BNC_J20:
+    footprint = "BNC_Amphenol_RF"
+    signal sig ~ pin 1
+    signal shield ~ pin 2
+
+component MiniFitJr_2P:
+    footprint = "Molex_MiniFitJr_2P"
+    signal p1 ~ pin 1
+    signal p2 ~ pin 2
+
+component LowEMF_4P:
+    footprint = "TE_LowEMF_4P"
+    signal hi ~ pin 1
+    signal lo ~ pin 2
+    signal shi ~ pin 3
+    signal slo ~ pin 4
+
+component LatchHeader_8P:
+    footprint = "Molex_Microfit_8P"
+    signal p1 ~ pin 1
+    signal p2 ~ pin 2
+    signal p3 ~ pin 3
+    signal p4 ~ pin 4
+    signal p5 ~ pin 5
+    signal p6 ~ pin 6
+    signal p7 ~ pin 7
+    signal p8 ~ pin 8
+
+
+module MatrixRevA:
+    power = new PowerTree
+    ctl = new Control
+    cart = new CartridgeInterface
+    matrix = new Matrix
+    refs = new ReferenceBlock
+
+    prot_p1 = new ProbeProtection
+    prot_p2 = new ProbeProtection
+    prot_p3 = new ProbeProtection
+    prot_p4 = new ProbeProtection
+    prot_kfp = new ProbeProtection
+    prot_kfn = new ProbeProtection
+    prot_ksp = new ProbeProtection
+    prot_ksn = new ProbeProtection
+
+    # connectors
+    j2_24v = new MiniFitJr_2P
+    j20_scope_a = new BNC_J20
+    j21_scope_b = new BNC_J20
+    j22_dmm = new LowEMF_4P
+    j23_daq_logic = new LatchHeader_8P
+    j24_pwr_inj = new MiniFitJr_2P
+
+    # power
+    j2_24v.p1 ~ power.v24.vcc
+    j2_24v.p2 ~ power.v24.gnd
+    ctl.v3v3 ~ power.v3v3_dig
+    ctl.v5_coil ~ power.v5_coil
+    cart.v3v3 ~ power.v3v3_dig
+    refs.v3v3 ~ power.v3v3_ana
+    matrix.coil_bus ~ power.v5_coil
+
+    # I2C bus: MCU <-> coil monitor + cal EEPROM + cartridge EEPROM
+    ctl.sda ~ cart.sda
+    ctl.scl ~ cart.scl
+
+    # tip -> protection -> selector
+    cart.tip_p1 ~ prot_p1.tip
+    cart.tip_p2 ~ prot_p2.tip
+    cart.tip_p3 ~ prot_p3.tip
+    cart.tip_p4 ~ prot_p4.tip
+    cart.tip_kf_p ~ prot_kfp.tip
+    cart.tip_kf_n ~ prot_kfn.tip
+    cart.tip_ks_p ~ prot_ksp.tip
+    cart.tip_ks_n ~ prot_ksn.tip
+    prot_p1.node ~ matrix.sel_p1.probe
+    prot_p2.node ~ matrix.sel_p2.probe
+    prot_p3.node ~ matrix.sel_p3.probe
+    prot_p4.node ~ matrix.sel_p4.probe
+    prot_kfp.node ~ matrix.sel_kfp.probe
+    prot_kfn.node ~ matrix.sel_kfn.probe
+    prot_ksp.node ~ matrix.sel_ksp.probe
+    prot_ksn.node ~ matrix.sel_ksn.probe
+
+    # protection rails (clamp rails from analog supply; -15V TBD Rev A
+    # bring-up: single +15/-15 charge pump or external — leave net stubs)
+    prot_p1.v3v3 ~ power.v3v3_ana
+    prot_p2.v3v3 ~ power.v3v3_ana
+    prot_p3.v3v3 ~ power.v3v3_ana
+    prot_p4.v3v3 ~ power.v3v3_ana
+    prot_kfp.v3v3 ~ power.v3v3_ana
+    prot_kfn.v3v3 ~ power.v3v3_ana
+    prot_ksp.v3v3 ~ power.v3v3_ana
+    prot_ksn.v3v3 ~ power.v3v3_ana
+
+    # lane buses -> instrument connectors
+    matrix.scope_a ~ j20_scope_a.sig
+    matrix.scope_b ~ j21_scope_b.sig
+    matrix.dmm_hi ~ j22_dmm.hi
+    matrix.dmm_lo ~ j22_dmm.lo
+    matrix.daq_1 ~ j23_daq_logic.p1
+    matrix.daq_2 ~ j23_daq_logic.p2
+    matrix.logic_1 ~ j23_daq_logic.p3
+    matrix.logic_2 ~ j23_daq_logic.p4
+    matrix.pwr_inj ~ j24_pwr_inj.p1
+    j24_pwr_inj.p2 ~ power.v24.gnd
+    matrix.gnd_ref ~ power.v24.gnd
+
+    # reference block rides the DMM_HI lane
+    refs.ref_bus ~ matrix.dmm_hi

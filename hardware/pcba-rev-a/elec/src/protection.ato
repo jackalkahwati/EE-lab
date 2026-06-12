@@ -1,0 +1,106 @@
+"""
+Protection — per-probe chain, in order from the tip
+(relay-probe-matrix-rev-a.md section 3):
+
+probe ─[PTC 50mA]─┬─ node -> LaneSelector.probe
+                  ├─ TVS + steering diodes to +/-15V clamp rails
+                  ├─ 1M/100k divider -> window comparator (pre-connect
+                  │   voltage check, readable BEFORE any relay closes)
+                  └─ (discharge to GND_REF via the selector's reed)
+"""
+
+import Power from "generics/interfaces.ato"
+import Resistor from "generics/resistors.ato"
+
+
+component PTC_50mA:
+    footprint = "R_0805"
+    signal p1 ~ pin 1
+    signal p2 ~ pin 2
+
+component SteeringPair_BAV99:
+    footprint = "SOT-23"
+    signal a ~ pin 1       # node
+    signal clamp_p ~ pin 3 # +15V rail
+    signal clamp_n ~ pin 2 # -15V rail
+
+component TVS_Bidir_24V:
+    footprint = "D_SOD-323"
+    signal p1 ~ pin 1
+    signal p2 ~ pin 2
+
+component WindowComparator_TLV3502:
+    footprint = "MSOP-8"
+    signal vcc ~ pin 8
+    signal gnd ~ pin 4
+    signal vin ~ pin 1
+    signal out_hi ~ pin 7
+    signal out_lo ~ pin 6
+
+
+module ProbeProtection:
+    """One channel; instantiated 8x in main."""
+    signal tip          # from cartridge connector
+    signal node         # to LaneSelector.probe
+    signal vcheck_hi    # to MCU GPIO
+    signal vcheck_lo
+    clamp_p = new Power  # +15V clamp rail
+    clamp_n = new Power  # -15V clamp rail
+    v3v3 = new Power
+
+    ptc = new PTC_50mA
+    steer = new SteeringPair_BAV99
+    tvs = new TVS_Bidir_24V
+    rdiv_top = new Resistor
+    rdiv_bot = new Resistor
+    comp = new WindowComparator_TLV3502
+
+    rdiv_top.value = 1Mohm
+    rdiv_top.footprint = "R_0402"
+    rdiv_bot.value = 100kohm
+    rdiv_bot.footprint = "R_0402"
+
+    tip ~ ptc.p1
+    ptc.p2 ~ node
+    node ~ steer.a
+    steer.clamp_p ~ clamp_p.vcc
+    steer.clamp_n ~ clamp_n.vcc
+    node ~ tvs.p1
+    tvs.p2 ~ v3v3.gnd
+
+    node ~ rdiv_top.p1
+    rdiv_top.p2 ~ comp.vin
+    comp.vin ~ rdiv_bot.p1
+    rdiv_bot.p2 ~ v3v3.gnd
+    comp.vcc ~ v3v3.vcc
+    comp.gnd ~ v3v3.gnd
+    comp.out_hi ~ vcheck_hi
+    comp.out_lo ~ vcheck_lo
+
+
+module ReferenceBlock:
+    """Cal references behind a dedicated reed pair: 0.01% 1k, 0.01% 100k,
+    dead short, open — routable to any lane for self-test (section 5)."""
+    signal ref_bus       # lands on dmm_hi lane via its own reed
+    v3v3 = new Power
+
+    import RelayReed5V from "matrix.ato"
+    r1k = new Resistor
+    r1k.value = 1kohm
+    r1k.footprint = "R_0805"
+    r100k = new Resistor
+    r100k.value = 100kohm
+    r100k.footprint = "R_0805"
+
+    k_1k = new RelayReed5V
+    k_100k = new RelayReed5V
+    k_short = new RelayReed5V
+
+    ref_bus ~ k_1k.com
+    k_1k.no ~ r1k.p1
+    r1k.p2 ~ v3v3.gnd
+    ref_bus ~ k_100k.com
+    k_100k.no ~ r100k.p1
+    r100k.p2 ~ v3v3.gnd
+    ref_bus ~ k_short.com
+    k_short.no ~ v3v3.gnd

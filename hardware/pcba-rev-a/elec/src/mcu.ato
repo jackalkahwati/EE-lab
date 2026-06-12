@@ -1,0 +1,168 @@
+"""
+Control — RP2040 + USB-C CDC + TPIC6B595 coil-sink chain + watchdog.
+
+Line protocol to station software: ROUTE / OPEN ALL / CHECK / CAL
+(relay-probe-matrix-rev-a.md section 6). Watchdog drops all coil power
+if the control link goes silent >250 ms (TPS3823 + coil-rail enable FET).
+91 coil channels (88 matrix + 3 reference block) = 12x TPIC6B595.
+"""
+
+import Power from "generics/interfaces.ato"
+import Resistor from "generics/resistors.ato"
+import Capacitor from "generics/capacitors.ato"
+
+
+component RP2040:
+    footprint = "QFN-56_7x7mm"
+    signal vdd ~ pin 49
+    signal gnd ~ pin 57
+    signal usb_dp ~ pin 47
+    signal usb_dm ~ pin 46
+    signal spi_sck ~ pin 2     # shift-register clock
+    signal spi_mosi ~ pin 3    # serial data
+    signal latch ~ pin 4       # RCK
+    signal oe_n ~ pin 5        # output enable (watchdog-gated)
+    signal sda ~ pin 6         # INA219, cal EEPROM, cartridge EEPROM
+    signal scl ~ pin 7
+    signal wdi ~ pin 8         # watchdog kick
+
+component W25Q32:
+    footprint = "SOIC-8"
+    signal vcc ~ pin 8
+    signal gnd ~ pin 4
+    signal cs ~ pin 1
+    signal clk ~ pin 6
+    signal di ~ pin 5
+    signal do ~ pin 2
+
+component USBC_Receptacle:
+    footprint = "USB_C_Receptacle_16P"
+    signal vbus ~ pin 1
+    signal gnd ~ pin 16
+    signal dp ~ pin 6
+    signal dm ~ pin 7
+    signal cc1 ~ pin 5
+    signal cc2 ~ pin 12
+
+component TPIC6B595:
+    # 8-ch power shift register, open-drain sinks for relay coils
+    footprint = "SOIC-20W"
+    signal vcc ~ pin 2
+    signal gnd ~ pin 10
+    signal ser_in ~ pin 3
+    signal ser_out ~ pin 18
+    signal srck ~ pin 13
+    signal rck ~ pin 12
+    signal g_n ~ pin 9
+
+component TPS3823:
+    # watchdog supervisor
+    footprint = "SOT-23-5"
+    signal vdd ~ pin 5
+    signal gnd ~ pin 2
+    signal wdi ~ pin 4
+    signal reset_n ~ pin 1
+
+component EEPROM_24AA025UID:
+    footprint = "SOT-23-5"
+    signal vcc ~ pin 5
+    signal gnd ~ pin 2
+    signal sda ~ pin 3
+    signal scl ~ pin 1
+
+
+module Control:
+    v3v3 = new Power
+    v5_coil = new Power
+    signal sda
+    signal scl
+
+    mcu = new RP2040
+    flash = new W25Q32
+    usb = new USBC_Receptacle
+    wdt = new TPS3823
+    cal_eeprom = new EEPROM_24AA025UID
+
+    # 12-deep coil sink chain
+    sr1 = new TPIC6B595
+    sr2 = new TPIC6B595
+    sr3 = new TPIC6B595
+    sr4 = new TPIC6B595
+    sr5 = new TPIC6B595
+    sr6 = new TPIC6B595
+    sr7 = new TPIC6B595
+    sr8 = new TPIC6B595
+    sr9 = new TPIC6B595
+    sr10 = new TPIC6B595
+    sr11 = new TPIC6B595
+    sr12 = new TPIC6B595
+
+    mcu.vdd ~ v3v3.vcc
+    mcu.gnd ~ v3v3.gnd
+    flash.vcc ~ v3v3.vcc
+    flash.gnd ~ v3v3.gnd
+    flash.cs ~ mcu.spi_sck   # QSPI pins abbreviated; real map at layout
+    usb.dp ~ mcu.usb_dp
+    usb.dm ~ mcu.usb_dm
+    usb.gnd ~ v3v3.gnd
+
+    mcu.sda ~ sda
+    mcu.scl ~ scl
+    cal_eeprom.vcc ~ v3v3.vcc
+    cal_eeprom.gnd ~ v3v3.gnd
+    cal_eeprom.sda ~ sda
+    cal_eeprom.scl ~ scl
+
+    wdt.vdd ~ v3v3.vcc
+    wdt.gnd ~ v3v3.gnd
+    wdt.wdi ~ mcu.wdi
+    wdt.reset_n ~ mcu.oe_n   # watchdog timeout -> sinks disabled -> all open
+
+    sr1.ser_in ~ mcu.spi_mosi
+    sr1.ser_out ~ sr2.ser_in
+    sr2.ser_out ~ sr3.ser_in
+    sr3.ser_out ~ sr4.ser_in
+    sr4.ser_out ~ sr5.ser_in
+    sr5.ser_out ~ sr6.ser_in
+    sr6.ser_out ~ sr7.ser_in
+    sr7.ser_out ~ sr8.ser_in
+    sr8.ser_out ~ sr9.ser_in
+    sr9.ser_out ~ sr10.ser_in
+    sr10.ser_out ~ sr11.ser_in
+    sr11.ser_out ~ sr12.ser_in
+    sr1.srck ~ mcu.spi_sck
+    sr2.srck ~ mcu.spi_sck
+    sr3.srck ~ mcu.spi_sck
+    sr4.srck ~ mcu.spi_sck
+    sr5.srck ~ mcu.spi_sck
+    sr6.srck ~ mcu.spi_sck
+    sr7.srck ~ mcu.spi_sck
+    sr8.srck ~ mcu.spi_sck
+    sr9.srck ~ mcu.spi_sck
+    sr10.srck ~ mcu.spi_sck
+    sr11.srck ~ mcu.spi_sck
+    sr12.srck ~ mcu.spi_sck
+    sr1.rck ~ mcu.latch
+    sr2.rck ~ mcu.latch
+    sr3.rck ~ mcu.latch
+    sr4.rck ~ mcu.latch
+    sr5.rck ~ mcu.latch
+    sr6.rck ~ mcu.latch
+    sr7.rck ~ mcu.latch
+    sr8.rck ~ mcu.latch
+    sr9.rck ~ mcu.latch
+    sr10.rck ~ mcu.latch
+    sr11.rck ~ mcu.latch
+    sr12.rck ~ mcu.latch
+    sr1.g_n ~ mcu.oe_n
+    sr2.g_n ~ mcu.oe_n
+    sr3.g_n ~ mcu.oe_n
+    sr4.g_n ~ mcu.oe_n
+    sr5.g_n ~ mcu.oe_n
+    sr6.g_n ~ mcu.oe_n
+    sr7.g_n ~ mcu.oe_n
+    sr8.g_n ~ mcu.oe_n
+    sr9.g_n ~ mcu.oe_n
+    sr10.g_n ~ mcu.oe_n
+    sr11.g_n ~ mcu.oe_n
+    sr12.g_n ~ mcu.oe_n

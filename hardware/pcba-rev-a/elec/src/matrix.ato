@@ -1,0 +1,198 @@
+"""
+Matrix — per-probe 1-of-10 lane selector trees.
+
+8 probe resources (P1-P4, KF+/-, KS+/-) x 10 instrument lanes
+(SCOPE_A/B, DMM_HI/LO, DAQ_1/2, LOGIC_1/2, PWR_INJ, GND_REF).
+Topology per relay-probe-matrix-rev-a.md section 2: one LaneSelector
+tree per probe (~11 relays) instead of a full crosspoint — 88 relays
+total, shorter stubs, one defined path per probe.
+
+General lanes: Omron G6K-2F-Y telecom relays.
+DMM/Kelvin lanes: Coto/Pickering shielded dry-reed, thermal-EMF matched.
+All relays default-open; coil sinks are TPIC6B595 channels (mcu.ato).
+"""
+
+import Power from "generics/interfaces.ato"
+
+
+component RelayG6K2FY:
+    # Omron G6K-2F-Y, 2 Form C signal relay, 5V coil
+    footprint = "Relay_Omron_G6K-2F-Y"
+    signal coil_p ~ pin 1
+    signal coil_n ~ pin 8
+    signal com ~ pin 4
+    signal no ~ pin 3
+    signal nc ~ pin 5
+
+component RelayReed5V:
+    # Coto 9007-05 class shielded dry reed, SPST-NO, 5V coil
+    footprint = "Relay_Coto_9007"
+    signal coil_p ~ pin 1
+    signal coil_n ~ pin 4
+    signal com ~ pin 2
+    signal no ~ pin 3
+
+
+module LaneSelector:
+    """One probe resource -> one of 10 lanes. Two-stage tree:
+    stage 1 splits probe to general-bank / precision-bank,
+    stage 2 selects the lane. Reed relays carry the precision bank
+    (DMM_HI/LO + GND_REF discharge path)."""
+    signal probe
+    signal scope_a
+    signal scope_b
+    signal daq_1
+    signal daq_2
+    signal logic_1
+    signal logic_2
+    signal pwr_inj
+    signal dmm_hi
+    signal dmm_lo
+    signal gnd_ref
+    coil_bus = new Power   # 5V_COIL / GND pair; sinks in mcu.ato
+
+    # stage 1: bank split
+    k_bank = new RelayG6K2FY
+
+    # stage 2, general bank (7 lanes)
+    k_scope_a = new RelayG6K2FY
+    k_scope_b = new RelayG6K2FY
+    k_daq_1 = new RelayG6K2FY
+    k_daq_2 = new RelayG6K2FY
+    k_logic_1 = new RelayG6K2FY
+    k_logic_2 = new RelayG6K2FY
+    k_pwr = new RelayG6K2FY
+
+    # stage 2, precision bank (3 lanes, reed)
+    k_dmm_hi = new RelayReed5V
+    k_dmm_lo = new RelayReed5V
+    k_gnd = new RelayReed5V
+
+    probe ~ k_bank.com
+    k_bank.nc ~ k_scope_a.com
+    k_bank.nc ~ k_scope_b.com
+    k_bank.nc ~ k_daq_1.com
+    k_bank.nc ~ k_daq_2.com
+    k_bank.nc ~ k_logic_1.com
+    k_bank.nc ~ k_logic_2.com
+    k_bank.nc ~ k_pwr.com
+    k_bank.no ~ k_dmm_hi.com
+    k_bank.no ~ k_dmm_lo.com
+    k_bank.no ~ k_gnd.com
+
+    k_scope_a.no ~ scope_a
+    k_scope_b.no ~ scope_b
+    k_daq_1.no ~ daq_1
+    k_daq_2.no ~ daq_2
+    k_logic_1.no ~ logic_1
+    k_logic_2.no ~ logic_2
+    k_pwr.no ~ pwr_inj
+    k_dmm_hi.no ~ dmm_hi
+    k_dmm_lo.no ~ dmm_lo
+    k_gnd.no ~ gnd_ref
+
+
+module Matrix:
+    """8 selector trees + the shared lane buses."""
+    signal scope_a
+    signal scope_b
+    signal daq_1
+    signal daq_2
+    signal logic_1
+    signal logic_2
+    signal pwr_inj
+    signal dmm_hi
+    signal dmm_lo
+    signal gnd_ref
+    coil_bus = new Power
+
+    sel_p1 = new LaneSelector
+    sel_p2 = new LaneSelector
+    sel_p3 = new LaneSelector
+    sel_p4 = new LaneSelector
+    sel_kfp = new LaneSelector
+    sel_kfn = new LaneSelector
+    sel_ksp = new LaneSelector
+    sel_ksn = new LaneSelector
+
+    # lane bus fan-in (probe pins exposed by each selector's .probe)
+    sel_p1.scope_a ~ scope_a
+    sel_p2.scope_a ~ scope_a
+    sel_p3.scope_a ~ scope_a
+    sel_p4.scope_a ~ scope_a
+    sel_kfp.scope_a ~ scope_a
+    sel_kfn.scope_a ~ scope_a
+    sel_ksp.scope_a ~ scope_a
+    sel_ksn.scope_a ~ scope_a
+    sel_p1.scope_b ~ scope_b
+    sel_p2.scope_b ~ scope_b
+    sel_p3.scope_b ~ scope_b
+    sel_p4.scope_b ~ scope_b
+    sel_kfp.scope_b ~ scope_b
+    sel_kfn.scope_b ~ scope_b
+    sel_ksp.scope_b ~ scope_b
+    sel_ksn.scope_b ~ scope_b
+    sel_p1.daq_1 ~ daq_1
+    sel_p2.daq_1 ~ daq_1
+    sel_p3.daq_1 ~ daq_1
+    sel_p4.daq_1 ~ daq_1
+    sel_kfp.daq_1 ~ daq_1
+    sel_kfn.daq_1 ~ daq_1
+    sel_ksp.daq_1 ~ daq_1
+    sel_ksn.daq_1 ~ daq_1
+    sel_p1.daq_2 ~ daq_2
+    sel_p2.daq_2 ~ daq_2
+    sel_p3.daq_2 ~ daq_2
+    sel_p4.daq_2 ~ daq_2
+    sel_kfp.daq_2 ~ daq_2
+    sel_kfn.daq_2 ~ daq_2
+    sel_ksp.daq_2 ~ daq_2
+    sel_ksn.daq_2 ~ daq_2
+    sel_p1.logic_1 ~ logic_1
+    sel_p2.logic_1 ~ logic_1
+    sel_p3.logic_1 ~ logic_1
+    sel_p4.logic_1 ~ logic_1
+    sel_kfp.logic_1 ~ logic_1
+    sel_kfn.logic_1 ~ logic_1
+    sel_ksp.logic_1 ~ logic_1
+    sel_ksn.logic_1 ~ logic_1
+    sel_p1.logic_2 ~ logic_2
+    sel_p2.logic_2 ~ logic_2
+    sel_p3.logic_2 ~ logic_2
+    sel_p4.logic_2 ~ logic_2
+    sel_kfp.logic_2 ~ logic_2
+    sel_kfn.logic_2 ~ logic_2
+    sel_ksp.logic_2 ~ logic_2
+    sel_ksn.logic_2 ~ logic_2
+    sel_p1.pwr_inj ~ pwr_inj
+    sel_p2.pwr_inj ~ pwr_inj
+    sel_p3.pwr_inj ~ pwr_inj
+    sel_p4.pwr_inj ~ pwr_inj
+    sel_kfp.pwr_inj ~ pwr_inj
+    sel_kfn.pwr_inj ~ pwr_inj
+    sel_ksp.pwr_inj ~ pwr_inj
+    sel_ksn.pwr_inj ~ pwr_inj
+    sel_p1.dmm_hi ~ dmm_hi
+    sel_p2.dmm_hi ~ dmm_hi
+    sel_p3.dmm_hi ~ dmm_hi
+    sel_p4.dmm_hi ~ dmm_hi
+    sel_kfp.dmm_hi ~ dmm_hi
+    sel_kfn.dmm_hi ~ dmm_hi
+    sel_ksp.dmm_hi ~ dmm_hi
+    sel_ksn.dmm_hi ~ dmm_hi
+    sel_p1.dmm_lo ~ dmm_lo
+    sel_p2.dmm_lo ~ dmm_lo
+    sel_p3.dmm_lo ~ dmm_lo
+    sel_p4.dmm_lo ~ dmm_lo
+    sel_kfp.dmm_lo ~ dmm_lo
+    sel_kfn.dmm_lo ~ dmm_lo
+    sel_ksp.dmm_lo ~ dmm_lo
+    sel_ksn.dmm_lo ~ dmm_lo
+    sel_p1.gnd_ref ~ gnd_ref
+    sel_p2.gnd_ref ~ gnd_ref
+    sel_p3.gnd_ref ~ gnd_ref
+    sel_p4.gnd_ref ~ gnd_ref
+    sel_kfp.gnd_ref ~ gnd_ref
+    sel_kfn.gnd_ref ~ gnd_ref
+    sel_ksp.gnd_ref ~ gnd_ref
+    sel_ksn.gnd_ref ~ gnd_ref
