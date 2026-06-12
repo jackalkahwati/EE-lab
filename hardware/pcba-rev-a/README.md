@@ -36,6 +36,22 @@ cd hardware/pcba-rev-a
 ato build                        # compile -> netlist for KiCad sync
 ```
 
+## Viewing in KiCad
+
+`elec/layout/rev-a/rev-a.kicad_sch` is the block schematic (valid KiCad 8+
+document, plotted clean by kicad-cli) — open with
+`open -a KiCad elec/layout/rev-a/rev-a.kicad_sch`. The component-level
+schematic materializes when `ato build` syncs the netlist (see gaps).
+
+## MCU decision (2026-06-12)
+
+Rev A uses a **socketed Raspberry Pi Pico 2 module** instead of chip-down
+RP2040: kills crystal/QSPI/USB bring-up risk, $5, same silicon. A full
+Linux Pi is deliberately not used — relay interlock timing wants an MCU
+and the station PC is the smart layer. An Arduino/Pi cannot replace the
+board itself: the 88-relay matrix, reed-lane leakage spec, protection
+chain, and cartridge contract are the custom content.
+
 ## Status / known gaps (Rev A bring-up list)
 
 - `.ato` syntax follows Tile-0's atopile ^0.2 conventions; current atopile

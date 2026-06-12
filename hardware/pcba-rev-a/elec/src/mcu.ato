@@ -1,48 +1,38 @@
 """
-Control — RP2040 + USB-C CDC + TPIC6B595 coil-sink chain + watchdog.
+Control — Raspberry Pi Pico 2 module (socketed) + TPIC6B595 coil-sink
+chain + watchdog.
+
+Rev A decision (2026-06-12): socketed Pico 2 module instead of chip-down
+RP2040 — kills the crystal/QSPI/USB-routing bring-up risk for $5, and the
+USB-C/flash live on the module. The module IS the Raspberry Pi silicon;
+a full Linux Pi is deliberately NOT used here (relay interlock timing
+wants an MCU; the station PC is the smart layer).
 
 Line protocol to station software: ROUTE / OPEN ALL / CHECK / CAL
 (relay-probe-matrix-rev-a.md section 6). Watchdog drops all coil power
-if the control link goes silent >250 ms (TPS3823 + coil-rail enable FET).
+if the control link goes silent >250 ms.
 91 coil channels (88 matrix + 3 reference block) = 12x TPIC6B595.
 """
 
 import Power from "generics/interfaces.ato"
 import Resistor from "generics/resistors.ato"
-import Capacitor from "generics/capacitors.ato"
 
 
-component RP2040:
-    footprint = "QFN-56_7x7mm"
-    signal vdd ~ pin 49
-    signal gnd ~ pin 57
-    signal usb_dp ~ pin 47
-    signal usb_dm ~ pin 46
-    signal spi_sck ~ pin 2     # shift-register clock
-    signal spi_mosi ~ pin 3    # serial data
-    signal latch ~ pin 4       # RCK
-    signal oe_n ~ pin 5        # output enable (watchdog-gated)
-    signal sda ~ pin 6         # INA219, cal EEPROM, cartridge EEPROM
-    signal scl ~ pin 7
-    signal wdi ~ pin 8         # watchdog kick
-
-component W25Q32:
-    footprint = "SOIC-8"
-    signal vcc ~ pin 8
-    signal gnd ~ pin 4
-    signal cs ~ pin 1
-    signal clk ~ pin 6
-    signal di ~ pin 5
-    signal do ~ pin 2
-
-component USBC_Receptacle:
-    footprint = "USB_C_Receptacle_16P"
-    signal vbus ~ pin 1
-    signal gnd ~ pin 16
-    signal dp ~ pin 6
-    signal dm ~ pin 7
-    signal cc1 ~ pin 5
-    signal cc2 ~ pin 12
+component PicoModule:
+    # Raspberry Pi Pico 2 (RP2350), socketed on 2x20 headers
+    footprint = "RPi_Pico_SMD_TH"
+    signal vsys ~ pin 39
+    signal gnd ~ pin 38
+    signal v3v3_out ~ pin 36
+    signal spi_sck ~ pin 4      # GP2: shift-register clock
+    signal spi_mosi ~ pin 5     # GP3: serial data
+    signal latch ~ pin 6        # GP4: RCK
+    signal oe_n ~ pin 7         # GP5: output enable (watchdog-gated)
+    signal sda ~ pin 9          # GP6
+    signal scl ~ pin 10         # GP7
+    signal wdi ~ pin 11         # GP8: watchdog kick
+    signal vcheck_in1 ~ pin 31  # GP26/ADC0: pre-connect window outputs
+    signal vcheck_in2 ~ pin 32  # GP27/ADC1
 
 component TPIC6B595:
     # 8-ch power shift register, open-drain sinks for relay coils
@@ -77,9 +67,7 @@ module Control:
     signal sda
     signal scl
 
-    mcu = new RP2040
-    flash = new W25Q32
-    usb = new USBC_Receptacle
+    mcu = new PicoModule
     wdt = new TPS3823
     cal_eeprom = new EEPROM_24AA025UID
 
@@ -97,14 +85,8 @@ module Control:
     sr11 = new TPIC6B595
     sr12 = new TPIC6B595
 
-    mcu.vdd ~ v3v3.vcc
+    mcu.vsys ~ v3v3.vcc
     mcu.gnd ~ v3v3.gnd
-    flash.vcc ~ v3v3.vcc
-    flash.gnd ~ v3v3.gnd
-    flash.cs ~ mcu.spi_sck   # QSPI pins abbreviated; real map at layout
-    usb.dp ~ mcu.usb_dp
-    usb.dm ~ mcu.usb_dm
-    usb.gnd ~ v3v3.gnd
 
     mcu.sda ~ sda
     mcu.scl ~ scl

@@ -1,5 +1,5 @@
 # atopile project — FirstLight FL-1 relay/probe matrix Rev A
-ato-version: ^0.2.0
+requires-atopile: ">=0.12"
 paths:
   src: elec/src
   layout: elec/layout
