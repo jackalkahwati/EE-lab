@@ -1,0 +1,58 @@
+item,part_number,description,qty,material,process,envelope_mm,finish,ref_parts
+1,EE-FAB-ARM,Probe Mount Arm,1,Aluminum 6061-T6,CNC machining,115 x 109 x 12,Clear anodize,Probe Mount Arm
+2,EE-FAB-BAF,Rear Vent Baffle,1,Aluminum 5052 sheet,Sheet metal,320 x 100 x 1,Powder coat (RAL 9005 matte black int.),Rear Vent Baffle
+3,EE-FAB-BPAN,Enclosure Base Pan,1,Aluminum 5052 sheet,Sheet metal,940 x 920 x 2,Powder coat (RAL 9005 matte black int.),Enclosure Base Pan
+4,EE-FAB-CAM,Overhead Camera Mount Pad,1,Aluminum 6061-T6,CNC machining,60 x 20 x 16,Clear anodize,Overhead Camera Mount Pad
+5,EE-FAB-CAM,Probe Camera Bezel,1,Aluminum 6061-T6,CNC machining,68 x 38 x 4,Clear anodize,Probe Camera Bezel
+6,EE-FAB-CAMBKT,Camera Bracket Post Left,2,Aluminum 6061-T6,CNC machining,240 x 40 x 40,Clear anodize,Camera Bracket Post Left; Camera Bracket Post Right
+7,EE-FAB-CAMBKT,Overhead Camera Bracket Center,1,Aluminum 6061-T6,CNC machining,310 x 60 x 16,Clear anodize,Overhead Camera Bracket Center
+8,EE-FAB-CAMBKT,Overhead Camera Bracket Beam,1,Aluminum 6061-T6,CNC machining,680 x 40 x 16,Clear anodize,Overhead Camera Bracket Beam
+9,EE-FAB-CLMP,Adjustable Clamp Front,4,Aluminum 6061-T6,CNC machining,100 x 20 x 10,Clear anodize,Adjustable Clamp Front; Adjustable Clamp Left; Adjustable Clamp Rear; Adjustable Clamp Right
+10,EE-FAB-CRDL,Cartridge Cradle 1,3,Aluminum 6061-T6,CNC machining,30 x 30 x 24,Clear anodize,Cartridge Cradle 1; Cartridge Cradle 2; Cartridge Cradle 3
+11,EE-FAB-DECK,Instrument Deck,1,Aluminum 5052 sheet,Sheet metal,670 x 570 x 3,Powder coat (RAL 9005 matte black int.),Instrument Deck
+12,EE-FAB-DSPBZL,Touch Display Bezel,1,,CNC machining,175 x 115 x 2,—,Touch Display Bezel
+13,EE-FAB-DUTIF,DUT Interface Bulkhead,1,Aluminum 6061-T6,CNC machining,140 x 130 x 6,Clear anodize,DUT Interface Bulkhead
+14,EE-FAB-EMB,Probe Head Logo Emblem,1,ABS / PC,SLA/SLS print,20 x 20 x 2,As-printed,Probe Head Logo Emblem
+15,EE-FAB-FIXP,PCB Fixture Plate,1,Aluminum 6061-T6,CNC machining,520 x 420 x 18,Clear anodize,PCB Fixture Plate
+16,EE-FAB-FRM 4040,Base Frame,1,Aluminum 6063 extrusion,Cut extrusion,740 x 640 x 80,Clear anodize,Base Frame
+17,EE-FAB-FSC,Plinth Fascia,1,Aluminum 5052 sheet,Sheet metal,870 x 300 x 20,Powder coat (RAL 9005 matte black int.),Plinth Fascia
+18,EE-FAB-GLZ smoked PMMA,Glass Frame Side L+R,2,PMMA (smoked acrylic),Laser/waterjet cut,392 x 20 x 10,"Polished, smoked tint",Glass Frame Side L+R
+19,EE-FAB-GLZ smoked PMMA,Glass Frame Top,1,PMMA (smoked acrylic),Laser/waterjet cut,750 x 12 x 10,"Polished, smoked tint",Glass Frame Top
+20,EE-FAB-GLZ smoked PMMA,Glass Frame Bottom,1,PMMA (smoked acrylic),Laser/waterjet cut,750 x 20 x 10,"Polished, smoked tint",Glass Frame Bottom
+21,EE-FAB-GLZ smoked PMMA,Front Smoked Glass v2,1,PMMA (smoked acrylic),Laser/waterjet cut,750 x 360 x 4,"Polished, smoked tint",Front Smoked Glass v2
+22,EE-FAB-JNL,Z Axis - Screw Journal,1,"Steel, alloy",CNC machining,38 x 8 x 8,Black oxide,Z Axis - Screw Journal
+23,EE-FAB-JNL,Y Axis - Screw Journal,1,"Steel, alloy",CNC machining,40 x 8 x 8,Black oxide,Y Axis - Screw Journal
+24,EE-FAB-JNL,X Axis - Screw Journal,1,"Steel, alloy",CNC machining,60 x 10 x 10,Black oxide,X Axis - Screw Journal
+25,EE-FAB-MISC,Vacuum Port 1,4,Aluminum 6061-T6,CNC machining,10 x 10 x 10,Clear anodize,Vacuum Port 1; Vacuum Port 2; Vacuum Port 3; Vacuum Port 4
+26,EE-FAB-MISC,X Axis - Motor Mount Plate,1,Aluminum 6061-T6,CNC machining,100 x 55 x 10,Clear anodize,X Axis - Motor Mount Plate
+27,EE-FAB-MISC,Y Axis - Carriage Adapter Plate,1,Aluminum 6061-T6,CNC machining,140 x 100 x 8,Clear anodize,Y Axis - Carriage Adapter Plate
+28,EE-FAB-MISC,Z Axis - Slide Plate,1,Aluminum 6061-T6,CNC machining,150 x 70 x 8,Clear anodize,Z Axis - Slide Plate
+29,EE-FAB-MISC,Probe Limit Tab Left,2,Aluminum 6061-T6,CNC machining,17 x 10 x 7,Clear anodize,Probe Limit Tab Left; Probe Limit Tab Right
+30,EE-FAB-MISC,Z Axis - Carriage Side Plate,1,Aluminum 6061-T6,CNC machining,195 x 70 x 12,Clear anodize,Z Axis - Carriage Side Plate
+31,EE-FAB-MISC,Relay Matrix Relay Blocks,1,Aluminum 6061-T6,CNC machining,200 x 80 x 26,Clear anodize,Relay Matrix Relay Blocks
+32,EE-FAB-MISC,Relay Matrix Board,1,Aluminum 6061-T6,CNC machining,233 x 160 x 4,Clear anodize,Relay Matrix Board
+33,EE-FAB-MISC,Z Axis - Bottom Bushing Block,1,Aluminum 6061-T6,CNC machining,24 x 24 x 15,Clear anodize,Z Axis - Bottom Bushing Block
+34,EE-FAB-MISC,X Axis - Rail Saddle Front,2,Aluminum 6061-T6,CNC machining,240 x 60 x 10,Clear anodize,X Axis - Rail Saddle Front; X Axis - Rail Saddle Rear
+35,EE-FAB-MISC,Z Axis - Ballnut Flange,1,Aluminum 6061-T6,CNC machining,32 x 32 x 10,Clear anodize,Z Axis - Ballnut Flange
+36,EE-FAB-MISC,X Axis - Ballnut Flange,1,Aluminum 6061-T6,CNC machining,38 x 38 x 10,Clear anodize,X Axis - Ballnut Flange
+37,EE-FAB-MISC,Z Axis - Ballnut Housing,1,Aluminum 6061-T6,CNC machining,45 x 32 x 30,Clear anodize,Z Axis - Ballnut Housing
+38,EE-FAB-MISC,Y Axis - Ballnut Housing,1,Aluminum 6061-T6,CNC machining,50 x 28 x 24,Clear anodize,Y Axis - Ballnut Housing
+39,EE-FAB-MISC,X Axis - Ballnut Housing,1,Aluminum 6061-T6,CNC machining,50 x 38 x 34,Clear anodize,X Axis - Ballnut Housing
+40,EE-FAB-MISC,Z Axis - Motor Plate,1,Aluminum 6061-T6,CNC machining,50 x 50 x 8,Clear anodize,Z Axis - Motor Plate
+41,EE-FAB-MISC,Probe Load Cell Plate,1,Aluminum 6061-T6,CNC machining,52 x 20 x 10,Clear anodize,Probe Load Cell Plate
+42,EE-FAB-MISC,Z Axis - Probe Interface Pad,1,Aluminum 6061-T6,CNC machining,60 x 11 x 10,Clear anodize,Z Axis - Probe Interface Pad
+43,EE-FAB-MISC,Measurement Bay Standoff 1,16,Aluminum 6061-T6,CNC machining,8 x 8 x 8,Clear anodize,Measurement Bay Standoff 1; Measurement Bay Standoff 10; Measurement Bay Standoff 11; Measurement Bay Standoff 12
+44,EE-FAB-MISC,Y Axis - Motor Mount Plate,1,Aluminum 6061-T6,CNC machining,80 x 80 x 8,Clear anodize,Y Axis - Motor Mount Plate
+45,EE-FAB-MISC,Enclosure Top Rail Ring,1,Aluminum 6061-T6,CNC machining,940 x 800 x 30,Clear anodize,Enclosure Top Rail Ring
+46,EE-FAB-PHD,Probe Head,1,Aluminum 6061-T6,CNC machining,70 x 60 x 30,Clear anodize,Probe Head
+47,EE-FAB-POST,Enclosure Post FL,4,Aluminum 6063 extrusion,Cut extrusion,780 x 30 x 30,Clear anodize,Enclosure Post FL; Enclosure Post FR; Enclosure Post RL; Enclosure Post RR
+48,EE-FAB-RACK,Cartridge Park Rack Base,1,Aluminum 6061-T6,CNC machining,160 x 40 x 8,Clear anodize,Cartridge Park Rack Base
+49,EE-FAB-RPNL,Rear Matte Black Panel,1,Aluminum 5052 sheet,Sheet metal,810 x 752 x 4,Powder coat (RAL 9005 matte black int.),Rear Matte Black Panel
+50,EE-FAB-SHL,Side Shell Left,2,Aluminum 5052 sheet,CNC (EVT) / molded (prod),920 x 782 x 70,Powder coat (RAL 9005 matte black int.),Side Shell Left; Side Shell Right
+51,EE-FAB-STDF,Fixture Standoff FL,4,Aluminum 6061-T6,CNC machining,40 x 16 x 16,Clear anodize,Fixture Standoff FL; Fixture Standoff FR; Fixture Standoff RL; Fixture Standoff RR
+52,EE-FAB-TOP,Top Slab,1,Aluminum 6061-T6,CNC machining,920 x 870 x 30,Clear anodize,Top Slab
+53,EE-FAB-TRAY,Equipment Tray,1,Aluminum 5052 sheet,Sheet metal,870 x 730 x 3,Powder coat (RAL 9005 matte black int.),Equipment Tray
+54,EE-FAB-TRIM,Trim - Front Filler L+R,2,Aluminum 5052 sheet,Sheet metal,452 x 40 x 8,Powder coat (RAL 9005 matte black int.),Trim - Front Filler L+R
+55,EE-FAB-TRIM,Trim - Rear Filler Left,2,Aluminum 5052 sheet,Sheet metal,752 x 30 x 4,Powder coat (RAL 9005 matte black int.),Trim - Rear Filler Left; Trim - Rear Filler Right
+56,EE-FAB-TRIM,Trim - Front Sill,1,Aluminum 5052 sheet,Sheet metal,790 x 60 x 8,Powder coat (RAL 9005 matte black int.),Trim - Front Sill
+57,EE-FAB-VAC,Vacuum Port Boss FL,4,Aluminum 6061-T6,CNC machining,12 x 12 x 8,Clear anodize,Vacuum Port Boss FL; Vacuum Port Boss FR; Vacuum Port Boss RL; Vacuum Port Boss RR

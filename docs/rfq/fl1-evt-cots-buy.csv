@@ -1,0 +1,62 @@
+item,vendor,part_number,qty,used_as
+1,Amphenol,bulkhead RJ45,1,RJ45 Connector Body
+2,Amphenol,bulkhead USB-C,1,USB-C Connector Body
+3,Basler,a2A4504-18ucBAS,1,Fixed Overhead Camera
+4,EE-lab,(power cluster cosmetic),4,Power Bezel; Power Button; Power Indicator Dot
+5,EE-lab,PCBA Rev A (cartridge),2,Probe Cartridge PCB; Probe Cartridge Plate
+6,EE-lab,PCBA Rev A (protection),2,Probe Protection Board; Probe Protection Component Block
+7,Edmund Optics,16 mm C-mount,3,Overhead Camera Barrel; Overhead Camera Lens Ring 1; Overhead Camera Lens Ring 2
+8,FLIR,(Lepton lens),1,IR Camera Lens
+9,FLIR / GroupGets,Lepton 3.5 + PureThermal 3,1,IR Camera (FLIR Lepton 3.5)
+10,Galil,DMC-4133,1,Galil DMC-4133 Motion Controller
+11,Generic,BF10 floating support,1,Y Axis - BF10 Floating Support
+12,Generic,BF12 floating support,1,X Axis - BF12 Floating Support
+13,Generic,BK10 fixed support,2,Y Axis - BK10 Fixed Support; Z Axis - BK10 Top Support
+14,Generic,BK12 fixed support,1,X Axis - BK12 Fixed Support
+15,Generic,LED bar 24V,1,Chamber Light Bar
+16,Generic,LED strip 24V,1,Accent Light Strip Full Width
+17,Generic,M20 cable gland,1,Vacuum Cable Gland
+18,Generic (THK-class),SFU1204 ballnut,2,Y Axis - SFU1204 Ballnut; Z Axis - SFU1204 Ballnut
+19,Generic (THK-class),SFU1204-C7,2,Y Axis - SFU1204 Ballscrew; Z Axis - SFU1204 Ballscrew
+20,Generic (THK-class),SFU1605 ballnut,1,X Axis - SFU1605 Ballnut
+21,Generic (THK-class),SFU1605-C7 (600 mm),1,X Axis - SFU1605 Ballscrew
+22,Generic industrial (Waveshare-class),7in HDMI capacitive touch 1024x600,1,Touch Display 7in
+23,HIWIN,HGH15CA,4,Y Axis - HGH15 Carriage Block 1; Y Axis - HGH15 Carriage Block 2; Y Axis - HGH15 Carriage Block 3
+24,HIWIN,HGH20CA,4,X Axis - HGH20 Carriage Block 1; X Axis - HGH20 Carriage Block 2; X Axis - HGH20 Carriage Block 3
+25,HIWIN,HGR15R (480 mm),2,Y Axis - HGR15 Rail Left; Y Axis - HGR15 Rail Right
+26,HIWIN,HGR20R (600 mm),2,X Axis - HGR20 Rail Front; X Axis - HGR20 Rail Rear
+27,HIWIN,MGN12H,2,Z Axis - MGN12H Block Front; Z Axis - MGN12H Block Rear
+28,HIWIN,MGN12R (180 mm),2,Z Axis - MGN12 Rail Front; Z Axis - MGN12 Rail Rear
+29,Joulescope,JS220,1,Instrument - Joulescope JS220 Envelope
+30,Keithley,DMM6500,1,Instrument - Keithley DMM6500 Envelope
+31,LabJack,T7-OEM,1,LabJack T7-OEM
+32,Lee Spring,LC-026 compression,2,Probe Preload Spring L; Probe Preload Spring R
+33,McMaster-Carr,23015T74 leveling mount,4,Leveling Foot 1; Leveling Foot 2; Leveling Foot 3
+34,McMaster-Carr,6121K knob M6,4,Clamp Knob Front; Clamp Knob Left; Clamp Knob Rear
+35,McMaster-Carr,6435K shaft collar,2,Probe Hard Stop Collar L; Probe Hard Stop Collar R
+36,McMaster-Carr,91585A O3 dowel,2,Cartridge Dowel Pin L; Cartridge Dowel Pin R
+37,McMaster-Carr,98381A dowel O5,2,Probe Guide Pin L; Probe Guide Pin R
+38,McMaster-Carr,98381A dowel O8,4,Fixture Locating Pin 1; Fixture Locating Pin 2; Fixture Locating Pin 3
+39,McMaster-Carr,M4x10 SHCS 91292A,16,Rear Panel Screw 1; Rear Panel Screw 2; Rear Panel Screw 3
+40,Mean Well,NDR-240-24,2,Mean Well 24V DIN PSU 1; Mean Well 24V DIN PSU 2
+41,Measurement Computing,USB-2416,1,MCC USB-2416 DAQ
+42,Mill-Max,0906 receptacle,4,Pogo Probe Bushing 1; Pogo Probe Bushing 2; Pogo Probe Bushing 3
+43,Mill-Max,0906 spring probe,8,Pogo Probe Body 1; Pogo Probe Body 2; Pogo Probe Body 3
+44,Omron,D2F-L,9,X Axis - Limit Switch Home; X Axis - Limit Switch Max; X Axis - Limit Switch Min
+45,Omron,G9SE-201,1,Omron G9SE Safety Relay
+46,OnLogic,MK100 (i7/32GB/1TB),1,Industrial Control PC
+47,Phoenix Contact,FL SWITCH 1008N,1,DIN Ethernet Switch
+48,Phoenix Contact,NS 35/7.5 DIN rail,1,DIN Rail Strip
+49,Pico Technology,PicoScope 5444D,1,PicoScope 5444D
+50,Rigol,DP832,1,Instrument - Rigol DP832 Envelope
+51,Ruland,GS24 jaw coupling,3,X Axis - Jaw Coupling; Y Axis - Jaw Coupling; Z Axis - Jaw Coupling
+52,Saleae,Logic Pro 16,2,Saleae Logic Pro 16; Saleae Mounting Bracket
+53,Schurter,6100.3300 IEC C14,1,IEC C14 Inlet Body
+54,Siglent,SDL1030X,1,Siglent SDL1030X E-Load
+55,Siglent,SPD1305X,1,Siglent SPD1305X Power Supply
+56,StarTech,ST7300USBME,1,Powered USB Hub
+57,Teknic,(ClearPath-SD shaft),3,X Axis - Motor Shaft; Y Axis - Motor Shaft; Z Axis - Motor Shaft
+58,Teknic,CPM-SDSK-2321S-RLN ClearPath-SD,3,X Axis - NEMA23 Motor Body; Y Axis - NEMA23 Motor Body; Z Axis - NEMA23 Motor Body
+59,Various,(DUT interface connector),6,DUT IF - DB9 CAN; DUT IF - DB9 UART; DUT IF - RJ45
+60,ebm-papst,(fan hub),2,Exhaust Fan Hub Left; Exhaust Fan Hub Right
+61,ebm-papst,"4414 FNH (120 mm, 24 V)",2,Exhaust Fan 120mm Left; Exhaust Fan 120mm Right
