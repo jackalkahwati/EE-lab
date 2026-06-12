@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>FirstLight FL-1 — Autonomous PCB Bring-Up Station</title>
+<style>
+  @page { size: A4; margin: 14mm; }
+  * { box-sizing: border-box; }
+  body { font-family: "Helvetica Neue", Arial, sans-serif; color: #1b1b1f;
+         margin: 0; padding: 28px 36px; max-width: 980px; }
+  header { display: flex; align-items: baseline; justify-content: space-between;
+           border-bottom: 3px solid #3c82ff; padding-bottom: 10px; }
+  h1 { font-size: 30px; letter-spacing: 4px; margin: 0; }
+  h1 .model { color: #3c82ff; }
+  .tagline { font-size: 13px; color: #555; }
+  h2 { font-size: 13px; letter-spacing: 2px; text-transform: uppercase;
+       color: #3c82ff; margin: 22px 0 6px; }
+  p, li, td, th { font-size: 12.5px; line-height: 1.45; }
+  .row { display: flex; gap: 24px; margin-top: 14px; }
+  .col { flex: 1; }
+  img.hero { width: 100%; border-radius: 6px; }
+  .imgrow { display: flex; gap: 10px; margin-top: 8px; }
+  .imgrow img { width: 50%; border-radius: 6px; }
+  table { border-collapse: collapse; width: 100%; margin-top: 4px; }
+  th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid #e3e3e8; }
+  th { color: #666; font-weight: 600; }
+  ul { margin: 4px 0 0 18px; padding: 0; }
+  li { margin-bottom: 3px; }
+  .footer { margin-top: 20px; border-top: 1px solid #ddd; padding-top: 8px;
+            font-size: 10.5px; color: #888; display: flex; justify-content: space-between; }
+  .status { background: #eef4ff; border-left: 3px solid #3c82ff; padding: 8px 12px;
+            font-size: 12px; margin-top: 16px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>FIRSTLIGHT <span class="model">FL-1</span></h1>
+  <div class="tagline">Autonomous PCB bring-up &amp; diagnosis station — every board's first light</div>
+</header>
+
+<div class="row">
+  <div class="col">
+    <h2>What it is</h2>
+    <p>FirstLight FL-1 takes a never-powered board straight from the fab and
+    autonomously answers <b>"does it work — and if not, why not."</b>
+    Fixture the board, load its manifest, close the glass, walk away. The
+    machine runs vision registration, a pre-power safety gate, sequenced
+    power-up, firmware programming, full-board probing, and thermal
+    inspection — then renders a diagnosis, not a guess: which test failed,
+    where, with measurements and imagery attached.</p>
+    <p>It replaces the first days of bench bring-up — the careful,
+    repetitive, easy-to-get-wrong part — with a repeatable autonomous run
+    operated entirely from the front touch panel or the web UI.</p>
+
+    <h2>Core capabilities</h2>
+    <ul>
+      <li><b>Pre-power safety gate</b> — resistance-to-ground, diode-mode,
+        isolation and live-voltage checks before any power touches the DUT.</li>
+      <li><b>3-axis precision probing</b> — force-compliant probe head with a
+        3-station tool-changing cartridge rack: pogo cluster, Kelvin 4-wire,
+        and 200&nbsp;MHz shielded scope tip, each with calibration EEPROM.</li>
+      <li><b>Power instrumentation</b> — sequenced multi-rail DUT power,
+        nA-to-A inrush/leakage capture, programmable electronic load.</li>
+      <li><b>Measurement matrix</b> — scope, 16-ch logic, DAQ and 6.5-digit
+        DMM routed to any probe through a protected, self-calibrating relay
+        matrix (custom PCBA, &lt;100&nbsp;pA leakage paths).</li>
+      <li><b>Firmware &amp; interfaces</b> — SWD/JTAG and SPI-flash
+        programming, UART/I²C/SPI bridging, USB/Ethernet/CAN-FD
+        connector-level test panel.</li>
+      <li><b>Vision + thermal</b> — machine-vision registration and
+        inspection, probe-tip camera, and FLIR thermal anomaly localization
+        in a still-air chamber.</li>
+    </ul>
+  </div>
+  <div class="col">
+    <img class="hero" src="images/fl1-front.png" alt="FL-1 front view">
+    <div class="imgrow">
+      <img src="images/fl1-hero.png" alt="FL-1 isometric view">
+      <img src="images/fl1-rear.png" alt="FL-1 rear view">
+    </div>
+  </div>
+</div>
+
+<div class="row">
+  <div class="col">
+    <h2>Dimensions</h2>
+    <table>
+      <tr><th>Footprint (W × D)</th><td>1010 × 920 mm (39.8 × 36.2 in)</td></tr>
+      <tr><th>Height</th><td>824 mm (32.4 in) incl. leveling feet</td></tr>
+      <tr><th>Work envelope (X × Y × Z)</th><td>500 × 400 × 100 mm</td></tr>
+      <tr><th>Fixture plate</th><td>520 × 420 mm, tooling pins + vacuum + edge clamps</td></tr>
+      <tr><th>Axis feed</th><td>X/Y 150 mm/s · Z 25 mm/s (ballscrew + servo)</td></tr>
+      <tr><th>Mass</th><td>&lt;100 kg production target</td></tr>
+      <tr><th>Operator interface</th><td>7&nbsp;in front touch panel + web UI; runs standalone</td></tr>
+      <tr><th>Cooling</th><td>Twin 120 mm filtered exhaust, still-air test chamber</td></tr>
+    </table>
+  </div>
+  <div class="col">
+    <h2>Cost</h2>
+    <table>
+      <tr><th>Hardware COGS — prototype / low volume</th><td>$60k – $110k</td></tr>
+      <tr><th>Hardware COGS — mature low-volume</th><td>$40k – $75k</td></tr>
+      <tr><th>Hardware COGS — scaled production</th><td>$30k – $55k</td></tr>
+      <tr><th>Target price — base flagship</th><td>$149k – $249k</td></tr>
+      <tr><th>Target price — enterprise / defense</th><td>$300k – $500k</td></tr>
+      <tr><th>Annual software &amp; support</th><td>$25k – $75k</td></tr>
+    </table>
+    <p style="font-size:11px;color:#777;margin-top:6px">COGS from the locked
+    COTS sourcing BOM (38 vendors; HIWIN motion, Teknic servos, Pico/Keithley/
+    Rigol/Siglent instrumentation). Custom content: relay/probe matrix, probe
+    protection, cartridge interface, DUT interface board (PCBA Rev&nbsp;A spec
+    complete).</p>
+  </div>
+</div>
+
+<div class="status">
+  <b>Program status:</b> EVT design freeze <b>EVT-CAD-1</b> — motion architecture
+  vendor-true, probe compliance + cartridge interface engineered, thermal pass
+  complete (fans + intake sized from heat budget), zero unintended interferences,
+  full BOM metadata (materials, vendors, part numbers), STEP v5 exported.
+  Next: PCBA Rev&nbsp;A schematic capture, parts order, Phase-1 bench build.
+</div>
+
+<div class="footer">
+  <span>FirstLight FL-1 · EE-lab · Confidential</span>
+  <span>June 11, 2026 · sources: flagship-cots-sourcing-bom.md, hardware-expansion-spec.md, thermal-analysis.md, relay-probe-matrix-rev-a.md</span>
+</div>
+
+</body>
+</html>
