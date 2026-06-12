@@ -1,0 +1,27 @@
+import has_designator_prefix
+import is_atomic_part
+import has_part_removed
+
+
+component Samtec_SEAF14_package:
+    """Samtec SEAF-class blind-mate, 14 contacts (local part)"""
+
+    trait is_atomic_part<manufacturer="Samtec", partnumber="SEAF-14 (TBD exact)", footprint="SEAF14.kicad_mod", symbol="Samtec_SEAF14.kicad_sym">
+    trait has_part_removed
+    trait has_designator_prefix<prefix="J">
+
+    # pins
+    pin 1
+    pin 2
+    pin 3
+    pin 4
+    pin 5
+    pin 6
+    pin 7
+    pin 8
+    pin 9
+    pin 10
+    pin 11
+    pin 12
+    pin 13
+    pin 14

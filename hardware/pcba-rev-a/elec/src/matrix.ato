@@ -40,6 +40,17 @@ module LaneSelector:
     signal dmm_lo
     signal gnd_ref
     coil_bus = new ElectricPower
+    signal sink_bank
+    signal sink_scope_a
+    signal sink_scope_b
+    signal sink_daq_1
+    signal sink_daq_2
+    signal sink_logic_1
+    signal sink_logic_2
+    signal sink_pwr
+    signal sink_dmm_hi
+    signal sink_dmm_lo
+    signal sink_gnd
 
     k_bank = new Omron_Electronics_G6K_2F_Y_TR_DC5_package
     k_scope_a = new Omron_Electronics_G6K_2F_Y_TR_DC5_package
@@ -65,6 +76,18 @@ module LaneSelector:
     k_dmm_hi.coil_p ~ coil_bus.hv
     k_dmm_lo.coil_p ~ coil_bus.hv
     k_gnd.coil_p ~ coil_bus.hv
+
+    k_bank.coil_n ~ sink_bank
+    k_scope_a.coil_n ~ sink_scope_a
+    k_scope_b.coil_n ~ sink_scope_b
+    k_daq_1.coil_n ~ sink_daq_1
+    k_daq_2.coil_n ~ sink_daq_2
+    k_logic_1.coil_n ~ sink_logic_1
+    k_logic_2.coil_n ~ sink_logic_2
+    k_pwr.coil_n ~ sink_pwr
+    k_dmm_hi.coil_n ~ sink_dmm_hi
+    k_dmm_lo.coil_n ~ sink_dmm_lo
+    k_gnd.coil_n ~ sink_gnd
 
     probe ~ k_bank.com
     k_bank.nc ~ k_scope_a.com
@@ -103,6 +126,94 @@ module Matrix:
     signal dmm_lo
     signal gnd_ref
     coil_bus = new ElectricPower
+    signal sink_p1_bank
+    signal sink_p1_scope_a
+    signal sink_p1_scope_b
+    signal sink_p1_daq_1
+    signal sink_p1_daq_2
+    signal sink_p1_logic_1
+    signal sink_p1_logic_2
+    signal sink_p1_pwr
+    signal sink_p1_dmm_hi
+    signal sink_p1_dmm_lo
+    signal sink_p1_gnd
+    signal sink_p2_bank
+    signal sink_p2_scope_a
+    signal sink_p2_scope_b
+    signal sink_p2_daq_1
+    signal sink_p2_daq_2
+    signal sink_p2_logic_1
+    signal sink_p2_logic_2
+    signal sink_p2_pwr
+    signal sink_p2_dmm_hi
+    signal sink_p2_dmm_lo
+    signal sink_p2_gnd
+    signal sink_p3_bank
+    signal sink_p3_scope_a
+    signal sink_p3_scope_b
+    signal sink_p3_daq_1
+    signal sink_p3_daq_2
+    signal sink_p3_logic_1
+    signal sink_p3_logic_2
+    signal sink_p3_pwr
+    signal sink_p3_dmm_hi
+    signal sink_p3_dmm_lo
+    signal sink_p3_gnd
+    signal sink_p4_bank
+    signal sink_p4_scope_a
+    signal sink_p4_scope_b
+    signal sink_p4_daq_1
+    signal sink_p4_daq_2
+    signal sink_p4_logic_1
+    signal sink_p4_logic_2
+    signal sink_p4_pwr
+    signal sink_p4_dmm_hi
+    signal sink_p4_dmm_lo
+    signal sink_p4_gnd
+    signal sink_kfp_bank
+    signal sink_kfp_scope_a
+    signal sink_kfp_scope_b
+    signal sink_kfp_daq_1
+    signal sink_kfp_daq_2
+    signal sink_kfp_logic_1
+    signal sink_kfp_logic_2
+    signal sink_kfp_pwr
+    signal sink_kfp_dmm_hi
+    signal sink_kfp_dmm_lo
+    signal sink_kfp_gnd
+    signal sink_kfn_bank
+    signal sink_kfn_scope_a
+    signal sink_kfn_scope_b
+    signal sink_kfn_daq_1
+    signal sink_kfn_daq_2
+    signal sink_kfn_logic_1
+    signal sink_kfn_logic_2
+    signal sink_kfn_pwr
+    signal sink_kfn_dmm_hi
+    signal sink_kfn_dmm_lo
+    signal sink_kfn_gnd
+    signal sink_ksp_bank
+    signal sink_ksp_scope_a
+    signal sink_ksp_scope_b
+    signal sink_ksp_daq_1
+    signal sink_ksp_daq_2
+    signal sink_ksp_logic_1
+    signal sink_ksp_logic_2
+    signal sink_ksp_pwr
+    signal sink_ksp_dmm_hi
+    signal sink_ksp_dmm_lo
+    signal sink_ksp_gnd
+    signal sink_ksn_bank
+    signal sink_ksn_scope_a
+    signal sink_ksn_scope_b
+    signal sink_ksn_daq_1
+    signal sink_ksn_daq_2
+    signal sink_ksn_logic_1
+    signal sink_ksn_logic_2
+    signal sink_ksn_pwr
+    signal sink_ksn_dmm_hi
+    signal sink_ksn_dmm_lo
+    signal sink_ksn_gnd
 
     sel_p1 = new LaneSelector
     sel_p2 = new LaneSelector
@@ -112,6 +223,95 @@ module Matrix:
     sel_kfn = new LaneSelector
     sel_ksp = new LaneSelector
     sel_ksn = new LaneSelector
+
+    sel_p1.sink_bank ~ sink_p1_bank
+    sel_p1.sink_scope_a ~ sink_p1_scope_a
+    sel_p1.sink_scope_b ~ sink_p1_scope_b
+    sel_p1.sink_daq_1 ~ sink_p1_daq_1
+    sel_p1.sink_daq_2 ~ sink_p1_daq_2
+    sel_p1.sink_logic_1 ~ sink_p1_logic_1
+    sel_p1.sink_logic_2 ~ sink_p1_logic_2
+    sel_p1.sink_pwr ~ sink_p1_pwr
+    sel_p1.sink_dmm_hi ~ sink_p1_dmm_hi
+    sel_p1.sink_dmm_lo ~ sink_p1_dmm_lo
+    sel_p1.sink_gnd ~ sink_p1_gnd
+    sel_p2.sink_bank ~ sink_p2_bank
+    sel_p2.sink_scope_a ~ sink_p2_scope_a
+    sel_p2.sink_scope_b ~ sink_p2_scope_b
+    sel_p2.sink_daq_1 ~ sink_p2_daq_1
+    sel_p2.sink_daq_2 ~ sink_p2_daq_2
+    sel_p2.sink_logic_1 ~ sink_p2_logic_1
+    sel_p2.sink_logic_2 ~ sink_p2_logic_2
+    sel_p2.sink_pwr ~ sink_p2_pwr
+    sel_p2.sink_dmm_hi ~ sink_p2_dmm_hi
+    sel_p2.sink_dmm_lo ~ sink_p2_dmm_lo
+    sel_p2.sink_gnd ~ sink_p2_gnd
+    sel_p3.sink_bank ~ sink_p3_bank
+    sel_p3.sink_scope_a ~ sink_p3_scope_a
+    sel_p3.sink_scope_b ~ sink_p3_scope_b
+    sel_p3.sink_daq_1 ~ sink_p3_daq_1
+    sel_p3.sink_daq_2 ~ sink_p3_daq_2
+    sel_p3.sink_logic_1 ~ sink_p3_logic_1
+    sel_p3.sink_logic_2 ~ sink_p3_logic_2
+    sel_p3.sink_pwr ~ sink_p3_pwr
+    sel_p3.sink_dmm_hi ~ sink_p3_dmm_hi
+    sel_p3.sink_dmm_lo ~ sink_p3_dmm_lo
+    sel_p3.sink_gnd ~ sink_p3_gnd
+    sel_p4.sink_bank ~ sink_p4_bank
+    sel_p4.sink_scope_a ~ sink_p4_scope_a
+    sel_p4.sink_scope_b ~ sink_p4_scope_b
+    sel_p4.sink_daq_1 ~ sink_p4_daq_1
+    sel_p4.sink_daq_2 ~ sink_p4_daq_2
+    sel_p4.sink_logic_1 ~ sink_p4_logic_1
+    sel_p4.sink_logic_2 ~ sink_p4_logic_2
+    sel_p4.sink_pwr ~ sink_p4_pwr
+    sel_p4.sink_dmm_hi ~ sink_p4_dmm_hi
+    sel_p4.sink_dmm_lo ~ sink_p4_dmm_lo
+    sel_p4.sink_gnd ~ sink_p4_gnd
+    sel_kfp.sink_bank ~ sink_kfp_bank
+    sel_kfp.sink_scope_a ~ sink_kfp_scope_a
+    sel_kfp.sink_scope_b ~ sink_kfp_scope_b
+    sel_kfp.sink_daq_1 ~ sink_kfp_daq_1
+    sel_kfp.sink_daq_2 ~ sink_kfp_daq_2
+    sel_kfp.sink_logic_1 ~ sink_kfp_logic_1
+    sel_kfp.sink_logic_2 ~ sink_kfp_logic_2
+    sel_kfp.sink_pwr ~ sink_kfp_pwr
+    sel_kfp.sink_dmm_hi ~ sink_kfp_dmm_hi
+    sel_kfp.sink_dmm_lo ~ sink_kfp_dmm_lo
+    sel_kfp.sink_gnd ~ sink_kfp_gnd
+    sel_kfn.sink_bank ~ sink_kfn_bank
+    sel_kfn.sink_scope_a ~ sink_kfn_scope_a
+    sel_kfn.sink_scope_b ~ sink_kfn_scope_b
+    sel_kfn.sink_daq_1 ~ sink_kfn_daq_1
+    sel_kfn.sink_daq_2 ~ sink_kfn_daq_2
+    sel_kfn.sink_logic_1 ~ sink_kfn_logic_1
+    sel_kfn.sink_logic_2 ~ sink_kfn_logic_2
+    sel_kfn.sink_pwr ~ sink_kfn_pwr
+    sel_kfn.sink_dmm_hi ~ sink_kfn_dmm_hi
+    sel_kfn.sink_dmm_lo ~ sink_kfn_dmm_lo
+    sel_kfn.sink_gnd ~ sink_kfn_gnd
+    sel_ksp.sink_bank ~ sink_ksp_bank
+    sel_ksp.sink_scope_a ~ sink_ksp_scope_a
+    sel_ksp.sink_scope_b ~ sink_ksp_scope_b
+    sel_ksp.sink_daq_1 ~ sink_ksp_daq_1
+    sel_ksp.sink_daq_2 ~ sink_ksp_daq_2
+    sel_ksp.sink_logic_1 ~ sink_ksp_logic_1
+    sel_ksp.sink_logic_2 ~ sink_ksp_logic_2
+    sel_ksp.sink_pwr ~ sink_ksp_pwr
+    sel_ksp.sink_dmm_hi ~ sink_ksp_dmm_hi
+    sel_ksp.sink_dmm_lo ~ sink_ksp_dmm_lo
+    sel_ksp.sink_gnd ~ sink_ksp_gnd
+    sel_ksn.sink_bank ~ sink_ksn_bank
+    sel_ksn.sink_scope_a ~ sink_ksn_scope_a
+    sel_ksn.sink_scope_b ~ sink_ksn_scope_b
+    sel_ksn.sink_daq_1 ~ sink_ksn_daq_1
+    sel_ksn.sink_daq_2 ~ sink_ksn_daq_2
+    sel_ksn.sink_logic_1 ~ sink_ksn_logic_1
+    sel_ksn.sink_logic_2 ~ sink_ksn_logic_2
+    sel_ksn.sink_pwr ~ sink_ksn_pwr
+    sel_ksn.sink_dmm_hi ~ sink_ksn_dmm_hi
+    sel_ksn.sink_dmm_lo ~ sink_ksn_dmm_lo
+    sel_ksn.sink_gnd ~ sink_ksn_gnd
 
     sel_p1.coil_bus ~ coil_bus
     sel_p2.coil_bus ~ coil_bus

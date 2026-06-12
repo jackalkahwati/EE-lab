@@ -1,0 +1,95 @@
+# FL-1 Rev A coil channel map (drain N = TPIC chain bit N)
+
+ 1: p1.bank
+ 2: p1.scope_a
+ 3: p1.scope_b
+ 4: p1.daq_1
+ 5: p1.daq_2
+ 6: p1.logic_1
+ 7: p1.logic_2
+ 8: p1.pwr
+ 9: p1.dmm_hi
+10: p1.dmm_lo
+11: p1.gnd
+12: p2.bank
+13: p2.scope_a
+14: p2.scope_b
+15: p2.daq_1
+16: p2.daq_2
+17: p2.logic_1
+18: p2.logic_2
+19: p2.pwr
+20: p2.dmm_hi
+21: p2.dmm_lo
+22: p2.gnd
+23: p3.bank
+24: p3.scope_a
+25: p3.scope_b
+26: p3.daq_1
+27: p3.daq_2
+28: p3.logic_1
+29: p3.logic_2
+30: p3.pwr
+31: p3.dmm_hi
+32: p3.dmm_lo
+33: p3.gnd
+34: p4.bank
+35: p4.scope_a
+36: p4.scope_b
+37: p4.daq_1
+38: p4.daq_2
+39: p4.logic_1
+40: p4.logic_2
+41: p4.pwr
+42: p4.dmm_hi
+43: p4.dmm_lo
+44: p4.gnd
+45: kfp.bank
+46: kfp.scope_a
+47: kfp.scope_b
+48: kfp.daq_1
+49: kfp.daq_2
+50: kfp.logic_1
+51: kfp.logic_2
+52: kfp.pwr
+53: kfp.dmm_hi
+54: kfp.dmm_lo
+55: kfp.gnd
+56: kfn.bank
+57: kfn.scope_a
+58: kfn.scope_b
+59: kfn.daq_1
+60: kfn.daq_2
+61: kfn.logic_1
+62: kfn.logic_2
+63: kfn.pwr
+64: kfn.dmm_hi
+65: kfn.dmm_lo
+66: kfn.gnd
+67: ksp.bank
+68: ksp.scope_a
+69: ksp.scope_b
+70: ksp.daq_1
+71: ksp.daq_2
+72: ksp.logic_1
+73: ksp.logic_2
+74: ksp.pwr
+75: ksp.dmm_hi
+76: ksp.dmm_lo
+77: ksp.gnd
+78: ksn.bank
+79: ksn.scope_a
+80: ksn.scope_b
+81: ksn.daq_1
+82: ksn.daq_2
+83: ksn.logic_1
+84: ksn.logic_2
+85: ksn.pwr
+86: ksn.dmm_hi
+87: ksn.dmm_lo
+88: ksn.gnd
+89: ref_1k
+90: ref_100k
+91: ref_short
+
+92-96: spare

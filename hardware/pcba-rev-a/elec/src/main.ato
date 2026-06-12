@@ -14,35 +14,9 @@ from "protection.ato" import ProbeProtection
 from "protection.ato" import ReferenceBlock
 from "mcu.ato" import Control
 from "cartridge.ato" import CartridgeInterface
-
-
-component BNC_J20:
-    footprint = "BNC_Amphenol_RF"
-    signal sig ~ pin 1
-    signal shield ~ pin 2
-
-component MiniFitJr_2P:
-    footprint = "Molex_MiniFitJr_2P"
-    signal p1 ~ pin 1
-    signal p2 ~ pin 2
-
-component LowEMF_4P:
-    footprint = "TE_LowEMF_4P"
-    signal hi ~ pin 1
-    signal lo ~ pin 2
-    signal shi ~ pin 3
-    signal slo ~ pin 4
-
-component LatchHeader_8P:
-    footprint = "Molex_Microfit_8P"
-    signal p1 ~ pin 1
-    signal p2 ~ pin 2
-    signal p3 ~ pin 3
-    signal p4 ~ pin 4
-    signal p5 ~ pin 5
-    signal p6 ~ pin 6
-    signal p7 ~ pin 7
-    signal p8 ~ pin 8
+from "parts/Header_1x02/Header_1x02.ato" import Header_1x02_package
+from "parts/Header_1x04/Header_1x04.ato" import Header_1x04_package
+from "parts/Header_1x08/Header_1x08.ato" import Header_1x08_package
 
 
 module MatrixRevA:
@@ -62,12 +36,12 @@ module MatrixRevA:
     prot_ksn = new ProbeProtection
 
     # connectors
-    j2_24v = new MiniFitJr_2P
-    j20_scope_a = new BNC_J20
-    j21_scope_b = new BNC_J20
-    j22_dmm = new LowEMF_4P
-    j23_daq_logic = new LatchHeader_8P
-    j24_pwr_inj = new MiniFitJr_2P
+    j2_24v = new Header_1x02_package
+    j20_scope_a = new Header_1x02_package
+    j21_scope_b = new Header_1x02_package
+    j22_dmm = new Header_1x04_package
+    j23_daq_logic = new Header_1x08_package
+    j24_pwr_inj = new Header_1x02_package
 
     # power
     j2_24v.p1 ~ power.v24.hv
@@ -112,10 +86,10 @@ module MatrixRevA:
     prot_ksn.v3v3 ~ power.v3v3_ana
 
     # lane buses -> instrument connectors
-    matrix.scope_a ~ j20_scope_a.sig
-    matrix.scope_b ~ j21_scope_b.sig
-    matrix.dmm_hi ~ j22_dmm.hi
-    matrix.dmm_lo ~ j22_dmm.lo
+    matrix.scope_a ~ j20_scope_a.p1
+    matrix.scope_b ~ j21_scope_b.p1
+    matrix.dmm_hi ~ j22_dmm.p1
+    matrix.dmm_lo ~ j22_dmm.p2
     matrix.daq_1 ~ j23_daq_logic.p1
     matrix.daq_2 ~ j23_daq_logic.p2
     matrix.logic_1 ~ j23_daq_logic.p3
@@ -126,3 +100,96 @@ module MatrixRevA:
 
     # reference block rides the DMM_HI lane
     refs.ref_bus ~ matrix.dmm_hi
+
+    # coil channel map: drains 1..88 = trees p1..ksn x 11 lanes; 89-91 = ref block
+    matrix.sink_p1_bank ~ ctl.drain1
+    matrix.sink_p1_scope_a ~ ctl.drain2
+    matrix.sink_p1_scope_b ~ ctl.drain3
+    matrix.sink_p1_daq_1 ~ ctl.drain4
+    matrix.sink_p1_daq_2 ~ ctl.drain5
+    matrix.sink_p1_logic_1 ~ ctl.drain6
+    matrix.sink_p1_logic_2 ~ ctl.drain7
+    matrix.sink_p1_pwr ~ ctl.drain8
+    matrix.sink_p1_dmm_hi ~ ctl.drain9
+    matrix.sink_p1_dmm_lo ~ ctl.drain10
+    matrix.sink_p1_gnd ~ ctl.drain11
+    matrix.sink_p2_bank ~ ctl.drain12
+    matrix.sink_p2_scope_a ~ ctl.drain13
+    matrix.sink_p2_scope_b ~ ctl.drain14
+    matrix.sink_p2_daq_1 ~ ctl.drain15
+    matrix.sink_p2_daq_2 ~ ctl.drain16
+    matrix.sink_p2_logic_1 ~ ctl.drain17
+    matrix.sink_p2_logic_2 ~ ctl.drain18
+    matrix.sink_p2_pwr ~ ctl.drain19
+    matrix.sink_p2_dmm_hi ~ ctl.drain20
+    matrix.sink_p2_dmm_lo ~ ctl.drain21
+    matrix.sink_p2_gnd ~ ctl.drain22
+    matrix.sink_p3_bank ~ ctl.drain23
+    matrix.sink_p3_scope_a ~ ctl.drain24
+    matrix.sink_p3_scope_b ~ ctl.drain25
+    matrix.sink_p3_daq_1 ~ ctl.drain26
+    matrix.sink_p3_daq_2 ~ ctl.drain27
+    matrix.sink_p3_logic_1 ~ ctl.drain28
+    matrix.sink_p3_logic_2 ~ ctl.drain29
+    matrix.sink_p3_pwr ~ ctl.drain30
+    matrix.sink_p3_dmm_hi ~ ctl.drain31
+    matrix.sink_p3_dmm_lo ~ ctl.drain32
+    matrix.sink_p3_gnd ~ ctl.drain33
+    matrix.sink_p4_bank ~ ctl.drain34
+    matrix.sink_p4_scope_a ~ ctl.drain35
+    matrix.sink_p4_scope_b ~ ctl.drain36
+    matrix.sink_p4_daq_1 ~ ctl.drain37
+    matrix.sink_p4_daq_2 ~ ctl.drain38
+    matrix.sink_p4_logic_1 ~ ctl.drain39
+    matrix.sink_p4_logic_2 ~ ctl.drain40
+    matrix.sink_p4_pwr ~ ctl.drain41
+    matrix.sink_p4_dmm_hi ~ ctl.drain42
+    matrix.sink_p4_dmm_lo ~ ctl.drain43
+    matrix.sink_p4_gnd ~ ctl.drain44
+    matrix.sink_kfp_bank ~ ctl.drain45
+    matrix.sink_kfp_scope_a ~ ctl.drain46
+    matrix.sink_kfp_scope_b ~ ctl.drain47
+    matrix.sink_kfp_daq_1 ~ ctl.drain48
+    matrix.sink_kfp_daq_2 ~ ctl.drain49
+    matrix.sink_kfp_logic_1 ~ ctl.drain50
+    matrix.sink_kfp_logic_2 ~ ctl.drain51
+    matrix.sink_kfp_pwr ~ ctl.drain52
+    matrix.sink_kfp_dmm_hi ~ ctl.drain53
+    matrix.sink_kfp_dmm_lo ~ ctl.drain54
+    matrix.sink_kfp_gnd ~ ctl.drain55
+    matrix.sink_kfn_bank ~ ctl.drain56
+    matrix.sink_kfn_scope_a ~ ctl.drain57
+    matrix.sink_kfn_scope_b ~ ctl.drain58
+    matrix.sink_kfn_daq_1 ~ ctl.drain59
+    matrix.sink_kfn_daq_2 ~ ctl.drain60
+    matrix.sink_kfn_logic_1 ~ ctl.drain61
+    matrix.sink_kfn_logic_2 ~ ctl.drain62
+    matrix.sink_kfn_pwr ~ ctl.drain63
+    matrix.sink_kfn_dmm_hi ~ ctl.drain64
+    matrix.sink_kfn_dmm_lo ~ ctl.drain65
+    matrix.sink_kfn_gnd ~ ctl.drain66
+    matrix.sink_ksp_bank ~ ctl.drain67
+    matrix.sink_ksp_scope_a ~ ctl.drain68
+    matrix.sink_ksp_scope_b ~ ctl.drain69
+    matrix.sink_ksp_daq_1 ~ ctl.drain70
+    matrix.sink_ksp_daq_2 ~ ctl.drain71
+    matrix.sink_ksp_logic_1 ~ ctl.drain72
+    matrix.sink_ksp_logic_2 ~ ctl.drain73
+    matrix.sink_ksp_pwr ~ ctl.drain74
+    matrix.sink_ksp_dmm_hi ~ ctl.drain75
+    matrix.sink_ksp_dmm_lo ~ ctl.drain76
+    matrix.sink_ksp_gnd ~ ctl.drain77
+    matrix.sink_ksn_bank ~ ctl.drain78
+    matrix.sink_ksn_scope_a ~ ctl.drain79
+    matrix.sink_ksn_scope_b ~ ctl.drain80
+    matrix.sink_ksn_daq_1 ~ ctl.drain81
+    matrix.sink_ksn_daq_2 ~ ctl.drain82
+    matrix.sink_ksn_logic_1 ~ ctl.drain83
+    matrix.sink_ksn_logic_2 ~ ctl.drain84
+    matrix.sink_ksn_pwr ~ ctl.drain85
+    matrix.sink_ksn_dmm_hi ~ ctl.drain86
+    matrix.sink_ksn_dmm_lo ~ ctl.drain87
+    matrix.sink_ksn_gnd ~ ctl.drain88
+    refs.sink_1k ~ ctl.drain89
+    refs.sink_100k ~ ctl.drain90
+    refs.sink_short ~ ctl.drain91

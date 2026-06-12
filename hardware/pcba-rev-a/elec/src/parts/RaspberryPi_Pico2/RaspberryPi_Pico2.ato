@@ -1,0 +1,65 @@
+import has_designator_prefix
+import is_atomic_part
+import has_part_removed
+
+
+component RaspberryPi_Pico2_package:
+    """Raspberry Pi Pico 2 (SC1632) (local part, no LCSC binding)"""
+
+    trait is_atomic_part<manufacturer="Raspberry Pi", partnumber="Pico 2 (SC1632)", footprint="RaspberryPi_Pico_SMD_HandSolder.kicad_mod", symbol="RaspberryPi_Pico2.kicad_sym">
+    trait has_part_removed
+    trait has_designator_prefix<prefix="U">
+
+    # pins
+    pin 1
+    pin 2
+    pin 3
+    pin 4
+    pin 5
+    pin 6
+    pin 7
+    pin 8
+    pin 9
+    pin 10
+    pin 11
+    pin 12
+    pin 13
+    pin 14
+    pin 15
+    pin 16
+    pin 17
+    pin 18
+    pin 19
+    pin 20
+    pin 21
+    pin 22
+    pin 23
+    pin 24
+    pin 25
+    pin 26
+    pin 27
+    pin 28
+    pin 29
+    pin 30
+    pin 31
+    pin 32
+    pin 33
+    pin 34
+    pin 35
+    pin 36
+    pin 37
+    pin 38
+    pin 39
+    pin 40
+
+    # EE-lab pin aliases
+    signal vsys ~ pin 39
+    signal gnd ~ pin 38
+    signal v3v3_out ~ pin 36
+    signal spi_sck ~ pin 4
+    signal spi_mosi ~ pin 5
+    signal latch ~ pin 6
+    signal oe_n ~ pin 7
+    signal sda ~ pin 9
+    signal scl ~ pin 10
+    signal wdi ~ pin 11

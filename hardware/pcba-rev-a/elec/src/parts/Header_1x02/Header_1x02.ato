@@ -1,0 +1,19 @@
+import has_designator_prefix
+import is_atomic_part
+import has_part_removed
+
+
+component Header_1x02_package:
+    """Generic PinHeader 1x02 2.54 (local part, no LCSC binding)"""
+
+    trait is_atomic_part<manufacturer="Generic", partnumber="PinHeader 1x02 2.54", footprint="PinHeader_1x02_P2.54mm_Vertical.kicad_mod", symbol="Header_1x02.kicad_sym">
+    trait has_part_removed
+    trait has_designator_prefix<prefix="J">
+
+    # pins
+    pin 1
+    pin 2
+
+    # EE-lab pin aliases
+    signal p1 ~ pin 1
+    signal p2 ~ pin 2

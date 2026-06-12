@@ -84,6 +84,12 @@ module ReferenceBlock:
     k_1k.coil_p ~ coil_bus.hv
     k_100k.coil_p ~ coil_bus.hv
     k_short.coil_p ~ coil_bus.hv
+    signal sink_1k
+    signal sink_100k
+    signal sink_short
+    k_1k.coil_n ~ sink_1k
+    k_100k.coil_n ~ sink_100k
+    k_short.coil_n ~ sink_short
 
     ref_bus ~ k_1k.com
     k_1k.no ~ r1k.unnamed[0]

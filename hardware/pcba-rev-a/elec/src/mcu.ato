@@ -13,21 +13,7 @@ import ElectricPower
 from "parts/Texas_Instruments_TPIC6B595DWR/Texas_Instruments_TPIC6B595DWR.ato" import Texas_Instruments_TPIC6B595DWR_package
 from "parts/Texas_Instruments_TPS3823_33DBVR/Texas_Instruments_TPS3823_33DBVR.ato" import Texas_Instruments_TPS3823_33DBVR_package
 from "parts/Microchip_Tech_24AA025UIDT_I_OT/Microchip_Tech_24AA025UIDT_I_OT.ato" import Microchip_Tech_24AA025UIDT_I_OT_package
-
-
-component PicoModule:
-    # Raspberry Pi Pico 2 (RP2350), socketed on 2x20 headers
-    footprint = "RPi_Pico_SMD_TH"
-    signal vsys ~ pin 39
-    signal gnd ~ pin 38
-    signal v3v3_out ~ pin 36
-    signal spi_sck ~ pin 4      # GP2: shift-register clock
-    signal spi_mosi ~ pin 5     # GP3: serial data
-    signal latch ~ pin 6        # GP4: RCK
-    signal oe_n ~ pin 7         # GP5: output enable (watchdog-gated)
-    signal sda ~ pin 9          # GP6
-    signal scl ~ pin 10         # GP7
-    signal wdi ~ pin 11         # GP8: watchdog kick
+from "parts/RaspberryPi_Pico2/RaspberryPi_Pico2.ato" import RaspberryPi_Pico2_package
 
 
 module Control:
@@ -35,8 +21,104 @@ module Control:
     v5_coil = new ElectricPower
     signal sda
     signal scl
+    signal drain1
+    signal drain2
+    signal drain3
+    signal drain4
+    signal drain5
+    signal drain6
+    signal drain7
+    signal drain8
+    signal drain9
+    signal drain10
+    signal drain11
+    signal drain12
+    signal drain13
+    signal drain14
+    signal drain15
+    signal drain16
+    signal drain17
+    signal drain18
+    signal drain19
+    signal drain20
+    signal drain21
+    signal drain22
+    signal drain23
+    signal drain24
+    signal drain25
+    signal drain26
+    signal drain27
+    signal drain28
+    signal drain29
+    signal drain30
+    signal drain31
+    signal drain32
+    signal drain33
+    signal drain34
+    signal drain35
+    signal drain36
+    signal drain37
+    signal drain38
+    signal drain39
+    signal drain40
+    signal drain41
+    signal drain42
+    signal drain43
+    signal drain44
+    signal drain45
+    signal drain46
+    signal drain47
+    signal drain48
+    signal drain49
+    signal drain50
+    signal drain51
+    signal drain52
+    signal drain53
+    signal drain54
+    signal drain55
+    signal drain56
+    signal drain57
+    signal drain58
+    signal drain59
+    signal drain60
+    signal drain61
+    signal drain62
+    signal drain63
+    signal drain64
+    signal drain65
+    signal drain66
+    signal drain67
+    signal drain68
+    signal drain69
+    signal drain70
+    signal drain71
+    signal drain72
+    signal drain73
+    signal drain74
+    signal drain75
+    signal drain76
+    signal drain77
+    signal drain78
+    signal drain79
+    signal drain80
+    signal drain81
+    signal drain82
+    signal drain83
+    signal drain84
+    signal drain85
+    signal drain86
+    signal drain87
+    signal drain88
+    signal drain89
+    signal drain90
+    signal drain91
+    signal drain92
+    signal drain93
+    signal drain94
+    signal drain95
+    signal drain96
 
-    mcu = new PicoModule
+    mcu = new RaspberryPi_Pico2_package
     wdt = new Texas_Instruments_TPS3823_33DBVR_package
     cal_eeprom = new Microchip_Tech_24AA025UIDT_I_OT_package
 
@@ -155,3 +237,101 @@ module Control:
     sr10.nSRCLR ~ v3v3.hv
     sr11.nSRCLR ~ v3v3.hv
     sr12.nSRCLR ~ v3v3.hv
+
+    # coil sink channel map (chain order; firmware shares this table)
+    sr1.DRAIN0 ~ drain1
+    sr1.DRAIN1 ~ drain2
+    sr1.DRAIN2 ~ drain3
+    sr1.DRAIN3 ~ drain4
+    sr1.DRAIN4 ~ drain5
+    sr1.DRAIN5 ~ drain6
+    sr1.DRAIN6 ~ drain7
+    sr1.DRAIN7 ~ drain8
+    sr2.DRAIN0 ~ drain9
+    sr2.DRAIN1 ~ drain10
+    sr2.DRAIN2 ~ drain11
+    sr2.DRAIN3 ~ drain12
+    sr2.DRAIN4 ~ drain13
+    sr2.DRAIN5 ~ drain14
+    sr2.DRAIN6 ~ drain15
+    sr2.DRAIN7 ~ drain16
+    sr3.DRAIN0 ~ drain17
+    sr3.DRAIN1 ~ drain18
+    sr3.DRAIN2 ~ drain19
+    sr3.DRAIN3 ~ drain20
+    sr3.DRAIN4 ~ drain21
+    sr3.DRAIN5 ~ drain22
+    sr3.DRAIN6 ~ drain23
+    sr3.DRAIN7 ~ drain24
+    sr4.DRAIN0 ~ drain25
+    sr4.DRAIN1 ~ drain26
+    sr4.DRAIN2 ~ drain27
+    sr4.DRAIN3 ~ drain28
+    sr4.DRAIN4 ~ drain29
+    sr4.DRAIN5 ~ drain30
+    sr4.DRAIN6 ~ drain31
+    sr4.DRAIN7 ~ drain32
+    sr5.DRAIN0 ~ drain33
+    sr5.DRAIN1 ~ drain34
+    sr5.DRAIN2 ~ drain35
+    sr5.DRAIN3 ~ drain36
+    sr5.DRAIN4 ~ drain37
+    sr5.DRAIN5 ~ drain38
+    sr5.DRAIN6 ~ drain39
+    sr5.DRAIN7 ~ drain40
+    sr6.DRAIN0 ~ drain41
+    sr6.DRAIN1 ~ drain42
+    sr6.DRAIN2 ~ drain43
+    sr6.DRAIN3 ~ drain44
+    sr6.DRAIN4 ~ drain45
+    sr6.DRAIN5 ~ drain46
+    sr6.DRAIN6 ~ drain47
+    sr6.DRAIN7 ~ drain48
+    sr7.DRAIN0 ~ drain49
+    sr7.DRAIN1 ~ drain50
+    sr7.DRAIN2 ~ drain51
+    sr7.DRAIN3 ~ drain52
+    sr7.DRAIN4 ~ drain53
+    sr7.DRAIN5 ~ drain54
+    sr7.DRAIN6 ~ drain55
+    sr7.DRAIN7 ~ drain56
+    sr8.DRAIN0 ~ drain57
+    sr8.DRAIN1 ~ drain58
+    sr8.DRAIN2 ~ drain59
+    sr8.DRAIN3 ~ drain60
+    sr8.DRAIN4 ~ drain61
+    sr8.DRAIN5 ~ drain62
+    sr8.DRAIN6 ~ drain63
+    sr8.DRAIN7 ~ drain64
+    sr9.DRAIN0 ~ drain65
+    sr9.DRAIN1 ~ drain66
+    sr9.DRAIN2 ~ drain67
+    sr9.DRAIN3 ~ drain68
+    sr9.DRAIN4 ~ drain69
+    sr9.DRAIN5 ~ drain70
+    sr9.DRAIN6 ~ drain71
+    sr9.DRAIN7 ~ drain72
+    sr10.DRAIN0 ~ drain73
+    sr10.DRAIN1 ~ drain74
+    sr10.DRAIN2 ~ drain75
+    sr10.DRAIN3 ~ drain76
+    sr10.DRAIN4 ~ drain77
+    sr10.DRAIN5 ~ drain78
+    sr10.DRAIN6 ~ drain79
+    sr10.DRAIN7 ~ drain80
+    sr11.DRAIN0 ~ drain81
+    sr11.DRAIN1 ~ drain82
+    sr11.DRAIN2 ~ drain83
+    sr11.DRAIN3 ~ drain84
+    sr11.DRAIN4 ~ drain85
+    sr11.DRAIN5 ~ drain86
+    sr11.DRAIN6 ~ drain87
+    sr11.DRAIN7 ~ drain88
+    sr12.DRAIN0 ~ drain89
+    sr12.DRAIN1 ~ drain90
+    sr12.DRAIN2 ~ drain91
+    sr12.DRAIN3 ~ drain92
+    sr12.DRAIN4 ~ drain93
+    sr12.DRAIN5 ~ drain94
+    sr12.DRAIN6 ~ drain95
+    sr12.DRAIN7 ~ drain96

@@ -9,25 +9,7 @@ off-board).
 
 import ElectricPower
 import Resistor
-
-
-component BlindMate_J10:
-    # Samtec SEAF-class guided blind-mate, 14 contacts used
-    footprint = "Samtec_SEAF-14"
-    signal p1 ~ pin 1
-    signal p2 ~ pin 2
-    signal p3 ~ pin 3
-    signal p4 ~ pin 4
-    signal kf_p ~ pin 5
-    signal kf_n ~ pin 6
-    signal ks_p ~ pin 7
-    signal ks_n ~ pin 8
-    signal guard1 ~ pin 9
-    signal guard2 ~ pin 10
-    signal cart_sda ~ pin 11
-    signal cart_scl ~ pin 12
-    signal present_n ~ pin 13
-    signal gnd ~ pin 14
+from "parts/Samtec_SEAF14/Samtec_SEAF14.ato" import Samtec_SEAF14_package
 
 
 module CartridgeInterface:
@@ -45,26 +27,26 @@ module CartridgeInterface:
     signal guard
     v3v3 = new ElectricPower
 
-    j10 = new BlindMate_J10
+    j10 = new Samtec_SEAF14_package
     r_pullup = new Resistor
     r_pullup.resistance = 10kohm +/- 5%
     r_pullup.package = "0402"
 
-    j10.p1 ~ tip_p1
-    j10.p2 ~ tip_p2
-    j10.p3 ~ tip_p3
-    j10.p4 ~ tip_p4
-    j10.kf_p ~ tip_kf_p
-    j10.kf_n ~ tip_kf_n
-    j10.ks_p ~ tip_ks_p
-    j10.ks_n ~ tip_ks_n
-    j10.guard1 ~ guard
-    j10.guard2 ~ guard
-    j10.cart_sda ~ sda
-    j10.cart_scl ~ scl
-    j10.gnd ~ v3v3.lv
+    j10.1 ~ tip_p1
+    j10.2 ~ tip_p2
+    j10.3 ~ tip_p3
+    j10.4 ~ tip_p4
+    j10.5 ~ tip_kf_p
+    j10.6 ~ tip_kf_n
+    j10.7 ~ tip_ks_p
+    j10.8 ~ tip_ks_n
+    j10.9 ~ guard
+    j10.10 ~ guard
+    j10.11 ~ sda
+    j10.12 ~ scl
+    j10.14 ~ v3v3.lv
 
     # presence: grounded loop on cartridge side, pull-up here
-    j10.present_n ~ present_n
+    j10.13 ~ present_n
     present_n ~ r_pullup.unnamed[0]
     r_pullup.unnamed[1] ~ v3v3.hv
