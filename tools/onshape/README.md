@@ -103,3 +103,34 @@ Part Studio 1).
   and rebuilt. Final division of labor: groups + verification via API,
   the 3 slider mates by hand in the UI (~30 s each, screw cylinder -> nut
   cylinder -> limits).
+
+## Browser automation (MCP browser / CDP) — slider mates: SOLVED (2026-06-11)
+
+Where the REST API could not create healthy slider mates, driving the
+Onshape web UI through the logged-in Chrome (port 9222) succeeded: the
+Motion Check assembly now has all 4 groups + 3 slider mates (X/Y/Z
+screw-to-nut), all OK, parked at exact relative zero via the matevalues
+endpoint afterward.
+
+Technique notes:
+- Onshape's WebGL canvas accepts synthetic (untrusted) pointer events —
+  dispatch pointermove/mousemove, dwell ~400 ms (the inference raycast
+  needs frames), then pointerdown/up + click.
+- Per-mate-type toolbar buttons exist (use[href$="#svg-icon-slider"]);
+  instance-list filtering, multi-select, and context-menu Isolate are all
+  DOM. Keyboard Shift+7/Shift+1 switch Iso/Front views (the view cube is
+  canvas, not DOM).
+- Verify picks by counting "Mate connector of" in the dialog's innerText —
+  but reads LAG the solve by 1-2 s; a successful second pick SNAPS the
+  parts immediately, so stale follow-up clicks toggle connectors off.
+  Pattern that works: one candidate -> wait 2.5 s -> accept immediately
+  when the count hits 2.
+- Tiny targets (the nut collar): separate the parts first by transforming
+  the free group along its DOF via occurrencetransforms (legal moves stick),
+  then pick the fat lone target.
+- NEVER round-trip-update mate features via the REST features endpoint —
+  it corrupts units/queries (limits became "0 deg") and the browser undo
+  stack does not see API edits. Set limits in the creation dialog or edit
+  in UI; set positions via matevalues only.
+- Mates have gauge freedom with nothing Fixed: relative park is exact, the
+  global offset is one UI Fix away (right-click a static part -> Fix).
