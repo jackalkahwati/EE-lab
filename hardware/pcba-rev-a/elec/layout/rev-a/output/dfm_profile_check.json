@@ -1,0 +1,16 @@
+{
+  "board": "rev-a.kicad_pcb",
+  "rules": {
+    "edge_mm": 3.0,
+    "hole_keepout_mm": 3.5,
+    "courtyard_gap_mm": 0.4,
+    "min_fiducials": 3
+  },
+  "violations": {
+    "edge": [],
+    "hole": [],
+    "gap": [],
+    "fiducial": []
+  },
+  "pass": true
+}

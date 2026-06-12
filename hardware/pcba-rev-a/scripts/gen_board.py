@@ -154,7 +154,7 @@ for i, p in enumerate(PROBES):
     body += place(*G6K, ref=nref("K"), x=cx, y=Y0 + 44, rot=90, netmap={
         "1": "+5V_COIL", "4": "NODE_" + p, "3": "GBANK_" + p, "5": "PBANK_" + p})
     for j, lane in enumerate(LANES_G):
-        body += place(*G6K, ref=nref("K"), x=cx, y=Y0 + 54 + j * 9.4, rot=90, netmap={
+        body += place(*G6K, ref=nref("K"), x=cx, y=Y0 + 54 + j * 9.75, rot=90, netmap={
             "1": "+5V_COIL", "4": "GBANK_" + p, "3": lane})
 
 # south: reed bank, 3 rows of 9 (24 matrix + 3 reference), pitch 20.5 x 8
@@ -165,9 +165,13 @@ for i, p in enumerate(PROBES):
         reed_jobs.append({"1": "+5V_COIL", "2": "PBANK_" + p, "3": lane})
 for i in range(3):  # reference block reeds
     reed_jobs.append({"1": "+5V_COIL", "2": "DMM_HI", "3": "GND"})
-for k, nm in enumerate(reed_jobs):
-    row, col = divmod(k, 9)
-    body += place(*REED, ref=nref("K"), x=X0 + 16 + col * 20.5, y=Y0 + 121 + row * 8, netmap=nm)
+matrix_jobs, ref_jobs = reed_jobs[:24], reed_jobs[24:]
+for k, nm in enumerate(matrix_jobs):
+    row, col = divmod(k, 8)
+    body += place(*REED, ref=nref("K"), x=X0 + 26 + col * 20.9, y=Y0 + 121.5 + row * 8, netmap=nm)
+# reference-block reeds: vertical column between relay field and Pico
+for k, nm in enumerate(ref_jobs):
+    body += place(*REED, ref=nref("K"), x=X0 + 144, y=Y0 + 56 + k * 21, rot=90, netmap=nm)
 body += place(*R0805, ref=nref("R"), x=X0 + 16, y=Y0 + 112, netmap={"1": "DMM_HI", "2": "GND"})
 body += place(*R0805, ref=nref("R"), x=X0 + 24, y=Y0 + 112, netmap={"1": "DMM_HI", "2": "GND"})
 
@@ -175,21 +179,27 @@ body += place(*R0805, ref=nref("R"), x=X0 + 24, y=Y0 + 112, netmap={"1": "DMM_HI
 body += place(*PICO, ref=nref("U"), x=X0 + 160, y=Y0 + 78, rot=0, netmap={
     "39": "+24V", "38": "GND", "4": "SRCK", "5": "SR_DATA", "6": "RCK",
     "7": "OE_N", "9": "SDA", "10": "SCL", "11": "WDI", "36": "+3V3_DIG"})
-body += place(*SOT235, ref=nref("U"), x=X0 + 143, y=Y0 + 50, netmap={
+body += place(*SOT235, ref=nref("U"), x=X0 + 158, y=Y0 + 35.5, netmap={
     "1": "OE_N", "2": "GND", "4": "WDI", "5": "+3V3_DIG"})
-body += place(*SOT235, ref=nref("U"), x=X0 + 143, y=Y0 + 58, netmap={
+body += place(*SOT235, ref=nref("U"), x=X0 + 166, y=Y0 + 35.5, netmap={
     "1": "SCL", "2": "GND", "3": "SDA", "5": "+3V3_DIG"})
 
 # far east: instrument connectors
-body += place(*BNCV, ref=nref("J"), x=X0 + 188, y=Y0 + 14, netmap={"1": "SCOPE_A", "2": "GND"})
-body += place(*BNCV, ref=nref("J"), x=X0 + 188, y=Y0 + 36, netmap={"1": "SCOPE_B", "2": "GND"})
-body += place(*HDR(4), ref=nref("J"), x=X0 + 190, y=Y0 + 54, rot=0, netmap={
+body += place(*BNCV, ref=nref("J"), x=X0 + 184, y=Y0 + 18, netmap={"1": "SCOPE_A", "2": "GND"})
+body += place(*BNCV, ref=nref("J"), x=X0 + 184, y=Y0 + 40, netmap={"1": "SCOPE_B", "2": "GND"})
+body += place(*HDR(4), ref=nref("J"), x=X0 + 190, y=Y0 + 58, rot=0, netmap={
     "1": "DMM_HI", "2": "DMM_LO", "3": "GND_REF", "4": "GND"})
-body += place(*HDR(8), ref=nref("J"), x=X0 + 190, y=Y0 + 74, rot=0, netmap={
+body += place(*HDR(8), ref=nref("J"), x=X0 + 190, y=Y0 + 78, rot=0, netmap={
     "1": "DAQ_1", "2": "DAQ_2", "3": "LOGIC_1", "4": "LOGIC_2",
     "5": "GND", "6": "GND", "7": "GND", "8": "GND"})
-body += place(*HDR(2), ref=nref("J"), x=X0 + 190, y=Y0 + 96, rot=0, netmap={
+body += place(*HDR(2), ref=nref("J"), x=X0 + 190, y=Y0 + 100, rot=0, netmap={
     "1": "PWR_INJ", "2": "GND"})
+
+
+# assembly fiducials (3, spread)
+FID = ("Fiducial", "Fiducial_1mm_Mask2mm")
+for fx, fy in ((38, 37), (195, 114), (8, 116)):
+    body += place(*FID, ref=nref("FID"), x=X0 + fx, y=Y0 + fy)
 
 # ---- assemble ------------------------------------------------------------------
 def grect(x0, y0, x1, y1, layer, w=0.15):
