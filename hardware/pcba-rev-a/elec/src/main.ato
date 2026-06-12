@@ -101,7 +101,9 @@ module MatrixRevA:
     # reference block rides the DMM_HI lane
     refs.ref_bus ~ matrix.dmm_hi
 
-    # coil channel map: drains 1..88 = trees p1..ksn x 11 lanes; 89-91 = ref block
+    # coil channel map v2 — LOCALITY: TPIC 1-8 sit atop tree 1-8 and
+    # sink that tree's 8 G6K coils; TPIC 9-11 sink the reed bank;
+    # TPIC 12 sinks the reference block. Firmware shares this table.
     matrix.sink_p1_bank ~ ctl.drain1
     matrix.sink_p1_scope_a ~ ctl.drain2
     matrix.sink_p1_scope_b ~ ctl.drain3
@@ -110,83 +112,83 @@ module MatrixRevA:
     matrix.sink_p1_logic_1 ~ ctl.drain6
     matrix.sink_p1_logic_2 ~ ctl.drain7
     matrix.sink_p1_pwr ~ ctl.drain8
-    matrix.sink_p1_dmm_hi ~ ctl.drain9
-    matrix.sink_p1_dmm_lo ~ ctl.drain10
-    matrix.sink_p1_gnd ~ ctl.drain11
-    matrix.sink_p2_bank ~ ctl.drain12
-    matrix.sink_p2_scope_a ~ ctl.drain13
-    matrix.sink_p2_scope_b ~ ctl.drain14
-    matrix.sink_p2_daq_1 ~ ctl.drain15
-    matrix.sink_p2_daq_2 ~ ctl.drain16
-    matrix.sink_p2_logic_1 ~ ctl.drain17
-    matrix.sink_p2_logic_2 ~ ctl.drain18
-    matrix.sink_p2_pwr ~ ctl.drain19
-    matrix.sink_p2_dmm_hi ~ ctl.drain20
-    matrix.sink_p2_dmm_lo ~ ctl.drain21
-    matrix.sink_p2_gnd ~ ctl.drain22
-    matrix.sink_p3_bank ~ ctl.drain23
-    matrix.sink_p3_scope_a ~ ctl.drain24
-    matrix.sink_p3_scope_b ~ ctl.drain25
-    matrix.sink_p3_daq_1 ~ ctl.drain26
-    matrix.sink_p3_daq_2 ~ ctl.drain27
-    matrix.sink_p3_logic_1 ~ ctl.drain28
-    matrix.sink_p3_logic_2 ~ ctl.drain29
-    matrix.sink_p3_pwr ~ ctl.drain30
-    matrix.sink_p3_dmm_hi ~ ctl.drain31
-    matrix.sink_p3_dmm_lo ~ ctl.drain32
-    matrix.sink_p3_gnd ~ ctl.drain33
-    matrix.sink_p4_bank ~ ctl.drain34
-    matrix.sink_p4_scope_a ~ ctl.drain35
-    matrix.sink_p4_scope_b ~ ctl.drain36
-    matrix.sink_p4_daq_1 ~ ctl.drain37
-    matrix.sink_p4_daq_2 ~ ctl.drain38
-    matrix.sink_p4_logic_1 ~ ctl.drain39
-    matrix.sink_p4_logic_2 ~ ctl.drain40
-    matrix.sink_p4_pwr ~ ctl.drain41
-    matrix.sink_p4_dmm_hi ~ ctl.drain42
-    matrix.sink_p4_dmm_lo ~ ctl.drain43
-    matrix.sink_p4_gnd ~ ctl.drain44
-    matrix.sink_kfp_bank ~ ctl.drain45
-    matrix.sink_kfp_scope_a ~ ctl.drain46
-    matrix.sink_kfp_scope_b ~ ctl.drain47
-    matrix.sink_kfp_daq_1 ~ ctl.drain48
-    matrix.sink_kfp_daq_2 ~ ctl.drain49
-    matrix.sink_kfp_logic_1 ~ ctl.drain50
-    matrix.sink_kfp_logic_2 ~ ctl.drain51
-    matrix.sink_kfp_pwr ~ ctl.drain52
-    matrix.sink_kfp_dmm_hi ~ ctl.drain53
-    matrix.sink_kfp_dmm_lo ~ ctl.drain54
-    matrix.sink_kfp_gnd ~ ctl.drain55
-    matrix.sink_kfn_bank ~ ctl.drain56
-    matrix.sink_kfn_scope_a ~ ctl.drain57
-    matrix.sink_kfn_scope_b ~ ctl.drain58
-    matrix.sink_kfn_daq_1 ~ ctl.drain59
-    matrix.sink_kfn_daq_2 ~ ctl.drain60
-    matrix.sink_kfn_logic_1 ~ ctl.drain61
-    matrix.sink_kfn_logic_2 ~ ctl.drain62
-    matrix.sink_kfn_pwr ~ ctl.drain63
-    matrix.sink_kfn_dmm_hi ~ ctl.drain64
-    matrix.sink_kfn_dmm_lo ~ ctl.drain65
-    matrix.sink_kfn_gnd ~ ctl.drain66
-    matrix.sink_ksp_bank ~ ctl.drain67
-    matrix.sink_ksp_scope_a ~ ctl.drain68
-    matrix.sink_ksp_scope_b ~ ctl.drain69
-    matrix.sink_ksp_daq_1 ~ ctl.drain70
-    matrix.sink_ksp_daq_2 ~ ctl.drain71
-    matrix.sink_ksp_logic_1 ~ ctl.drain72
-    matrix.sink_ksp_logic_2 ~ ctl.drain73
-    matrix.sink_ksp_pwr ~ ctl.drain74
-    matrix.sink_ksp_dmm_hi ~ ctl.drain75
-    matrix.sink_ksp_dmm_lo ~ ctl.drain76
-    matrix.sink_ksp_gnd ~ ctl.drain77
-    matrix.sink_ksn_bank ~ ctl.drain78
-    matrix.sink_ksn_scope_a ~ ctl.drain79
-    matrix.sink_ksn_scope_b ~ ctl.drain80
-    matrix.sink_ksn_daq_1 ~ ctl.drain81
-    matrix.sink_ksn_daq_2 ~ ctl.drain82
-    matrix.sink_ksn_logic_1 ~ ctl.drain83
-    matrix.sink_ksn_logic_2 ~ ctl.drain84
-    matrix.sink_ksn_pwr ~ ctl.drain85
+    matrix.sink_p2_bank ~ ctl.drain9
+    matrix.sink_p2_scope_a ~ ctl.drain10
+    matrix.sink_p2_scope_b ~ ctl.drain11
+    matrix.sink_p2_daq_1 ~ ctl.drain12
+    matrix.sink_p2_daq_2 ~ ctl.drain13
+    matrix.sink_p2_logic_1 ~ ctl.drain14
+    matrix.sink_p2_logic_2 ~ ctl.drain15
+    matrix.sink_p2_pwr ~ ctl.drain16
+    matrix.sink_p3_bank ~ ctl.drain17
+    matrix.sink_p3_scope_a ~ ctl.drain18
+    matrix.sink_p3_scope_b ~ ctl.drain19
+    matrix.sink_p3_daq_1 ~ ctl.drain20
+    matrix.sink_p3_daq_2 ~ ctl.drain21
+    matrix.sink_p3_logic_1 ~ ctl.drain22
+    matrix.sink_p3_logic_2 ~ ctl.drain23
+    matrix.sink_p3_pwr ~ ctl.drain24
+    matrix.sink_p4_bank ~ ctl.drain25
+    matrix.sink_p4_scope_a ~ ctl.drain26
+    matrix.sink_p4_scope_b ~ ctl.drain27
+    matrix.sink_p4_daq_1 ~ ctl.drain28
+    matrix.sink_p4_daq_2 ~ ctl.drain29
+    matrix.sink_p4_logic_1 ~ ctl.drain30
+    matrix.sink_p4_logic_2 ~ ctl.drain31
+    matrix.sink_p4_pwr ~ ctl.drain32
+    matrix.sink_kfp_bank ~ ctl.drain33
+    matrix.sink_kfp_scope_a ~ ctl.drain34
+    matrix.sink_kfp_scope_b ~ ctl.drain35
+    matrix.sink_kfp_daq_1 ~ ctl.drain36
+    matrix.sink_kfp_daq_2 ~ ctl.drain37
+    matrix.sink_kfp_logic_1 ~ ctl.drain38
+    matrix.sink_kfp_logic_2 ~ ctl.drain39
+    matrix.sink_kfp_pwr ~ ctl.drain40
+    matrix.sink_kfn_bank ~ ctl.drain41
+    matrix.sink_kfn_scope_a ~ ctl.drain42
+    matrix.sink_kfn_scope_b ~ ctl.drain43
+    matrix.sink_kfn_daq_1 ~ ctl.drain44
+    matrix.sink_kfn_daq_2 ~ ctl.drain45
+    matrix.sink_kfn_logic_1 ~ ctl.drain46
+    matrix.sink_kfn_logic_2 ~ ctl.drain47
+    matrix.sink_kfn_pwr ~ ctl.drain48
+    matrix.sink_ksp_bank ~ ctl.drain49
+    matrix.sink_ksp_scope_a ~ ctl.drain50
+    matrix.sink_ksp_scope_b ~ ctl.drain51
+    matrix.sink_ksp_daq_1 ~ ctl.drain52
+    matrix.sink_ksp_daq_2 ~ ctl.drain53
+    matrix.sink_ksp_logic_1 ~ ctl.drain54
+    matrix.sink_ksp_logic_2 ~ ctl.drain55
+    matrix.sink_ksp_pwr ~ ctl.drain56
+    matrix.sink_ksn_bank ~ ctl.drain57
+    matrix.sink_ksn_scope_a ~ ctl.drain58
+    matrix.sink_ksn_scope_b ~ ctl.drain59
+    matrix.sink_ksn_daq_1 ~ ctl.drain60
+    matrix.sink_ksn_daq_2 ~ ctl.drain61
+    matrix.sink_ksn_logic_1 ~ ctl.drain62
+    matrix.sink_ksn_logic_2 ~ ctl.drain63
+    matrix.sink_ksn_pwr ~ ctl.drain64
+    matrix.sink_p1_dmm_hi ~ ctl.drain65
+    matrix.sink_p1_dmm_lo ~ ctl.drain66
+    matrix.sink_p1_gnd ~ ctl.drain67
+    matrix.sink_p2_dmm_hi ~ ctl.drain68
+    matrix.sink_p2_dmm_lo ~ ctl.drain69
+    matrix.sink_p2_gnd ~ ctl.drain70
+    matrix.sink_p3_dmm_hi ~ ctl.drain71
+    matrix.sink_p3_dmm_lo ~ ctl.drain72
+    matrix.sink_p3_gnd ~ ctl.drain73
+    matrix.sink_p4_dmm_hi ~ ctl.drain74
+    matrix.sink_p4_dmm_lo ~ ctl.drain75
+    matrix.sink_p4_gnd ~ ctl.drain76
+    matrix.sink_kfp_dmm_hi ~ ctl.drain77
+    matrix.sink_kfp_dmm_lo ~ ctl.drain78
+    matrix.sink_kfp_gnd ~ ctl.drain79
+    matrix.sink_kfn_dmm_hi ~ ctl.drain80
+    matrix.sink_kfn_dmm_lo ~ ctl.drain81
+    matrix.sink_kfn_gnd ~ ctl.drain82
+    matrix.sink_ksp_dmm_hi ~ ctl.drain83
+    matrix.sink_ksp_dmm_lo ~ ctl.drain84
+    matrix.sink_ksp_gnd ~ ctl.drain85
     matrix.sink_ksn_dmm_hi ~ ctl.drain86
     matrix.sink_ksn_dmm_lo ~ ctl.drain87
     matrix.sink_ksn_gnd ~ ctl.drain88

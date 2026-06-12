@@ -1,93 +1,95 @@
-# FL-1 Rev A coil channel map (drain N = TPIC chain bit N)
+# FL-1 Rev A coil channel map v2 (drain N = TPIC chain bit N)
+# Locality mapping: drains (t*8+1..t*8+8) = tree t G6K coils (sr t);
+# drains 65..88 = reed bank (sr9-11); 89..91 = reference block (sr12)
 
- 1: p1.bank
- 2: p1.scope_a
- 3: p1.scope_b
- 4: p1.daq_1
- 5: p1.daq_2
- 6: p1.logic_1
- 7: p1.logic_2
- 8: p1.pwr
- 9: p1.dmm_hi
-10: p1.dmm_lo
-11: p1.gnd
-12: p2.bank
-13: p2.scope_a
-14: p2.scope_b
-15: p2.daq_1
-16: p2.daq_2
-17: p2.logic_1
-18: p2.logic_2
-19: p2.pwr
-20: p2.dmm_hi
-21: p2.dmm_lo
-22: p2.gnd
-23: p3.bank
-24: p3.scope_a
-25: p3.scope_b
-26: p3.daq_1
-27: p3.daq_2
-28: p3.logic_1
-29: p3.logic_2
-30: p3.pwr
-31: p3.dmm_hi
-32: p3.dmm_lo
-33: p3.gnd
-34: p4.bank
-35: p4.scope_a
-36: p4.scope_b
-37: p4.daq_1
-38: p4.daq_2
-39: p4.logic_1
-40: p4.logic_2
-41: p4.pwr
-42: p4.dmm_hi
-43: p4.dmm_lo
-44: p4.gnd
-45: kfp.bank
-46: kfp.scope_a
-47: kfp.scope_b
-48: kfp.daq_1
-49: kfp.daq_2
-50: kfp.logic_1
-51: kfp.logic_2
-52: kfp.pwr
-53: kfp.dmm_hi
-54: kfp.dmm_lo
-55: kfp.gnd
-56: kfn.bank
-57: kfn.scope_a
-58: kfn.scope_b
-59: kfn.daq_1
-60: kfn.daq_2
-61: kfn.logic_1
-62: kfn.logic_2
-63: kfn.pwr
-64: kfn.dmm_hi
-65: kfn.dmm_lo
-66: kfn.gnd
-67: ksp.bank
-68: ksp.scope_a
-69: ksp.scope_b
-70: ksp.daq_1
-71: ksp.daq_2
-72: ksp.logic_1
-73: ksp.logic_2
-74: ksp.pwr
-75: ksp.dmm_hi
-76: ksp.dmm_lo
-77: ksp.gnd
-78: ksn.bank
-79: ksn.scope_a
-80: ksn.scope_b
-81: ksn.daq_1
-82: ksn.daq_2
-83: ksn.logic_1
-84: ksn.logic_2
-85: ksn.pwr
-86: ksn.dmm_hi
-87: ksn.dmm_lo
-88: ksn.gnd
+ 1: p1.bank (G6K)
+ 2: p1.scope_a (G6K)
+ 3: p1.scope_b (G6K)
+ 4: p1.daq_1 (G6K)
+ 5: p1.daq_2 (G6K)
+ 6: p1.logic_1 (G6K)
+ 7: p1.logic_2 (G6K)
+ 8: p1.pwr (G6K)
+ 9: p2.bank (G6K)
+10: p2.scope_a (G6K)
+11: p2.scope_b (G6K)
+12: p2.daq_1 (G6K)
+13: p2.daq_2 (G6K)
+14: p2.logic_1 (G6K)
+15: p2.logic_2 (G6K)
+16: p2.pwr (G6K)
+17: p3.bank (G6K)
+18: p3.scope_a (G6K)
+19: p3.scope_b (G6K)
+20: p3.daq_1 (G6K)
+21: p3.daq_2 (G6K)
+22: p3.logic_1 (G6K)
+23: p3.logic_2 (G6K)
+24: p3.pwr (G6K)
+25: p4.bank (G6K)
+26: p4.scope_a (G6K)
+27: p4.scope_b (G6K)
+28: p4.daq_1 (G6K)
+29: p4.daq_2 (G6K)
+30: p4.logic_1 (G6K)
+31: p4.logic_2 (G6K)
+32: p4.pwr (G6K)
+33: kfp.bank (G6K)
+34: kfp.scope_a (G6K)
+35: kfp.scope_b (G6K)
+36: kfp.daq_1 (G6K)
+37: kfp.daq_2 (G6K)
+38: kfp.logic_1 (G6K)
+39: kfp.logic_2 (G6K)
+40: kfp.pwr (G6K)
+41: kfn.bank (G6K)
+42: kfn.scope_a (G6K)
+43: kfn.scope_b (G6K)
+44: kfn.daq_1 (G6K)
+45: kfn.daq_2 (G6K)
+46: kfn.logic_1 (G6K)
+47: kfn.logic_2 (G6K)
+48: kfn.pwr (G6K)
+49: ksp.bank (G6K)
+50: ksp.scope_a (G6K)
+51: ksp.scope_b (G6K)
+52: ksp.daq_1 (G6K)
+53: ksp.daq_2 (G6K)
+54: ksp.logic_1 (G6K)
+55: ksp.logic_2 (G6K)
+56: ksp.pwr (G6K)
+57: ksn.bank (G6K)
+58: ksn.scope_a (G6K)
+59: ksn.scope_b (G6K)
+60: ksn.daq_1 (G6K)
+61: ksn.daq_2 (G6K)
+62: ksn.logic_1 (G6K)
+63: ksn.logic_2 (G6K)
+64: ksn.pwr (G6K)
+65: p1.dmm_hi (reed)
+66: p1.dmm_lo (reed)
+67: p1.gnd (reed)
+68: p2.dmm_hi (reed)
+69: p2.dmm_lo (reed)
+70: p2.gnd (reed)
+71: p3.dmm_hi (reed)
+72: p3.dmm_lo (reed)
+73: p3.gnd (reed)
+74: p4.dmm_hi (reed)
+75: p4.dmm_lo (reed)
+76: p4.gnd (reed)
+77: kfp.dmm_hi (reed)
+78: kfp.dmm_lo (reed)
+79: kfp.gnd (reed)
+80: kfn.dmm_hi (reed)
+81: kfn.dmm_lo (reed)
+82: kfn.gnd (reed)
+83: ksp.dmm_hi (reed)
+84: ksp.dmm_lo (reed)
+85: ksp.gnd (reed)
+86: ksn.dmm_hi (reed)
+87: ksn.dmm_lo (reed)
+88: ksn.gnd (reed)
 89: ref_1k
 90: ref_100k
 91: ref_short
