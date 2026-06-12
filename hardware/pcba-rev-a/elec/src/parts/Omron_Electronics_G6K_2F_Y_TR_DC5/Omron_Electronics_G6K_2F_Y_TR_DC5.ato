@@ -1,0 +1,30 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+import is_auto_generated
+
+component Omron_Electronics_G6K_2F_Y_TR_DC5_package:
+    """G6K-2F-Y-DC5"""
+
+    trait is_atomic_part<manufacturer="Omron Electronics", partnumber="G6K-2F-Y-TR DC5", footprint="RELAY-SMD_G6K-2F-X-XX.kicad_mod", symbol="G6K-2F-Y-DC5.kicad_sym", model="SMD-8_L10.0-W6.5-H5.4-LS7.8-P2.2-3.2.step">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C47190", manufacturer="Omron Electronics", partno="G6K-2F-Y-TR DC5">
+    trait has_designator_prefix<prefix="K">
+    trait has_datasheet<datasheet="https://www.lcsc.com/datasheet/lcsc_datasheet_2211282300_Omron-Electronics-G6K-2F-Y-TR-DC5_C47190.pdf">
+
+    # pins
+    pin 1
+    pin 2
+    pin 3
+    pin 4
+    pin 5
+    pin 6
+    pin 7
+    pin 8
+
+    # EE-lab pin aliases (datasheet-verified)
+    signal coil_p ~ pin 1
+    signal coil_n ~ pin 8
+    signal com ~ pin 3
+    signal no ~ pin 4
+    signal nc ~ pin 2

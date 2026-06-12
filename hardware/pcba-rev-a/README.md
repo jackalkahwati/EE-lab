@@ -54,12 +54,20 @@ chain, and cartridge contract are the custom content.
 
 ## Status / known gaps (Rev A bring-up list)
 
-- MIGRATED 2026-06-12: language ported to atopile 0.15.7; `ato build`
-  is GREEN (solver, PCB, BOM, pinout, power-tree, stackup targets pass).
-  Passives are real picked parts (LCSC); 50 warnings remain for custom
-  components without part bindings — run `ato create part` per component
-  (G6K-2F-Y, reed, TPIC6B595, TPS regs, Pico, connectors) so they join
-  the netlist, then reconcile with the rev-a floorplan board.
+- BOUND 2026-06-12: 15 real parts created via `ato create part`
+  (pty-wrapped, `-s <term> -a`); 172 components on 29 BOM lines, every
+  one a real LCSC part. Datasheet-verified pinouts fixed wrong guesses
+  on the G6K relay (COM=3 NO=4 NC=2, coil 1/8), reed (coil 5/7, switch
+  1/3), TPS54331/7A4901, INA219, BAV99 (node=pin3). Buck/LDO support
+  passives added (inductors, boot cap, feedback dividers; COMP/SS
+  compensation at analog review). LESSON: never subclass an atomic part
+  — footprint paths resolve against the defining file's directory; put
+  pin aliases IN the part file (drop is_auto_generated) instead.
+  Remaining 9 unbound (documented): 24V entry fuse (needs >=30V PPTC or
+  cartridge fuse selection), Pico module + SEAF blind-mate (local parts,
+  footprint+symbol files), J2/J20-J24 connectors (assembly-supplied).
+  Substitutions to revisit: PAN CHANG SIP-1A05 reeds (unshielded, vs
+  Coto/Pickering spec), 0805L010YR PTC (100 mA hold vs 50 mA spec).
 - Pin maps on RP2040 QSPI flash and TPS54331 are abbreviated; finalize at
   netlist sync against real symbols (Tile-0 pattern: vendor symbols pulled
   into `output/symbols/`).

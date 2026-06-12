@@ -1,0 +1,162 @@
+(footprint "Littelfuse_0805L010YR:F0805"
+	(version 20241229)
+	(generator "faebryk_convert")
+	(generator_version "v5")
+	(layer "F.Cu")
+	(tedit "5DC5F6A4")
+	(uuid "dcdc3f78-43ff-4c7f-b48d-627017e5933e")
+	(property "Reference" "REF**"
+		(at 0 -4)
+		(layer "F.SilkS")
+		(uuid "9fea53c2-db07-498f-95b0-5f3dbc6b5569")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Value" "F0805"
+		(at 0 4)
+		(layer "F.Fab")
+		(uuid "12788b21-b9db-4eb6-9aac-6ba74740f824")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(attr smd)
+	(fp_circle
+		(center -1.1 0.75)
+		(end -1.07 0.75)
+		(stroke
+			(width 0.06)
+			(type solid)
+		)
+		(layer "F.Fab")
+		(locked no)
+		(uuid "b659352f-8bb4-48e4-bdc2-9239b5b4c53f")
+	)
+	(fp_line
+		(start -2.06 -0.76)
+		(end -2.06 0.76)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "5394e30f-2cd4-4be5-91a4-b56d185fb198")
+	)
+	(fp_line
+		(start 2.06 -0.76)
+		(end 2.06 0.76)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "1672f389-d36d-40d0-9513-de607b5ebe86")
+	)
+	(fp_line
+		(start 1.78 -1.02)
+		(end 0.51 -1.02)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "e1ff4fee-fd89-481a-ae9e-9c58e30c43e9")
+	)
+	(fp_line
+		(start -1.78 -1.02)
+		(end -0.54 -1.02)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "d5e22e72-1f5d-4ec3-af6d-4c8a3ba6cfa3")
+	)
+	(fp_line
+		(start -0.51 1.02)
+		(end -1.78 1.02)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "ca05036f-7bf7-4c94-9f87-2a7e2c50b5a4")
+	)
+	(fp_line
+		(start 0.51 1.02)
+		(end 1.78 1.02)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "9113a51d-0ed1-441c-925e-b8b089d7f793")
+	)
+	(fp_arc
+		(start 0 0.38)
+		(mid 0.19 0.19)
+		(end 0 0)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(locked no)
+		(uuid "9096513a-7d11-4637-8edf-2c13596e7f95")
+	)
+	(fp_arc
+		(start 0 -0.38)
+		(mid -0.19 -0.19)
+		(end -0 0)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(locked no)
+		(uuid "6d23bab2-355e-4bcb-842e-1a2281c3da08")
+	)
+	(pad "2" smd rect
+		(at 1.1 0 0)
+		(size 1 1.5)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "a1633a64-161b-4288-8f67-6a82258b4e90")
+	)
+	(pad "1" smd rect
+		(at -1.1 0 0)
+		(size 1 1.5)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "92c3ff59-8093-43ca-9b20-0073998e6cff")
+	)
+	(model "${KIPRJMOD}/../../src/parts/Littelfuse_0805L010YR/F0805_L2.1-W1.4-H0.8.step"
+		(offset
+			(xyz 0 0 -0)
+		)
+		(scale
+			(xyz 1 1 1)
+		)
+		(rotate
+			(xyz 0 0 0)
+		)
+	)
+	(embedded_fonts no)
+)

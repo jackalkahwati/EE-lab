@@ -1,0 +1,25 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+import is_auto_generated
+
+component Texas_Instruments_TLV3502AIDR_package:
+    # This trait marks this file as auto-generated
+    # If you want to manually change it, remove the trait
+    trait is_auto_generated<system="ato_part", source="easyeda:C131165", date="2026-06-12T18:48:10.339064+00:00", checksum="6c1234150fb526af32b87898ccd358d46cf1d2ec584d17b1c3942df94090c32d">
+
+    trait is_atomic_part<manufacturer="Texas Instruments", partnumber="TLV3502AIDR", footprint="SOIC-8_L4.9-W3.9-P1.27-LS6.0-BL.kicad_mod", symbol="TLV3502AIDR.kicad_sym", model="SOIC-8_L4.9-W3.9-H1.7-LS6.0-P1.27.STEP">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C131165", manufacturer="Texas Instruments", partno="TLV3502AIDR">
+    trait has_designator_prefix<prefix="U">
+    trait has_datasheet<datasheet="https://www.lcsc.com/datasheet/lcsc_datasheet_2304140030_Texas-Instruments-TLV3502AIDR_C131165.pdf">
+
+    # pins
+    signal IN_Aneg ~ pin 2
+    signal IN_Apos ~ pin 1
+    signal IN_Bneg ~ pin 4
+    signal IN_Bpos ~ pin 3
+    signal OUTA ~ pin 7
+    signal OUTB ~ pin 6
+    signal Vneg ~ pin 5
+    signal Vpos ~ pin 8

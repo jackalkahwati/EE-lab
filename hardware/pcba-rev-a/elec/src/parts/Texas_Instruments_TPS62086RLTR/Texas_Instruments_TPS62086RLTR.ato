@@ -1,0 +1,24 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+import is_auto_generated
+
+component Texas_Instruments_TPS62086RLTR_package:
+    # This trait marks this file as auto-generated
+    # If you want to manually change it, remove the trait
+    trait is_auto_generated<system="ato_part", source="easyeda:C2071344", date="2026-06-12T18:51:33.271223+00:00", checksum="706ed5491c442636d709cf3a32d1f235cff834f0a38c5a8b5abffc87d9107b04">
+
+    trait is_atomic_part<manufacturer="Texas Instruments", partnumber="TPS62086RLTR", footprint="VSON-7_L2.0-W2.0-P0.5-TL.kicad_mod", symbol="TPS62086RLTR.kicad_sym", model="VSON-7_L2.0-W2.0-H1.0-P0.5-TL.step">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C2071344", manufacturer="Texas Instruments", partno="TPS62086RLTR">
+    trait has_designator_prefix<prefix="U">
+    trait has_datasheet<datasheet="https://datasheet.lcsc.com/lcsc/2302221230_Texas-Instruments-TPS62086RLTR_C2071344.pdf">
+
+    # pins
+    signal EN ~ pin 1
+    signal FB ~ pin 3
+    signal GND ~ pin 5
+    signal PG ~ pin 2
+    signal SW ~ pin 6
+    signal VIN ~ pin 7
+    signal VOS ~ pin 4

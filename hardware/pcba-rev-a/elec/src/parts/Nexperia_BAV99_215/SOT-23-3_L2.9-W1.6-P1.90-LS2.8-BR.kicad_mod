@@ -1,0 +1,143 @@
+(footprint "Nexperia_BAV99_215:SOT-23-3_L2.9-W1.6-P1.90-LS2.8-BR"
+	(version 20241229)
+	(generator "faebryk_convert")
+	(generator_version "v5")
+	(layer "F.Cu")
+	(tedit "5DC5F6A4")
+	(uuid "e0f3d147-f081-4cb0-945a-b8fa1560f0e5")
+	(property "Reference" "REF**"
+		(at 0 -4.95)
+		(layer "F.SilkS")
+		(uuid "d811b97e-bddd-47f5-8f4f-c22a347913ea")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Value" "SOT-23-3_L2.9-W1.6-P1.90-LS2.8-BR"
+		(at 0 4.95)
+		(layer "F.Fab")
+		(uuid "8da14246-326c-4ef2-9206-b199cac24d8c")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(attr smd)
+	(fp_circle
+		(center 1.4 1.46)
+		(end 1.43 1.46)
+		(stroke
+			(width 0.06)
+			(type solid)
+		)
+		(layer "F.Fab")
+		(locked no)
+		(uuid "9c695ea6-9e55-45ff-bb49-a1a5b75d5e5a")
+	)
+	(fp_circle
+		(center 1.65 0.95)
+		(end 1.75 0.95)
+		(stroke
+			(width 0.2)
+			(type solid)
+		)
+		(layer "Cmts.User")
+		(locked no)
+		(uuid "34c107af-7456-4d46-9ec6-c251ff2a4900")
+	)
+	(fp_line
+		(start 0.88 -1.54)
+		(end -0.88 -1.54)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "6c9e72ec-6b55-497d-8db1-8c14849f3397")
+	)
+	(fp_line
+		(start -0.88 -1.54)
+		(end -0.88 -0.49)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "15d22631-e401-4c6a-8d57-83575c457af8")
+	)
+	(fp_line
+		(start 0.88 1.54)
+		(end -0.88 1.54)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "1729047c-b245-4633-8c5a-152db389e2aa")
+	)
+	(fp_line
+		(start -0.88 1.54)
+		(end -0.88 0.49)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "51aa3527-8a85-4030-831c-faebb92c6846")
+	)
+	(fp_line
+		(start 0.88 -0.46)
+		(end 0.88 0.46)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "3285bcb9-3aa7-46ae-be98-61890ed3f136")
+	)
+	(pad "1" smd rect
+		(at 1.24 0.95 0)
+		(size 1.07 0.6)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "a2aafcc5-7ec7-4db3-8e33-876f7137fbde")
+	)
+	(pad "2" smd rect
+		(at 1.24 -0.95 0)
+		(size 1.07 0.6)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "d912bbd7-3444-48ff-9e0e-6f91fcae2070")
+	)
+	(pad "3" smd rect
+		(at -1.24 0 0)
+		(size 1.07 0.6)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "2f5b62b7-96e3-436f-9c29-3779f490b347")
+	)
+	(model "${KIPRJMOD}/../../src/parts/Nexperia_BAV99_215/SOT-23-3L_L2.9-W1.6-H1.1-LS2.8-P0.95.step"
+		(offset
+			(xyz 0 0 -0)
+		)
+		(scale
+			(xyz 1 1 1)
+		)
+		(rotate
+			(xyz 0 0 270)
+		)
+	)
+	(embedded_fonts no)
+)

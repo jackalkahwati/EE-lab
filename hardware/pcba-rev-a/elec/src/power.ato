@@ -1,62 +1,24 @@
 """
 PowerTree — 24V control power in, relay coil rail, logic rails.
-
-J2 24V ─[F1 2A polyfuse]─[D1 TVS 33V]── 24V rail
-  24V ─[TPS54331 buck]── 5V_COIL   (relay coils via TPIC6B595 sinks)
-  5V  ─[TPS62086 buck]── 3V3_DIG   (RP2040, flash, shift registers, EEPROM)
-  5V  ─[TPS7A4901 LDO]── 3V3_ANA   (comparators, INA219, voltage-check dividers)
-
-Coil rail current telemetry: INA219 shunt on 5V_COIL (stuck-relay
-signature detection per relay-probe-matrix-rev-a.md section 6).
-Same stack/idiom as resonant-computer Tile-0 power.ato.
+Real parts (verified generated pinouts):
+  TPS54331DR (24V->5V buck), TPS62086RLTR (5V->3V3 dig buck),
+  TPS7A4901DGNR (5V->3V3 ana LDO), INA219AIDCNR (coil telemetry),
+  SMBJ33A input TVS, stdlib Fuse (24V-rated PPTC, solver-picked).
+Support passives are functional essentials (inductors, boot cap,
+feedback dividers); compensation networks (COMP/SS/NR) are noted TODO
+for the analog review before fab.
 """
 
 import ElectricPower
 import Resistor
 import Capacitor
-
-
-component Polyfuse_2A:
-    footprint = "Fuse_1812"
-    signal p1 ~ pin 1
-    signal p2 ~ pin 2
-
-component TVS_33V:
-    # SMBJ33A
-    footprint = "D_SMB"
-    signal cathode ~ pin 1
-    signal anode ~ pin 2
-
-component TPS54331:
-    # 24V -> 5V buck, 3A
-    footprint = "SOIC-8_3.9x4.9mm_P1.27mm"
-    signal vin ~ pin 7
-    signal gnd ~ pin 9
-    signal vout ~ pin 8   # via inductor; net label for layout
-    signal en ~ pin 4
-
-component TPS62086:
-    # 5V -> 3.3V buck
-    footprint = "SON-8_2x2mm"
-    signal vin ~ pin 1
-    signal gnd ~ pin 2
-    signal vout ~ pin 8
-
-component TPS7A4901:
-    # low-noise LDO
-    footprint = "MSOP-8"
-    signal vin ~ pin 1
-    signal gnd ~ pin 2
-    signal vout ~ pin 8
-
-component INA219:
-    footprint = "SOT-23-8"
-    signal vcc ~ pin 6
-    signal gnd ~ pin 5
-    signal vin_p ~ pin 8
-    signal vin_n ~ pin 7
-    signal sda ~ pin 1
-    signal scl ~ pin 2
+import Inductor
+import Fuse
+from "parts/Texas_Instruments_TPS54331DR/Texas_Instruments_TPS54331DR.ato" import Texas_Instruments_TPS54331DR_package
+from "parts/Texas_Instruments_TPS62086RLTR/Texas_Instruments_TPS62086RLTR.ato" import Texas_Instruments_TPS62086RLTR_package
+from "parts/Texas_Instruments_TPS7A4901DGNR/Texas_Instruments_TPS7A4901DGNR.ato" import Texas_Instruments_TPS7A4901DGNR_package
+from "parts/Texas_Instruments_INA219AIDCNR/Texas_Instruments_INA219AIDCNR.ato" import Texas_Instruments_INA219AIDCNR_package
+from "parts/Littelfuse_SMBJ33A/Littelfuse_SMBJ33A.ato" import Littelfuse_SMBJ33A_package
 
 
 module PowerTree:
@@ -64,37 +26,99 @@ module PowerTree:
     v5_coil = new ElectricPower
     v3v3_dig = new ElectricPower
     v3v3_ana = new ElectricPower
+    signal sda
+    signal scl
 
-    fuse = new Polyfuse_2A
-    tvs = new TVS_33V
-    buck24 = new TPS54331
-    buck5 = new TPS62086
-    ldo_ana = new TPS7A4901
-    coil_mon = new INA219
+    fuse = new Fuse
+    fuse.trip_current = 2A +/- 20%
+
+    tvs = new Littelfuse_SMBJ33A_package
+    buck24 = new Texas_Instruments_TPS54331DR_package
+    buck5 = new Texas_Instruments_TPS62086RLTR_package
+    ldo_ana = new Texas_Instruments_TPS7A4901DGNR_package
+    coil_mon = new Texas_Instruments_INA219AIDCNR_package
+
     shunt = new Resistor
-    shunt.resistance = 0.05ohm +/- 5%
+    shunt.resistance = 0.05ohm +/- 1%
 
-    v24.hv ~ fuse.p1
-    fuse.p2 ~ tvs.cathode
-    tvs.anode ~ v24.lv
-    fuse.p2 ~ buck24.vin
-    buck24.gnd ~ v24.lv
+    # 24V entry: fuse + TVS clamp
+    v24.hv ~ fuse.unnamed[0]
+    fuse.unnamed[1] ~ tvs.C
+    tvs.A ~ v24.lv
+
+    # 24V -> 5V buck: TPS54331 (VIN 2, GND 7, EN 3, PH 8, BOOT 1, VSENSE 5)
+    fuse.unnamed[1] ~ buck24.VIN
+    buck24.GND ~ v24.lv
+    buck24.EN ~ buck24.VIN
+    l_buck24 = new Inductor
+    l_buck24.inductance = 10uH +/- 20%
+    c_boot = new Capacitor
+    c_boot.capacitance = 100nF +/- 10%
+    buck24.BOOT ~ c_boot.unnamed[0]
+    c_boot.unnamed[1] ~ buck24.PH
+    buck24.PH ~ l_buck24.unnamed[0]
+    signal v5_raw
+    l_buck24.unnamed[1] ~ v5_raw
+    # feedback: 0.8V ref, 5V out -> 10.5k / 2k
+    fb24_top = new Resistor
+    fb24_top.resistance = 10.5kohm +/- 1%
+    fb24_bot = new Resistor
+    fb24_bot.resistance = 2kohm +/- 1%
+    v5_raw ~ fb24_top.unnamed[0]
+    fb24_top.unnamed[1] ~ buck24.VSENSE
+    buck24.VSENSE ~ fb24_bot.unnamed[0]
+    fb24_bot.unnamed[1] ~ v24.lv
+    # TODO analog review: COMP RC + SS cap values before fab
 
     # coil rail through the telemetry shunt
-    buck24.vout ~ shunt.unnamed[0]
+    v5_raw ~ shunt.unnamed[0]
     shunt.unnamed[1] ~ v5_coil.hv
-    coil_mon.vin_p ~ shunt.unnamed[0]
-    coil_mon.vin_n ~ shunt.unnamed[1]
-    coil_mon.vcc ~ v3v3_dig.hv
-    coil_mon.gnd ~ v24.lv
+    coil_mon.INpos ~ shunt.unnamed[0]
+    coil_mon.INneg ~ shunt.unnamed[1]
+    coil_mon.VS ~ v3v3_dig.hv
+    coil_mon.GND ~ v24.lv
+    coil_mon.SDA ~ sda
+    coil_mon.SCL ~ scl
+    coil_mon.A0 ~ v24.lv
+    coil_mon.A1 ~ v24.lv
 
-    buck24.vout ~ buck5.vin
-    buck5.gnd ~ v24.lv
-    buck5.vout ~ v3v3_dig.hv
+    # 5V -> 3V3 dig buck: TPS62086 (VIN 7, GND 5, SW 6, FB 3, EN 1, VOS 4)
+    v5_raw ~ buck5.VIN
+    buck5.GND ~ v24.lv
+    buck5.EN ~ buck5.VIN
+    l_buck5 = new Inductor
+    l_buck5.inductance = 2.2uH +/- 20%
+    buck5.SW ~ l_buck5.unnamed[0]
+    l_buck5.unnamed[1] ~ v3v3_dig.hv
+    buck5.VOS ~ v3v3_dig.hv
+    # feedback: 0.45V ref, 3.3V out -> 100k / 15.8k
+    fb5_top = new Resistor
+    fb5_top.resistance = 100kohm +/- 1%
+    fb5_bot = new Resistor
+    fb5_bot.resistance = 15.8kohm +/- 1%
+    v3v3_dig.hv ~ fb5_top.unnamed[0]
+    fb5_top.unnamed[1] ~ buck5.FB
+    buck5.FB ~ fb5_bot.unnamed[0]
+    fb5_bot.unnamed[1] ~ v24.lv
 
-    buck24.vout ~ ldo_ana.vin
-    ldo_ana.gnd ~ v24.lv
-    ldo_ana.vout ~ v3v3_ana.hv
+    # 5V -> 3V3 ana LDO: TPS7A4901 (IN 8, GND 4, OUT 1, FB 2, EN 5, NR 6)
+    v5_raw ~ ldo_ana.IN
+    ldo_ana.GND ~ v24.lv
+    ldo_ana.EN ~ ldo_ana.IN
+    ldo_ana.OUT ~ v3v3_ana.hv
+    # feedback: 1.194V ref, 3.3V out -> 35.7k / 20.5k
+    fbl_top = new Resistor
+    fbl_top.resistance = 35.7kohm +/- 1%
+    fbl_bot = new Resistor
+    fbl_bot.resistance = 20.5kohm +/- 1%
+    v3v3_ana.hv ~ fbl_top.unnamed[0]
+    fbl_top.unnamed[1] ~ ldo_ana.FB
+    ldo_ana.FB ~ fbl_bot.unnamed[0]
+    fbl_bot.unnamed[1] ~ v24.lv
+    c_nr = new Capacitor
+    c_nr.capacitance = 10nF +/- 10%
+    ldo_ana.NR_SS ~ c_nr.unnamed[0]
+    c_nr.unnamed[1] ~ v24.lv
 
     v5_coil.lv ~ v24.lv
     v3v3_dig.lv ~ v24.lv

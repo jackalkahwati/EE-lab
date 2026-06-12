@@ -1,0 +1,20 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+import is_auto_generated
+
+component Littelfuse_0805L010YR_package:
+
+    trait is_atomic_part<manufacturer="Littelfuse", partnumber="0805L010YR", footprint="F0805.kicad_mod", symbol="0805L010YR.kicad_sym", model="F0805_L2.1-W1.4-H0.8.step">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C207020", manufacturer="Littelfuse", partno="0805L010YR">
+    trait has_designator_prefix<prefix="U">
+    trait has_datasheet<datasheet="https://www.lcsc.com/datasheet/lcsc_datasheet_2304140030_Littelfuse-0805L010YR_C207020.pdf">
+
+    # pins
+    pin 2
+    pin 1
+
+    # EE-lab pin aliases
+    signal p1 ~ pin 1
+    signal p2 ~ pin 2

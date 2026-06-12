@@ -1,0 +1,20 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+import is_auto_generated
+
+component Littelfuse_SMAJ24CA_package:
+
+    trait is_atomic_part<manufacturer="Littelfuse", partnumber="SMAJ24CA", footprint="SMA_L4.4-W2.6-LS5.0-BI.kicad_mod", symbol="SMAJ24CA-C148223.kicad_sym", model="SMA_L4.3-W2.5-H2.1-LS5.0.step">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C148223", manufacturer="Littelfuse", partno="SMAJ24CA">
+    trait has_designator_prefix<prefix="D">
+    trait has_datasheet<datasheet="https://www.lcsc.com/datasheet/lcsc_datasheet_2304140030_Littelfuse-SMAJ24CA_C148223.pdf">
+
+    # pins
+    pin 2
+    pin 1
+
+    # EE-lab pin aliases (datasheet-verified)
+    signal p1 ~ pin 1
+    signal p2 ~ pin 2

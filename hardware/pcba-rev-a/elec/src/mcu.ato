@@ -1,21 +1,18 @@
 """
 Control — Raspberry Pi Pico 2 module (socketed) + TPIC6B595 coil-sink
-chain + watchdog.
+chain + watchdog. Real parts: TPIC6B595DWR, TPS3823-33DBVR,
+24AA025UIDT-I/OT (verified generated pinouts).
 
-Rev A decision (2026-06-12): socketed Pico 2 module instead of chip-down
-RP2040 — kills the crystal/QSPI/USB-routing bring-up risk for $5, and the
-USB-C/flash live on the module. The module IS the Raspberry Pi silicon;
-a full Linux Pi is deliberately NOT used here (relay interlock timing
-wants an MCU; the station PC is the smart layer).
-
-Line protocol to station software: ROUTE / OPEN ALL / CHECK / CAL
-(relay-probe-matrix-rev-a.md section 6). Watchdog drops all coil power
-if the control link goes silent >250 ms.
+Pico module is not an LCSC part — stays a local component (footprint in
+the floorplan board); bind as a local atomic part at layout sync.
+Watchdog drops all coil power if the control link goes silent >250 ms.
 91 coil channels (88 matrix + 3 reference block) = 12x TPIC6B595.
 """
 
 import ElectricPower
-import Resistor
+from "parts/Texas_Instruments_TPIC6B595DWR/Texas_Instruments_TPIC6B595DWR.ato" import Texas_Instruments_TPIC6B595DWR_package
+from "parts/Texas_Instruments_TPS3823_33DBVR/Texas_Instruments_TPS3823_33DBVR.ato" import Texas_Instruments_TPS3823_33DBVR_package
+from "parts/Microchip_Tech_24AA025UIDT_I_OT/Microchip_Tech_24AA025UIDT_I_OT.ato" import Microchip_Tech_24AA025UIDT_I_OT_package
 
 
 component PicoModule:
@@ -31,34 +28,6 @@ component PicoModule:
     signal sda ~ pin 9          # GP6
     signal scl ~ pin 10         # GP7
     signal wdi ~ pin 11         # GP8: watchdog kick
-    signal vcheck_in1 ~ pin 31  # GP26/ADC0: pre-connect window outputs
-    signal vcheck_in2 ~ pin 32  # GP27/ADC1
-
-component TPIC6B595:
-    # 8-ch power shift register, open-drain sinks for relay coils
-    footprint = "SOIC-20W"
-    signal vcc ~ pin 2
-    signal gnd ~ pin 10
-    signal ser_in ~ pin 3
-    signal ser_out ~ pin 18
-    signal srck ~ pin 13
-    signal rck ~ pin 12
-    signal g_n ~ pin 9
-
-component TPS3823:
-    # watchdog supervisor
-    footprint = "SOT-23-5"
-    signal vdd ~ pin 5
-    signal gnd ~ pin 2
-    signal wdi ~ pin 4
-    signal reset_n ~ pin 1
-
-component EEPROM_24AA025UID:
-    footprint = "SOT-23-5"
-    signal vcc ~ pin 5
-    signal gnd ~ pin 2
-    signal sda ~ pin 3
-    signal scl ~ pin 1
 
 
 module Control:
@@ -68,83 +37,121 @@ module Control:
     signal scl
 
     mcu = new PicoModule
-    wdt = new TPS3823
-    cal_eeprom = new EEPROM_24AA025UID
+    wdt = new Texas_Instruments_TPS3823_33DBVR_package
+    cal_eeprom = new Microchip_Tech_24AA025UIDT_I_OT_package
 
-    # 12-deep coil sink chain
-    sr1 = new TPIC6B595
-    sr2 = new TPIC6B595
-    sr3 = new TPIC6B595
-    sr4 = new TPIC6B595
-    sr5 = new TPIC6B595
-    sr6 = new TPIC6B595
-    sr7 = new TPIC6B595
-    sr8 = new TPIC6B595
-    sr9 = new TPIC6B595
-    sr10 = new TPIC6B595
-    sr11 = new TPIC6B595
-    sr12 = new TPIC6B595
+    sr1 = new Texas_Instruments_TPIC6B595DWR_package
+    sr2 = new Texas_Instruments_TPIC6B595DWR_package
+    sr3 = new Texas_Instruments_TPIC6B595DWR_package
+    sr4 = new Texas_Instruments_TPIC6B595DWR_package
+    sr5 = new Texas_Instruments_TPIC6B595DWR_package
+    sr6 = new Texas_Instruments_TPIC6B595DWR_package
+    sr7 = new Texas_Instruments_TPIC6B595DWR_package
+    sr8 = new Texas_Instruments_TPIC6B595DWR_package
+    sr9 = new Texas_Instruments_TPIC6B595DWR_package
+    sr10 = new Texas_Instruments_TPIC6B595DWR_package
+    sr11 = new Texas_Instruments_TPIC6B595DWR_package
+    sr12 = new Texas_Instruments_TPIC6B595DWR_package
 
     mcu.vsys ~ v3v3.hv
     mcu.gnd ~ v3v3.lv
 
     mcu.sda ~ sda
     mcu.scl ~ scl
-    cal_eeprom.vcc ~ v3v3.hv
-    cal_eeprom.gnd ~ v3v3.lv
-    cal_eeprom.sda ~ sda
-    cal_eeprom.scl ~ scl
+    cal_eeprom.VCC ~ v3v3.hv
+    cal_eeprom.VSS ~ v3v3.lv
+    cal_eeprom.SDA ~ sda
+    cal_eeprom.SCL ~ scl
+    cal_eeprom.A0 ~ v3v3.lv
+    cal_eeprom.A1 ~ v3v3.lv
 
-    wdt.vdd ~ v3v3.hv
-    wdt.gnd ~ v3v3.lv
-    wdt.wdi ~ mcu.wdi
-    wdt.reset_n ~ mcu.oe_n   # watchdog timeout -> sinks disabled -> all open
+    wdt.VDD ~ v3v3.hv
+    wdt.GND ~ v3v3.lv
+    wdt.WDI ~ mcu.wdi
+    wdt.nRESET ~ mcu.oe_n   # watchdog timeout -> sinks disabled -> all open
+    wdt.nMR ~ v3v3.hv
 
-    sr1.ser_in ~ mcu.spi_mosi
-    sr1.ser_out ~ sr2.ser_in
-    sr2.ser_out ~ sr3.ser_in
-    sr3.ser_out ~ sr4.ser_in
-    sr4.ser_out ~ sr5.ser_in
-    sr5.ser_out ~ sr6.ser_in
-    sr6.ser_out ~ sr7.ser_in
-    sr7.ser_out ~ sr8.ser_in
-    sr8.ser_out ~ sr9.ser_in
-    sr9.ser_out ~ sr10.ser_in
-    sr10.ser_out ~ sr11.ser_in
-    sr11.ser_out ~ sr12.ser_in
-    sr1.srck ~ mcu.spi_sck
-    sr2.srck ~ mcu.spi_sck
-    sr3.srck ~ mcu.spi_sck
-    sr4.srck ~ mcu.spi_sck
-    sr5.srck ~ mcu.spi_sck
-    sr6.srck ~ mcu.spi_sck
-    sr7.srck ~ mcu.spi_sck
-    sr8.srck ~ mcu.spi_sck
-    sr9.srck ~ mcu.spi_sck
-    sr10.srck ~ mcu.spi_sck
-    sr11.srck ~ mcu.spi_sck
-    sr12.srck ~ mcu.spi_sck
-    sr1.rck ~ mcu.latch
-    sr2.rck ~ mcu.latch
-    sr3.rck ~ mcu.latch
-    sr4.rck ~ mcu.latch
-    sr5.rck ~ mcu.latch
-    sr6.rck ~ mcu.latch
-    sr7.rck ~ mcu.latch
-    sr8.rck ~ mcu.latch
-    sr9.rck ~ mcu.latch
-    sr10.rck ~ mcu.latch
-    sr11.rck ~ mcu.latch
-    sr12.rck ~ mcu.latch
-    sr1.g_n ~ mcu.oe_n
-    sr2.g_n ~ mcu.oe_n
-    sr3.g_n ~ mcu.oe_n
-    sr4.g_n ~ mcu.oe_n
-    sr5.g_n ~ mcu.oe_n
-    sr6.g_n ~ mcu.oe_n
-    sr7.g_n ~ mcu.oe_n
-    sr8.g_n ~ mcu.oe_n
-    sr9.g_n ~ mcu.oe_n
-    sr10.g_n ~ mcu.oe_n
-    sr11.g_n ~ mcu.oe_n
-    sr12.g_n ~ mcu.oe_n
+    sr1.SERIN ~ mcu.spi_mosi
+    sr1.SEROUT ~ sr2.SERIN
+    sr2.SEROUT ~ sr3.SERIN
+    sr3.SEROUT ~ sr4.SERIN
+    sr4.SEROUT ~ sr5.SERIN
+    sr5.SEROUT ~ sr6.SERIN
+    sr6.SEROUT ~ sr7.SERIN
+    sr7.SEROUT ~ sr8.SERIN
+    sr8.SEROUT ~ sr9.SERIN
+    sr9.SEROUT ~ sr10.SERIN
+    sr10.SEROUT ~ sr11.SERIN
+    sr11.SEROUT ~ sr12.SERIN
+    sr1.SRCK ~ mcu.spi_sck
+    sr2.SRCK ~ mcu.spi_sck
+    sr3.SRCK ~ mcu.spi_sck
+    sr4.SRCK ~ mcu.spi_sck
+    sr5.SRCK ~ mcu.spi_sck
+    sr6.SRCK ~ mcu.spi_sck
+    sr7.SRCK ~ mcu.spi_sck
+    sr8.SRCK ~ mcu.spi_sck
+    sr9.SRCK ~ mcu.spi_sck
+    sr10.SRCK ~ mcu.spi_sck
+    sr11.SRCK ~ mcu.spi_sck
+    sr12.SRCK ~ mcu.spi_sck
+    sr1.RCK ~ mcu.latch
+    sr2.RCK ~ mcu.latch
+    sr3.RCK ~ mcu.latch
+    sr4.RCK ~ mcu.latch
+    sr5.RCK ~ mcu.latch
+    sr6.RCK ~ mcu.latch
+    sr7.RCK ~ mcu.latch
+    sr8.RCK ~ mcu.latch
+    sr9.RCK ~ mcu.latch
+    sr10.RCK ~ mcu.latch
+    sr11.RCK ~ mcu.latch
+    sr12.RCK ~ mcu.latch
+    sr1.nG ~ mcu.oe_n
+    sr2.nG ~ mcu.oe_n
+    sr3.nG ~ mcu.oe_n
+    sr4.nG ~ mcu.oe_n
+    sr5.nG ~ mcu.oe_n
+    sr6.nG ~ mcu.oe_n
+    sr7.nG ~ mcu.oe_n
+    sr8.nG ~ mcu.oe_n
+    sr9.nG ~ mcu.oe_n
+    sr10.nG ~ mcu.oe_n
+    sr11.nG ~ mcu.oe_n
+    sr12.nG ~ mcu.oe_n
+    sr1.VCC ~ v3v3.hv
+    sr2.VCC ~ v3v3.hv
+    sr3.VCC ~ v3v3.hv
+    sr4.VCC ~ v3v3.hv
+    sr5.VCC ~ v3v3.hv
+    sr6.VCC ~ v3v3.hv
+    sr7.VCC ~ v3v3.hv
+    sr8.VCC ~ v3v3.hv
+    sr9.VCC ~ v3v3.hv
+    sr10.VCC ~ v3v3.hv
+    sr11.VCC ~ v3v3.hv
+    sr12.VCC ~ v3v3.hv
+    sr1.GND ~ v3v3.lv
+    sr2.GND ~ v3v3.lv
+    sr3.GND ~ v3v3.lv
+    sr4.GND ~ v3v3.lv
+    sr5.GND ~ v3v3.lv
+    sr6.GND ~ v3v3.lv
+    sr7.GND ~ v3v3.lv
+    sr8.GND ~ v3v3.lv
+    sr9.GND ~ v3v3.lv
+    sr10.GND ~ v3v3.lv
+    sr11.GND ~ v3v3.lv
+    sr12.GND ~ v3v3.lv
+    sr1.nSRCLR ~ v3v3.hv
+    sr2.nSRCLR ~ v3v3.hv
+    sr3.nSRCLR ~ v3v3.hv
+    sr4.nSRCLR ~ v3v3.hv
+    sr5.nSRCLR ~ v3v3.hv
+    sr6.nSRCLR ~ v3v3.hv
+    sr7.nSRCLR ~ v3v3.hv
+    sr8.nSRCLR ~ v3v3.hv
+    sr9.nSRCLR ~ v3v3.hv
+    sr10.nSRCLR ~ v3v3.hv
+    sr11.nSRCLR ~ v3v3.hv
+    sr12.nSRCLR ~ v3v3.hv

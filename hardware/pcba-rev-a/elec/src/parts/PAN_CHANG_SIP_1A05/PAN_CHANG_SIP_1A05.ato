@@ -1,0 +1,25 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+import is_auto_generated
+
+component PAN_CHANG_SIP_1A05_package:
+    """SIP-1A05"""
+
+    trait is_atomic_part<manufacturer="PAN CHANG", partnumber="SIP-1A05", footprint="RELAY-TH_SIP-1A05.kicad_mod", symbol="SIP-1A05.kicad_sym", model="RELAY-TH_L19.9-W5.4-H7.9-4P-P5.08.step">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C10496", manufacturer="PAN CHANG", partno="SIP-1A05">
+    trait has_designator_prefix<prefix="K">
+    trait has_datasheet<datasheet="https://www.lcsc.com/datasheet/lcsc_datasheet_1809191913_PAN-CHANG-SIP-1A05_C10496.pdf">
+
+    # pins
+    pin 3
+    pin 5
+    pin 1
+    pin 7
+
+    # EE-lab pin aliases (datasheet-verified)
+    signal coil_p ~ pin 5
+    signal coil_n ~ pin 7
+    signal com ~ pin 1
+    signal no ~ pin 3

@@ -1,0 +1,126 @@
+(footprint "Littelfuse_SMBJ33A:SMB_L4.6-W3.6-LS5.3-RD"
+	(version 20241229)
+	(generator "faebryk_convert")
+	(generator_version "v5")
+	(layer "F.Cu")
+	(tedit "5DC5F6A4")
+	(uuid "624789c8-8a51-49f2-acf9-0cf0e6419b87")
+	(property "Reference" "REF**"
+		(at 0 -4)
+		(layer "F.SilkS")
+		(uuid "4b3a755b-734c-4474-b767-3ad97a979285")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Value" "SMB_L4.6-W3.6-LS5.3-RD"
+		(at 0 4)
+		(layer "F.Fab")
+		(uuid "b0b52ce7-605a-4ccb-ab80-ad15885e5c10")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(attr smd)
+	(fp_circle
+		(center -2.65 1.8)
+		(end -2.62 1.8)
+		(stroke
+			(width 0.06)
+			(type solid)
+		)
+		(layer "F.Fab")
+		(locked no)
+		(uuid "bd1c1d41-d42a-44f6-a0c4-69b881eabcb8")
+	)
+	(fp_line
+		(start -1.02 -1.89)
+		(end -1.02 1.89)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "a8564a79-b001-483a-a4fb-c4003a4585c5")
+	)
+	(fp_line
+		(start -2.74 -1.89)
+		(end 2.74 -1.89)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "884b25f7-8eeb-48d5-b78b-e711d9b001b7")
+	)
+	(fp_line
+		(start -2.74 1.89)
+		(end 2.74 1.89)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "48991ad7-a011-4bc7-874c-cd55c8a0e229")
+	)
+	(fp_line
+		(start 2.74 -1.89)
+		(end 2.74 -1.3)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "cf1d8790-5f5a-4882-8f60-9690dd267c05")
+	)
+	(fp_line
+		(start 2.74 1.89)
+		(end 2.74 1.3)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "3973ad2c-37f2-4bb4-bc06-fbdbf5f3f712")
+	)
+	(pad "2" smd rect
+		(at 2.36 0 0)
+		(size 2.05 2.19)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "5381aad7-d88d-4d32-b824-1e076f27e44f")
+	)
+	(pad "1" smd rect
+		(at -2.36 0 0)
+		(size 2.05 2.19)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "f85fe70c-060f-4777-9129-88e05f32a574")
+	)
+	(model "${KIPRJMOD}/../../src/parts/Littelfuse_SMBJ33A/SMB_L4.6-W3.6-LS5.3-RD.step"
+		(offset
+			(xyz 0 0 -0)
+		)
+		(scale
+			(xyz 1 1 1)
+		)
+		(rotate
+			(xyz 0 0 0)
+		)
+	)
+	(embedded_fonts no)
+)

@@ -1,0 +1,27 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+import is_auto_generated
+
+component Texas_Instruments_TPS54331DR_package:
+    """Buck Step Down Regulator with 3.5 to 28 V Input and 0.8 to 25 V Output, -40 to 150 degC, 8-Pin SOIC (D), Green (RoHS  no SbBr)"""
+
+    # This trait marks this file as auto-generated
+    # If you want to manually change it, remove the trait
+    trait is_auto_generated<system="ato_part", source="easyeda:C9865", date="2026-06-12T18:43:08.523039+00:00", checksum="d73be2ead02283aa37509fef445774cc9d6cc5dc123b15487bf00e769d93acdf">
+
+    trait is_atomic_part<manufacturer="Texas Instruments", partnumber="TPS54331DR", footprint="SOIC-8_L5.0-W4.0-P1.27-LS6.0-BL.kicad_mod", symbol="TPS54331DR.kicad_sym", model="SOIC-8_L4.9-W3.9-H1.7-LS6.0-P1.27.STEP">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C9865", manufacturer="Texas Instruments", partno="TPS54331DR">
+    trait has_designator_prefix<prefix="U">
+    trait has_datasheet<datasheet="https://www.lcsc.com/datasheet/lcsc_datasheet_1808272040_Texas-Instruments-TPS54331DR_C9865.pdf">
+
+    # pins
+    signal BOOT ~ pin 1
+    signal COMP ~ pin 6
+    signal EN ~ pin 3
+    signal GND ~ pin 7
+    signal PH ~ pin 8
+    signal SS ~ pin 4
+    signal VIN ~ pin 2
+    signal VSENSE ~ pin 5

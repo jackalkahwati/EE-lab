@@ -1,42 +1,24 @@
 """
 Protection — per-probe chain, in order from the tip
-(relay-probe-matrix-rev-a.md section 3):
-
-probe ─[PTC 50mA]─┬─ node -> LaneSelector.probe
-                  ├─ TVS + steering diodes to +/-15V clamp rails
-                  ├─ 1M/100k divider -> window comparator (pre-connect
-                  │   voltage check, readable BEFORE any relay closes)
-                  └─ (discharge to GND_REF via the selector's reed)
+(relay-probe-matrix-rev-a.md section 3). Real parts:
+- BAV99,215 steering pair (SOT-23: pin3 = center K1+A2 = node;
+  pin2 = K2 -> clamp+; pin1 = A1 -> clamp-)
+- SMAJ24CA bidirectional TVS on each node
+- TLV3502AIDR dual comparator as the pre-connect window check
+- stdlib Fuse as the 50 mA resettable PTC
 """
 
 import ElectricPower
 import Resistor
-from "matrix.ato" import RelayReed5V
+import Fuse
+from "parts/PAN_CHANG_SIP_1A05/PAN_CHANG_SIP_1A05.ato" import PAN_CHANG_SIP_1A05_package
+from "parts/Nexperia_BAV99_215/Nexperia_BAV99_215.ato" import Nexperia_BAV99_215_package
+from "parts/Littelfuse_SMAJ24CA/Littelfuse_SMAJ24CA.ato" import Littelfuse_SMAJ24CA_package
+from "parts/Texas_Instruments_TLV3502AIDR/Texas_Instruments_TLV3502AIDR.ato" import Texas_Instruments_TLV3502AIDR_package
+from "parts/Littelfuse_0805L010YR/Littelfuse_0805L010YR.ato" import Littelfuse_0805L010YR_package
 
 
-component PTC_50mA:
-    footprint = "R_0805"
-    signal p1 ~ pin 1
-    signal p2 ~ pin 2
 
-component SteeringPair_BAV99:
-    footprint = "SOT-23"
-    signal a ~ pin 1       # node
-    signal clamp_p ~ pin 3 # +15V rail
-    signal clamp_n ~ pin 2 # -15V rail
-
-component TVS_Bidir_24V:
-    footprint = "D_SOD-323"
-    signal p1 ~ pin 1
-    signal p2 ~ pin 2
-
-component WindowComparator_TLV3502:
-    footprint = "MSOP-8"
-    signal vcc ~ pin 8
-    signal gnd ~ pin 4
-    signal vin ~ pin 1
-    signal out_hi ~ pin 7
-    signal out_lo ~ pin 6
 
 
 module ProbeProtection:
@@ -45,56 +27,63 @@ module ProbeProtection:
     signal node         # to LaneSelector.probe
     signal vcheck_hi    # to MCU GPIO
     signal vcheck_lo
-    clamp_p = new ElectricPower  # +15V clamp rail
-    clamp_n = new ElectricPower  # -15V clamp rail
+    clamp_p = new ElectricPower  # +15V clamp rail (source TBD)
+    clamp_n = new ElectricPower  # -15V clamp rail (source TBD)
     v3v3 = new ElectricPower
 
-    ptc = new PTC_50mA
-    steer = new SteeringPair_BAV99
-    tvs = new TVS_Bidir_24V
-    rdiv_top = new Resistor
-    rdiv_bot = new Resistor
-    comp = new WindowComparator_TLV3502
+    # 0805L010YR: 100 mA hold / 0.25 A trip — Rev A substitute for the
+    # spec'd 50 mA hold (closest stocked 0805 PPTC); revisit at analog review
+    ptc = new Littelfuse_0805L010YR_package
 
-    rdiv_top.resistance = 1Mohm +/- 5%
-    rdiv_top.package = "0402"
-    rdiv_bot.resistance = 100kohm +/- 5%
-    rdiv_bot.package = "0402"
+    steer = new Nexperia_BAV99_215_package
+    tvs = new Littelfuse_SMAJ24CA_package
+    comp = new Texas_Instruments_TLV3502AIDR_package
+
+    rdiv_top = new Resistor
+    rdiv_top.resistance = 1Mohm +/- 1%
+    rdiv_bot = new Resistor
+    rdiv_bot.resistance = 100kohm +/- 1%
 
     tip ~ ptc.p1
     ptc.p2 ~ node
-    node ~ steer.a
+    node ~ steer.node
     steer.clamp_p ~ clamp_p.hv
     steer.clamp_n ~ clamp_n.hv
     node ~ tvs.p1
     tvs.p2 ~ v3v3.lv
 
+    # divider -> both comparator inputs (window thresholds set by shared
+    # reference chain; values at analog review)
     node ~ rdiv_top.unnamed[0]
-    rdiv_top.unnamed[1] ~ comp.vin
-    comp.vin ~ rdiv_bot.unnamed[0]
+    rdiv_top.unnamed[1] ~ comp.IN_Apos
+    comp.IN_Apos ~ comp.IN_Bneg
+    comp.IN_Apos ~ rdiv_bot.unnamed[0]
     rdiv_bot.unnamed[1] ~ v3v3.lv
-    comp.vcc ~ v3v3.hv
-    comp.gnd ~ v3v3.lv
-    comp.out_hi ~ vcheck_hi
-    comp.out_lo ~ vcheck_lo
+    comp.Vpos ~ v3v3.hv
+    comp.Vneg ~ v3v3.lv
+    comp.OUTA ~ vcheck_hi
+    comp.OUTB ~ vcheck_lo
 
 
 module ReferenceBlock:
-    """Cal references behind a dedicated reed pair: 0.01% 1k, 0.01% 100k,
-    dead short, open — routable to any lane for self-test (section 5)."""
-    signal ref_bus       # lands on dmm_hi lane via its own reed
+    """Cal references behind dedicated reeds: 0.01%-class 1k, 100k,
+    dead short — routable onto DMM_HI for self-test (section 5)."""
+    signal ref_bus
     v3v3 = new ElectricPower
+    coil_bus = new ElectricPower
 
     r1k = new Resistor
-    r1k.resistance = 1kohm +/- 5%
-    r1k.package = "0805"
+    r1k.resistance = 1kohm +/- 0.1%
     r100k = new Resistor
-    r100k.resistance = 100kohm +/- 5%
-    r100k.package = "0805"
+    r100k.resistance = 100kohm +/- 0.1%
 
-    k_1k = new RelayReed5V
-    k_100k = new RelayReed5V
-    k_short = new RelayReed5V
+    k_1k = new PAN_CHANG_SIP_1A05_package
+    k_100k = new PAN_CHANG_SIP_1A05_package
+    k_short = new PAN_CHANG_SIP_1A05_package
+
+    k_1k.coil_p ~ coil_bus.hv
+    k_100k.coil_p ~ coil_bus.hv
+    k_short.coil_p ~ coil_bus.hv
 
     ref_bus ~ k_1k.com
     k_1k.no ~ r1k.unnamed[0]

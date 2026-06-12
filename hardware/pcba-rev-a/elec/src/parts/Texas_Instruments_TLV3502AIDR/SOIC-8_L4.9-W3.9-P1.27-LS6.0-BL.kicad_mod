@@ -1,0 +1,183 @@
+(footprint "Texas_Instruments_TLV3502AIDR:SOIC-8_L4.9-W3.9-P1.27-LS6.0-BL"
+	(version 20241229)
+	(generator "faebryk_convert")
+	(generator_version "v5")
+	(layer "F.Cu")
+	(tedit "5DC5F6A4")
+	(uuid "25745366-412a-40fc-af93-dd558086b3c2")
+	(property "Reference" "REF**"
+		(at 0 -6.57)
+		(layer "F.SilkS")
+		(uuid "2a23140c-c12d-4e84-a3f6-a47b5e2ed665")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Value" "SOIC-8_L4.9-W3.9-P1.27-LS6.0-BL"
+		(at 0 6.57)
+		(layer "F.Fab")
+		(uuid "0326d67a-39d0-4f72-86cc-0824ea90963c")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(attr smd)
+	(fp_circle
+		(center -2.45 3)
+		(end -2.42 3)
+		(stroke
+			(width 0.06)
+			(type solid)
+		)
+		(layer "F.Fab")
+		(locked no)
+		(uuid "13e951c4-1dba-4027-80e0-3344a0afe011")
+	)
+	(fp_circle
+		(center -1.91 3.4)
+		(end -1.76 3.4)
+		(stroke
+			(width 0.3)
+			(type solid)
+		)
+		(layer "Cmts.User")
+		(locked no)
+		(uuid "5c2cbb89-007d-4892-b4ba-4600805bdaaa")
+	)
+	(fp_circle
+		(center -1.91 0.77)
+		(end -1.76 0.77)
+		(stroke
+			(width 0.3)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(locked no)
+		(uuid "99f7334e-726b-4b08-b2fd-cfd4a084f581")
+	)
+	(fp_circle
+		(center -2.65 2.77)
+		(end -2.5 2.77)
+		(stroke
+			(width 0.3)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(locked no)
+		(uuid "1240b086-d453-427a-b0e1-c5d6d73455ab")
+	)
+	(fp_line
+		(start -2.53 1.52)
+		(end -2.53 -1.52)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "9416f11d-28bc-499c-857a-bf753c01fe5f")
+	)
+	(fp_line
+		(start -2.53 -1.52)
+		(end 2.53 -1.52)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "4a850d78-f796-4a1c-a3ed-cd530a541036")
+	)
+	(fp_line
+		(start 2.53 -1.52)
+		(end 2.53 1.52)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "bcf4141b-e965-4e09-ae83-6a2b46dc2fe1")
+	)
+	(fp_line
+		(start 2.53 1.52)
+		(end -2.53 1.52)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "42f87d96-474d-4de5-85e4-66826969bcdf")
+	)
+	(pad "5" smd oval
+		(at 1.9 -2.57 0)
+		(size 0.59 2.05)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "fe839060-8d35-45dc-b002-e95f83c9c75f")
+	)
+	(pad "6" smd oval
+		(at 0.63 -2.57 0)
+		(size 0.59 2.05)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "32c07a4e-513e-4b2f-9b78-0f1610e3134f")
+	)
+	(pad "7" smd oval
+		(at -0.63 -2.57 0)
+		(size 0.59 2.05)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "6987cc30-388b-4d1e-a38d-da68fa4359f7")
+	)
+	(pad "8" smd oval
+		(at -1.91 -2.57 0)
+		(size 0.59 2.05)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "8f3bd783-3c78-4fb6-aafe-bc6f95fd3a42")
+	)
+	(pad "4" smd oval
+		(at 1.9 2.57 0)
+		(size 0.59 2.05)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "8fd25af7-eafb-4856-a5a9-bbf2cefd1279")
+	)
+	(pad "3" smd oval
+		(at 0.63 2.57 0)
+		(size 0.59 2.05)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "81fb005b-9222-4863-8843-b47a9c709ae5")
+	)
+	(pad "2" smd oval
+		(at -0.63 2.57 0)
+		(size 0.59 2.05)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "72543d04-a13f-4171-922a-222162c345d5")
+	)
+	(pad "1" smd oval
+		(at -1.91 2.57 0)
+		(size 0.59 2.05)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "57feaf7b-a909-425a-9c42-c4afc53a3104")
+	)
+	(model "${KIPRJMOD}/../../src/parts/Texas_Instruments_TLV3502AIDR/SOIC-8_L4.9-W3.9-H1.7-LS6.0-P1.27.STEP"
+		(offset
+			(xyz 0 0 -0)
+		)
+		(scale
+			(xyz 1 1 1)
+		)
+		(rotate
+			(xyz 0 0 0)
+		)
+	)
+	(embedded_fonts no)
+)

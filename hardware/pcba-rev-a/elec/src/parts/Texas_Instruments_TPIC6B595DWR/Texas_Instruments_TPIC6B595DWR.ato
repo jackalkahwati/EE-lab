@@ -1,0 +1,35 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+import is_auto_generated
+
+component Texas_Instruments_TPIC6B595DWR_package:
+    # This trait marks this file as auto-generated
+    # If you want to manually change it, remove the trait
+    trait is_auto_generated<system="ato_part", source="easyeda:C7094", date="2026-06-12T18:40:18.024748+00:00", checksum="cc092e9d0e22a84182e938f0979305c2e80d221b7575825948b4790f11f05d94">
+
+    trait is_atomic_part<manufacturer="Texas Instruments", partnumber="TPIC6B595DWR", footprint="SOIC-20_L13.0-W7.6-P1.27-LS10.3-BL.kicad_mod", symbol="TPIC6B595DWR.kicad_sym", model="SOIC-20_L12.8-W7.5-H2.7-LS10.3-P1.27.step">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C7094", manufacturer="Texas Instruments", partno="TPIC6B595DWR">
+    trait has_designator_prefix<prefix="U">
+    trait has_datasheet<datasheet="https://www.lcsc.com/datasheet/lcsc_datasheet_1811081921_Texas-Instruments-TPIC6B595DWR_C7094.pdf">
+
+    # pins
+    signal DRAIN0 ~ pin 4
+    signal DRAIN1 ~ pin 5
+    signal DRAIN2 ~ pin 6
+    signal DRAIN3 ~ pin 7
+    signal DRAIN4 ~ pin 14
+    signal DRAIN5 ~ pin 15
+    signal DRAIN6 ~ pin 16
+    signal DRAIN7 ~ pin 17
+    signal GND ~ pin 10
+    GND ~ pin 11
+    GND ~ pin 19
+    signal RCK ~ pin 12
+    signal SERIN ~ pin 3
+    signal SEROUT ~ pin 18
+    signal SRCK ~ pin 13
+    signal VCC ~ pin 2
+    signal nG ~ pin 9
+    signal nSRCLR ~ pin 8

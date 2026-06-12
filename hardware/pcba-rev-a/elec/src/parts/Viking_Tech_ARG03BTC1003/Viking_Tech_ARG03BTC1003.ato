@@ -1,0 +1,19 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+import is_auto_generated
+
+component Viking_Tech_ARG03BTC1003_package:
+    # This trait marks this file as auto-generated
+    # If you want to manually change it, remove the trait
+    trait is_auto_generated<system="ato_part", source="easyeda:C335088", date="2026-06-12T19:16:18.084014+00:00", checksum="4866c70fe0208f19c1f979d92aa3acf5264f74864aa9cb5209b0b1f2cd4d0c50">
+
+    trait is_atomic_part<manufacturer="Viking Tech", partnumber="ARG03BTC1003", footprint="R0603.kicad_mod", symbol="ARG03BTC1003.kicad_sym", model="R0603.STEP">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C335088", manufacturer="Viking Tech", partno="ARG03BTC1003">
+    trait has_designator_prefix<prefix="R">
+    trait has_datasheet<datasheet="https://wmsc.lcsc.com/wmsc/upload/file/pdf/v2/lcsc/2304140030_Viking-Tech-ARG03BTC1003_C335088.pdf">
+
+    # pins
+    pin 2
+    pin 1

@@ -1,0 +1,25 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+import is_auto_generated
+
+component Texas_Instruments_INA219AIDCNR_package:
+    # This trait marks this file as auto-generated
+    # If you want to manually change it, remove the trait
+    trait is_auto_generated<system="ato_part", source="easyeda:C87469", date="2026-06-12T19:09:03.324089+00:00", checksum="74ad36c88f59c07992eafa5b16c26b36a3ce454b5bfd7278f488a40081840cc0">
+
+    trait is_atomic_part<manufacturer="Texas Instruments", partnumber="INA219AIDCNR", footprint="SOT-23-8_L3.0-W1.7-P0.65-LS2.8-BR.kicad_mod", symbol="INA219AIDCNR.kicad_sym", model="SOT-23-8_L2.9-W1.6-H1.5-LS2.8-P0.65.step">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C87469", manufacturer="Texas Instruments", partno="INA219AIDCNR">
+    trait has_designator_prefix<prefix="U">
+    trait has_datasheet<datasheet="https://www.lcsc.com/datasheet/lcsc_datasheet_1811032121_Texas-Instruments-INA219AIDCNR_C87469.pdf">
+
+    # pins
+    signal A0 ~ pin 7
+    signal A1 ~ pin 8
+    signal GND ~ pin 3
+    signal INneg ~ pin 2
+    signal INpos ~ pin 1
+    signal SCL ~ pin 5
+    signal SDA ~ pin 6
+    signal VS ~ pin 4
