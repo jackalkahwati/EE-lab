@@ -25,20 +25,23 @@ const RUN_TIMEOUT_MS = 20 * 60 * 1000
 type PipelineEvent =
   | { type: 'stage'; id: string; state: string; failReason?: string }
   | { type: 'log'; stage: string; text: string; level?: string }
-  | { type: 'done'; status: 'PASSED' | 'GATE FAILED'; boardPath: string }
+  | { type: 'design'; spec: Record<string, unknown> }
+  | { type: 'done'; status: 'PASSED' | 'GATE FAILED'; boardPath: string; fabZip?: string }
   | { type: 'error'; message: string }
 
 const globalState = globalThis as unknown as { __pipelineRunning?: boolean }
 
-export async function GET() {
+export async function GET(req: Request) {
   if (globalState.__pipelineRunning) {
     return new Response('a pipeline run is already in progress', { status: 409 })
   }
   globalState.__pipelineRunning = true
 
+  const prompt = new URL(req.url).searchParams.get('prompt') ?? ''
   const appDir = process.cwd()
   const hwDir = path.resolve(appDir, '../../hardware/pcba-rev-a')
   const flroute = path.join(hwDir, 'tools/flroute/target/release/flroute')
+  const ATO = process.env.ATO_BIN || `${process.env.HOME}/.local/bin/ato`
   const encoder = new TextEncoder()
   let child: ChildProcess | null = null
   let cancelled = false
@@ -107,10 +110,34 @@ export async function GET() {
         const wsBoard = path.join(wsLayout, 'rev-a-routed.kicad_pcb')
         log('design', `workspace: ${ws} (working board untouched)`)
 
-        // ---- stage 1: design (cached — schematic edits are a separate AI stage)
+        // ---- stage 1: design — AI interprets the prompt, then `ato build` gate
         send({ type: 'stage', id: 'design', state: 'running' })
-        log('design', 'using existing green netlist from ato build (172 components)')
-        log('design', 'GATE design: BUILD GREEN (cached) — PASS', 'ok')
+        const specPath = path.join(ws, 'design_spec.json')
+        await exec('design', 'python3', [
+          path.join(appDir, 'scripts/ai_design.py'),
+          prompt,
+          specPath,
+        ])
+        try {
+          const spec = JSON.parse(fs.readFileSync(specPath, 'utf8'))
+          send({ type: 'design', spec })
+        } catch {
+          log('design', 'design spec unreadable — continuing on FL-1 baseline', 'warn')
+        }
+        // hard gate: the atopile build must be GREEN (the real Stage-1 gate)
+        log('design', 'ato build — compiling .ato design-of-record…')
+        const build = await exec('design', ATO, ['build'], { cwd: hwDir })
+        const buildOk =
+          build.code === 0 || build.out.includes('Build successful')
+        if (!buildOk) {
+          send({ type: 'stage', id: 'design', state: 'failed', failReason: 'ato build not GREEN' })
+          send({ type: 'stage', id: 'placement', state: 'blocked' })
+          send({ type: 'stage', id: 'routing', state: 'blocked' })
+          send({ type: 'stage', id: 'validation', state: 'blocked' })
+          send({ type: 'done', status: 'GATE FAILED', boardPath: wsBoard })
+          return
+        }
+        log('design', 'GATE design: ato build GREEN — PASS', 'ok')
         send({ type: 'stage', id: 'design', state: 'passed' })
 
         // ---- stage 2: placement + hard gate --------------------------------
@@ -162,7 +189,35 @@ export async function GET() {
           send({ type: 'done', status: 'GATE FAILED', boardPath: wsBoard })
           return
         }
-        log('placement', 'GATE placement — PASS', 'ok')
+        log('placement', 'GATE placement (HPWL/overlap) — PASS', 'ok')
+
+        // self-heal: the atopile netlist has no fiducial parts; assembly needs
+        // >= 3. Inject them into free space before the DFM gate (idempotent).
+        const fid = await exec('placement', KPY, [
+          path.join(appDir, 'scripts/add_fiducials.py'),
+          wsBoard,
+        ])
+        const fidN = fid.out.match(/^FIDUCIALS (\d+)/m)?.[1]
+        log('placement',
+          fidN !== undefined
+            ? `assembly fiducials: ${fidN} present`
+            : 'fiducial self-heal did not complete',
+          fidN !== undefined ? 'ok' : 'warn')
+
+        // DFM gate — assembly-house rules KiCad DRC doesn't check
+        // (edge/hole keepout, fiducials, courtyard gaps). Hard gate.
+        const dfm = await exec('placement', KPY, [
+          path.join(hwDir, 'scripts/dfm_check.py'),
+          wsBoard,
+        ])
+        if (dfm.code !== 0) {
+          send({ type: 'stage', id: 'placement', state: 'failed', failReason: 'DFM gate FAIL' })
+          send({ type: 'stage', id: 'routing', state: 'blocked' })
+          send({ type: 'stage', id: 'validation', state: 'blocked' })
+          send({ type: 'done', status: 'GATE FAILED', boardPath: wsBoard })
+          return
+        }
+        log('placement', 'GATE DFM (edge/hole/fiducial/courtyard) — PASS', 'ok')
         send({ type: 'stage', id: 'placement', state: 'passed' })
 
         // ---- stage 3: routing (flroute on the real DSN) ---------------------
@@ -258,8 +313,30 @@ export async function GET() {
 
         if (drcPass) {
           log('validation', 'GATE validation: DRC = 0 — PASS', 'ok')
+          // ---- fab outputs: gerbers/drill/P&P/STEP/BOM -> zip --------------
+          log('validation', 'generating fabrication package (gerbers, drill, P&P, STEP, BOM)…')
+          const fabDir = path.join(ws, 'fab')
+          const bomCsv = path.join(hwDir, 'build/builds/default/default.bom.csv')
+          const fab = await exec('validation', 'python3', [
+            path.join(appDir, 'scripts/export_fab.py'),
+            wsBoard,
+            fabDir,
+            bomCsv,
+          ])
+          let fabZip: string | undefined
+          const zipMatch = fab.out.match(/^FAB_ZIP:(.+)$/m)
+          if (zipMatch && fs.existsSync(zipMatch[1].trim())) {
+            const pubFab = path.join(appDir, 'public/fab')
+            fs.mkdirSync(pubFab, { recursive: true })
+            const dest = path.join(pubFab, 'fab-package.zip')
+            fs.copyFileSync(zipMatch[1].trim(), dest)
+            fabZip = '/fab/fab-package.zip'
+            log('validation', `fab package ready → ${fabZip}`, 'ok')
+          } else {
+            log('validation', 'fab package generation incomplete', 'warn')
+          }
           send({ type: 'stage', id: 'validation', state: 'passed' })
-          send({ type: 'done', status: 'PASSED', boardPath: wsBoard })
+          send({ type: 'done', status: 'PASSED', boardPath: wsBoard, fabZip })
         } else {
           send({ type: 'stage', id: 'validation', state: 'failed', failReason: `${violations} DRC violations` })
           send({ type: 'done', status: 'GATE FAILED', boardPath: wsBoard })

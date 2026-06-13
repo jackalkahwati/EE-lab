@@ -6,8 +6,11 @@ migration; until then this is the authoritative floorplan.
 
 Run: python3 scripts/gen_board.py
 """
+import json
+import math
 import os
 import re
+import sys
 import uuid
 
 FP_DIR = "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints"
@@ -15,12 +18,40 @@ FP_DIR = "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints"
 def U():
     return str(uuid.uuid4())
 
+# ---- design spec (parametric) -----------------------------------------------
+# The FL-1 baseline is the default. A prompt-driven run writes a spec JSON and
+# points DESIGN_SPEC at it (or passes it as argv[2]); the floorplan then scales
+# to the requested probe count / lane set. Absent a spec, output is byte-for-
+# byte the original FL-1 board so the existing real run is unchanged.
+DEFAULT_PROBES = ["P1", "P2", "P3", "P4", "KFP", "KFN", "KSP", "KSN"]
+DEFAULT_LANES_G = ["SCOPE_A", "SCOPE_B", "DAQ_1", "DAQ_2", "LOGIC_1", "LOGIC_2", "PWR_INJ"]
+DEFAULT_LANES_P = ["DMM_HI", "DMM_LO", "GND_REF"]
+
+_spec_path = os.environ.get("DESIGN_SPEC") or (sys.argv[2] if len(sys.argv) > 2 else None)
+SPEC = {}
+if _spec_path and os.path.exists(_spec_path):
+    SPEC = json.load(open(_spec_path))
+
+# clamp to the validated layout envelope — gates still referee the result
+def _clampn(v, lo, hi, d):
+    try:
+        return max(lo, min(hi, int(v)))
+    except Exception:
+        return d
+
+n_probes = _clampn(SPEC.get("probes", len(DEFAULT_PROBES)), 2, 8, len(DEFAULT_PROBES))
+n_g = _clampn(SPEC.get("group_lanes", len(DEFAULT_LANES_G)), 1, 7, len(DEFAULT_LANES_G))
+n_p = _clampn(SPEC.get("probe_lanes", len(DEFAULT_LANES_P)), 1, 3, len(DEFAULT_LANES_P))
+PROBES = DEFAULT_PROBES[:n_probes]
+LANES_G = DEFAULT_LANES_G[:n_g]
+LANES_P = DEFAULT_LANES_P[:n_p]
+TITLE = SPEC.get("title", "FIRSTLIGHT FL-1 - RELAY/PROBE MATRIX REV A - FLOORPLAN")
+
 # ---- nets -------------------------------------------------------------------
 NETS = ["", "GND", "+24V", "+5V_COIL", "+3V3_DIG", "+3V3_ANA",
         "SCOPE_A", "SCOPE_B", "DMM_HI", "DMM_LO", "DAQ_1", "DAQ_2",
         "LOGIC_1", "LOGIC_2", "PWR_INJ", "GND_REF",
         "SRCK", "RCK", "OE_N", "SDA", "SCL", "WDI", "SR_DATA"]
-PROBES = ["P1", "P2", "P3", "P4", "KFP", "KFN", "KSP", "KSN"]
 for p in PROBES:
     NETS += ["TIP_" + p, "NODE_" + p, "GBANK_" + p, "PBANK_" + p]
 NET = {n: i for i, n in enumerate(NETS)}
@@ -54,7 +85,7 @@ def inject_nets(text, netmap):
             j += 1
         out.append(text[i:j])
         nn = netmap.get(m.group(1))
-        if nn:
+        if nn and nn in NET:
             out.append(' (net {} "{}")'.format(NET[nn], nn))
         out.append(")")
         i = j + 1
@@ -84,7 +115,7 @@ def seaf(ref, x, y):
           ' (fill none) (layer "F.SilkS") (uuid "{}"))\n').format(U())
     for i, nn in enumerate(names):
         col, row = i % 7, i // 7
-        netpart = ' (net {} "{}")'.format(NET[nn], nn) if nn else ""
+        netpart = ' (net {} "{}")'.format(NET[nn], nn) if nn and nn in NET else ""
         s += ('    (pad "{}" smd rect (at {} {}) (size 0.7 0.9)\n'
               '      (layers "F.Cu" "F.Paste" "F.Mask"){} (uuid "{}"))\n').format(
             i + 1, -3.81 + col * 1.27, -0.65 + row * 1.3, netpart, U())
@@ -131,8 +162,10 @@ body += place(*SOT235, ref=nref("U"), x=X0 + 67, y=Y0 + 8, netmap={
     "1": "SDA", "3": "SCL", "2": "GND", "5": "+3V3_DIG"})
 body += place(*HDR(2), ref=nref("J"), x=X0 + 80, y=Y0 + 8, netmap={"1": "+24V", "2": "GND"})
 
-# sinks row: 12x SOIC20 rot 0, pitch 13.5, y 26
-for i in range(12):
+# sinks row: SOIC20 shift-register drivers, rot 0, pitch 12.4, y 26.
+# Count scales with the relay population (12 drivers serve the 8-probe board).
+n_sinks = max(4, round(12 * len(PROBES) / 8))
+for i in range(n_sinks):
     body += place(*SOIC20, ref=nref("U"), x=X0 + 30 + i * 12.4, y=Y0 + 26, netmap={
         "2": "+5V_COIL", "10": "GND", "3": "SR_DATA", "13": "SRCK", "12": "RCK", "9": "OE_N"})
 
@@ -146,9 +179,8 @@ for i, p in enumerate(PROBES):
     body += place(*MSOP8, ref=nref("U"), x=X0 + 29, y=y,
                   netmap={"1": "NODE_" + p, "8": "+3V3_ANA", "4": "GND"})
 
-# center: 8 lane-selector trees, relays rot 90 (12.3 wide x 9.3 tall):
-# col pitch 13, row pitch 10 -> rows y 44..114
-LANES_G = ["SCOPE_A", "SCOPE_B", "DAQ_1", "DAQ_2", "LOGIC_1", "LOGIC_2", "PWR_INJ"]
+# center: lane-selector trees, relays rot 90 (12.3 wide x 9.3 tall):
+# col pitch 13, row pitch 10 -> rows y 44..114 (LANES_G set by the spec)
 for i, p in enumerate(PROBES):
     cx = X0 + 42 + i * 13
     body += place(*G6K, ref=nref("K"), x=cx, y=Y0 + 44, rot=90, netmap={
@@ -157,17 +189,18 @@ for i, p in enumerate(PROBES):
         body += place(*G6K, ref=nref("K"), x=cx, y=Y0 + 54 + j * 9.75, rot=90, netmap={
             "1": "+5V_COIL", "4": "GBANK_" + p, "3": lane})
 
-# south: reed bank, 3 rows of 9 (24 matrix + 3 reference), pitch 20.5 x 8
-LANES_P = ["DMM_HI", "DMM_LO", "GND_REF"]
+# south: reed bank, len(LANES_P) rows of len(PROBES) (matrix + 3 reference),
+# pitch 20.5 x 8 (LANES_P set by the spec)
 reed_jobs = []
 for i, p in enumerate(PROBES):
     for lane in LANES_P:
         reed_jobs.append({"1": "+5V_COIL", "2": "PBANK_" + p, "3": lane})
+n_matrix = len(PROBES) * len(LANES_P)
 for i in range(3):  # reference block reeds
     reed_jobs.append({"1": "+5V_COIL", "2": "DMM_HI", "3": "GND"})
-matrix_jobs, ref_jobs = reed_jobs[:24], reed_jobs[24:]
+matrix_jobs, ref_jobs = reed_jobs[:n_matrix], reed_jobs[n_matrix:]
 for k, nm in enumerate(matrix_jobs):
-    row, col = divmod(k, 8)
+    row, col = divmod(k, len(PROBES))
     body += place(*REED, ref=nref("K"), x=X0 + 26 + col * 20.9, y=Y0 + 121.5 + row * 8, netmap=nm)
 # reference-block reeds: vertical column between relay field and Pico
 for k, nm in enumerate(ref_jobs):
@@ -252,13 +285,17 @@ for i, n in enumerate(NETS):
 p += grect(X0, Y0, X0 + BW, Y0 + BH, "Edge.Cuts")
 for cx, cy in ((5, 5), (BW - 5, 5), (5, BH - 5), (BW - 5, BH - 5)):
     p += gcircle(X0 + cx, Y0 + cy, 1.6, "Edge.Cuts")
-p += gtext("FIRSTLIGHT FL-1 - RELAY/PROBE MATRIX REV A - FLOORPLAN", X0 + BW / 2, Y0 - 5, "Dwgs.User", 2.2, True)
+p += gtext(TITLE, X0 + BW / 2, Y0 - 5, "Dwgs.User", 2.2, True)
 p += gtext("ANALOG ISLAND - reed bank + references", X0 + 100, Y0 + 136, "Cmts.User", 1.4)
 p += body
 p += ')\n'
 
-out = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                   "..", "elec", "layout", "rev-a", "rev-a.kicad_pcb")
+out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "..", "elec", "layout", "rev-a", "rev-a.kicad_pcb")
+os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
 open(os.path.abspath(out), "w").write(p)
 print("written:", os.path.abspath(out))
+print("gen_board: {} probes, {} group lanes, {} probe lanes".format(
+    len(PROBES), len(LANES_G), len(LANES_P)))
 print("components:", sum(refn.values()), "| nets:", len(NETS))

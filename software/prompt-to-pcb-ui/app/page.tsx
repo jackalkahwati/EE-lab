@@ -24,7 +24,7 @@ const TABS = ['Board', 'Schematic / Code', 'BOM', 'Gates & Logs'] as const
 type Tab = (typeof TABS)[number]
 
 interface PipelineEvent {
-  type: 'stage' | 'log' | 'done' | 'error'
+  type: 'stage' | 'log' | 'design' | 'done' | 'error'
   id?: StageId
   state?: StageState
   failReason?: string
@@ -33,6 +33,8 @@ interface PipelineEvent {
   level?: 'info' | 'ok' | 'warn' | 'err'
   status?: 'PASSED' | 'GATE FAILED'
   message?: string
+  spec?: Record<string, unknown>
+  fabZip?: string
 }
 
 export default function FirstLightPage() {
@@ -43,6 +45,8 @@ export default function FirstLightPage() {
   const [liveRunId, setLiveRunId] = useState<string | null>(null)
   const [liveElapsed, setLiveElapsed] = useState<Record<string, number>>({})
   const [realBoard, setRealBoard] = useState<RealBoard | null>(null)
+  const [designSpec, setDesignSpec] = useState<Record<string, unknown> | null>(null)
+  const [fabZip, setFabZip] = useState<string | null>(null)
   const esRef = useRef<EventSource | null>(null)
   const stageStartRef = useRef<Record<string, number>>({})
   const currentStageRef = useRef<string | null>(null)
@@ -105,6 +109,8 @@ export default function FirstLightPage() {
       }
       stageStartRef.current = {}
       currentStageRef.current = null
+      setDesignSpec(null)
+      setFabZip(null)
       setRuns((prev) => [base, ...prev])
       setSelectedId(id)
       setLiveRunId(id)
@@ -113,7 +119,9 @@ export default function FirstLightPage() {
       const update = (fn: (r: Run) => Run) =>
         setRuns((prev) => prev.map((r) => (r.id === id ? fn(r) : r)))
 
-      const es = new EventSource('/api/pipeline/run')
+      const es = new EventSource(
+        `/api/pipeline/run?prompt=${encodeURIComponent(prompt)}`,
+      )
       esRef.current = es
 
       es.onmessage = (e) => {
@@ -150,11 +158,14 @@ export default function FirstLightPage() {
                 : s,
             ),
           }))
+        } else if (ev.type === 'design') {
+          if (ev.spec) setDesignSpec(ev.spec)
         } else if (ev.type === 'done') {
           es.close()
           esRef.current = null
           setLiveRunId(null)
           setLiveElapsed({})
+          setFabZip(ev.fabZip ?? null)
           update((r) => ({ ...r, status: ev.status ?? 'GATE FAILED' }))
           // refresh real artifacts synced by the run, attach to this run
           loadRealBoard().then((data) => {
@@ -249,9 +260,28 @@ export default function FirstLightPage() {
               {'PROMPT → PCBA · 4 STAGES · HARD GATES'}
             </span>
           </div>
-          <span className="font-mono text-[10px] text-muted-foreground">
-            {selectedRun.name} · {selectedRun.timestamp}
-          </span>
+          <div className="flex items-center gap-3">
+            {designSpec && (
+              <span
+                className="font-mono text-[10px] text-primary"
+                title={String(designSpec.rationale ?? '')}
+              >
+                {`SPEC · ${designSpec.probes ?? '?'}P · ${designSpec.group_lanes ?? '?'}G+${designSpec.probe_lanes ?? '?'}P lanes · ${designSpec.vin ?? ''}`}
+              </span>
+            )}
+            {fabZip && (
+              <a
+                href={fabZip}
+                download
+                className="rounded border border-primary px-2 py-1 font-mono text-[10px] font-medium text-primary hover:bg-primary hover:text-primary-foreground"
+              >
+                ↓ Fab package (.zip)
+              </a>
+            )}
+            <span className="font-mono text-[10px] text-muted-foreground">
+              {selectedRun.name} · {selectedRun.timestamp}
+            </span>
+          </div>
         </header>
 
         <div className="flex flex-col gap-3 border-b border-border p-3">
