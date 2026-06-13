@@ -18,8 +18,24 @@ BOARD = "elec/layout/rev-a-routed.kicad_pcb"
 X0, Y0, BW, BH = 40.0, 40.0, 200.0, 175.0
 MARGIN = 0.6  # courtyard-to-courtyard spacing, mm
 
+# 4-layer stackup: In1 = lv plane, In2 = coil rail; both routable
+# (zones pour around tracks)
 b = pcbnew.LoadBoard(BOARD)
+b.SetCopperLayerCount(4)
 fps = list(b.GetFootprints())
+
+# Net census BEFORE any board mutation: KiCad 10.0.1 swig proxies go stale
+# after Remove/Add calls, and GetNetsByName() returns a dead SwigPyObject.
+from collections import Counter
+pc = Counter()
+net_codes = {}
+for _fp in fps:
+    for _pad in _fp.Pads():
+        pc[str(_pad.GetNetname())] += 1
+        net_codes.setdefault(str(_pad.GetNetname()), _pad.GetNetCode())
+# Zones list also captured pre-mutation: b.Zones() SEGFAULTS post-Remove/Add
+# under KiCad 10.0.1 standalone python.
+zones_pre = list(b.Zones())
 
 def mm(v):
     return pcbnew.FromMM(v)
@@ -237,23 +253,16 @@ for cx, cy in ((5, 5), (BW - 5, 5), (5, BH - 5), (BW - 5, BH - 5)):
     b.Add(c)
 
 # ---- zones -----------------------------------------------------------------------------------
-nets = b.GetNetsByName()
-from collections import Counter
-pc = Counter()
-for fp in fps:
-    for pad in fp.Pads():
-        pc[str(pad.GetNetname())] += 1
+# (net census pc/net_codes computed at the top of the script, pre-mutation)
 gnd_name = "lv"
 coil_name = max((n for n in pc if "coil_bus" in n), key=lambda n: pc[n], default=None)
 
-for z in list(b.Zones()):
-    b.Remove(z)
 def add_zone(name, layer):
-    if name is None or name not in nets:
+    if name is None or name not in net_codes:
         return
     z = pcbnew.ZONE(b)
     z.SetLayer(layer)
-    z.SetNetCode(nets[name].GetNetCode())
+    z.SetNetCode(net_codes[name])
     chain = pcbnew.SHAPE_LINE_CHAIN()
     for x, y in [(X0, Y0), (X0 + BW, Y0), (X0 + BW, Y0 + BH), (X0, Y0 + BH)]:
         chain.Append(mm(x), mm(y))
@@ -262,9 +271,15 @@ def add_zone(name, layer):
     z.SetPadConnection(pcbnew.ZONE_CONNECTION_FULL)
     z.SetMinThickness(mm(0.2))
     b.Add(z)
-add_zone(gnd_name, pcbnew.In1_Cu)
-add_zone(gnd_name, pcbnew.B_Cu)
-add_zone(coil_name, pcbnew.In2_Cu)
+
+# KiCad 10.0.1 standalone swig: objects created/fetched after Remove/Add
+# mutations have dead method dispatch (Outline() etc). Existing zones are
+# full-board pours with unchanged nets, so KEEP them instead of
+# remove-and-recreate; only create zones on a board that has none.
+if not zones_pre:
+    add_zone(gnd_name, pcbnew.In1_Cu)
+    add_zone(gnd_name, pcbnew.B_Cu)
+    add_zone(coil_name, pcbnew.In2_Cu)
 
 pcbnew.SaveBoard(BOARD, b)
 print("v3: relay pitch {:.1f}x{:.1f}, reed pitch {:.1f}x{:.1f}, zones: {} / {}".format(
