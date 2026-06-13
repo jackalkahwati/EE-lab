@@ -1,0 +1,52 @@
+{
+ "source": "/tmp/board-sync/clean-test.kicad_pcb",
+ "boardSize": {
+  "wMm": 200.15,
+  "hMm": 175.15
+ },
+ "layers": 4,
+ "components": 180,
+ "netsTotal": 176,
+ "netsRouted": 173,
+ "unroutedNets": [
+  "FB",
+  "no",
+  "scope_a"
+ ],
+ "zoneServedNets": [
+  "lv",
+  "sel_p4-coil_bus-hv"
+ ],
+ "tracks": 5412,
+ "vias": 374,
+ "hpwlMm": 18830,
+ "placement": {
+  "overlaps": 0,
+  "overlapPairs": [],
+  "offBoard": []
+ },
+ "drc": {
+  "violations": 4,
+  "violationSummaries": [
+   {
+    "type": "clearance",
+    "description": "Clearance violation ( clearance 0.2000 mm; actual 0.0325 mm)"
+   },
+   {
+    "type": "clearance",
+    "description": "Clearance violation ( clearance 0.2000 mm; actual 0.0325 mm)"
+   },
+   {
+    "type": "clearance",
+    "description": "Clearance violation ( clearance 0.2000 mm; actual 0.1852 mm)"
+   },
+   {
+    "type": "clearance",
+    "description": "Clearance violation ( clearance 0.2000 mm; actual 0.1842 mm)"
+   }
+  ],
+  "unconnectedItems": 162,
+  "kicadVersion": "10.0.1",
+  "date": "2026-06-12T22:42:10"
+ }
+}

@@ -482,6 +482,78 @@ fn main() {
         }
     }
 
+    // ---------- v2: respect the boundary (no edge-clearance overshoot) ------------
+    // The grid is ceil(span/pitch)+2 cells, so the far-edge cells overshoot the
+    // boundary bbox by up to ~2*pitch — routing there put copper <0.5mm from the
+    // real board edge (DRC copper_edge_clearance). Block every cell whose center
+    // falls outside [bx0,bx1]x[by0,by1]; the DSN boundary is already inset by
+    // edge_clearance+width/2, so copper within it clears the real edge.
+    {
+        let mut edge_blocked = 0u32;
+        for y in 0..gh {
+            let cy = by0 + y as f64 * pitch;
+            for x in 0..gw {
+                let cx = bx0 + x as f64 * pitch;
+                if cx < bx0 || cx > bx1 || cy < by0 || cy > by1 {
+                    for l in 0..nl {
+                        let c = &mut owner[idx(x, y, l)];
+                        if *c == 0 {
+                            *c = u16::MAX;
+                            edge_blocked += 1;
+                        }
+                    }
+                }
+            }
+        }
+        eprintln!("v2 boundary clamp: {} overshoot cells blocked", edge_blocked);
+    }
+
+    // ---------- v2: honor (keepout) regions (mounting holes etc.) -----------------
+    // pcbnew exports mounting holes as (keepout "" (polygon ...)); v0/v1 dropped
+    // them, so tracks could run through a hole's clearance (DRC hole_clearance).
+    // Rasterize each keepout's bbox + halo and block it on all layers.
+    {
+        let mut ko_cells = 0u32;
+        for ko in structure.kids("keepout") {
+            if let Some(poly) = ko.kid("polygon") {
+                let coords: Vec<f64> = poly.list()[3..]
+                    .iter()
+                    .filter_map(|s| s.sym().parse().ok())
+                    .collect();
+                if coords.len() < 4 {
+                    continue;
+                }
+                let (mut kx0, mut ky0, mut kx1, mut ky1) =
+                    (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+                for p in coords.chunks(2) {
+                    if p.len() == 2 {
+                        kx0 = kx0.min(p[0]);
+                        ky0 = ky0.min(p[1]);
+                        kx1 = kx1.max(p[0]);
+                        ky1 = ky1.max(p[1]);
+                    }
+                }
+                let m = clearance + width / 2.0; // copper must clear the keepout
+                let x_lo = (((kx0 - m - bx0) / pitch).floor() as isize).max(0);
+                let x_hi = (((kx1 + m - bx0) / pitch).ceil() as isize).min(gw as isize - 1);
+                let y_lo = (((ky0 - m - by0) / pitch).floor() as isize).max(0);
+                let y_hi = (((ky1 + m - by0) / pitch).ceil() as isize).min(gh as isize - 1);
+                for y in y_lo..=y_hi {
+                    for x in x_lo..=x_hi {
+                        for l in 0..nl {
+                            let c = &mut owner[idx(x as usize, y as usize, l)];
+                            if *c == 0 {
+                                *c = u16::MAX;
+                                ko_cells += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        eprintln!("v2 keepout: {} cells blocked", ko_cells);
+    }
+
     // ---------- fanout stubs for fine-pitch pads -----------------------------------
     // At cell granularity a fine-pitch pad can be walled in by neighbor pads'
     // clearance halos even though a straight outward escape lane is DRC-legal
@@ -698,8 +770,14 @@ fn main() {
                     break; // a longer stub on this line only gets worse
                 }
                 // claim the corridor: foreign track centerlines must stay
-                // width+clearance away from the stub line
-                let mark_r = width + clearance - 1.0;
+                // width+clearance away from the stub line. v2: the mark is
+                // cell-rasterized at `pitch`, so a foreign track on the
+                // nearest unmarked cell can still sit ~pitch closer than this
+                // radius in continuous coords (the residual clearance defects).
+                // Add a half-pitch guard so the reserved corridor actually
+                // excludes sub-clearance foreign copper. (A/B: keep only if it
+                // doesn't tank completion — wider corridors risk choking.)
+                let mark_r = width + clearance + pitch * 0.5 - 1.0;
                 let mut undo: Vec<(usize, u16)> = Vec::new();
                 let x_lo = (((pcx.min(ex) - mark_r - bx0) / pitch).floor() as isize).max(0);
                 let x_hi = (((pcx.max(ex) + mark_r - bx0) / pitch).ceil() as isize)

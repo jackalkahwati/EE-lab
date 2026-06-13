@@ -47,6 +47,35 @@ if edges:
         if not o.Contains(fp.GetPosition()):
             outside.append(fp.GetReference())
 
+# --- gate 3: edge clearance + mounting-hole keepout ------------------------------
+# Defects in this class previously escaped to kicad-cli DRC (J7 pads 0.03mm
+# from a mounting-hole circle). Every downstream defect class becomes an
+# upstream gate check.
+EDGE_KEEPOUT_MM = 3.0   # courtyard-to-board-edge (DFM conveyor rail)
+HOLE_KEEPOUT_MM = 3.5   # courtyard-to-hole-center radial (M3 head + washer)
+
+holes = [d for d in b.GetDrawings() if d.GetLayer() == pcbnew.Edge_Cuts
+         and d.GetShape() == pcbnew.SHAPE_T_CIRCLE]
+keepout_fails = []
+if edges:
+    o = edges[0].GetBoundingBox()
+    for (ref, bb) in boxes:
+        d_edge = min(
+            pcbnew.ToMM(bb.GetLeft() - o.GetLeft()),
+            pcbnew.ToMM(o.GetRight() - bb.GetRight()),
+            pcbnew.ToMM(bb.GetTop() - o.GetTop()),
+            pcbnew.ToMM(o.GetBottom() - bb.GetBottom()),
+        )
+        if d_edge < EDGE_KEEPOUT_MM:
+            keepout_fails.append((ref, "edge", d_edge))
+        for h in holes:
+            c = h.GetCenter()
+            dx = max(bb.GetLeft() - c.x, 0, c.x - bb.GetRight())
+            dy = max(bb.GetTop() - c.y, 0, c.y - bb.GetBottom())
+            d_hole = pcbnew.ToMM(int((dx * dx + dy * dy) ** 0.5))
+            if d_hole < HOLE_KEEPOUT_MM:
+                keepout_fails.append((ref, "hole", d_hole))
+
 # --- score: HPWL ------------------------------------------------------------------
 net_pads = {}
 for fp in fps:
@@ -64,10 +93,14 @@ for code, pts in net_pads.items():
     hpwl += (max(xs) - min(xs)) + (max(ys) - min(ys))
 hpwl_mm = pcbnew.ToMM(hpwl)
 
-print("PLACEMENT GATE:", "PASS" if not overlaps and not outside else "FAIL")
+gate_pass = not overlaps and not outside and not keepout_fails
+print("PLACEMENT GATE:", "PASS" if gate_pass else "FAIL")
 for a, bb_ in overlaps[:12]:
     print("  overlap:", a, "<->", bb_)
 for r in outside[:6]:
     print("  off-board:", r)
+for ref, kind, d in keepout_fails[:12]:
+    need = EDGE_KEEPOUT_MM if kind == "edge" else HOLE_KEEPOUT_MM
+    print("  keepout: {} {:.2f}mm from {} (need {:.1f}mm)".format(ref, d, kind, need))
 print("nets: {} | HPWL: {:.0f} mm".format(len(net_pads), hpwl_mm))
-sys.exit(0 if not overlaps and not outside else 1)
+sys.exit(0 if gate_pass else 1)

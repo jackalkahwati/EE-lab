@@ -4,7 +4,7 @@ Replaces `adam-cad-evt-pass-1-motion.prompt.md` as the thing you actually paste.
 One block per Adam chat, in order. Each block is self-contained (Adam starts
 fresh each session) and ends with verify-and-stop. If a run stalls, start a new
 chat and re-paste the same block — it begins by checking current state.
-
+y
 Token guards for every run (learned from the 2026-06-11 stall): the studio has
 ~195 parts — never fetch the full feature tree and never enumerate all parts.
 One part-metadata listing per session is allowed. All needed coordinates are

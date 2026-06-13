@@ -17,6 +17,12 @@ import pcbnew
 BOARD = "elec/layout/rev-a-routed.kicad_pcb"
 X0, Y0, BW, BH = 40.0, 40.0, 200.0, 175.0
 MARGIN = 0.6  # courtyard-to-courtyard spacing, mm
+# NOTE (2026-06-12): tried 235x205/1.2 and 260x230/2.0 to relieve the last
+# clearance defects. Bigger board did NOT help — it reshuffled the layout
+# into a different/worse congestion set (4 -> 8 incl. shorts). Violation
+# count is placement-dependent noise, not a function of board area. The
+# leftover/reed_sink placement is now extent-derived (below) so the engine
+# survives dimension changes, but the proven config stays 200x175/0.6.
 
 # 4-layer stackup: In1 = lv plane, In2 = coil rail; both routable
 # (zones pour around tracks)

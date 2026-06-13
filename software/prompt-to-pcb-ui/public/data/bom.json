@@ -1,0 +1,234 @@
+[
+ {
+  "ref": "C1",
+  "part": "YAGEO CC0603KRX7R9BB104 \u2014 100nF \u00b110% 50V X7R",
+  "lcsc": "C14663",
+  "qty": 1,
+  "unitPrice": 0,
+  "lineType": "ordered"
+ },
+ {
+  "ref": "C2",
+  "part": "FH(Guangdong Fenghua Advanced Tech) 0603B103K500NT \u2014 10nF \u00b110% 50V X7R",
+  "lcsc": "C57112",
+  "qty": 1,
+  "unitPrice": 0,
+  "lineType": "ordered"
+ },
+ {
+  "ref": "D1",
+  "part": "Littelfuse SMBJ33A",
+  "lcsc": "C224019",
+  "qty": 1,
+  "unitPrice": 0,
+  "lineType": "ordered"
+ },
+ {
+  "ref": "D2\u2026D16 (8)",
+  "part": "Nexperia BAV99,215",
+  "lcsc": "C2500",
+  "qty": 8,
+  "unitPrice": 0,
+  "lineType": "ordered"
+ },
+ {
+  "ref": "D3\u2026D17 (8)",
+  "part": "Littelfuse SMAJ24CA",
+  "lcsc": "C148223",
+  "qty": 8,
+  "unitPrice": 0,
+  "lineType": "ordered"
+ },
+ {
+  "ref": "K1\u2026K88 (64)",
+  "part": "Omron Electronics G6K-2F-Y-TR DC5",
+  "lcsc": "C47190",
+  "qty": 64,
+  "unitPrice": 0,
+  "lineType": "ordered"
+ },
+ {
+  "ref": "K4\u2026K91 (27)",
+  "part": "PAN CHANG SIP-1A05",
+  "lcsc": "C10496",
+  "qty": 27,
+  "unitPrice": 0,
+  "lineType": "ordered"
+ },
+ {
+  "ref": "L1",
+  "part": "cjiang (Changjiang Microelectronics Tech) FTC252012S2R2MBCA \u2014 L 2.2\u00b5H \u00b120% SRF \u211d+Hz Imax 3A DCR 55m\u03a9",
+  "lcsc": "C5832372",
+  "qty": 1,
+  "unitPrice": 0,
+  "lineType": "ordered"
+ },
+ {
+  "ref": "L2",
+  "part": "Murata Electronics LQM18FN100M00D \u2014 L 10\u00b5H \u00b120% SRF 30MHz Imax 50mA DCR 1.17\u03a9",
+  "lcsc": "C86083",
+  "qty": 1,
+  "unitPrice": 0,
+  "lineType": "ordered"
+ },
+ {
+  "ref": "R1",
+  "part": "UNI-ROYAL(Uniroyal Elec) 0402WGF1002TCE \u2014 10k\u03a9 \u00b11% 62.5mW 50V",
+  "lcsc": "C25744",
+  "qty": 1,
+  "unitPrice": 0,
+  "lineType": "ordered"
+ },
+ {
+  "ref": "R2",
+  "part": "FOJAN FRC0603F1582TS \u2014 15.8k\u03a9 \u00b11% 100mW 50V",
+  "lcsc": "C2960716",
+  "qty": 1,
+  "unitPrice": 0,
+  "lineType": "ordered"
+ },
+ {
+  "ref": "R3\u2026R23 (9)",
+  "part": "UNI-ROYAL(Uniroyal Elec) 0402WGF1003TCE \u2014 100k\u03a9 \u00b11% 62.5mW 50V",
+  "lcsc": "C25741",
+  "qty": 9,
+  "unitPrice": 0,
+  "lineType": "ordered"
+ },
+ {
+  "ref": "R4",
+  "part": "UNI-ROYAL(Uniroyal Elec) 0603WAF2001T5E \u2014 2k\u03a9 \u00b11% 100mW 75V",
+  "lcsc": "C22975",
+  "qty": 1,
+  "unitPrice": 0,
+  "lineType": "ordered"
+ },
+ {
+  "ref": "R5",
+  "part": "UNI-ROYAL(Uniroyal Elec) 0402WGF1052TCE \u2014 10.5k\u03a9 \u00b11% 62.5mW 50V",
+  "lcsc": "C25850",
+  "qty": 1,
+  "unitPrice": 0,
+  "lineType": "ordered"
+ },
+ {
+  "ref": "R6",
+  "part": "FOJAN FRC0603F2052TS \u2014 20.5k\u03a9 \u00b11% 100mW 75V",
+  "lcsc": "C2930074",
+  "qty": 1,
+  "unitPrice": 0,
+  "lineType": "ordered"
+ },
+ {
+  "ref": "R7",
+  "part": "FOJAN FRC0603F3572TS \u2014 35.7k\u03a9 \u00b11% 100mW 75V",
+  "lcsc": "C2933207",
+  "qty": 1,
+  "unitPrice": 0,
+  "lineType": "ordered"
+ },
+ {
+  "ref": "R8",
+  "part": "UNI-ROYAL(Uniroyal Elec) 1206W3F500MT5E \u2014 50m\u03a9 \u00b11% 333.333mW 200V",
+  "lcsc": "C127691",
+  "qty": 1,
+  "unitPrice": 0,
+  "lineType": "ordered"
+ },
+ {
+  "ref": "R10\u2026R24 (8)",
+  "part": "UNI-ROYAL(Uniroyal Elec) 0603WAF1004T5E \u2014 1M\u03a9 \u00b11% 100mW 75V",
+  "lcsc": "C22935",
+  "qty": 8,
+  "unitPrice": 0,
+  "lineType": "ordered"
+ },
+ {
+  "ref": "R25",
+  "part": "YAGEO RT0603BRD071KL \u2014 1k\u03a9 \u00b10.1% 100mW 75V",
+  "lcsc": "C110776",
+  "qty": 1,
+  "unitPrice": 0,
+  "lineType": "ordered"
+ },
+ {
+  "ref": "R26",
+  "part": "Viking Tech ARG03BTC1003 \u2014 100k\u03a9 \u00b10.1% 100mW 75V",
+  "lcsc": "C335088",
+  "qty": 1,
+  "unitPrice": 0,
+  "lineType": "ordered"
+ },
+ {
+  "ref": "U1",
+  "part": "Microchip Tech 24AA025UIDT-I/OT",
+  "lcsc": "C2061498",
+  "qty": 1,
+  "unitPrice": 0,
+  "lineType": "ordered"
+ },
+ {
+  "ref": "U3\u2026U14 (12)",
+  "part": "Texas Instruments TPIC6B595DWR",
+  "lcsc": "C7094",
+  "qty": 12,
+  "unitPrice": 0,
+  "lineType": "ordered"
+ },
+ {
+  "ref": "U15",
+  "part": "Texas Instruments TPS3823-33DBVR",
+  "lcsc": "C7719",
+  "qty": 1,
+  "unitPrice": 0,
+  "lineType": "ordered"
+ },
+ {
+  "ref": "U16",
+  "part": "Texas Instruments TPS62086RLTR",
+  "lcsc": "C2071344",
+  "qty": 1,
+  "unitPrice": 0,
+  "lineType": "ordered"
+ },
+ {
+  "ref": "U17",
+  "part": "Texas Instruments TPS54331DR",
+  "lcsc": "C9865",
+  "qty": 1,
+  "unitPrice": 0,
+  "lineType": "ordered"
+ },
+ {
+  "ref": "U18",
+  "part": "Texas Instruments INA219AIDCNR",
+  "lcsc": "C87469",
+  "qty": 1,
+  "unitPrice": 0,
+  "lineType": "ordered"
+ },
+ {
+  "ref": "U19",
+  "part": "Texas Instruments TPS7A4901DGNR",
+  "lcsc": "C16430",
+  "qty": 1,
+  "unitPrice": 0,
+  "lineType": "ordered"
+ },
+ {
+  "ref": "U20\u2026U34 (8)",
+  "part": "Texas Instruments TLV3502AIDR",
+  "lcsc": "C131165",
+  "qty": 8,
+  "unitPrice": 0,
+  "lineType": "ordered"
+ },
+ {
+  "ref": "U21\u2026U35 (8)",
+  "part": "Littelfuse 0805L010YR",
+  "lcsc": "C207020",
+  "qty": 8,
+  "unitPrice": 0,
+  "lineType": "ordered"
+ }
+]
