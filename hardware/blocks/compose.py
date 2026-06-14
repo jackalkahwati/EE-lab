@@ -307,7 +307,8 @@ def _block_key(s):
         return "imu"
     if any(k in s for k in ("motor", "esc", "actuator", "servo", "propeller", "prop ")):
         return "motors"
-    if any(k in s for k in ("power", "regulator", "usb", "battery", "vin", "5v", "3v3", "charg", "ldo", "buck")):
+    if any(k in s for k in ("power", "regulator", "battery", "vin", "5v", "3v3",
+                            "charg", "ldo", "buck", "usb power", "usb-c power")):
         return "power"
     return None
 
@@ -373,6 +374,31 @@ COL = {"power": 0, "usbc": 0, "mcu": 2, "imu": 3, "tempsensor": 3, "gnss": 4,
 ROW_BUDGET = 170.0  # mm — wrap a band wider than this
 
 
+def _unique_refs(body):
+    """Renumber duplicate reference designators across the composed footprints so
+    every part is unique (the board is invalid otherwise). Bumps the number of
+    each repeated ref to the next free one for its prefix and rewrites that ref
+    everywhere inside the footprint block."""
+    parts = re.split(r"(?=^  \(footprint )", body, flags=re.M)
+    used = set()
+    out = []
+    for blk in parts:
+        m = re.search(r'\(property "Reference" "([^"]+)"', blk)
+        pm = re.match(r"([A-Za-z]+)(\d+)$", m.group(1)) if m else None
+        if not pm:
+            out.append(blk)
+            continue
+        prefix, num = pm.group(1), int(pm.group(2))
+        while (prefix, num) in used:
+            num += 1
+        used.add((prefix, num))
+        newref = "{}{}".format(prefix, num)
+        if newref != m.group(1):
+            blk = blk.replace('"{}"'.format(m.group(1)), '"{}"'.format(newref))
+        out.append(blk)
+    return "".join(out)
+
+
 def compose(spec, blocks, out_path):
     nets = Nets()
     keys, dropped = classify(blocks)
@@ -434,6 +460,13 @@ def compose(spec, blocks, out_path):
     for i, (fx, fy) in enumerate([(6, 6), (BW - 6, 6), (6, BH - 6)]):
         body += place("Fiducial", "Fiducial_1mm_Mask2mm", "FID" + str(i + 1),
                       X0 + fx, Y0 + fy, 0, {}, nets)
+
+    # blocks hardcode their reference designators, so two similar blocks (e.g. a
+    # USB-C inlet + a header power block) can both emit J1/C1. Renumber any
+    # duplicate references to keep every footprint unique — KiCad rejects a board
+    # with collisions and DSN export fails. Defensive: works no matter what mix
+    # of blocks the classifier produced.
+    body = _unique_refs(body)
 
     p = '(kicad_pcb (version 20240108) (generator "ee-lab-compose") (generator_version "8.0")\n'
     p += '  (general (thickness 1.6))\n  (paper "A4")\n' + LAYERS
