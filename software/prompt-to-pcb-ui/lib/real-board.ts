@@ -112,6 +112,8 @@ function buildRun(b: RealBoardJson): Run {
             elapsedMs: 0,
             failReason: `${b.drc.violations} DRC violations`,
           },
+      // firmware is netlist-derived, so it builds regardless of the DRC result
+      { id: 'firmware', state: 'passed', elapsedMs: 0 },
     ],
     metrics: {
       netsRouted: b.netsRouted,

@@ -53,9 +53,15 @@ export function PipelineTracker({
   liveElapsed: Partial<Record<string, number>>
 }) {
   return (
-    <div className="grid grid-cols-4 gap-px overflow-hidden rounded-sm border border-border bg-border">
+    <div className="grid grid-cols-5 gap-px overflow-hidden rounded-sm border border-border bg-border">
       {STAGE_DEFS.map((def, i) => {
-        const stage = run.stages[i]
+        // older runs (seed / synced real board) predate the firmware stage and
+        // have shorter stages arrays — treat a missing stage as pending.
+        const stage = run.stages[i] ?? {
+          id: def.id,
+          state: 'pending' as const,
+          elapsedMs: 0,
+        }
         const isDim = stage.state === 'pending' || stage.state === 'blocked'
         const elapsed =
           stage.state === 'running'

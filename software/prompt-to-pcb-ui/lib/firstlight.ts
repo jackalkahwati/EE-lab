@@ -158,6 +158,7 @@ export const SEED_RUNS: Run[] = [
       { id: 'placement', state: 'passed', elapsedMs: 6300 },
       { id: 'routing', state: 'passed', elapsedMs: 35000 },
       { id: 'validation', state: 'passed', elapsedMs: 7800 },
+      { id: 'firmware', state: 'passed', elapsedMs: 4800 },
     ],
     metrics: {
       netsRouted: 150,
@@ -190,6 +191,7 @@ export const SEED_RUNS: Run[] = [
       },
       { id: 'routing', state: 'blocked', elapsedMs: 0 },
       { id: 'validation', state: 'blocked', elapsedMs: 0 },
+      { id: 'firmware', state: 'blocked', elapsedMs: 0 },
     ],
     metrics: {
       netsRouted: 0,
