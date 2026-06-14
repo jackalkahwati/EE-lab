@@ -435,9 +435,9 @@ def emit(pins, peripherals, motors):
 
 def main():
     pins, peripherals, motors = load()
-    if not pins:
-        print("FIRMWARE: ERROR — no MCU pin map found (expected a Pico/RP2040 footprint)")
-        sys.exit(1)
+    # A bare MCU + power board has no peripheral nets, so `pins` is empty — that
+    # is valid hardware, not an error. Emit a minimal BSP crate that still
+    # compiles (no pin constants / no probeable peripherals) rather than failing.
     emit(pins, peripherals, motors)
     print("FIRMWARE: peripherals [{}]{}".format(
         ", ".join(peripherals) or "none",
