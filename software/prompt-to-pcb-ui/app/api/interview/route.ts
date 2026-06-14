@@ -39,8 +39,32 @@ When the key blocks and their main parameters are pinned down (or you have asked
 enough), finalize:
 {"enough":true,"board_class":"<short name>","blocks":["..."],"spec":{"<param>":"<value>"},"summary":"<one sentence>"}`
 
-/** Gemini (preferred — frontier reasoning). Throws on quota/billing/auth so the
- *  caller falls back to Nemotron. */
+/** OpenAI GPT-5.1 (preferred — frontier reasoning, fast). */
+async function openaiCall(system: string, user: string): Promise<string> {
+  const key = process.env.OPENAI_API_KEY
+  const model = process.env.OPENAI_MODEL || 'gpt-5.1'
+  if (!key) throw new Error('no openai key')
+  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+    }),
+  })
+  if (!r.ok) throw new Error(`openai HTTP ${r.status}`)
+  const d = await r.json()
+  const t = d.choices?.[0]?.message?.content
+  if (!t) throw new Error('openai empty')
+  return t
+}
+
+/** Gemini (frontier reasoning). Throws on quota/billing/auth so the caller
+ *  falls back. */
 async function geminiCall(system: string, user: string): Promise<string> {
   const key = process.env.GEMINI_API_KEY
   const model = process.env.GEMINI_MODEL || 'gemini-3.1-pro-preview'
@@ -87,20 +111,27 @@ async function nemotronCall(system: string, user: string): Promise<string> {
   return d.choices?.[0]?.message?.content ?? ''
 }
 
-/** Try the frontier provider first, fall back to the working one. */
+/** Try providers in order of preference, fall back to the next on any failure:
+ *  OpenAI GPT-5.1 -> Gemini -> Nemotron. */
 async function callLLM(userMsg: string, force: boolean) {
   const sys = force
     ? SYSTEM + '\nYou have asked enough questions — you MUST finalize now (enough:true).'
     : SYSTEM
-  let text: string
-  let provider = 'gemini'
-  try {
-    text = await geminiCall(sys, userMsg)
-  } catch {
-    provider = 'nemotron'
-    text = await nemotronCall(sys, userMsg)
+  const chain: [string, (s: string, u: string) => Promise<string>][] = [
+    ['openai', openaiCall],
+    ['gemini', geminiCall],
+    ['nemotron', nemotronCall],
+  ]
+  let lastErr: unknown
+  for (const [provider, fn] of chain) {
+    try {
+      const text = await fn(sys, userMsg)
+      return { out: JSON.parse(firstJsonObject(text)), provider }
+    } catch (e) {
+      lastErr = e
+    }
   }
-  return { out: JSON.parse(firstJsonObject(text)), provider }
+  throw lastErr ?? new Error('all providers failed')
 }
 
 /** Extract the first complete top-level {...} object, ignoring any trailing
