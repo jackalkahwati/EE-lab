@@ -19,6 +19,9 @@ import re
 import sys
 import uuid
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import resolve_part  # general KiCad-library part resolver
+
 FP = "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints"
 
 
@@ -239,6 +242,22 @@ def block_cellular(x, y, n, nets):
     return b, 16, 24
 
 
+def block_tempsensor(x, y, n, nets):
+    """I2C temperature sensor — NOT a hardcoded block. The part (LM75B) is
+    resolved live from KiCad's symbol+footprint libraries: its real pin map and
+    a routable footprint come from the library, and resolve_part binds the pins
+    to the i2c_sensor interface. This is the general path — any library part
+    becomes usable without a hand-written block."""
+    r = resolve_part.resolve("LM75B", "i2c_sensor", {
+        "power": "+3V3", "gnd": "GND",
+        "i2c_scl": n["i2c_scl"], "i2c_sda": n["i2c_sda"], "int": "TEMP_OS"})
+    if "error" in r:
+        raise RuntimeError("tempsensor resolve failed: " + r["error"])
+    b = place(r["lib"], r["footprint"], "U6", x + 6, y + 6, 0, r["pmap"], nets)
+    b += cap("C9", x + 6, y + 14, "+3V3", "GND", nets)  # decoupling per power pin
+    return b, 16, 20
+
+
 BLOCK_TABLE = {
     "power": block_usbc_power,
     "usbc": block_usbc,
@@ -249,6 +268,7 @@ BLOCK_TABLE = {
     "motors": block_motors,
     "gnss": block_gnss,
     "cellular": block_cellular,
+    "tempsensor": block_tempsensor,
 }
 
 
@@ -273,6 +293,9 @@ def _block_key(s):
         return "radio"
     if "antenna" in s:
         return "antenna"
+    if any(k in s for k in ("temperature", "temp sensor", "thermometer", "thermal sensor",
+                            "lm75", "tmp102", "tmp117", "mcp9808")):
+        return "tempsensor"
     if any(k in s for k in ("imu", "gyro", "accel", "mpu", "mpu6050", "inertial",
                             "6-axis", "6 axis", "9-axis", "9 axis")):
         return "imu"
@@ -338,9 +361,9 @@ LAYERS = '''  (layers
 # radio + antenna land on the right edge (best RF practice). Rows wrap if a band
 # grows past the width budget, so the layout scales as blocks are added.
 ROW = {"power": 0, "usbc": 0, "mcu": 0, "imu": 0, "radio": 0, "antenna": 0,
-       "gnss": 0, "cellular": 0, "motors": 1}
-COL = {"power": 0, "usbc": 0, "mcu": 2, "imu": 3, "gnss": 4, "radio": 5,
-       "cellular": 6, "antenna": 9, "motors": 1}
+       "gnss": 0, "cellular": 0, "tempsensor": 0, "motors": 1}
+COL = {"power": 0, "usbc": 0, "mcu": 2, "imu": 3, "tempsensor": 3, "gnss": 4,
+       "radio": 5, "cellular": 6, "antenna": 9, "motors": 1}
 ROW_BUDGET = 170.0  # mm — wrap a band wider than this
 
 
@@ -355,8 +378,10 @@ def compose(spec, blocks, out_path):
         n.update({"spi_sck": "SPI_SCK", "spi_mosi": "SPI_MOSI", "spi_miso": "SPI_MISO",
                   "spi_cs": "LORA_NSS", "ctrl_rst": "LORA_RST", "ctrl_irq": "LORA_DIO0",
                   "ant": "ANT"})
+    if "imu" in keys or "tempsensor" in keys:        # shared I2C bus
+        n.update({"i2c_sda": "I2C_SDA", "i2c_scl": "I2C_SCL"})
     if "imu" in keys:
-        n.update({"i2c_sda": "I2C_SDA", "i2c_scl": "I2C_SCL", "imu_int": "IMU_INT"})
+        n["imu_int"] = "IMU_INT"
     if "motors" in keys:
         n.update({"mot1": "MOTOR1", "mot2": "MOTOR2", "mot3": "MOTOR3", "mot4": "MOTOR4"})
     if "gnss" in keys:
