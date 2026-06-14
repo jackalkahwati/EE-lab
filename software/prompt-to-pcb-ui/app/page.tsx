@@ -177,8 +177,17 @@ export default function FirstLightPage() {
 
       let url = `/api/pipeline/run?prompt=${encodeURIComponent(prompt)}&runId=${encodeURIComponent(id)}`
       if (compose) {
+        const json = JSON.stringify({
+          blocks: compose.blocks,
+          boardClass: compose.boardClass,
+        })
+        // UTF-8-safe base64: btoa() only accepts Latin1, but interview-generated
+        // specs can contain non-ASCII (µ, ×, em-dash, curly quotes). Encode the
+        // UTF-8 bytes; the server decodes base64 -> utf8 to match.
         const payload = btoa(
-          JSON.stringify({ blocks: compose.blocks, boardClass: compose.boardClass }),
+          encodeURIComponent(json).replace(/%([0-9A-F]{2})/g, (_, h) =>
+            String.fromCharCode(parseInt(h, 16)),
+          ),
         )
         url += `&compose=1&spec=${encodeURIComponent(payload)}`
       }
