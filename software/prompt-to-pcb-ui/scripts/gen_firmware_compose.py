@@ -34,6 +34,7 @@ PICO_PIN_TO_GP = {
 SIGNALS = [
     "SPI_SCK", "SPI_MOSI", "SPI_MISO", "LORA_NSS", "LORA_RST", "LORA_DIO0",
     "I2C_SDA", "I2C_SCL", "IMU_INT", "MOTOR1", "MOTOR2", "MOTOR3", "MOTOR4",
+    "GPS_TX", "GPS_RX", "CELL_TX", "CELL_RX", "CELL_PWRKEY", "CELL_RST",
 ]
 
 
@@ -62,6 +63,10 @@ def load():
         peripherals.append("radio")
     if "I2C_SDA" in nets_on_board:
         peripherals.append("imu")
+    if "GPS_TX" in nets_on_board:
+        peripherals.append("gnss")
+    if "CELL_TX" in nets_on_board:
+        peripherals.append("cellular")
     motors = sorted(n for n in nets_on_board if re.fullmatch(r"MOTOR\d+", n))
     if motors:
         peripherals.append("motors")
@@ -188,6 +193,96 @@ impl<I2C: I2c> Imu<I2C> {
 '''
 
 
+GNSS_RS = '''//! GNSS receiver (Quectel L80-R, NMEA over UART) — reads sentences from an
+//! embedded-io serial port. The UART GPIOs are in `bsp` (GPS_TX/GPS_RX).
+//! Generated — do not edit.
+#![allow(dead_code)]
+use embedded_io::Read;
+
+pub struct Gnss<R> {
+    uart: R,
+}
+
+impl<R: Read> Gnss<R> {
+    pub fn new(uart: R) -> Self {
+        Self { uart }
+    }
+
+    /// Read one NMEA sentence (up to the newline) into `buf`; returns the byte
+    /// count. Lines longer than `buf` are truncated.
+    pub fn read_sentence(&mut self, buf: &mut [u8]) -> Result<usize, R::Error> {
+        let mut i = 0;
+        let mut b = [0u8; 1];
+        while i < buf.len() {
+            let n = self.uart.read(&mut b)?;
+            if n == 0 {
+                break;
+            }
+            if b[0] == b'\\n' {
+                break;
+            }
+            if b[0] != b'\\r' {
+                buf[i] = b[0];
+                i += 1;
+            }
+        }
+        Ok(i)
+    }
+
+    /// `Ok(true)` if the next sentence starts with '$' (a valid NMEA frame) and
+    /// is a GGA/RMC fix line.
+    pub fn has_fix_sentence(&mut self) -> Result<bool, R::Error> {
+        let mut buf = [0u8; 83]; // max NMEA 0183 line
+        let n = self.read_sentence(&mut buf)?;
+        let line = &buf[..n];
+        Ok(line.first() == Some(&b'$')
+            && (line.windows(3).any(|w| w == b"GGA") || line.windows(3).any(|w| w == b"RMC")))
+    }
+}
+'''
+
+CELL_RS = '''//! Cellular modem (LTE-M / NB-IoT breakout) — AT-command driver over an
+//! embedded-io read/write serial port. UART GPIOs + PWRKEY/RESET are in `bsp`.
+//! Generated — do not edit.
+#![allow(dead_code)]
+use embedded_io::{Read, Write};
+
+pub struct Modem<S> {
+    uart: S,
+}
+
+impl<S: Read + Write> Modem<S> {
+    pub fn new(uart: S) -> Self {
+        Self { uart }
+    }
+
+    /// Send an AT command, appending CR/LF.
+    pub fn send_at(&mut self, cmd: &str) -> Result<(), S::Error> {
+        self.uart.write_all(cmd.as_bytes())?;
+        self.uart.write_all(b"\\r\\n")
+    }
+
+    /// Read response bytes into `buf` (best-effort, up to `buf.len()`).
+    pub fn read_response(&mut self, buf: &mut [u8]) -> Result<usize, S::Error> {
+        self.uart.read(buf)
+    }
+
+    /// `Ok(true)` if the response to a bare `AT` contains "OK" (modem alive).
+    pub fn probe(&mut self) -> Result<bool, S::Error> {
+        self.send_at("AT")?;
+        let mut buf = [0u8; 32];
+        let n = self.read_response(&mut buf)?;
+        Ok(buf[..n].windows(2).any(|w| w == b"OK"))
+    }
+
+    /// Attach to the packet network (LTE-M context activate).
+    pub fn network_attach(&mut self) -> Result<(), S::Error> {
+        self.send_at("AT+CGATT=1")
+    }
+}
+'''
+
+
 def emit_motors(motors):
     chans = "\n".join(
         "    /// {m} ESC signal (BSP `{m}_GPIO`).\n    {m},".format(m=m) for m in motors)
@@ -266,6 +361,26 @@ def emit_selftest(peripherals):
         imu.wake()?;
         Ok(true)
     }''')
+    if "gnss" in peripherals:
+        doc.append("//! - gnss: read a sentence, confirm a valid NMEA fix frame")
+        steps.append('''    /// Bring up the GNSS: confirm it is emitting valid NMEA fix sentences.
+    pub fn gnss<R: embedded_io::Read>(gnss: &mut crate::gnss::Gnss<R>)
+        -> Result<bool, R::Error>
+    {
+        gnss.has_fix_sentence()
+    }''')
+    if "cellular" in peripherals:
+        doc.append("//! - cellular: AT probe, confirm the modem answers OK")
+        steps.append('''    /// Bring up the modem: AT probe + network attach.
+    pub fn cellular<S: embedded_io::Read + embedded_io::Write>(modem: &mut crate::cellular::Modem<S>)
+        -> Result<bool, S::Error>
+    {
+        if !modem.probe()? {
+            return Ok(false);
+        }
+        modem.network_attach()?;
+        Ok(true)
+    }''')
     body = "\n\n".join(steps) if steps else "    // no probeable peripherals on this board"
     header = ("//! Bring-up self-test: probe each peripheral's identity register so a\n"
               "//! board either answers correctly or fails loudly at power-on.\n"
@@ -280,10 +395,12 @@ def emit(pins, peripherals, motors):
     os.makedirs(os.path.join(OUT, "src"), exist_ok=True)
     os.makedirs(os.path.join(OUT, ".cargo"), exist_ok=True)
 
+    deps = '[dependencies]\nembedded-hal = "1.0"\n'
+    if "gnss" in peripherals or "cellular" in peripherals:
+        deps += 'embedded-io = "0.6"\n'
     open(os.path.join(OUT, "Cargo.toml"), "w").write(
         '[package]\nname = "firmware"\nversion = "0.1.0"\nedition = "2021"\n\n'
-        '[dependencies]\nembedded-hal = "1.0"\n\n'
-        '[profile.release]\nopt-level = "z"\n')
+        + deps + '\n[profile.release]\nopt-level = "z"\n')
     open(os.path.join(OUT, ".cargo", "config.toml"), "w").write(
         '[build]\ntarget = "thumbv6m-none-eabi"\n')
 
@@ -299,6 +416,12 @@ def emit(pins, peripherals, motors):
     if "motors" in peripherals:
         open(os.path.join(OUT, "src", "motors.rs"), "w").write(emit_motors(motors))
         mods.append("motors")
+    if "gnss" in peripherals:
+        open(os.path.join(OUT, "src", "gnss.rs"), "w").write(GNSS_RS)
+        mods.append("gnss")
+    if "cellular" in peripherals:
+        open(os.path.join(OUT, "src", "cellular.rs"), "w").write(CELL_RS)
+        mods.append("cellular")
     open(os.path.join(OUT, "src", "selftest.rs"), "w").write(emit_selftest(peripherals))
     mods.append("selftest")
 

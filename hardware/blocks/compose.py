@@ -128,6 +128,9 @@ def block_mcu_pico(x, y, n, nets):
         "4": "spi_sck", "5": "spi_mosi", "6": "spi_miso", "7": "spi_cs",
         "9": "ctrl_rst", "10": "ctrl_irq", "11": "i2c_sda", "12": "i2c_scl",
         "14": "mot1", "15": "mot2", "16": "mot3", "17": "mot4",
+        "1": "uart_gps_tx", "2": "uart_gps_rx",          # UART0 -> GNSS
+        "19": "uart_cell_tx", "20": "uart_cell_rx",      # UART1 -> cellular modem
+        "21": "cell_pwrkey", "22": "cell_rst",           # modem power control
     }
     pmap = {"40": "+5V", "39": "+5V", "38": "GND", "36": "+3V3"}
     for pin, key in opt.items():
@@ -208,6 +211,34 @@ def block_antenna_ufl(x, y, n, nets):
     return b, 6, 8
 
 
+def block_gnss(x, y, n, nets):
+    """GNSS receiver — Quectel L80-R with an integrated patch antenna (so no RF
+    routing on this board). UART to the MCU; VCC + VCC_RTC backup on 3V3.
+    L80-R pinout: 1 VCC_RTC, 2 VCC, 3 RXD, 4 TXD, 5/8/10/12 GND."""
+    pmap = {
+        "1": "+3V3", "2": "+3V3", "3": n["uart_gps_tx"], "4": n["uart_gps_rx"],
+        "5": "GND", "8": "GND", "10": "GND", "12": "GND",
+    }
+    b = place("RF_GPS", "Quectel_L80-R", "U4", x + 10, y + 11, 0, pmap, nets)
+    b += cap("C7", x + 10, y + 22, "+3V3", "GND", nets)  # below the patch module
+    return b, 20, 28
+
+
+def block_cellular(x, y, n, nets):
+    """Cellular modem (LTE-M / NB-IoT) as a breakout module — a 1x06 header
+    carrying the modem's UART + power-control lines. The SIM holder and the RF
+    front end live on the breakout, so nothing fine-pitch routes on this board.
+    Header: 1 VCC(5V), 2 GND, 3 modem TXD, 4 modem RXD, 5 PWRKEY, 6 RESET."""
+    pmap = {
+        "1": "+5V", "2": "GND", "3": n["uart_cell_rx"], "4": n["uart_cell_tx"],
+        "5": n["cell_pwrkey"], "6": n["cell_rst"],
+    }
+    b = place("Connector_PinHeader_2.54mm", "PinHeader_1x06_P2.54mm_Vertical",
+              "U5", x + 4, y + 6, 0, pmap, nets)
+    b += cap("C8", x + 11, y + 10, "+5V", "GND", nets)
+    return b, 16, 24
+
+
 BLOCK_TABLE = {
     "power": block_usbc_power,
     "usbc": block_usbc,
@@ -216,45 +247,71 @@ BLOCK_TABLE = {
     "antenna": block_antenna_ufl,
     "imu": block_imu,
     "motors": block_motors,
+    "gnss": block_gnss,
+    "cellular": block_cellular,
 }
 
 
 # ---- composer ---------------------------------------------------------------
+def _block_key(s):
+    """Map one free-text block name to a library key, or None if unsupported.
+    Order matters: the specific RF parts (cellular, GNSS) are matched before the
+    generic radio so e.g. 'GNSS_RF' / 'cellular_RF' don't collapse into LoRa."""
+    s = s.lower()
+    if any(k in s for k in ("usb-c", "usb c", "type-c", "type c", "usbc")):
+        return "usbc"
+    if any(k in s for k in ("cellular", "lte", "nb-iot", "nbiot", "gsm", "gprs",
+                            "modem", "sim7", "bg96", "bg95", "sara", "sim card", "sim_")):
+        return "cellular"
+    if any(k in s for k in ("gnss", "gps", "glonass", "galileo", "beidou",
+                            "positioning", "geoloc", "l80", "l76", "neo-6", "neo-8", "ublox gps")):
+        return "gnss"
+    if any(k in s for k in ("mcu", "soc", "microcontroller", "rp2040", "stm32",
+                            "compute", "flight controller", "fc ", "processor")):
+        return "mcu"
+    if any(k in s for k in ("lora", "radio", "transceiver", "sx12", "telemetry", "rfm", "433", "915", "868")):
+        return "radio"
+    if "antenna" in s:
+        return "antenna"
+    if any(k in s for k in ("imu", "gyro", "accel", "mpu", "mpu6050", "inertial",
+                            "6-axis", "6 axis", "9-axis", "9 axis")):
+        return "imu"
+    if any(k in s for k in ("motor", "esc", "actuator", "servo", "propeller", "prop ")):
+        return "motors"
+    if any(k in s for k in ("power", "regulator", "usb", "battery", "vin", "5v", "3v3", "charg", "ldo", "buck")):
+        return "power"
+    return None
+
+
 def classify(blocks):
-    """Map the spec's free-text block names to library block keys."""
-    out = []
+    """Map the spec's free-text block names to library keys. Returns
+    (mapped_keys, dropped_blocks): dropped = requested blocks with no library
+    equivalent, so the caller can report exactly what was and was NOT built."""
+    seen, uniq, dropped = set(), [], []
     for b in blocks:
-        s = b.lower()
-        if any(k in s for k in ("usb-c", "usb c", "type-c", "type c", "usbc")):
-            out.append("usbc")
-        elif any(k in s for k in ("power", "regulator", "usb", "battery", "vin", "5v")):
-            out.append("power")
-        elif any(k in s for k in ("mcu", "soc", "microcontroller", "rp2040", "stm32", "compute", "flight controller", "fc")):
-            out.append("mcu")
-        elif any(k in s for k in ("lora", "rf", "radio", "transceiver", "sx12", "telemetry")):
-            out.append("radio")
-        elif "antenna" in s:
-            out.append("antenna")
-        elif any(k in s for k in ("imu", "gyro", "accel", "mpu", "mpu6050", "inertial", "6-axis", "6 axis")):
-            out.append("imu")
-        elif any(k in s for k in ("motor", "esc", "actuator", "servo", "propeller", "prop ")):
-            out.append("motors")
-    # dedup, keep order; ensure power+mcu present for a sane board
-    seen, uniq = set(), []
-    for k in out:
-        if k not in seen:
+        k = _block_key(b)
+        if k is None:
+            dropped.append(b)
+        elif k not in seen:
             seen.add(k)
             uniq.append(k)
-    for must in ("mcu",):
-        if must not in seen:
-            uniq.append(must)
-            seen.add(must)
-    if not (seen & {"power", "usbc"}):  # every board needs a power inlet
+    # ensure a usable baseline: every board needs an MCU + a power inlet
+    if "mcu" not in seen:
+        uniq.append("mcu")
+        seen.add("mcu")
+    if not (seen & {"power", "usbc"}):
         uniq.append("power")
         seen.add("power")
+    # The standalone U.FL block exists only to carry the LoRa ANT net; cellular
+    # and GNSS modules carry their own antennas. So make the antenna block track
+    # the radio exactly: add it with a radio, drop a bare antenna without one.
     if "radio" in seen and "antenna" not in seen:
         uniq.append("antenna")
-    return uniq
+        seen.add("antenna")
+    elif "antenna" in seen and "radio" not in seen:
+        uniq.remove("antenna")
+        seen.discard("antenna")
+    return uniq, dropped
 
 
 def gzone(net, layer, x0, y0, x1, y1, nets):
@@ -280,14 +337,16 @@ LAYERS = '''  (layers
 # on the left, the MCU is central, sensors sit next to it (short I2C), and the
 # radio + antenna land on the right edge (best RF practice). Rows wrap if a band
 # grows past the width budget, so the layout scales as blocks are added.
-ROW = {"power": 0, "usbc": 0, "mcu": 0, "imu": 0, "radio": 0, "antenna": 0, "motors": 1}
-COL = {"power": 0, "usbc": 0, "mcu": 2, "imu": 3, "radio": 5, "antenna": 9, "motors": 1}
+ROW = {"power": 0, "usbc": 0, "mcu": 0, "imu": 0, "radio": 0, "antenna": 0,
+       "gnss": 0, "cellular": 0, "motors": 1}
+COL = {"power": 0, "usbc": 0, "mcu": 2, "imu": 3, "gnss": 4, "radio": 5,
+       "cellular": 6, "antenna": 9, "motors": 1}
 ROW_BUDGET = 170.0  # mm — wrap a band wider than this
 
 
 def compose(spec, blocks, out_path):
     nets = Nets()
-    keys = classify(blocks)
+    keys, dropped = classify(blocks)
 
     # shared interface nets — allocated only for the buses that are actually
     # used, so the MCU and netlist carry no dangling stubs.
@@ -300,6 +359,11 @@ def compose(spec, blocks, out_path):
         n.update({"i2c_sda": "I2C_SDA", "i2c_scl": "I2C_SCL", "imu_int": "IMU_INT"})
     if "motors" in keys:
         n.update({"mot1": "MOTOR1", "mot2": "MOTOR2", "mot3": "MOTOR3", "mot4": "MOTOR4"})
+    if "gnss" in keys:
+        n.update({"uart_gps_tx": "GPS_TX", "uart_gps_rx": "GPS_RX"})
+    if "cellular" in keys:
+        n.update({"uart_cell_tx": "CELL_TX", "uart_cell_rx": "CELL_RX",
+                  "cell_pwrkey": "CELL_PWRKEY", "cell_rst": "CELL_RST"})
     for sig in n.values():
         nets.id(sig)
 
@@ -373,6 +437,10 @@ def compose(spec, blocks, out_path):
     print("COMPOSE: blocks {} -> {} components placed, {:.0f}x{:.0f}mm, {} nets".format(
         keys, p.count("(footprint "), BW, BH, len(nets.order) - 1))
     print("COMPOSE_BLOCKS:" + ",".join(keys))
+    # coverage: what the spec asked for vs. what the library could build. The
+    # pipeline surfaces `dropped` loudly so an incomplete board never reads as a
+    # silent clean pass.
+    print("COMPOSE_COVERAGE:" + json.dumps({"mapped": keys, "dropped": dropped}))
 
 
 def main():
