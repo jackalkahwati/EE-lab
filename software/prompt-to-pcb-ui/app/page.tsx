@@ -20,6 +20,7 @@ import { BomTable } from '@/components/bom-table'
 import { GatesLogs } from '@/components/gates-logs'
 import { MetricsRail } from '@/components/metrics-rail'
 import { OrderPanel } from '@/components/order-panel'
+import { ErrorBoundary } from '@/components/error-boundary'
 
 const TABS = ['Board', 'Schematic / Code', 'BOM', 'Gates & Logs', 'Order'] as const
 type Tab = (typeof TABS)[number]
@@ -53,6 +54,32 @@ export default function FirstLightPage() {
   const esRef = useRef<EventSource | null>(null)
   const stageStartRef = useRef<Record<string, number>>({})
   const currentStageRef = useRef<string | null>(null)
+
+  // restore persisted runs on mount (client-only, avoids hydration mismatch)
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('fl-runs') || 'null')
+      if (Array.isArray(saved) && saved.length) {
+        setRuns(
+          saved.map((r: Run) =>
+            r.status === 'RUNNING' ? { ...r, status: 'GATE FAILED' } : r,
+          ),
+        )
+      }
+    } catch {
+      /* ignore corrupt storage */
+    }
+  }, [])
+
+  // persist runs (skip while a run is live — its partial state is transient)
+  useEffect(() => {
+    if (liveRunId) return
+    try {
+      localStorage.setItem('fl-runs', JSON.stringify(runs.slice(0, 30)))
+    } catch {
+      /* ignore quota / private mode */
+    }
+  }, [runs, liveRunId])
 
   // load the real board (synced from KiCad by scripts/sync-board.sh)
   useEffect(() => {
@@ -345,6 +372,7 @@ export default function FirstLightPage() {
             ))}
           </div>
           <div className="min-h-0 flex-1">
+            <ErrorBoundary key={tab} label={`The ${tab} panel`}>
             {tab === 'Board' && (
               <BoardCanvas
                 run={selectedRun}
@@ -383,6 +411,7 @@ export default function FirstLightPage() {
                 fabZip={fabZip}
               />
             )}
+            </ErrorBoundary>
           </div>
         </div>
       </div>

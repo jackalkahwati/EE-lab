@@ -3,6 +3,13 @@
 import { useState } from 'react'
 import { Zap } from 'lucide-react'
 
+const EXAMPLES = [
+  '8-probe relay matrix, scope + DMM, RP2040, 24V',
+  'compact 4-probe matrix, scope and DMM only, 12V',
+  '6-probe, scope + logic analyzer + DAQ lanes, 24V',
+  'tiny 2-probe continuity tester, 5V',
+]
+
 export function PromptComposer({
   onGenerate,
   disabled,
@@ -37,9 +44,23 @@ export function PromptComposer({
         placeholder="Describe the board… e.g. 8x11 relay probe matrix, 4-layer, RP2040 control, USB-C, 24V input"
         className="w-full resize-none bg-transparent font-mono text-sm leading-relaxed text-foreground placeholder:text-muted-foreground focus:outline-none"
       />
+      {!prompt && !disabled && (
+        <div className="flex flex-wrap gap-1.5">
+          {EXAMPLES.map((ex) => (
+            <button
+              key={ex}
+              type="button"
+              onClick={() => setPrompt(ex)}
+              className="rounded-full border border-border bg-secondary/50 px-2.5 py-1 font-mono text-[10px] text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+            >
+              {ex}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <span className="font-mono text-[10px] text-muted-foreground">
-          ⌘↵ to run · 4 stages · hard gates
+          ⌘↵ to run · 5 stages · hard gates
         </span>
         <button
           type="button"
