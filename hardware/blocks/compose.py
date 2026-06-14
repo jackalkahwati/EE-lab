@@ -142,18 +142,23 @@ def block_mcu_pico(x, y, n, nets):
 
 
 def block_imu(x, y, n, nets):
-    """6-axis IMU (InvenSense MPU-6050, HVQFN-24) on the I2C bus. VDD/VLOGIC ->
-    3V3, AD0 -> GND (addr 0x68), INT -> a control line, REGOUT/CPOUT bypassed."""
+    """6-axis IMU (MPU-6050) as a GY-521-style breakout module on the I2C bus.
+    This is a module-integration board (the MCU and radio are modules too), so
+    the IMU is a 0.1" module header — it carries the same I2C interface as the
+    bare chip but its pads escape cleanly on two signal layers, where a raw
+    0.5mm-pitch QFN's inner pads cannot without via-in-pad fanout.
+    Header pinout (GY-521): 1 VCC, 2 GND, 3 SCL, 4 SDA, 5 XDA, 6 XCL, 7 AD0,
+    8 INT."""
     pmap = {
-        "8": "+3V3", "13": "+3V3", "18": "GND", "1": "GND", "9": "GND",
-        "11": "GND", "23": n["i2c_scl"], "24": n["i2c_sda"], "12": n["imu_int"],
-        "10": "IMU_REGOUT", "20": "IMU_CPOUT", "25": "GND", "EP": "GND",
+        "1": "+3V3", "2": "GND", "3": n["i2c_scl"], "4": n["i2c_sda"],
+        "7": "GND", "8": n["imu_int"],  # AD0->GND (addr 0x68); XDA/XCL unused
     }
-    b = place("Package_DFN_QFN", "HVQFN-24-1EP_4x4mm_P0.5mm_EP2.5x2.5mm",
-              "U3", x + 6, y + 7, 0, pmap, nets)
-    b += cap("C5", x + 6, y + 13, "+3V3", "GND", nets)        # VDD decoupling
-    b += cap("C6", x + 11, y + 7, "IMU_REGOUT", "GND", nets)  # REGOUT bypass
-    return b, 14, 16
+    # the 1x08 header is a vertical pad strip (~3.5mm wide, ~21mm tall); the
+    # decoupling cap goes to the SIDE of the strip, clear of its courtyard.
+    b = place("Connector_PinHeader_2.54mm", "PinHeader_1x08_P2.54mm_Vertical",
+              "U3", x + 4, y + 6, 0, pmap, nets)
+    b += cap("C5", x + 11, y + 12, "+3V3", "GND", nets)  # local decoupling
+    return b, 15, 30
 
 
 def block_motors(x, y, n, nets):
@@ -277,7 +282,7 @@ LAYERS = '''  (layers
 # grows past the width budget, so the layout scales as blocks are added.
 ROW = {"power": 0, "usbc": 0, "mcu": 0, "imu": 0, "radio": 0, "antenna": 0, "motors": 1}
 COL = {"power": 0, "usbc": 0, "mcu": 2, "imu": 3, "radio": 5, "antenna": 9, "motors": 1}
-ROW_BUDGET = 130.0  # mm — wrap a band wider than this
+ROW_BUDGET = 170.0  # mm — wrap a band wider than this
 
 
 def compose(spec, blocks, out_path):
@@ -316,6 +321,7 @@ def compose(spec, blocks, out_path):
             txt, w, h = BLOCK_TABLE[k](x, ytop, n, nets)
             # wrap to a new sub-row if this band overflows the width budget
             if x > X0 + MARGIN and (x + w - X0) > ROW_BUDGET:
+                maxright = max(maxright, x - GAP)  # capture this sub-row's reach
                 x = X0 + MARGIN
                 ytop += rowh + ROWGAP
                 rowh = 0
@@ -355,7 +361,7 @@ def compose(spec, blocks, out_path):
     # the 0.2mm house clearance. Emit a matching design-rules file that allows
     # 0.13mm (6-mil) pad-to-pad — a clearance every standard fab supports — so
     # these parts are genuinely DRC-clean. kicad-cli auto-loads <board>.kicad_dru.
-    if {"usbc", "imu"} & set(keys):
+    if "usbc" in keys:
         dru = os.path.splitext(out_path)[0] + ".kicad_dru"
         open(dru, "w").write(
             "(version 1)\n"
