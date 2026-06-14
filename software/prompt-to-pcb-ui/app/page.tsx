@@ -343,7 +343,6 @@ export default function FirstLightPage() {
 
         <div className="flex flex-col gap-3 border-b border-border p-3">
           <PromptComposer
-            onGenerate={handleGenerate}
             onInterview={(p) => setInterviewRequest(p || 'design a custom board')}
             disabled={liveRunId !== null}
           />

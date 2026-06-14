@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Zap, MessagesSquare } from 'lucide-react'
+import { MessagesSquare } from 'lucide-react'
 
 const EXAMPLES = [
   '8-probe relay matrix, scope + DMM, RP2040, 24V',
@@ -11,11 +11,9 @@ const EXAMPLES = [
 ]
 
 export function PromptComposer({
-  onGenerate,
   onInterview,
   disabled,
 }: {
-  onGenerate: (prompt: string) => void
   onInterview: (prompt: string) => void
   disabled: boolean
 }) {
@@ -23,11 +21,10 @@ export function PromptComposer({
 
   const submit = () => {
     if (disabled) return
-    onGenerate(
+    onInterview(
       prompt.trim() ||
-        '8x11 relay probe matrix, 4-layer, RP2040 control, USB-C, 24V input',
+        '8-probe relay probe matrix, 4-layer, RP2040 control, 24V input',
     )
-    setPrompt('')
   }
 
   return (
@@ -62,29 +59,18 @@ export function PromptComposer({
       )}
       <div className="flex items-center justify-between">
         <span className="font-mono text-[10px] text-muted-foreground">
-          ⌘↵ to run · 5 stages · hard gates
+          ⌘↵ · the interview gathers a complete spec, then generates
         </span>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => onInterview(prompt.trim())}
-            disabled={disabled}
-            className="flex items-center gap-1.5 rounded-sm border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-primary/40 hover:text-primary disabled:opacity-40"
-            title="Describe any board in natural language; it asks follow-ups"
-          >
-            <MessagesSquare className="size-3.5" />
-            Design Interview
-          </button>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={disabled}
-            className="flex items-center gap-1.5 rounded-sm bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
-          >
-            <Zap className="size-3.5" />
-            {disabled ? 'Pipeline running…' : 'Generate Board'}
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={submit}
+          disabled={disabled}
+          className="flex items-center gap-1.5 rounded-sm bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
+          title="Describe any board; the interview asks follow-ups until it has enough to build"
+        >
+          <MessagesSquare className="size-3.5" />
+          {disabled ? 'Pipeline running…' : 'Design Board'}
+        </button>
       </div>
     </div>
   )
