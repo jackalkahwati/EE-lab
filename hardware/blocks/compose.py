@@ -279,52 +279,63 @@ BLOCK_TABLE = {
 
 
 # ---- composer ---------------------------------------------------------------
-def _block_key(s):
-    """Map one free-text block name to a library key, or None if unsupported.
-    Order matters: the specific RF parts (cellular, GNSS) are matched before the
-    generic radio so e.g. 'GNSS_RF' / 'cellular_RF' don't collapse into LoRa."""
+def _block_keys(s):
+    """All library keys a (possibly COMPOUND) block maps to. Independent checks,
+    not first-match, so 'sensors (6-axis IMU + digital temperature)' yields BOTH
+    imu and tempsensor instead of silently dropping one. Power is suppressed when
+    a USB-C inlet is already the power path (same category — avoids a duplicate
+    inlet). Returns [] for an unsupported block."""
     s = s.lower()
+    out = []
+
+    def add(k):
+        if k not in out:
+            out.append(k)
+
     if any(k in s for k in ("usb-c", "usb c", "type-c", "type c", "usbc")):
-        return "usbc"
+        add("usbc")
     if any(k in s for k in ("cellular", "lte", "nb-iot", "nbiot", "gsm", "gprs",
                             "modem", "sim7", "bg96", "bg95", "sara", "sim card", "sim_")):
-        return "cellular"
+        add("cellular")
     if any(k in s for k in ("gnss", "gps", "glonass", "galileo", "beidou",
                             "positioning", "geoloc", "l80", "l76", "neo-6", "neo-8", "ublox gps")):
-        return "gnss"
+        add("gnss")
     if any(k in s for k in ("mcu", "soc", "microcontroller", "rp2040", "stm32",
                             "compute", "flight controller", "fc ", "processor")):
-        return "mcu"
+        add("mcu")
     if any(k in s for k in ("lora", "radio", "transceiver", "sx12", "telemetry", "rfm", "433", "915", "868")):
-        return "radio"
+        add("radio")
     if "antenna" in s:
-        return "antenna"
+        add("antenna")
     if any(k in s for k in ("temperature", "temp sensor", "thermometer", "thermal sensor",
                             "lm75", "tmp102", "tmp117", "mcp9808")):
-        return "tempsensor"
+        add("tempsensor")
     if any(k in s for k in ("imu", "gyro", "accel", "mpu", "mpu6050", "inertial",
                             "6-axis", "6 axis", "9-axis", "9 axis")):
-        return "imu"
+        add("imu")
     if any(k in s for k in ("motor", "esc", "actuator", "servo", "propeller", "prop ")):
-        return "motors"
-    if any(k in s for k in ("power", "regulator", "battery", "vin", "5v", "3v3",
-                            "charg", "ldo", "buck", "usb power", "usb-c power")):
-        return "power"
-    return None
+        add("motors")
+    if "usbc" not in out and any(k in s for k in ("power", "regulator", "battery", "vin",
+                                                  "5v", "3v3", "charg", "ldo", "buck",
+                                                  "usb power", "usb-c power")):
+        add("power")
+    return out
 
 
 def classify(blocks):
     """Map the spec's free-text block names to library keys. Returns
-    (mapped_keys, dropped_blocks): dropped = requested blocks with no library
-    equivalent, so the caller can report exactly what was and was NOT built."""
+    (mapped_keys, dropped_blocks): dropped = requested blocks with NO buildable
+    function, so the caller can report exactly what was and was NOT built. A
+    compound block contributes every function it mentions (see _block_keys)."""
     seen, uniq, dropped = set(), [], []
     for b in blocks:
-        k = _block_key(b)
-        if k is None:
+        ks = _block_keys(b)
+        if not ks:
             dropped.append(b)
-        elif k not in seen:
-            seen.add(k)
-            uniq.append(k)
+        for k in ks:
+            if k not in seen:
+                seen.add(k)
+                uniq.append(k)
     # ensure a usable baseline: every board needs an MCU + a power inlet
     if "mcu" not in seen:
         uniq.append("mcu")
