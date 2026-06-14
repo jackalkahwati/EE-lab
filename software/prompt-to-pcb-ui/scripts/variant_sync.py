@@ -160,6 +160,58 @@ def main():
     with open(bj_path, "w") as f:
         json.dump(board, f, indent=1)
 
+    # ---- design summary -> lead the Schematic/Code tab with the VARIANT ------
+    # The .ato modules are the FL-1 reference design language; this summary,
+    # derived from the variant's own nets, shows what the prompt actually built.
+    GL = {"SCOPE_A", "SCOPE_B", "DAQ_1", "DAQ_2", "LOGIC_1", "LOGIC_2", "PWR_INJ"}
+    PL = {"DMM_HI", "DMM_LO", "GND_REF"}
+    probes, glanes, planes = set(), set(), set()
+    for fp in fps:
+        nm = str(fp.GetFPID().GetLibItemName())
+        pn = {str(p.GetNetname()) for p in fp.Pads()}
+        for n in pn:
+            mm_ = re.match(r"[GP]BANK_(\w+)", n)
+            if mm_:
+                probes.add(mm_.group(1))
+        if "G6K" in nm:
+            glanes |= pn & GL  # group lanes actually wired to a relay
+        elif "SIL" in nm:
+            planes |= pn & PL  # probe lanes actually wired to a reed
+    probes, glanes, planes = sorted(probes), sorted(glanes), sorted(planes)
+    xpoints = len(probes) * (len(glanes) + len(planes))
+    summary = (
+        "FirstLight FL-1 — design variant (generated from your prompt)\n"
+        "============================================================\n\n"
+        "  probes        : {np}   ({plist})\n"
+        "  group lanes   : {ng}   ({gl})\n"
+        "  probe lanes   : {npl}  ({pl})\n"
+        "  controller    : RP2040, shift-register driven (SRCK/SER/RCK/OE_N)\n"
+        "  board         : {w:.0f} x {h:.0f} mm, {ly}-layer\n"
+        "  components    : {comp}\n"
+        "  crosspoints   : {np} probes x {lanes} lanes = {xp} relays\n\n"
+        "Each crosspoint is one relay coil on the SR chain; the generated\n"
+        "firmware (firmware/matrix.rs) exposes set_crosspoint(probe, lane).\n\n"
+        "The .ato modules below are the FL-1 reference design (atopile source);\n"
+        "this variant is derived from them parametrically by gen_board.\n"
+    ).format(
+        np=len(probes), plist=", ".join(probes) or "—",
+        ng=len(glanes), gl=", ".join(glanes) or "—",
+        npl=len(planes), pl=", ".join(planes) or "—",
+        w=w_mm, h=h_mm, ly=b.GetCopperLayerCount(), comp=len(fps),
+        lanes=len(glanes) + len(planes), xp=xpoints,
+    )
+    ato_path = os.path.join(OUT, "ato.json")
+    ato = []
+    if os.path.exists(ato_path):
+        try:
+            ato = json.load(open(ato_path))
+        except Exception:
+            ato = []
+    ato = [a for a in ato if a.get("name") != "design.txt"]
+    ato.insert(0, {"name": "design.txt", "content": summary})
+    with open(ato_path, "w") as f:
+        json.dump(ato, f, indent=1)
+
     print("VARIANT_SYNC: {} components, {:.0f}x{:.0f}mm, {} nets, {} bom lines".format(
         len(fps), w_mm, h_mm, nets, len(bom)))
 

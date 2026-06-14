@@ -303,7 +303,7 @@ export async function GET(req: Request) {
         for (const side of ['top', 'bottom']) {
           await exec('validation', KCLI, [
             'pcb', 'render', '--side', side, '--background', 'opaque',
-            '--quality', 'basic', '--width', '1600', '--height', '1400',
+            '--quality', 'basic', '--width', '1200', '--height', '1050',
             '-o', path.join(pubBoard, `render-${side}.png`), variantBoard,
           ])
         }
