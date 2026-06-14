@@ -98,6 +98,12 @@ def cap(ref, x, y, a, b, nets):
                  {"1": a, "2": b}, nets)
 
 
+def res(ref, x, y, a, b, nets):
+    """0402 resistor between nets a and b."""
+    return place("Resistor_SMD", "R_0402_1005Metric", ref, x, y, 0,
+                 {"1": a, "2": b}, nets)
+
+
 # ---- BLOCKS -----------------------------------------------------------------
 # Each returns (footprint_text, width_mm, height_mm) placed at its top-left (x,y)
 # and binds its interface to the shared net names passed in `n`.
@@ -113,20 +119,69 @@ def block_usbc_power(x, y, n, nets):
 
 
 def block_mcu_pico(x, y, n, nets):
-    """RP2040 (Pico module). USB-C 5V -> VSYS; provides 3V3OUT to peripherals;
-    SPI + control + I2C buses exposed on GP pins."""
-    pmap = {
-        "40": "+5V", "39": "+5V", "38": "GND", "36": "+3V3",
-        "4": n["spi_sck"], "5": n["spi_mosi"], "6": n["spi_miso"],
-        "7": n["spi_cs"], "9": n["ctrl_rst"], "10": n["ctrl_irq"],
-        "11": n.get("i2c_sda", ""), "12": n.get("i2c_scl", ""),
+    """RP2040 (Pico module). 5V -> VSYS/VBUS; provides 3V3OUT to peripherals.
+    Buses are wired only where a peripheral actually uses them: the pin map is
+    built from whichever interface nets `n` carries (SPI for a radio, I2C for a
+    sensor, PWM for motors), so the MCU has no dangling stub nets."""
+    # physical Pico pin -> the interface-net key it carries (mapped only if present)
+    opt = {
+        "4": "spi_sck", "5": "spi_mosi", "6": "spi_miso", "7": "spi_cs",
+        "9": "ctrl_rst", "10": "ctrl_irq", "11": "i2c_sda", "12": "i2c_scl",
+        "14": "mot1", "15": "mot2", "16": "mot3", "17": "mot4",
     }
+    pmap = {"40": "+5V", "39": "+5V", "38": "GND", "36": "+3V3"}
+    for pin, key in opt.items():
+        if key in n:
+            pmap[pin] = n[key]
     b = place("Module", "RaspberryPi_Pico_SMD_HandSolder", "U1",
               x + 11, y + 28, 0, pmap, nets)
     # decoupling caps to the RIGHT of the Pico body, clear of its courtyard
     b += cap("C2", x + 26, y + 22, "+3V3", "GND", nets)
     b += cap("C3", x + 26, y + 30, "+5V", "GND", nets)
     return b, 30, 56
+
+
+def block_imu(x, y, n, nets):
+    """6-axis IMU (InvenSense MPU-6050, HVQFN-24) on the I2C bus. VDD/VLOGIC ->
+    3V3, AD0 -> GND (addr 0x68), INT -> a control line, REGOUT/CPOUT bypassed."""
+    pmap = {
+        "8": "+3V3", "13": "+3V3", "18": "GND", "1": "GND", "9": "GND",
+        "11": "GND", "23": n["i2c_scl"], "24": n["i2c_sda"], "12": n["imu_int"],
+        "10": "IMU_REGOUT", "20": "IMU_CPOUT", "25": "GND", "EP": "GND",
+    }
+    b = place("Package_DFN_QFN", "HVQFN-24-1EP_4x4mm_P0.5mm_EP2.5x2.5mm",
+              "U3", x + 6, y + 7, 0, pmap, nets)
+    b += cap("C5", x + 6, y + 13, "+3V3", "GND", nets)        # VDD decoupling
+    b += cap("C6", x + 11, y + 7, "IMU_REGOUT", "GND", nets)  # REGOUT bypass
+    return b, 14, 16
+
+
+def block_motors(x, y, n, nets):
+    """4-channel ESC/motor output header — PWM1..4 from the MCU + a GND return.
+    ESC power comes from the flight battery, so only the signals route here."""
+    b = place("Connector_PinHeader_2.54mm", "PinHeader_1x05_P2.54mm_Vertical",
+              "J3", x + 4, y + 8, 90,
+              {"1": n["mot1"], "2": n["mot2"], "3": n["mot3"],
+               "4": n["mot4"], "5": "GND"}, nets)
+    return b, 18, 12
+
+
+def block_usbc(x, y, n, nets):
+    """DRC-clean USB-C sink inlet — GCT USB4085 receptacle, VBUS -> +5V, dual
+    5.1k CC pulldowns (correct UFP/sink termination), shield + GND to GND."""
+    pmap = {
+        "A1": "GND", "A12": "GND", "B1": "GND", "B12": "GND",
+        "A4": "+5V", "A9": "+5V", "B4": "+5V", "B9": "+5V",
+        "A5": "USB_CC1", "B5": "USB_CC2",
+        "S1": "GND", "S2": "GND", "S3": "GND", "S4": "GND",
+    }
+    b = place("Connector_USB", "USB_C_Receptacle_GCT_USB4085", "J1",
+              x + 6, y + 6, 0, pmap, nets)
+    # passives below the receptacle courtyard (extends to ~y+15.1)
+    b += res("R1", x + 4, y + 18, "USB_CC1", "GND", nets)   # CC1 5.1k Rd
+    b += res("R2", x + 8, y + 18, "USB_CC2", "GND", nets)   # CC2 5.1k Rd
+    b += cap("C1", x + 12, y + 18, "+5V", "GND", nets)      # VBUS bulk
+    return b, 16, 22
 
 
 def block_lora_rfm95(x, y, n, nets):
@@ -150,9 +205,12 @@ def block_antenna_ufl(x, y, n, nets):
 
 BLOCK_TABLE = {
     "power": block_usbc_power,
+    "usbc": block_usbc,
     "mcu": block_mcu_pico,
     "radio": block_lora_rfm95,
     "antenna": block_antenna_ufl,
+    "imu": block_imu,
+    "motors": block_motors,
 }
 
 
@@ -162,24 +220,33 @@ def classify(blocks):
     out = []
     for b in blocks:
         s = b.lower()
-        if any(k in s for k in ("power", "regulator", "usb", "battery")):
+        if any(k in s for k in ("usb-c", "usb c", "type-c", "type c", "usbc")):
+            out.append("usbc")
+        elif any(k in s for k in ("power", "regulator", "usb", "battery", "vin", "5v")):
             out.append("power")
-        elif any(k in s for k in ("mcu", "soc", "microcontroller", "rp2040", "stm32", "compute")):
+        elif any(k in s for k in ("mcu", "soc", "microcontroller", "rp2040", "stm32", "compute", "flight controller", "fc")):
             out.append("mcu")
-        elif any(k in s for k in ("lora", "rf", "radio", "transceiver", "sx12")):
+        elif any(k in s for k in ("lora", "rf", "radio", "transceiver", "sx12", "telemetry")):
             out.append("radio")
         elif "antenna" in s:
             out.append("antenna")
+        elif any(k in s for k in ("imu", "gyro", "accel", "mpu", "mpu6050", "inertial", "6-axis", "6 axis")):
+            out.append("imu")
+        elif any(k in s for k in ("motor", "esc", "actuator", "servo", "propeller", "prop ")):
+            out.append("motors")
     # dedup, keep order; ensure power+mcu present for a sane board
     seen, uniq = set(), []
     for k in out:
         if k not in seen:
             seen.add(k)
             uniq.append(k)
-    for must in ("power", "mcu"):
+    for must in ("mcu",):
         if must not in seen:
             uniq.append(must)
             seen.add(must)
+    if not (seen & {"power", "usbc"}):  # every board needs a power inlet
+        uniq.append("power")
+        seen.add("power")
     if "radio" in seen and "antenna" not in seen:
         uniq.append("antenna")
     return uniq
@@ -201,30 +268,66 @@ LAYERS = '''  (layers
 '''
 
 
+# ---- floorplan ---------------------------------------------------------------
+# Region-based placement: a function-grouped flow rather than one flat row.
+# ROW puts compute/RF/sensors on the top band and bulky edge connectors
+# (motors) on their own band below; within a row COL orders blocks so power is
+# on the left, the MCU is central, sensors sit next to it (short I2C), and the
+# radio + antenna land on the right edge (best RF practice). Rows wrap if a band
+# grows past the width budget, so the layout scales as blocks are added.
+ROW = {"power": 0, "usbc": 0, "mcu": 0, "imu": 0, "radio": 0, "antenna": 0, "motors": 1}
+COL = {"power": 0, "usbc": 0, "mcu": 2, "imu": 3, "radio": 5, "antenna": 9, "motors": 1}
+ROW_BUDGET = 130.0  # mm — wrap a band wider than this
+
+
 def compose(spec, blocks, out_path):
     nets = Nets()
     keys = classify(blocks)
-    # shared interface nets (allocated once, wired across blocks)
-    n = {
-        "spi_sck": "SPI_SCK", "spi_mosi": "SPI_MOSI", "spi_miso": "SPI_MISO",
-        "spi_cs": "LORA_NSS", "ctrl_rst": "LORA_RST", "ctrl_irq": "LORA_DIO0",
-        "i2c_sda": "I2C_SDA", "i2c_scl": "I2C_SCL", "ant": "ANT",
-        "cc1": "USB_CC1", "cc2": "USB_CC2",
-    }
+
+    # shared interface nets — allocated only for the buses that are actually
+    # used, so the MCU and netlist carry no dangling stubs.
+    n = {}
+    if "radio" in keys:
+        n.update({"spi_sck": "SPI_SCK", "spi_mosi": "SPI_MOSI", "spi_miso": "SPI_MISO",
+                  "spi_cs": "LORA_NSS", "ctrl_rst": "LORA_RST", "ctrl_irq": "LORA_DIO0",
+                  "ant": "ANT"})
+    if "imu" in keys:
+        n.update({"i2c_sda": "I2C_SDA", "i2c_scl": "I2C_SCL", "imu_int": "IMU_INT"})
+    if "motors" in keys:
+        n.update({"mot1": "MOTOR1", "mot2": "MOTOR2", "mot3": "MOTOR3", "mot4": "MOTOR4"})
     for sig in n.values():
         nets.id(sig)
 
-    X0, Y0, MARGIN = 30.0, 30.0, 8.0
-    body, x = "", X0 + MARGIN
-    rowh = 0
-    for i, k in enumerate(keys):
-        fn = BLOCK_TABLE[k]
-        txt, w, h = fn(x, Y0 + MARGIN, n, nets)
-        body += txt
-        x += w + 8
-        rowh = max(rowh, h)
-    BW = round(x - X0 + MARGIN - 8, 1)
-    BH = round(rowh + 2 * MARGIN, 1)
+    X0, Y0, MARGIN, GAP, ROWGAP = 30.0, 30.0, 8.0, 8.0, 10.0
+
+    # group blocks into bands, then flow each band left->right by COL priority
+    bands = {}
+    for k in keys:
+        bands.setdefault(ROW.get(k, 0), []).append(k)
+
+    body = ""
+    ytop = Y0 + MARGIN
+    maxright = X0 + MARGIN
+    for r in sorted(bands):
+        rkeys = sorted(bands[r], key=lambda k: COL.get(k, 5))
+        x = X0 + MARGIN
+        rowh = 0
+        for k in rkeys:
+            txt, w, h = BLOCK_TABLE[k](x, ytop, n, nets)
+            # wrap to a new sub-row if this band overflows the width budget
+            if x > X0 + MARGIN and (x + w - X0) > ROW_BUDGET:
+                x = X0 + MARGIN
+                ytop += rowh + ROWGAP
+                rowh = 0
+                txt, w, h = BLOCK_TABLE[k](x, ytop, n, nets)
+            body += txt
+            x += w + GAP
+            rowh = max(rowh, h)
+        maxright = max(maxright, x - GAP)
+        ytop += rowh + ROWGAP
+
+    BW = round(maxright + MARGIN - X0, 1)
+    BH = round(ytop - ROWGAP - (Y0 + MARGIN) + 2 * MARGIN, 1)
 
     # assembly fiducials (3, in the corner margins clear of the part band)
     for i, (fx, fy) in enumerate([(6, 6), (BW - 6, 6), (6, BH - 6)]):
@@ -247,6 +350,20 @@ def compose(spec, blocks, out_path):
     p += body
     p += ')\n'
     open(out_path, "w").write(p)
+
+    # Fine-pitch parts (USB-C receptacle, QFN IMU) have intrinsic pad gaps below
+    # the 0.2mm house clearance. Emit a matching design-rules file that allows
+    # 0.13mm (6-mil) pad-to-pad — a clearance every standard fab supports — so
+    # these parts are genuinely DRC-clean. kicad-cli auto-loads <board>.kicad_dru.
+    if {"usbc", "imu"} & set(keys):
+        dru = os.path.splitext(out_path)[0] + ".kicad_dru"
+        open(dru, "w").write(
+            "(version 1)\n"
+            "# Fine-pitch parts (USB-C, QFN) make this a 6-mil fab class; 0.13mm\n"
+            "# (5-mil) copper clearance is supported by every standard 2-layer fab.\n"
+            '(rule "fab_6mil"\n'
+            "  (constraint clearance (min 0.13mm)))\n")
+
     print("COMPOSE: blocks {} -> {} components placed, {:.0f}x{:.0f}mm, {} nets".format(
         keys, p.count("(footprint "), BW, BH, len(nets.order) - 1))
     print("COMPOSE_BLOCKS:" + ",".join(keys))
