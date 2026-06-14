@@ -180,6 +180,48 @@ def pick_footprint(fp_filters):
     return (best[1], best[2]) if best else (None, None)
 
 
+def footprint_for_package(package, npins=None):
+    """Map a datasheet PACKAGE NAME (e.g. 'SOIC-8', 'QFN-24 4x4mm 0.5mm pitch')
+    to a verified KiCad land pattern. Geometry is REUSED, never generated — the
+    datasheet only tells us which standard package, and KiCad ships the IPC
+    footprint for it."""
+    p = package.upper().replace("-", " ").replace("/", " ")
+    fams = ["SOIC", "TSSOP", "VSSOP", "MSOP", "SSOP", "SOT 23", "SOT", "QFN",
+            "DFN", "WSON", "TQFP", "LQFP", "QFP", "BGA", "TO 92", "SON"]
+    fam = next((k for k in fams if k in p), None)
+    if not npins:
+        m = re.search(r"\b(\d{1,3})\b", package)
+        npins = int(m.group(1)) if m else None
+    fam_glob = (fam or "*").replace(" ", "?")
+    glob = "*%s*%s*" % (fam_glob, npins or "")
+    return pick_footprint(glob)
+
+
+def resolve_from_spec(spec, interface, nets):
+    """Resolve a component from an extracted datasheet spec (pins + package),
+    rather than a KiCad symbol. Same return shape as resolve()."""
+    pins = [(str(p.get("number")), p.get("name", "")) for p in spec.get("pins", [])
+            if p.get("number")]
+    if interface not in CONTRACTS:
+        return {"error": "unknown interface '%s'" % interface}
+    pmap, rep = bind(pins, interface, nets)
+    if rep["missing"]:
+        return {"error": "unbound required roles %s" % rep["missing"], "report": rep}
+    lib, fp = footprint_for_package(spec.get("package", ""), len(pins))
+    if not fp:
+        return {"error": "no footprint for package '%s'" % spec.get("package")}
+    return {"symbol": spec.get("part"), "lib": lib, "footprint": fp, "pmap": pmap,
+            "report": rep}
+
+
+def symbol_pinmap(query):
+    """For verification: {number: NORMALIZED-name} from a KiCad symbol, or None."""
+    info = symbol_info(query)
+    if not info:
+        return None
+    return {num: _norm(nm) for num, nm in info["pins"]}
+
+
 def resolve(query, interface, nets):
     """Full resolution: symbol -> pins -> binding -> footprint. Returns a dict
     with lib, footprint, pmap, and a human report (or {'error': ...})."""

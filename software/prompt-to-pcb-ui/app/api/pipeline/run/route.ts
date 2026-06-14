@@ -28,6 +28,7 @@ type PipelineEvent =
   | { type: 'log'; stage: string; text: string; level?: string }
   | { type: 'design'; spec: Record<string, unknown> }
   | { type: 'coverage'; mapped: string[]; dropped: string[] }
+  | { type: 'sourced'; parts: Record<string, unknown>[] }
   | {
       type: 'done'
       status: 'PASSED' | 'GATE FAILED'
@@ -181,6 +182,28 @@ export async function GET(req: Request) {
               }
             } catch {
               /* coverage line unparseable — non-fatal */
+            }
+          }
+          // sourced parts: real MPN/price/stock/verification for parts pulled
+          // live from DigiKey + datasheet (vs. hardcoded blocks).
+          const sourced = [...comp.out.matchAll(/^SOURCED:(.+)$/gm)]
+            .map((m) => {
+              try {
+                return JSON.parse(m[1]) as Record<string, unknown>
+              } catch {
+                return null
+              }
+            })
+            .filter(Boolean) as Record<string, unknown>[]
+          if (sourced.length) {
+            send({ type: 'sourced', parts: sourced })
+            for (const p of sourced) {
+              const v = p.verified === 'verified' || String(p.verified).startsWith('verified')
+              log(
+                'design',
+                `sourced ${p.ref}: ${p.mpn} (${p.manufacturer}) $${p.price} · ${p.stock} in stock · ${p.footprint} · ${v ? '✓ verified' : '⚠ ' + p.verified}`,
+                v ? 'ok' : 'warn',
+              )
             }
           }
           log('design', 'GATE design: blocks composed + wired — PASS', 'ok')
@@ -621,11 +644,13 @@ function writeRunReport(
   let done: Extract<PipelineEvent, { type: 'done' }> | null = null
   let error: string | null = null
   let coverage: { mapped: string[]; dropped: string[] } | null = null
+  let sourced: Record<string, unknown>[] = []
   for (const ev of rec.events) {
     if (ev.type === 'stage') stages[ev.id] = { state: ev.state, failReason: ev.failReason }
     else if (ev.type === 'done') done = ev
     else if (ev.type === 'error') error = ev.message
     else if (ev.type === 'coverage') coverage = { mapped: ev.mapped, dropped: ev.dropped }
+    else if (ev.type === 'sourced') sourced = ev.parts
   }
   const logs = rec.events.filter(
     (e): e is Extract<PipelineEvent, { type: 'log' }> => e.type === 'log',
@@ -645,6 +670,7 @@ function writeRunReport(
     status: error ? 'ERROR' : done?.status ?? 'INCOMPLETE',
     error,
     coverage,
+    sourced,
     stages,
     boardPath: done?.boardPath ?? null,
     fabZip: done?.fabZip ?? null,
@@ -684,6 +710,16 @@ function writeRunReport(
     if (coverage.dropped.length)
       md.push(`- ⚠ NOT built (no library block): ${coverage.dropped.join(', ')}`)
     else md.push('- every requested block was built')
+    md.push('')
+  }
+  if (sourced.length) {
+    md.push('## Sourced parts (live DigiKey + datasheet)')
+    for (const p of sourced) {
+      const v = String(p.verified).startsWith('verified') ? '✓ verified' : `⚠ ${p.verified}`
+      md.push(
+        `- **${p.ref}** ${p.mpn} (${p.manufacturer}) — $${p.price} · ${p.stock} in stock · ${p.footprint} · ${v}`,
+      )
+    }
     md.push('')
   }
   md.push('## Stages')

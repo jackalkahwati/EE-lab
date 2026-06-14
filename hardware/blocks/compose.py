@@ -21,6 +21,7 @@ import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import resolve_part  # general KiCad-library part resolver
+import source_part   # DigiKey -> datasheet -> resolved part (cache-first)
 
 FP = "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints"
 
@@ -243,18 +244,23 @@ def block_cellular(x, y, n, nets):
 
 
 def block_tempsensor(x, y, n, nets):
-    """I2C temperature sensor — NOT a hardcoded block. The part (LM75B) is
-    resolved live from KiCad's symbol+footprint libraries: its real pin map and
-    a routable footprint come from the library, and resolve_part binds the pins
-    to the i2c_sensor interface. This is the general path — any library part
-    becomes usable without a hand-written block."""
-    r = resolve_part.resolve("LM75B", "i2c_sensor", {
+    """I2C temperature sensor — NOT a hardcoded block. source_part sources a
+    real, in-stock, routable part from DigiKey, reads its datasheet for the
+    pinout + package, and resolves a verified footprint (cache-first; falls back
+    to the KiCad-symbol path offline). The board uses whatever real part fits the
+    interface, with MPN/price/stock/verification reported."""
+    r = source_part.source("I2C temperature sensor", "i2c_sensor", {
         "power": "+3V3", "gnd": "GND",
         "i2c_scl": n["i2c_scl"], "i2c_sda": n["i2c_sda"], "int": "TEMP_OS"})
     if "error" in r:
-        raise RuntimeError("tempsensor resolve failed: " + r["error"])
+        raise RuntimeError("tempsensor source failed: " + r["error"])
     b = place(r["lib"], r["footprint"], "U6", x + 6, y + 6, 0, r["pmap"], nets)
     b += cap("C9", x + 6, y + 14, "+3V3", "GND", nets)  # decoupling per power pin
+    print("SOURCED:" + json.dumps({
+        "ref": "U6", "mpn": r.get("mpn"), "manufacturer": r.get("manufacturer"),
+        "price": r.get("price"), "stock": r.get("stock"),
+        "footprint": r["lib"] + ":" + r["footprint"],
+        "verified": r.get("verified"), "via": r.get("source")}))
     return b, 16, 20
 
 

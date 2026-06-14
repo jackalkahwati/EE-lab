@@ -1,0 +1,53 @@
+{
+ "i2c_sensor::i2c temperature sensor": {
+  "datasheet": "https://www.ti.com/lit/ds/symlink/tmp1075.pdf",
+  "manufacturer": "Texas Instruments",
+  "mpn": "TMP1075DGKR",
+  "package": "VSSOP-8",
+  "pins": [
+   {
+    "function": "I2C data, open-drain I/O",
+    "name": "SDA",
+    "number": "1"
+   },
+   {
+    "function": "I2C clock input",
+    "name": "SCL",
+    "number": "2"
+   },
+   {
+    "function": "Overtemperature alert, open-drain output",
+    "name": "ALERT",
+    "number": "3"
+   },
+   {
+    "function": "Ground reference",
+    "name": "GND",
+    "number": "4"
+   },
+   {
+    "function": "I2C address select",
+    "name": "A2",
+    "number": "5"
+   },
+   {
+    "function": "I2C address select",
+    "name": "A1",
+    "number": "6"
+   },
+   {
+    "function": "I2C address select",
+    "name": "A0",
+    "number": "7"
+   },
+   {
+    "function": "Supply voltage input",
+    "name": "V+",
+    "number": "8"
+   }
+  ],
+  "price": 0.54,
+  "stock": 66719,
+  "verified": "unverified (no symbol)"
+ }
+}
