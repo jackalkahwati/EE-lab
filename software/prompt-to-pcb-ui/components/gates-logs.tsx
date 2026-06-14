@@ -16,6 +16,7 @@ const STAGE_COLOR: Record<StageId, string> = {
   placement: 'text-[#5fb3e8]',
   routing: 'text-[#c792ea]',
   validation: 'text-success',
+  firmware: 'text-[#e8b75f]',
 }
 
 export function GatesLogs({

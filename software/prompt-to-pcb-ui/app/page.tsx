@@ -35,6 +35,7 @@ interface PipelineEvent {
   message?: string
   spec?: Record<string, unknown>
   fabZip?: string
+  fwZip?: string
 }
 
 export default function FirstLightPage() {
@@ -47,6 +48,7 @@ export default function FirstLightPage() {
   const [realBoard, setRealBoard] = useState<RealBoard | null>(null)
   const [designSpec, setDesignSpec] = useState<Record<string, unknown> | null>(null)
   const [fabZip, setFabZip] = useState<string | null>(null)
+  const [fwZip, setFwZip] = useState<string | null>(null)
   const esRef = useRef<EventSource | null>(null)
   const stageStartRef = useRef<Record<string, number>>({})
   const currentStageRef = useRef<string | null>(null)
@@ -111,6 +113,7 @@ export default function FirstLightPage() {
       currentStageRef.current = null
       setDesignSpec(null)
       setFabZip(null)
+      setFwZip(null)
       setRuns((prev) => [base, ...prev])
       setSelectedId(id)
       setLiveRunId(id)
@@ -166,6 +169,7 @@ export default function FirstLightPage() {
           setLiveRunId(null)
           setLiveElapsed({})
           setFabZip(ev.fabZip ?? null)
+          setFwZip(ev.fwZip ?? null)
           update((r) => ({ ...r, status: ev.status ?? 'GATE FAILED' }))
           // refresh real artifacts synced by the run, attach to this run
           loadRealBoard().then((data) => {
@@ -257,7 +261,7 @@ export default function FirstLightPage() {
               FirstLight
             </h1>
             <span className="font-mono text-[10px] tracking-wide text-muted-foreground">
-              {'PROMPT → PCBA · 4 STAGES · HARD GATES'}
+              {'PROMPT → PCBA + FIRMWARE · 5 STAGES · HARD GATES'}
             </span>
           </div>
           <div className="flex items-center gap-3">
@@ -276,6 +280,15 @@ export default function FirstLightPage() {
                 className="rounded border border-primary px-2 py-1 font-mono text-[10px] font-medium text-primary hover:bg-primary hover:text-primary-foreground"
               >
                 ↓ Fab package (.zip)
+              </a>
+            )}
+            {fwZip && (
+              <a
+                href={fwZip}
+                download
+                className="rounded border border-primary px-2 py-1 font-mono text-[10px] font-medium text-primary hover:bg-primary hover:text-primary-foreground"
+              >
+                ↓ Firmware (.zip)
               </a>
             )}
             <span className="font-mono text-[10px] text-muted-foreground">

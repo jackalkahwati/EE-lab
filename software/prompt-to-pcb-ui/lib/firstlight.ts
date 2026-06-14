@@ -1,4 +1,9 @@
-export type StageId = 'design' | 'placement' | 'routing' | 'validation'
+export type StageId =
+  | 'design'
+  | 'placement'
+  | 'routing'
+  | 'validation'
+  | 'firmware'
 export type StageState = 'pending' | 'running' | 'passed' | 'failed' | 'blocked'
 export type RunStatus = 'RUNNING' | 'PASSED' | 'GATE FAILED'
 
@@ -84,6 +89,14 @@ export const STAGE_DEFS: StageDef[] = [
     substeps: ['SES import', 'zone fill', 'kicad-cli DRC'],
     durationMs: 8000,
   },
+  {
+    id: 'firmware',
+    label: 'Firmware',
+    tool: 'gen_firmware',
+    gate: 'BUILD GREEN',
+    substeps: ['pin map + channel map', 'HAL + self-test', 'cargo build (thumbv6m)'],
+    durationMs: 5000,
+  },
 ]
 
 export const STAGE_PREFIX: Record<StageId, string> = {
@@ -91,6 +104,7 @@ export const STAGE_PREFIX: Record<StageId, string> = {
   placement: 'place',
   routing: 'route',
   validation: 'drc',
+  firmware: 'fw',
 }
 
 /* ------------------------------------------------------------------ */
@@ -494,6 +508,12 @@ export const SIM_LOGS: Record<StageId, string[]> = {
     'zone fill: 3 zones',
     'kicad-cli pcb drc --severity-error → 0 violations',
     'GATE validation: DRC = 0 — PASS',
+  ],
+  firmware: [
+    'gen_firmware: pin map + channel map from netlist',
+    'HAL: shift-register driver + crosspoint table',
+    'cargo build --target thumbv6m-none-eabi',
+    'GATE firmware: cargo build GREEN — PASS',
   ],
 }
 

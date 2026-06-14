@@ -26,7 +26,13 @@ type PipelineEvent =
   | { type: 'stage'; id: string; state: string; failReason?: string }
   | { type: 'log'; stage: string; text: string; level?: string }
   | { type: 'design'; spec: Record<string, unknown> }
-  | { type: 'done'; status: 'PASSED' | 'GATE FAILED'; boardPath: string; fabZip?: string }
+  | {
+      type: 'done'
+      status: 'PASSED' | 'GATE FAILED'
+      boardPath: string
+      fabZip?: string
+      fwZip?: string
+    }
   | { type: 'error'; message: string }
 
 const globalState = globalThis as unknown as { __pipelineRunning?: boolean }
@@ -42,6 +48,7 @@ export async function GET(req: Request) {
   const hwDir = path.resolve(appDir, '../../hardware/pcba-rev-a')
   const flroute = path.join(hwDir, 'tools/flroute/target/release/flroute')
   const ATO = process.env.ATO_BIN || `${process.env.HOME}/.local/bin/ato`
+  const CARGO = process.env.CARGO_BIN || `${process.env.HOME}/.cargo/bin/cargo`
   const encoder = new TextEncoder()
   let child: ChildProcess | null = null
   let cancelled = false
@@ -311,6 +318,7 @@ export async function GET(req: Request) {
           sync.code === 0 ? 'ok' : 'err',
         )
 
+        let fabZip: string | undefined
         if (drcPass) {
           log('validation', 'GATE validation: DRC = 0 — PASS', 'ok')
           // ---- fab outputs: gerbers/drill/P&P/STEP/BOM -> zip --------------
@@ -323,7 +331,6 @@ export async function GET(req: Request) {
             fabDir,
             bomCsv,
           ])
-          let fabZip: string | undefined
           const zipMatch = fab.out.match(/^FAB_ZIP:(.+)$/m)
           if (zipMatch && fs.existsSync(zipMatch[1].trim())) {
             const pubFab = path.join(appDir, 'public/fab')
@@ -336,11 +343,55 @@ export async function GET(req: Request) {
             log('validation', 'fab package generation incomplete', 'warn')
           }
           send({ type: 'stage', id: 'validation', state: 'passed' })
-          send({ type: 'done', status: 'PASSED', boardPath: wsBoard, fabZip })
         } else {
           send({ type: 'stage', id: 'validation', state: 'failed', failReason: `${violations} DRC violations` })
-          send({ type: 'done', status: 'GATE FAILED', boardPath: wsBoard })
         }
+        const validationStatus: 'PASSED' | 'GATE FAILED' = drcPass
+          ? 'PASSED'
+          : 'GATE FAILED'
+
+        // ---- stage 5: firmware — netlist-derived BSP + HAL + self-test -------
+        // Independent of DRC: firmware comes from the netlist, so it generates
+        // and compiles even when copper still has a defect. Its own hard gate
+        // is `cargo build` for the RP2040 target.
+        send({ type: 'stage', id: 'firmware', state: 'running' })
+        let fwZip: string | undefined
+        const fwDir = path.join(ws, 'firmware')
+        const gen = await exec('firmware', KPY, [
+          path.join(appDir, 'scripts/gen_firmware.py'),
+          wsBoard,
+          fwDir,
+        ])
+        if (!gen.out.includes('FIRMWARE:') || gen.out.includes('ERROR')) {
+          send({ type: 'stage', id: 'firmware', state: 'failed', failReason: 'firmware generation failed' })
+        } else {
+          log('firmware', 'cargo build --target thumbv6m-none-eabi (RP2040)…')
+          const fwBuild = await exec('firmware', CARGO, ['build', '--release'], {
+            cwd: fwDir,
+          })
+          const fwOk = fwBuild.code === 0 || fwBuild.out.includes('Finished')
+          if (fwOk) {
+            log('firmware', 'GATE firmware: cargo build GREEN — PASS', 'ok')
+            // zip the crate (exclude target/) for download
+            const zipRes = await exec('firmware', 'bash', [
+              '-c',
+              `cd ${JSON.stringify(fwDir)} && zip -qr firmware.zip . -x 'target/*' && echo FW_ZIP:${fwDir}/firmware.zip`,
+            ])
+            const fwm = zipRes.out.match(/^FW_ZIP:(.+)$/m)
+            if (fwm && fs.existsSync(fwm[1].trim())) {
+              const pubFw = path.join(appDir, 'public/firmware')
+              fs.mkdirSync(pubFw, { recursive: true })
+              fs.copyFileSync(fwm[1].trim(), path.join(pubFw, 'firmware.zip'))
+              fwZip = '/firmware/firmware.zip'
+              log('firmware', `firmware crate ready → ${fwZip}`, 'ok')
+            }
+            send({ type: 'stage', id: 'firmware', state: 'passed' })
+          } else {
+            send({ type: 'stage', id: 'firmware', state: 'failed', failReason: 'cargo build failed' })
+          }
+        }
+
+        send({ type: 'done', status: validationStatus, boardPath: wsBoard, fabZip, fwZip })
       } catch (err) {
         send({ type: 'error', message: String(err) })
       } finally {
