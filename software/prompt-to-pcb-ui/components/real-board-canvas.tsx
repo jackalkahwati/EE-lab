@@ -50,9 +50,12 @@ function MaskedLayer({
 export function RealBoardCanvas({
   run,
   board,
+  basePath = '/board',
 }: {
   run: Run
   board: RealBoardJson
+  // where this run's artifacts live: '/board' (shared latest) or '/runs/<id>/board'
+  basePath?: string
 }) {
   const [visibleLayers, setVisibleLayers] = useState<Set<LayerId>>(
     () => new Set(LAYERS.map((l) => l.id)),
@@ -148,7 +151,7 @@ export function RealBoardCanvas({
             aria-label={`Real PCB copper: ${run.metrics.boardSize}, ${board.layers} layers`}
           >
             {/* board outline */}
-            <MaskedLayer src="/board/Edge.Cuts.svg" color="#9aa3ae" opacity={0.9} />
+            <MaskedLayer src={`${basePath}/Edge.Cuts.svg`} color="#9aa3ae" opacity={0.9} />
             {/* copper, bottom-up */}
             {[...LAYERS]
               .reverse()
@@ -157,20 +160,20 @@ export function RealBoardCanvas({
                   visibleLayers.has(layer.id) && (
                     <MaskedLayer
                       key={layer.id}
-                      src={`/board/${layer.id}.svg`}
+                      src={`${basePath}/${layer.id}.svg`}
                       color={layer.color}
                       opacity={layer.opacity}
                     />
                   ),
               )}
             {silk && (
-              <MaskedLayer src="/board/F.SilkS.svg" color="#d7dde6" opacity={0.55} />
+              <MaskedLayer src={`${basePath}/F.SilkS.svg`} color="#d7dde6" opacity={0.55} />
             )}
           </div>
         ) : (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={`/board/render-${view === 'photo-top' ? 'top' : 'bottom'}.png`}
+            src={`${basePath}/render-${view === 'photo-top' ? 'top' : 'bottom'}.png`}
             alt={`KiCad raytraced render, ${view === 'photo-top' ? 'top' : 'bottom'} side`}
             className="max-h-full max-w-full rounded-sm"
           />

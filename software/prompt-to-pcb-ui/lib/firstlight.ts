@@ -38,6 +38,9 @@ export interface Run {
   logs: LogLine[]
   /** true when this run is backed by real KiCad artifacts in public/ */
   real?: boolean
+  /** public URL base of this run's OWN artifact snapshot (e.g. /runs/<id>);
+   *  absent for the shared FL-1 seed run, which uses /board + /data */
+  runDir?: string
 }
 
 export interface LogLine {

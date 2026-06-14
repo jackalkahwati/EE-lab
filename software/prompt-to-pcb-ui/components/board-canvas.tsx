@@ -91,9 +91,11 @@ function useBoardGeometry() {
 export function BoardCanvas({
   run,
   realBoard,
+  basePath = '/board',
 }: {
   run: Run
   realBoard?: RealBoardJson | null
+  basePath?: string
 }) {
   const [visibleLayers, setVisibleLayers] = useState<Set<LayerId>>(
     () => new Set(LAYERS.map((l) => l.id)),
@@ -102,7 +104,7 @@ export function BoardCanvas({
   const { relays, traces, rats } = useBoardGeometry()
 
   if (run.real && realBoard) {
-    return <RealBoardCanvas run={run} board={realBoard} />
+    return <RealBoardCanvas run={run} board={realBoard} basePath={basePath} />
   }
 
   const toggleLayer = (id: LayerId) => {

@@ -35,6 +35,7 @@ type PipelineEvent =
       boardPath: string
       fabZip?: string
       fwZip?: string
+      runDir?: string
     }
   | { type: 'error'; message: string }
 
@@ -48,6 +49,9 @@ export async function GET(req: Request) {
 
   const qp = new URL(req.url).searchParams
   const prompt = qp.get('prompt') ?? ''
+  // per-run artifact snapshot id (so each run keeps its OWN board/renders/data
+  // instead of all runs sharing the latest write to public/board)
+  const runId = (qp.get('runId') ?? '').replace(/[^a-zA-Z0-9_-]/g, '')
   // Layer-2 compose mode: the interview passes a base64 {blocks, boardClass}
   const composeMode = qp.get('compose') === '1'
   let composeSpec: { blocks: string[]; boardClass: string } | null = null
@@ -77,6 +81,16 @@ export async function GET(req: Request) {
   const stream = new ReadableStream({
     async start(controller) {
       const send = (ev: PipelineEvent) => {
+        // snapshot this run's artifacts into public/runs/<id> BEFORE telling the
+        // client it's done, so the run keeps its own board even after the next
+        // run overwrites public/board.
+        if (ev.type === 'done' && runId) {
+          try {
+            ev.runDir = snapshotRun(process.cwd(), runId)
+          } catch {
+            /* snapshot best-effort; UI falls back to shared /board */
+          }
+        }
         events.push(ev)
         try {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(ev)}\n\n`))
@@ -610,6 +624,24 @@ export async function GET(req: Request) {
       Connection: 'keep-alive',
     },
   })
+}
+
+/**
+ * Copy this run's artifacts (board renders + data) into public/runs/<id>/ so the
+ * run keeps its own board after the next run overwrites the shared public/board.
+ * Returns the public URL base (e.g. /runs/<id>).
+ */
+function snapshotRun(appDir: string, runId: string): string {
+  const dest = path.join(appDir, 'public/runs', runId)
+  fs.rmSync(dest, { recursive: true, force: true })
+  fs.mkdirSync(dest, { recursive: true })
+  for (const sub of ['board', 'data']) {
+    const src = path.join(appDir, 'public', sub)
+    if (fs.existsSync(src)) {
+      fs.cpSync(src, path.join(dest, sub), { recursive: true })
+    }
+  }
+  return `/runs/${runId}`
 }
 
 /**

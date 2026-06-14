@@ -39,6 +39,7 @@ interface PipelineEvent {
   spec?: Record<string, unknown>
   fabZip?: string
   fwZip?: string
+  runDir?: string
 }
 
 export default function FirstLightPage() {
@@ -101,6 +102,23 @@ export default function FirstLightPage() {
 
   const selectedRun = runs.find((r) => r.id === selectedId) ?? runs[0]
   const isReal = selectedRun?.real === true && realBoard !== null
+  // images for the selected run come from ITS snapshot, not the shared latest
+  const boardBase = selectedRun?.runDir ? `${selectedRun.runDir}/board` : '/board'
+
+  // when the user switches to a real run, load THAT run's own artifact snapshot
+  // so the board view / metrics reflect the selected run (not the latest one)
+  const selectedRunDir = selectedRun?.runDir
+  const selectedReal = selectedRun?.real
+  useEffect(() => {
+    if (!selectedReal) return
+    let cancelled = false
+    loadRealBoard(selectedRunDir ?? '').then((data) => {
+      if (data && !cancelled) setRealBoard(data)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [selectedId, selectedReal, selectedRunDir])
 
   /** REAL pipeline: placement → routing → validation via /api/pipeline/run */
   const handleGenerate = useCallback(
@@ -157,7 +175,7 @@ export default function FirstLightPage() {
       const update = (fn: (r: Run) => Run) =>
         setRuns((prev) => prev.map((r) => (r.id === id ? fn(r) : r)))
 
-      let url = `/api/pipeline/run?prompt=${encodeURIComponent(prompt)}`
+      let url = `/api/pipeline/run?prompt=${encodeURIComponent(prompt)}&runId=${encodeURIComponent(id)}`
       if (compose) {
         const payload = btoa(
           JSON.stringify({ blocks: compose.blocks, boardClass: compose.boardClass }),
@@ -211,17 +229,17 @@ export default function FirstLightPage() {
           setFabZip(ev.fabZip ?? null)
           setFwZip(ev.fwZip ?? null)
           update((r) => ({ ...r, status: ev.status ?? 'GATE FAILED' }))
-          // refresh real artifacts synced by the run, attach to this run
-          loadRealBoard().then((data) => {
+          // load THIS run's own artifact snapshot (/runs/<id>) so every run keeps
+          // its own board instead of all runs sharing the latest public/board
+          loadRealBoard(ev.runDir ?? '').then((data) => {
             if (!data) return
             setRealBoard(data)
             setRuns((prev) =>
-              prev.map((r) => {
-                if (r.id === id)
-                  return { ...r, real: true, metrics: data.run.metrics }
-                if (r.id === REAL_RUN_ID) return data.run
-                return r
-              }),
+              prev.map((r) =>
+                r.id === id
+                  ? { ...r, real: true, runDir: ev.runDir, metrics: data.run.metrics }
+                  : r,
+              ),
             )
           })
         } else if (ev.type === 'error') {
@@ -389,6 +407,7 @@ export default function FirstLightPage() {
               <BoardCanvas
                 run={selectedRun}
                 realBoard={isReal ? realBoard?.board : null}
+                basePath={boardBase}
               />
             )}
             {tab === 'Schematic / Code' && (

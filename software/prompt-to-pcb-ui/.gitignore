@@ -20,3 +20,6 @@ public/firmware/
 # transient per-run debug report (regenerated every pipeline run)
 public/data/last-run.json
 public/data/last-run.md
+
+# per-run artifact snapshots (regenerated each run)
+public/runs/

@@ -201,12 +201,13 @@ function buildReports(b: RealBoardJson): GateReport[] {
   ]
 }
 
-export async function loadRealBoard(): Promise<RealBoard | null> {
-  const board = await fetchJson<RealBoardJson>('/data/board.json')
+export async function loadRealBoard(base = ''): Promise<RealBoard | null> {
+  // base '' = shared latest artifacts (/data); '/runs/<id>' = a run's own snapshot
+  const board = await fetchJson<RealBoardJson>(`${base}/data/board.json`)
   if (!board) return null
   const [bom, ato] = await Promise.all([
-    fetchJson<BomLine[]>('/data/bom.json'),
-    fetchJson<AtoFile[]>('/data/ato.json'),
+    fetchJson<BomLine[]>(`${base}/data/bom.json`),
+    fetchJson<AtoFile[]>(`${base}/data/ato.json`),
   ])
   return { board, run: buildRun(board), reports: buildReports(board), bom, ato }
 }
