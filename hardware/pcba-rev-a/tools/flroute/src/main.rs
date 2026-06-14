@@ -539,14 +539,18 @@ fn main() {
             .unwrap_or_default();
         nets.push(Net { name, pins });
     }
-    // zone-served nets: the two largest by pin count, plus any --skip-net
-    let mut by_size: Vec<usize> = (0..nets.len()).collect();
-    by_size.sort_by(|&a, &b| nets[b].pins.len().cmp(&nets[a].pins.len()));
-    let mut skip: HashSet<String> = by_size
-        .iter()
-        .take(2)
-        .map(|&i| nets[i].name.clone())
-        .collect();
+    // zone-served nets are the ones the caller marks with --skip-net (the board's
+    // actual copper pours). Only when no zone info is given do we fall back to the
+    // heuristic of skipping the two largest nets as assumed planes — otherwise that
+    // heuristic wrongly skips a big non-pour net (e.g. a multi-pad +5V rail),
+    // leaving it unrouted.
+    let mut skip: HashSet<String> = if skip_extra.is_empty() {
+        let mut by_size: Vec<usize> = (0..nets.len()).collect();
+        by_size.sort_by(|&a, &b| nets[b].pins.len().cmp(&nets[a].pins.len()));
+        by_size.iter().take(2).map(|&i| nets[i].name.clone()).collect()
+    } else {
+        HashSet::new()
+    };
     skip.extend(skip_extra);
     eprintln!("zone-served (skipped): {:?}", skip);
 
