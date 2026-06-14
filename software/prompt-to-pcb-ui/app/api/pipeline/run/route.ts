@@ -27,6 +27,7 @@ type PipelineEvent =
   | { type: 'stage'; id: string; state: string; failReason?: string }
   | { type: 'log'; stage: string; text: string; level?: string }
   | { type: 'design'; spec: Record<string, unknown> }
+  | { type: 'coverage'; mapped: string[]; dropped: string[] }
   | {
       type: 'done'
       status: 'PASSED' | 'GATE FAILED'
@@ -161,6 +162,26 @@ export async function GET(req: Request) {
               send({ type: 'stage', id: s, state: 'blocked' })
             send({ type: 'done', status: 'GATE FAILED', boardPath: variantBoard })
             return
+          }
+          // coverage: surface which requested blocks the library could NOT build,
+          // so an incomplete board never passes silently.
+          const covMatch = comp.out.match(/^COMPOSE_COVERAGE:(.+)$/m)
+          if (covMatch) {
+            try {
+              const cov = JSON.parse(covMatch[1]) as { mapped: string[]; dropped: string[] }
+              send({ type: 'coverage', mapped: cov.mapped, dropped: cov.dropped })
+              if (cov.dropped.length) {
+                log(
+                  'design',
+                  `⚠ coverage: built [${cov.mapped.join(', ')}]; NOT built (no library block): [${cov.dropped.join(', ')}]`,
+                  'warn',
+                )
+              } else {
+                log('design', `coverage: every requested block built [${cov.mapped.join(', ')}]`, 'ok')
+              }
+            } catch {
+              /* coverage line unparseable — non-fatal */
+            }
           }
           log('design', 'GATE design: blocks composed + wired — PASS', 'ok')
           send({ type: 'stage', id: 'design', state: 'passed' })
@@ -457,12 +478,16 @@ export async function GET(req: Request) {
                 `Write src/app.rs: a generic application controller that drives this board ` +
                 `using the modules above. Rules:\n` +
                 `- no_std; reference only crate::{${mods.map((m) => m.replace('.rs', '')).join(', ')}} and embedded-hal 1.0 traits.\n` +
-                `- A struct owning the peripherals it needs, generic over concrete types with EXACTLY these bounds where used: ` +
+                `- A struct owning ONLY the peripherals that exist above, generic over concrete types with ` +
+                `EXACTLY these embedded-hal/embedded-io bounds where used: ` +
                 `SPI: embedded_hal::spi::SpiDevice, RST: embedded_hal::digital::OutputPin, ` +
-                `I2C: embedded_hal::i2c::I2c, PWM: embedded_hal::pwm::SetDutyCycle, D: embedded_hal::delay::DelayNs.\n` +
-                `- new(...), init(&mut self) that probes radio/IMU if present, and control_step(&mut self) ` +
-                `running one real iteration (e.g. read IMU, treat a received LoRa byte as 0..=255 throttle, ` +
-                `apply to motors via crate::motors::set_throttle, failsafe-disarm). Only use peripherals that exist above.\n` +
+                `I2C: embedded_hal::i2c::I2c, PWM: embedded_hal::pwm::SetDutyCycle, D: embedded_hal::delay::DelayNs, ` +
+                `R: embedded_io::Read, S: embedded_io::Read + embedded_io::Write.\n` +
+                `- new(...), init(&mut self) that probes/brings up each present peripheral, and control_step(&mut self) ` +
+                `running ONE realistic iteration that fits THIS board's peripherals — derive the behavior from what ` +
+                `exists, do not assume motors or a radio. Examples by peripheral: GNSS -> read a fix sentence; ` +
+                `cellular modem -> send the latest reading via an AT command; IMU -> read accel; motors -> apply a ` +
+                `throttle with failsafe-disarm. Use only the modules above and only their real public functions.\n` +
                 `- No main, no #[entry], no panic handler — this is a library module. It MUST compile. Return only src/app.rs.`
 
               log('firmware', 'app firmware: frontier model writing the control loop…')
@@ -595,10 +620,12 @@ function writeRunReport(
   const stages: Record<string, { state: string; failReason?: string }> = {}
   let done: Extract<PipelineEvent, { type: 'done' }> | null = null
   let error: string | null = null
+  let coverage: { mapped: string[]; dropped: string[] } | null = null
   for (const ev of rec.events) {
     if (ev.type === 'stage') stages[ev.id] = { state: ev.state, failReason: ev.failReason }
     else if (ev.type === 'done') done = ev
     else if (ev.type === 'error') error = ev.message
+    else if (ev.type === 'coverage') coverage = { mapped: ev.mapped, dropped: ev.dropped }
   }
   const logs = rec.events.filter(
     (e): e is Extract<PipelineEvent, { type: 'log' }> => e.type === 'log',
@@ -617,6 +644,7 @@ function writeRunReport(
     composeSpec: rec.composeSpec,
     status: error ? 'ERROR' : done?.status ?? 'INCOMPLETE',
     error,
+    coverage,
     stages,
     boardPath: done?.boardPath ?? null,
     fabZip: done?.fabZip ?? null,
@@ -639,13 +667,25 @@ function writeRunReport(
   const icon = (s?: string) =>
     s === 'passed' ? '✅' : s === 'failed' ? '❌' : s === 'blocked' ? '⛔' : '·'
   const md: string[] = []
-  md.push(`# Last run — ${report.status}`)
+  const partial = coverage && coverage.dropped.length > 0
+  md.push(
+    `# Last run — ${report.status}` +
+      (partial ? ` ⚠ partial coverage (${coverage!.dropped.length} block(s) unbuilt)` : ''),
+  )
   md.push('')
   md.push(`- when: ${report.startedAt} → ${report.finishedAt}`)
   md.push(`- mode: \`${report.mode}\`${rec.composeSpec ? ` · ${rec.composeSpec.boardClass}` : ''}`)
   md.push(`- prompt: ${report.prompt || '(none)'}`)
   if (rec.composeSpec) md.push(`- blocks: ${rec.composeSpec.blocks.join(', ')}`)
   md.push('')
+  if (coverage) {
+    md.push('## Coverage')
+    md.push(`- ✅ built: ${coverage.mapped.join(', ') || '(none)'}`)
+    if (coverage.dropped.length)
+      md.push(`- ⚠ NOT built (no library block): ${coverage.dropped.join(', ')}`)
+    else md.push('- every requested block was built')
+    md.push('')
+  }
   md.push('## Stages')
   for (const id of STAGE_ORDER) {
     if (!stages[id]) continue
