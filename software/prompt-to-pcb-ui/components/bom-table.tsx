@@ -21,6 +21,8 @@ export function BomTable({ lines }: { lines?: BomLine[] | null }) {
   }, [query, data])
 
   const totalComponents = data.reduce((s, l) => s + l.qty, 0)
+  const lineTotal = (l: BomLine) => l.lineTotal ?? l.unitPrice * l.qty
+  const bomTotal = data.reduce((s, l) => s + lineTotal(l), 0)
 
   const exportCsv = () => {
     const header = 'Ref,Part,LCSC,Qty,Unit Price,Line Type'
@@ -72,7 +74,7 @@ export function BomTable({ lines }: { lines?: BomLine[] | null }) {
               <th className="px-3 py-2 font-medium">LCSC #</th>
               <th className="px-3 py-2 text-right font-medium">QTY</th>
               <th className="px-3 py-2 text-right font-medium">UNIT $</th>
-              <th className="px-3 py-2 font-medium">LINE</th>
+              <th className="px-3 py-2 text-right font-medium">LINE $</th>
             </tr>
           </thead>
           <tbody>
@@ -91,20 +93,11 @@ export function BomTable({ lines }: { lines?: BomLine[] | null }) {
                 <td className="px-3 py-1.5 text-right font-mono tabular-nums text-foreground">
                   {line.qty}
                 </td>
-                <td className="px-3 py-1.5 text-right font-mono tabular-nums text-foreground">
+                <td className="px-3 py-1.5 text-right font-mono tabular-nums text-muted-foreground">
                   {line.unitPrice > 0 ? line.unitPrice.toFixed(3) : '—'}
                 </td>
-                <td className="px-3 py-1.5">
-                  <span
-                    className={cn(
-                      'rounded-sm border px-1.5 py-0.5 font-mono text-[10px] leading-none',
-                      line.lineType === 'ordered'
-                        ? 'border-success/40 bg-success/10 text-success'
-                        : 'border-primary/40 bg-primary/10 text-primary',
-                    )}
-                  >
-                    {line.lineType}
-                  </span>
+                <td className="px-3 py-1.5 text-right font-mono tabular-nums text-foreground">
+                  {lineTotal(line) > 0 ? lineTotal(line).toFixed(2) : '—'}
                 </td>
               </tr>
             ))}
@@ -122,10 +115,16 @@ export function BomTable({ lines }: { lines?: BomLine[] | null }) {
         </table>
       </div>
 
-      <div className="border-t border-border px-3 py-2">
+      <div className="flex items-center justify-between border-t border-border px-3 py-2">
         <p className="font-mono text-[10px] text-muted-foreground">
-          {totalComponents} components · {data.length} BOM lines ·{' '}
-          {lines ? 'from atopile default.bom.csv' : 'all real parts'}
+          {totalComponents} components · {data.length} BOM lines
+        </p>
+        <p className="font-mono text-[11px] text-foreground">
+          parts subtotal{' '}
+          <span className="font-semibold text-primary">
+            ${bomTotal.toFixed(2)}
+          </span>{' '}
+          <span className="text-muted-foreground">/ board</span>
         </p>
       </div>
     </div>

@@ -219,6 +219,7 @@ export interface BomLine {
   lcsc: string
   qty: number
   unitPrice: number
+  lineTotal?: number
   lineType: 'ordered' | 'buyer-furnished'
 }
 

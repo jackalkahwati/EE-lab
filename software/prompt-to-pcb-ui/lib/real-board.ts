@@ -18,6 +18,7 @@ export interface RealBoardJson {
   boardSize: { wMm: number; hMm: number }
   layers: number
   components: number
+  bomTotal?: number
   netsTotal: number
   netsRouted: number
   unroutedNets: string[]

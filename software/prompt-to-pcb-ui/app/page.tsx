@@ -19,8 +19,9 @@ import { CodeViewer } from '@/components/code-viewer'
 import { BomTable } from '@/components/bom-table'
 import { GatesLogs } from '@/components/gates-logs'
 import { MetricsRail } from '@/components/metrics-rail'
+import { OrderPanel } from '@/components/order-panel'
 
-const TABS = ['Board', 'Schematic / Code', 'BOM', 'Gates & Logs'] as const
+const TABS = ['Board', 'Schematic / Code', 'BOM', 'Gates & Logs', 'Order'] as const
 type Tab = (typeof TABS)[number]
 
 interface PipelineEvent {
@@ -360,6 +361,25 @@ export default function FirstLightPage() {
               <GatesLogs
                 run={selectedRun}
                 reports={isReal ? realBoard?.reports : null}
+              />
+            )}
+            {tab === 'Order' && (
+              <OrderPanel
+                boardW={realBoard?.board.boardSize.wMm ?? 200}
+                boardH={realBoard?.board.boardSize.hMm ?? 146}
+                layers={realBoard?.board.layers ?? selectedRun.metrics.layers}
+                components={
+                  realBoard?.board.components ?? selectedRun.metrics.components
+                }
+                bomTotal={
+                  realBoard?.board.bomTotal ??
+                  (isReal ? realBoard?.bom : null)?.reduce(
+                    (s, l) => s + (l.lineTotal ?? l.unitPrice * l.qty),
+                    0,
+                  ) ??
+                  55
+                }
+                fabZip={fabZip}
               />
             )}
           </div>

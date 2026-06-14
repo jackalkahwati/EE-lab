@@ -30,28 +30,30 @@ ROUTING_JSON = None
 if "--routing-json" in sys.argv:
     ROUTING_JSON = sys.argv[sys.argv.index("--routing-json") + 1]
 
-# KiCad-library footprint family -> (friendly name, FL-1 BOM match keyword(s)).
-# The variant uses standard KiCad footprints; we attach the real orderable part
-# from the FL-1 BOM by family so the quantities scale but the parts stay real.
+# KiCad-library footprint family -> (friendly name, FL-1 BOM match keyword(s),
+# reference unit price USD @ qty 100). The variant uses standard KiCad
+# footprints; we attach the real orderable part + a realistic catalog price by
+# family so quantities AND cost scale with the prompt. (Reference prices — a
+# live DigiKey/LCSC API would make these real-time; structure is ready for it.)
 FAMILY = [
-    ("G6K-2F", "Omron G6K-2F-Y DPDT signal relay", ["g6k", "relay"]),
-    ("SIL_Form1A", "Standex reed relay (SIP-1A05)", ["reed", "sil", "sip", "1a05"]),
-    ("Pico", "Raspberry Pi Pico (RP2040)", ["pico", "rp2040"]),
-    ("SOIC-20", "Shift-register sink driver (SOIC-20)", ["soic-20", "595", "tpic"]),
-    ("R_2512", "Power resistor 2512", ["2512"]),
-    ("R_0805", "Resistor 0805", ["0805"]),
-    ("R_0402", "Resistor 0402", ["0402"]),
-    ("SOD-323", "Diode SOD-323", ["sod-323", "sod323"]),
-    ("D_SMB", "Diode SMB", ["smb"]),
-    ("SOT-23-5", "Supervisor / regulator SOT-23-5", ["sot-23-5"]),
-    ("SOT-23", "Transistor SOT-23", ["sot-23"]),
-    ("MSOP-8", "Amplifier MSOP-8", ["msop"]),
-    ("SOIC-8", "Regulator SOIC-8", ["soic-8"]),
-    ("Fuse", "Resettable fuse", ["fuse"]),
-    ("BNC", "BNC vertical connector", ["bnc"]),
-    ("PinHeader", "Pin header 2.54mm", ["header", "pinheader"]),
-    ("Fiducial", "Assembly fiducial", ["fiducial"]),
-    ("SEAF", "SEAF probe interface", ["seaf"]),
+    ("G6K-2F", "Omron G6K-2F-Y DPDT signal relay", ["g6k", "relay"], 1.12),
+    ("SIL_Form1A", "Standex reed relay (SIP-1A05)", ["reed", "sil", "sip", "1a05"], 0.78),
+    ("Pico", "Raspberry Pi Pico (RP2040)", ["pico", "rp2040"], 4.00),
+    ("SOIC-20", "Shift-register sink driver (TPIC6B595)", ["soic-20", "595", "tpic"], 0.54),
+    ("R_2512", "Power resistor 2512", ["2512"], 0.10),
+    ("R_0805", "Resistor 0805", ["0805"], 0.02),
+    ("R_0402", "Resistor 0402", ["0402"], 0.01),
+    ("SOD-323", "Diode SOD-323", ["sod-323", "sod323"], 0.05),
+    ("D_SMB", "Diode SMB", ["smb"], 0.15),
+    ("SOT-23-5", "Supervisor / regulator SOT-23-5", ["sot-23-5"], 0.32),
+    ("SOT-23", "Transistor SOT-23", ["sot-23"], 0.08),
+    ("MSOP-8", "Amplifier MSOP-8", ["msop"], 0.58),
+    ("SOIC-8", "Regulator SOIC-8", ["soic-8"], 0.42),
+    ("Fuse", "Resettable fuse", ["fuse"], 0.20),
+    ("BNC", "BNC vertical connector", ["bnc"], 1.45),
+    ("PinHeader", "Pin header 2.54mm", ["header", "pinheader"], 0.12),
+    ("Fiducial", "Assembly fiducial", ["fiducial"], 0.00),
+    ("SEAF", "SEAF probe interface", ["seaf"], 7.80),
 ]
 
 
@@ -84,25 +86,29 @@ def main():
     counts = {}      # family idx -> [refs]
     for fp in fps:
         lib = str(fp.GetFPID().GetLibItemName())
-        for i, (key, _name, _kw) in enumerate(FAMILY):
-            if key.lower() in lib.lower():
+        for i, fam in enumerate(FAMILY):
+            if fam[0].lower() in lib.lower():
                 counts.setdefault(i, []).append(fp.GetReference())
                 break
 
     rows = fl1_lcsc_index()
     bom = []
+    bom_total = 0.0
     for i, refs in sorted(counts.items()):
-        key, name, kw = FAMILY[i]
+        key, name, kw, price = FAMILY[i]
         refs.sort(key=lambda s: int(re.sub(r"[^0-9]", "", s) or 0))
         ref = (", ".join(refs) if len(refs) <= 4
                else "{}…{} ({})".format(refs[0], refs[-1], len(refs)))
         lcsc = match_lcsc(kw, rows)
+        line_total = round(price * len(refs), 2)
+        bom_total += line_total
         bom.append({
             "ref": ref,
             "part": name,
             "lcsc": lcsc or "—",
             "qty": len(refs),
-            "unitPrice": 0,
+            "unitPrice": price,
+            "lineTotal": line_total,
             "lineType": "ordered" if lcsc else "buyer-furnished",
         })
     with open(os.path.join(OUT, "bom.json"), "w") as f:
@@ -131,6 +137,7 @@ def main():
     board["boardSize"] = {"wMm": round(w_mm, 1), "hMm": round(h_mm, 1)}
     board["layers"] = b.GetCopperLayerCount()
     board["variantNets"] = nets  # the variant's own net count, for reference
+    board["bomTotal"] = round(bom_total, 2)  # parts cost per board (qty 100 ref)
     board.setdefault("netsTotal", nets)
     board.setdefault("netsRouted", 0)
     board.setdefault("unroutedNets", [])
