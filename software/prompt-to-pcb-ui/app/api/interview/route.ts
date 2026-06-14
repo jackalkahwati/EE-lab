@@ -39,13 +39,36 @@ When the key blocks and their main parameters are pinned down (or you have asked
 enough), finalize:
 {"enough":true,"board_class":"<short name>","blocks":["..."],"spec":{"<param>":"<value>"},"summary":"<one sentence>"}`
 
-async function callNemotron(userMsg: string, force: boolean) {
+/** Gemini (preferred — frontier reasoning). Throws on quota/billing/auth so the
+ *  caller falls back to Nemotron. */
+async function geminiCall(system: string, user: string): Promise<string> {
+  const key = process.env.GEMINI_API_KEY
+  const model = process.env.GEMINI_MODEL || 'gemini-3.1-pro-preview'
+  if (!key) throw new Error('no gemini key')
+  const r = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: system }] },
+        contents: [{ parts: [{ text: user }] }],
+        generationConfig: { temperature: 0.2, responseMimeType: 'application/json' },
+      }),
+    },
+  )
+  if (!r.ok) throw new Error(`gemini HTTP ${r.status}`)
+  const d = await r.json()
+  const t = d.candidates?.[0]?.content?.parts?.[0]?.text
+  if (!t) throw new Error('gemini empty')
+  return t
+}
+
+/** Nemotron Super 49B (OpenAI-compatible, hosted) — the working fallback. */
+async function nemotronCall(system: string, user: string): Promise<string> {
   const key = process.env.NVIDIA_API_KEY
   const model = process.env.NVIDIA_MODEL || 'nvidia/llama-3.3-nemotron-super-49b-v1'
   if (!key) throw new Error('NVIDIA_API_KEY not set')
-  const sys = force
-    ? SYSTEM + '\nYou have asked enough questions — you MUST finalize now (enough:true).'
-    : SYSTEM
   const r = await fetch(NVIDIA_URL, {
     method: 'POST',
     headers: { Authorization: `Bearer ${key}`, 'content-type': 'application/json' },
@@ -54,15 +77,30 @@ async function callNemotron(userMsg: string, force: boolean) {
       max_tokens: 1000,
       temperature: 0.2,
       messages: [
-        { role: 'system', content: sys },
-        { role: 'user', content: userMsg },
+        { role: 'system', content: system },
+        { role: 'user', content: user },
       ],
     }),
   })
   if (!r.ok) throw new Error(`Nemotron HTTP ${r.status}: ${(await r.text()).slice(0, 160)}`)
-  const data = await r.json()
-  const text: string = data.choices?.[0]?.message?.content ?? ''
-  return JSON.parse(firstJsonObject(text))
+  const d = await r.json()
+  return d.choices?.[0]?.message?.content ?? ''
+}
+
+/** Try the frontier provider first, fall back to the working one. */
+async function callLLM(userMsg: string, force: boolean) {
+  const sys = force
+    ? SYSTEM + '\nYou have asked enough questions — you MUST finalize now (enough:true).'
+    : SYSTEM
+  let text: string
+  let provider = 'gemini'
+  try {
+    text = await geminiCall(sys, userMsg)
+  } catch {
+    provider = 'nemotron'
+    text = await nemotronCall(sys, userMsg)
+  }
+  return { out: JSON.parse(firstJsonObject(text)), provider }
 }
 
 /** Extract the first complete top-level {...} object, ignoring any trailing
@@ -107,7 +145,7 @@ export async function POST(req: Request) {
       `Questions already asked: ${answers.length} of max ${MAX_QUESTIONS}.`
 
     const force = answers.length >= MAX_QUESTIONS
-    const out = await callNemotron(userMsg, force)
+    const { out, provider } = await callLLM(userMsg, force)
 
     const blocks: string[] = Array.isArray(out.blocks) ? out.blocks : []
     const boardClass: string = out.board_class ?? 'custom board'
@@ -121,6 +159,7 @@ export async function POST(req: Request) {
         summary: out.summary ?? '',
         buildable: isBuildable(boardClass, blocks),
         request,
+        provider,
       })
     }
     return Response.json({
@@ -130,6 +169,7 @@ export async function POST(req: Request) {
       question: out.question ?? 'Any other requirements?',
       options: Array.isArray(out.options) ? out.options : [],
       default: out.default ?? '',
+      provider,
     })
   } catch (err) {
     return Response.json({ error: String(err) }, { status: 502 })
