@@ -30,7 +30,7 @@ interface Spec {
   blocks: string[]
   spec: Record<string, unknown>
   summary: string
-  buildable: boolean
+  method: 'matrix' | 'compose'
   request: string
 }
 
@@ -40,7 +40,10 @@ export function InterviewPanel({
   onClose,
 }: {
   request: string
-  onGenerate: (prompt: string) => void
+  onGenerate: (
+    prompt: string,
+    compose?: { blocks: string[]; boardClass: string },
+  ) => void
   onClose: () => void
 }) {
   const [answers, setAnswers] = useState<Answer[]>([])
@@ -204,26 +207,24 @@ export function InterviewPanel({
                   </div>
                 ))}
               </dl>
-              {spec.buildable ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    onGenerate(spec.request)
-                    onClose()
-                  }}
-                  className="flex w-full items-center justify-center gap-2 rounded-sm bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
-                >
-                  Generate this board <ArrowRight className="size-4" />
-                </button>
-              ) : (
-                <div className="rounded-sm border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-[11px] leading-relaxed text-amber-200/90">
-                  Spec captured. A generator for{' '}
-                  <span className="font-semibold">{spec.boardClass}</span> isn’t built
-                  yet — today the pipeline routes the relay/probe-matrix family. This
-                  spec is the exact input the block-composition engine (Layer 2) will
-                  consume.
-                </div>
-              )}
+              <button
+                type="button"
+                onClick={() => {
+                  onGenerate(
+                    spec.request,
+                    spec.method === 'compose'
+                      ? { blocks: spec.blocks, boardClass: spec.boardClass }
+                      : undefined,
+                  )
+                  onClose()
+                }}
+                className="flex w-full items-center justify-center gap-2 rounded-sm bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
+              >
+                Generate this board <ArrowRight className="size-4" />
+              </button>
+              <p className="font-mono text-[10px] text-muted-foreground">
+                generator: {spec.method === 'compose' ? 'block composition (Layer 2)' : 'relay-matrix (FL-1)'}
+              </p>
             </div>
           )}
         </div>

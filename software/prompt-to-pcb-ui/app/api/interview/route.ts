@@ -15,10 +15,13 @@ interface Answer {
   answer: string
 }
 
-// board classes the pipeline can actually generate today (Layer 2 archetypes)
-function isBuildable(boardClass: string, blocks: string[]): boolean {
+// Which generator builds this spec. 'matrix' = the FL-1 relay/probe gen_board
+// path; 'compose' = the Layer-2 block-composition engine (MCU + radio + power +
+// sensor + ...). Every spec gets a generator, so the interview always ends with
+// a Generate Board button.
+function generatorFor(boardClass: string, blocks: string[]): 'matrix' | 'compose' {
   const hay = (boardClass + ' ' + blocks.join(' ')).toLowerCase()
-  return /relay|probe|matrix|crosspoint|switch ?matrix/.test(hay)
+  return /relay|probe|matrix|crosspoint|switch ?matrix/.test(hay) ? 'matrix' : 'compose'
 }
 
 const SYSTEM = `detailed thinking off.
@@ -188,7 +191,7 @@ export async function POST(req: Request) {
         blocks,
         spec: out.spec ?? {},
         summary: out.summary ?? '',
-        buildable: isBuildable(boardClass, blocks),
+        method: generatorFor(boardClass, blocks),
         request,
         provider,
       })

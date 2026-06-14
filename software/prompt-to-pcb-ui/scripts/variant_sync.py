@@ -82,35 +82,60 @@ def main():
     b = pcbnew.LoadBoard(VARIANT)
     fps = list(b.GetFootprints())
 
-    # census by footprint family
+    # census by footprint family; parts not in the FL-1 family (e.g. a composed
+    # board's LoRa module, U.FL, caps) fall back to a generic group keyed by a
+    # cleaned footprint name, so EVERY board gets a BOM.
     counts = {}      # family idx -> [refs]
+    generic = {}     # cleaned footprint name -> [refs]
     for fp in fps:
         lib = str(fp.GetFPID().GetLibItemName())
+        matched = False
         for i, fam in enumerate(FAMILY):
             if fam[0].lower() in lib.lower():
                 counts.setdefault(i, []).append(fp.GetReference())
+                matched = True
                 break
+        if not matched:
+            mp = re.match(r"([A-Z]+)_(\d{3,4})", lib)
+            if mp:
+                cls = {"C": "Capacitor", "R": "Resistor", "L": "Inductor"}.get(
+                    mp.group(1), mp.group(1))
+                name = "{} {}".format(cls, mp.group(2))
+            else:
+                name = re.sub(r"[_-]+", " ", re.split(r"_\d", lib)[0]).strip()
+            generic.setdefault(name or lib, []).append(fp.GetReference())
 
     rows = fl1_lcsc_index()
     bom = []
     bom_total = 0.0
-    for i, refs in sorted(counts.items()):
-        key, name, kw, price = FAMILY[i]
+
+    def add_line(refs, name, kw, price):
+        nonlocal bom_total
         refs.sort(key=lambda s: int(re.sub(r"[^0-9]", "", s) or 0))
         ref = (", ".join(refs) if len(refs) <= 4
                else "{}…{} ({})".format(refs[0], refs[-1], len(refs)))
-        lcsc = match_lcsc(kw, rows)
+        lcsc = match_lcsc(kw, rows) if kw else ""
         line_total = round(price * len(refs), 2)
         bom_total += line_total
         bom.append({
-            "ref": ref,
-            "part": name,
-            "lcsc": lcsc or "—",
-            "qty": len(refs),
-            "unitPrice": price,
-            "lineTotal": line_total,
+            "ref": ref, "part": name, "lcsc": lcsc or "—",
+            "qty": len(refs), "unitPrice": price, "lineTotal": line_total,
             "lineType": "ordered" if lcsc else "buyer-furnished",
         })
+
+    for i, refs in sorted(counts.items()):
+        _key, name, kw, price = FAMILY[i]
+        add_line(refs, name, kw, price)
+    for name, refs in sorted(generic.items()):
+        # rough catalog price by class: modules/connectors > ICs > passives
+        s = name.lower()
+        price = (3.50 if any(k in s for k in ("module", "rfm", "lora", "esp", "radio"))
+                 else 0.80 if any(k in s for k in ("usb", "connector", "header", "coaxial", "u.fl", "jack"))
+                 else 0.15 if any(k in s for k in ("sot", "soic", "qfn", "lga", "msop", "dfn"))
+                 else 0.00 if "fiducial" in s
+                 else 0.02 if any(k in s for k in ("c ", "r ", "0402", "0603", "0805", "capacitor", "resistor"))
+                 else 0.30)
+        add_line(refs, name, "", price)
     with open(os.path.join(OUT, "bom.json"), "w") as f:
         json.dump(bom, f, indent=1)
 
@@ -178,28 +203,45 @@ def main():
         elif "SIL" in nm:
             planes |= pn & PL  # probe lanes actually wired to a reed
     probes, glanes, planes = sorted(probes), sorted(glanes), sorted(planes)
-    xpoints = len(probes) * (len(glanes) + len(planes))
-    summary = (
-        "FirstLight FL-1 — design variant (generated from your prompt)\n"
-        "============================================================\n\n"
-        "  probes        : {np}   ({plist})\n"
-        "  group lanes   : {ng}   ({gl})\n"
-        "  probe lanes   : {npl}  ({pl})\n"
-        "  controller    : RP2040, shift-register driven (SRCK/SER/RCK/OE_N)\n"
-        "  board         : {w:.0f} x {h:.0f} mm, {ly}-layer\n"
-        "  components    : {comp}\n"
-        "  crosspoints   : {np} probes x {lanes} lanes = {xp} relays\n\n"
-        "Each crosspoint is one relay coil on the SR chain; the generated\n"
-        "firmware (firmware/matrix.rs) exposes set_crosspoint(probe, lane).\n\n"
-        "The .ato modules below are the FL-1 reference design (atopile source);\n"
-        "this variant is derived from them parametrically by gen_board.\n"
-    ).format(
-        np=len(probes), plist=", ".join(probes) or "—",
-        ng=len(glanes), gl=", ".join(glanes) or "—",
-        npl=len(planes), pl=", ".join(planes) or "—",
-        w=w_mm, h=h_mm, ly=b.GetCopperLayerCount(), comp=len(fps),
-        lanes=len(glanes) + len(planes), xp=xpoints,
-    )
+    if probes:
+        xpoints = len(probes) * (len(glanes) + len(planes))
+        summary = (
+            "FirstLight FL-1 — design variant (generated from your prompt)\n"
+            "============================================================\n\n"
+            "  probes        : {np}   ({plist})\n"
+            "  group lanes   : {ng}   ({gl})\n"
+            "  probe lanes   : {npl}  ({pl})\n"
+            "  controller    : RP2040, shift-register driven (SRCK/SER/RCK/OE_N)\n"
+            "  board         : {w:.0f} x {h:.0f} mm, {ly}-layer\n"
+            "  components    : {comp}\n"
+            "  crosspoints   : {np} probes x {lanes} lanes = {xp} relays\n\n"
+            "Each crosspoint is one relay coil on the SR chain; the generated\n"
+            "firmware (firmware/matrix.rs) exposes set_crosspoint(probe, lane).\n"
+        ).format(
+            np=len(probes), plist=", ".join(probes) or "—",
+            ng=len(glanes), gl=", ".join(glanes) or "—",
+            npl=len(planes), pl=", ".join(planes) or "—",
+            w=w_mm, h=h_mm, ly=b.GetCopperLayerCount(), comp=len(fps),
+            lanes=len(glanes) + len(planes), xp=xpoints,
+        )
+    else:
+        # composed board (Layer 2): summarize by components + nets
+        refs = sorted({l["part"] for l in bom})
+        summary = (
+            "Composed board — generated from your design interview\n"
+            "====================================================\n\n"
+            "  board         : {w:.0f} x {h:.0f} mm, {ly}-layer, GND-poured\n"
+            "  components    : {comp}\n"
+            "  nets          : {nets}\n"
+            "  parts         : {parts}\n\n"
+            "Assembled by the Layer-2 block-composition engine: each functional\n"
+            "block (power / MCU / radio / antenna ...) is a reusable sub-layout\n"
+            "wired by its typed interfaces, then routed through the same flroute\n"
+            "-> DRC pipeline as the relay matrix.\n"
+        ).format(
+            w=w_mm, h=h_mm, ly=b.GetCopperLayerCount(), comp=len(fps),
+            nets=nets, parts="; ".join(refs[:8]),
+        )
     ato_path = os.path.join(OUT, "ato.json")
     ato = []
     if os.path.exists(ato_path):

@@ -104,11 +104,16 @@ export default function FirstLightPage() {
 
   /** REAL pipeline: placement → routing → validation via /api/pipeline/run */
   const handleGenerate = useCallback(
-    (prompt: string) => {
+    (
+      prompt: string,
+      compose?: { blocks: string[]; boardClass: string },
+    ) => {
       const id = `run-${Date.now()}`
       const base: Run = {
         id,
-        name: `FL-1 pipeline run ${new Date().toTimeString().slice(0, 5)}`,
+        name: compose
+          ? `${compose.boardClass} ${new Date().toTimeString().slice(0, 5)}`
+          : `FL-1 pipeline run ${new Date().toTimeString().slice(0, 5)}`,
         timestamp: new Date().toISOString().slice(0, 16).replace('T', ' '),
         status: 'RUNNING',
         prompt,
@@ -152,9 +157,14 @@ export default function FirstLightPage() {
       const update = (fn: (r: Run) => Run) =>
         setRuns((prev) => prev.map((r) => (r.id === id ? fn(r) : r)))
 
-      const es = new EventSource(
-        `/api/pipeline/run?prompt=${encodeURIComponent(prompt)}`,
-      )
+      let url = `/api/pipeline/run?prompt=${encodeURIComponent(prompt)}`
+      if (compose) {
+        const payload = btoa(
+          JSON.stringify({ blocks: compose.blocks, boardClass: compose.boardClass }),
+        )
+        url += `&compose=1&spec=${encodeURIComponent(payload)}`
+      }
+      const es = new EventSource(url)
       esRef.current = es
 
       es.onmessage = (e) => {

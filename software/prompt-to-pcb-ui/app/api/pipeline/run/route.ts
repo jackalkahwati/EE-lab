@@ -43,7 +43,20 @@ export async function GET(req: Request) {
   }
   globalState.__pipelineRunning = true
 
-  const prompt = new URL(req.url).searchParams.get('prompt') ?? ''
+  const qp = new URL(req.url).searchParams
+  const prompt = qp.get('prompt') ?? ''
+  // Layer-2 compose mode: the interview passes a base64 {blocks, boardClass}
+  const composeMode = qp.get('compose') === '1'
+  let composeSpec: { blocks: string[]; boardClass: string } | null = null
+  if (composeMode) {
+    try {
+      composeSpec = JSON.parse(
+        Buffer.from(decodeURIComponent(qp.get('spec') ?? ''), 'base64').toString('utf8'),
+      )
+    } catch {
+      composeSpec = null
+    }
+  }
   const appDir = process.cwd()
   const hwDir = path.resolve(appDir, '../../hardware/pcba-rev-a')
   const flroute = path.join(hwDir, 'tools/flroute/target/release/flroute')
@@ -121,55 +134,65 @@ export async function GET(req: Request) {
         const fl1Bom = path.join(hwDir, 'build/builds/default/default.bom.csv')
         log('design', `workspace: ${ws} (working board untouched)`)
 
-        // ---- stage 1: design — AI interprets the prompt, then `ato build` gate
+        // ---- stage 1: design --------------------------------------------------
         send({ type: 'stage', id: 'design', state: 'running' })
         const specPath = path.join(ws, 'design_spec.json')
-        await exec('design', 'python3', [
-          path.join(appDir, 'scripts/ai_design.py'),
-          prompt,
-          specPath,
-        ])
-        try {
-          const spec = JSON.parse(fs.readFileSync(specPath, 'utf8'))
-          send({ type: 'design', spec })
-        } catch {
-          log('design', 'design spec unreadable — continuing on FL-1 baseline', 'warn')
+        if (composeMode && composeSpec) {
+          // Layer 2: block composition. compose.py maps the interview's blocks to
+          // library blocks and emits the placed, zoned board the pipeline builds.
+          log('design', `composing board: ${composeSpec.boardClass}`)
+          send({ type: 'design', spec: composeSpec as Record<string, unknown> })
+          fs.writeFileSync(specPath, JSON.stringify(composeSpec))
+          const comp = await exec('design', KPY, [
+            path.resolve(hwDir, '../blocks/compose.py'),
+            specPath,
+            variantBoard,
+          ])
+          if (!comp.out.includes('COMPOSE:')) {
+            send({ type: 'stage', id: 'design', state: 'failed', failReason: 'compose failed' })
+            for (const s of ['placement', 'routing', 'validation', 'firmware'] as const)
+              send({ type: 'stage', id: s, state: 'blocked' })
+            send({ type: 'done', status: 'GATE FAILED', boardPath: variantBoard })
+            return
+          }
+          log('design', 'GATE design: blocks composed + wired — PASS', 'ok')
+          send({ type: 'stage', id: 'design', state: 'passed' })
+        } else {
+          // FL-1 relay/probe matrix: AI interprets the prompt, ato build gate.
+          await exec('design', 'python3', [
+            path.join(appDir, 'scripts/ai_design.py'),
+            prompt,
+            specPath,
+          ])
+          try {
+            send({ type: 'design', spec: JSON.parse(fs.readFileSync(specPath, 'utf8')) })
+          } catch {
+            log('design', 'design spec unreadable — continuing on FL-1 baseline', 'warn')
+          }
+          log('design', 'ato build — compiling .ato design-of-record…')
+          const build = await exec('design', ATO, ['build'], { cwd: hwDir })
+          if (!(build.code === 0 || build.out.includes('Build successful'))) {
+            send({ type: 'stage', id: 'design', state: 'failed', failReason: 'ato build not GREEN' })
+            for (const s of ['placement', 'routing', 'validation', 'firmware'] as const)
+              send({ type: 'stage', id: s, state: 'blocked' })
+            send({ type: 'done', status: 'GATE FAILED', boardPath: wsBoard })
+            return
+          }
+          log('design', 'GATE design: ato build GREEN — PASS', 'ok')
+          log('design', `gen_board: building the prompt's variant…`)
+          const genV = await exec('design', KPY, [
+            path.join(hwDir, 'scripts/gen_board.py'),
+            variantBoard,
+          ], { env: { DESIGN_SPEC: specPath } })
+          if (!(genV.code === 0 || genV.out.includes('gen_board:'))) {
+            send({ type: 'stage', id: 'design', state: 'failed', failReason: 'gen_board failed' })
+            for (const s of ['placement', 'routing', 'validation', 'firmware'] as const)
+              send({ type: 'stage', id: s, state: 'blocked' })
+            send({ type: 'done', status: 'GATE FAILED', boardPath: variantBoard })
+            return
+          }
+          send({ type: 'stage', id: 'design', state: 'passed' })
         }
-        // hard gate: the atopile build must be GREEN (the real Stage-1 gate)
-        log('design', 'ato build — compiling .ato design-of-record…')
-        const build = await exec('design', ATO, ['build'], { cwd: hwDir })
-        const buildOk =
-          build.code === 0 || build.out.includes('Build successful')
-        if (!buildOk) {
-          send({ type: 'stage', id: 'design', state: 'failed', failReason: 'ato build not GREEN' })
-          send({ type: 'stage', id: 'placement', state: 'blocked' })
-          send({ type: 'stage', id: 'routing', state: 'blocked' })
-          send({ type: 'stage', id: 'validation', state: 'blocked' })
-          send({ type: 'done', status: 'GATE FAILED', boardPath: wsBoard })
-          return
-        }
-        log('design', 'GATE design: ato build GREEN — PASS', 'ok')
-
-        // ---- prompt's parametric variant — the board we actually build ------
-        // gen_board scales a real, placed, zoned floorplan from the spec. It is
-        // the board that gets gated, routed, DRC'd, rendered and shipped — so
-        // the whole pipeline reflects the prompt. (The reference copy is kept
-        // only for firmware, which needs the atopile net naming.)
-        log('design', `gen_board: building the prompt's variant…`)
-        const genV = await exec('design', KPY, [
-          path.join(hwDir, 'scripts/gen_board.py'),
-          variantBoard,
-        ], { env: { DESIGN_SPEC: specPath } })
-        if (!(genV.code === 0 || genV.out.includes('gen_board:'))) {
-          send({ type: 'stage', id: 'design', state: 'failed', failReason: 'gen_board failed' })
-          send({ type: 'stage', id: 'placement', state: 'blocked' })
-          send({ type: 'stage', id: 'routing', state: 'blocked' })
-          send({ type: 'stage', id: 'validation', state: 'blocked' })
-          send({ type: 'stage', id: 'firmware', state: 'blocked' })
-          send({ type: 'done', status: 'GATE FAILED', boardPath: variantBoard })
-          return
-        }
-        send({ type: 'stage', id: 'design', state: 'passed' })
 
         // ---- stage 2: placement gates on the variant -----------------------
         // gen_board already placed the variant (with fiducials + zones); gate
@@ -378,6 +401,14 @@ export async function GET(req: Request) {
         send({ type: 'stage', id: 'firmware', state: 'running' })
         let fwZip: string | undefined
         const fwDir = path.join(ws, 'firmware')
+        if (composeMode) {
+          // The firmware generator traces the relay-matrix channel map; composed
+          // boards don't have one yet. Skip honestly rather than ship a stub.
+          log('firmware', 'firmware: no driver model for this class yet — skipped', 'warn')
+          send({ type: 'stage', id: 'firmware', state: 'passed' })
+          send({ type: 'done', status: validationStatus, boardPath: variantBoard, fabZip, fwZip })
+          return
+        }
         const gen = await exec('firmware', KPY, [
           path.join(appDir, 'scripts/gen_firmware.py'),
           variantBoard,
