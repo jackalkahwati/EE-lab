@@ -401,16 +401,13 @@ export async function GET(req: Request) {
         send({ type: 'stage', id: 'firmware', state: 'running' })
         let fwZip: string | undefined
         const fwDir = path.join(ws, 'firmware')
-        if (composeMode) {
-          // The firmware generator traces the relay-matrix channel map; composed
-          // boards don't have one yet. Skip honestly rather than ship a stub.
-          log('firmware', 'firmware: no driver model for this class yet — skipped', 'warn')
-          send({ type: 'stage', id: 'firmware', state: 'passed' })
-          send({ type: 'done', status: validationStatus, boardPath: variantBoard, fabZip, fwZip })
-          return
-        }
+        // Relay boards get the crosspoint/coil HAL; composed boards get a generic
+        // BSP + per-peripheral HAL (LoRa/IMU/motors) traced from the netlist.
+        // Either way the hard gate is the same: `cargo build` for the RP2040.
+        const fwGen = composeMode ? 'scripts/gen_firmware_compose.py' : 'scripts/gen_firmware.py'
+        log('firmware', `${composeMode ? 'composed BSP + peripheral HAL' : 'relay-matrix HAL'} from netlist…`)
         const gen = await exec('firmware', KPY, [
-          path.join(appDir, 'scripts/gen_firmware.py'),
+          path.join(appDir, fwGen),
           variantBoard,
           fwDir,
         ])
@@ -443,7 +440,13 @@ export async function GET(req: Request) {
           }
         }
 
-        send({ type: 'done', status: validationStatus, boardPath: wsBoard, fabZip, fwZip })
+        send({
+          type: 'done',
+          status: validationStatus,
+          boardPath: composeMode ? variantBoard : wsBoard,
+          fabZip,
+          fwZip,
+        })
       } catch (err) {
         send({ type: 'error', message: String(err) })
       } finally {
