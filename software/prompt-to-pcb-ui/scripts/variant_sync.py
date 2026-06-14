@@ -243,14 +243,35 @@ def main():
             nets=nets, parts="; ".join(refs[:8]),
         )
     ato_path = os.path.join(OUT, "ato.json")
-    ato = []
-    if os.path.exists(ato_path):
-        try:
-            ato = json.load(open(ato_path))
-        except Exception:
-            ato = []
-    ato = [a for a in ato if a.get("name") != "design.txt"]
-    ato.insert(0, {"name": "design.txt", "content": summary})
+    if probes:
+        # relay board: prepend the summary to the FL-1 .ato reference modules
+        ato = []
+        if os.path.exists(ato_path):
+            try:
+                ato = json.load(open(ato_path))
+            except Exception:
+                ato = []
+        ato = [a for a in ato if a.get("name") != "design.txt"]
+        ato.insert(0, {"name": "design.txt", "content": summary})
+    else:
+        # composed board: there is no .ato source — the netlist IS the schematic.
+        # Show the summary + a connection listing (net -> ref.pad), and drop the
+        # relay modules so the tab matches the board.
+        net_pads = {}
+        for fp in fps:
+            for p in fp.Pads():
+                nn = str(p.GetNetname())
+                if nn:
+                    net_pads.setdefault(nn, []).append(
+                        "{}.{}".format(fp.GetReference(), p.GetNumber()))
+        nl = ["Netlist — composed board (net -> connected pins)",
+              "=================================================", ""]
+        for nn in sorted(net_pads):
+            nl.append("{:<12} {}".format(nn, ", ".join(sorted(set(net_pads[nn])))))
+        ato = [
+            {"name": "design.txt", "content": summary},
+            {"name": "netlist.txt", "content": "\n".join(nl) + "\n"},
+        ]
     with open(ato_path, "w") as f:
         json.dump(ato, f, indent=1)
 
