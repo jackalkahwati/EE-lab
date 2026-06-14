@@ -452,16 +452,21 @@ def compose(spec, blocks, out_path):
     p += ')\n'
     open(out_path, "w").write(p)
 
-    # Fine-pitch parts (USB-C receptacle, QFN IMU) have intrinsic pad gaps below
-    # the 0.2mm house clearance. Emit a matching design-rules file that allows
-    # 0.13mm (6-mil) pad-to-pad — a clearance every standard fab supports — so
-    # these parts are genuinely DRC-clean. kicad-cli auto-loads <board>.kicad_dru.
-    if "usbc" in keys:
+    # Fine-pitch parts (USB-C receptacle, QFN/VSSOP/DFN, any sub-0.8mm-pitch
+    # sourced part) have intrinsic pad gaps below the 0.2mm house clearance.
+    # Detect them from the ACTUAL placed footprints (not the block type, since a
+    # sourced part can be any package) and emit a matching design-rules file
+    # allowing 0.13mm (6-mil) pad-to-pad — a clearance every standard fab
+    # supports. kicad-cli auto-loads <board>.kicad_dru.
+    fine_pitch = re.search(
+        r"P0\.[1-7]\d*mm|QFN|DFN|WSON|USON|VSSOP|VQFN|UQFN|UFQFPN|BGA|"
+        r"LGA|SON_|USB_C_Receptacle", p)
+    if fine_pitch:
         dru = os.path.splitext(out_path)[0] + ".kicad_dru"
         open(dru, "w").write(
             "(version 1)\n"
-            "# Fine-pitch parts (USB-C, QFN) make this a 6-mil fab class; 0.13mm\n"
-            "# (5-mil) copper clearance is supported by every standard 2-layer fab.\n"
+            "# Fine-pitch parts make this a 6-mil fab class; 0.13mm (5-mil) copper\n"
+            "# clearance is supported by every standard 2-layer fab.\n"
             '(rule "fab_6mil"\n'
             "  (constraint clearance (min 0.13mm)))\n")
 
