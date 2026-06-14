@@ -115,6 +115,10 @@ export async function GET(req: Request) {
           if (fs.existsSync(src)) fs.copyFileSync(src, path.join(wsLayout, f))
         }
         const wsBoard = path.join(wsLayout, 'rev-a-routed.kicad_pcb')
+        const variantBoard = path.join(ws, 'variant.kicad_pcb')
+        const pubBoard = path.join(appDir, 'public/board')
+        const pubData = path.join(appDir, 'public/data')
+        const fl1Bom = path.join(hwDir, 'build/builds/default/default.bom.csv')
         log('design', `workspace: ${ws} (working board untouched)`)
 
         // ---- stage 1: design — AI interprets the prompt, then `ato build` gate
@@ -145,6 +149,40 @@ export async function GET(req: Request) {
           return
         }
         log('design', 'GATE design: ato build GREEN — PASS', 'ok')
+
+        // ---- prompt's parametric variant -> the DISPLAYED board -------------
+        // The routed/validated board is the proven FL-1 reference, but the
+        // renders + BOM the user sees should reflect what the PROMPT asked for.
+        // gen_board scales the floorplan from the spec; render it and sync its
+        // design metrics + BOM so the visual changes with the prompt.
+        log('design', 'rendering prompt design variant (gen_board)…')
+        const genV = await exec('design', KPY, [
+          path.join(hwDir, 'scripts/gen_board.py'),
+          variantBoard,
+        ], { env: { DESIGN_SPEC: specPath } })
+        if (genV.code === 0 || genV.out.includes('gen_board:')) {
+          for (const side of ['top', 'bottom']) {
+            await exec('design', KCLI, [
+              'pcb', 'render', '--side', side, '--background', 'opaque',
+              '--quality', 'basic', '--width', '1600', '--height', '1400',
+              '-o', path.join(pubBoard, `render-${side}.png`), variantBoard,
+            ])
+          }
+          for (const layer of ['F.Cu', 'In1.Cu', 'In2.Cu', 'B.Cu', 'Edge.Cuts', 'F.SilkS']) {
+            await exec('design', KCLI, [
+              'pcb', 'export', 'svg', '--mode-single', '--page-size-mode', '2',
+              '--exclude-drawing-sheet', '--black-and-white', '--negative',
+              '-l', layer, '-o', path.join(pubBoard, `${layer}.svg`), variantBoard,
+            ])
+          }
+          await exec('design', KPY, [
+            path.join(appDir, 'scripts/variant_sync.py'),
+            variantBoard, fl1Bom, pubData,
+          ])
+          log('design', 'design variant rendered — board + BOM reflect the prompt', 'ok')
+        } else {
+          log('design', 'variant render skipped — showing FL-1 reference', 'warn')
+        }
         send({ type: 'stage', id: 'design', state: 'passed' })
 
         // ---- stage 2: placement + hard gate --------------------------------
@@ -304,19 +342,49 @@ export async function GET(req: Request) {
         }
         const drcPass = violations === 0
 
-        // ---- sync artifacts so the UI shows this run's real board -----------
-        log('validation', 'syncing run artifacts to frontend (sync-board.sh)…')
-        const sync = await exec(
-          'validation',
-          'bash',
-          [path.join(appDir, 'scripts/sync-board.sh')],
-          { cwd: appDir, env: { BOARD: wsBoard, HW_DIR: hwDir } },
-        )
-        log(
-          'validation',
-          sync.code === 0 ? 'artifacts synced from run output' : 'artifact sync failed',
-          sync.code === 0 ? 'ok' : 'err',
-        )
+        // ---- sync: keep the prompt variant's renders+BOM, refresh routing ---
+        // The displayed renders/BOM are the prompt's variant (from the design
+        // stage). Here we only refresh the DRC report + routing stats from the
+        // routed REFERENCE so completion/defects reflect real copper, and the
+        // .ato source for the Schematic/Code tab. Variant board+BOM are kept.
+        log('validation', 'refreshing routing stats from reference (variant render kept)…')
+        try {
+          fs.copyFileSync(drcPath, path.join(pubData, 'drc.json'))
+        } catch {
+          /* drc already at pubData or unreadable */
+        }
+        // .ato sources (writes ato.json AND a reference bom.json — variant_sync
+        // overwrites the bom.json next so the variant BOM wins)
+        await exec('validation', 'python3', [
+          path.join(appDir, 'scripts/build_data.py'),
+          hwDir,
+          pubData,
+        ])
+        // reference routing stats -> temp, then merge into the variant board.json
+        const refStats = path.join(ws, 'ref_board.json')
+        await exec('validation', KPY, [
+          path.join(appDir, 'scripts/extract_stats.py'),
+          wsBoard,
+          drcPath,
+          refStats,
+        ])
+        if (fs.existsSync(variantBoard)) {
+          await exec('validation', KPY, [
+            path.join(appDir, 'scripts/variant_sync.py'),
+            variantBoard,
+            fl1Bom,
+            pubData,
+            '--routing-json',
+            refStats,
+          ])
+          log('validation', 'board: prompt variant · routing stats: reference', 'ok')
+        } else {
+          // no variant — fall back to syncing the reference board fully
+          await exec('validation', 'bash', [path.join(appDir, 'scripts/sync-board.sh')], {
+            cwd: appDir,
+            env: { BOARD: wsBoard, HW_DIR: hwDir },
+          })
+        }
 
         let fabZip: string | undefined
         if (drcPass) {
