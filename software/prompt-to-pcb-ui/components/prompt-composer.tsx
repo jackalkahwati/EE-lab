@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Zap } from 'lucide-react'
+import { Zap, MessagesSquare } from 'lucide-react'
 
 const EXAMPLES = [
   '8-probe relay matrix, scope + DMM, RP2040, 24V',
@@ -12,9 +12,11 @@ const EXAMPLES = [
 
 export function PromptComposer({
   onGenerate,
+  onInterview,
   disabled,
 }: {
   onGenerate: (prompt: string) => void
+  onInterview: (prompt: string) => void
   disabled: boolean
 }) {
   const [prompt, setPrompt] = useState('')
@@ -62,15 +64,27 @@ export function PromptComposer({
         <span className="font-mono text-[10px] text-muted-foreground">
           ⌘↵ to run · 5 stages · hard gates
         </span>
-        <button
-          type="button"
-          onClick={submit}
-          disabled={disabled}
-          className="flex items-center gap-1.5 rounded-sm bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
-        >
-          <Zap className="size-3.5" />
-          {disabled ? 'Pipeline running…' : 'Generate Board'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onInterview(prompt.trim())}
+            disabled={disabled}
+            className="flex items-center gap-1.5 rounded-sm border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-primary/40 hover:text-primary disabled:opacity-40"
+            title="Describe any board in natural language; it asks follow-ups"
+          >
+            <MessagesSquare className="size-3.5" />
+            Design Interview
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={disabled}
+            className="flex items-center gap-1.5 rounded-sm bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
+          >
+            <Zap className="size-3.5" />
+            {disabled ? 'Pipeline running…' : 'Generate Board'}
+          </button>
+        </div>
       </div>
     </div>
   )

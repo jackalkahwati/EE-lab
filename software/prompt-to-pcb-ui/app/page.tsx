@@ -21,6 +21,7 @@ import { GatesLogs } from '@/components/gates-logs'
 import { MetricsRail } from '@/components/metrics-rail'
 import { OrderPanel } from '@/components/order-panel'
 import { ErrorBoundary } from '@/components/error-boundary'
+import { InterviewPanel } from '@/components/interview-panel'
 
 const TABS = ['Board', 'Schematic / Code', 'BOM', 'Gates & Logs', 'Order'] as const
 type Tab = (typeof TABS)[number]
@@ -51,6 +52,7 @@ export default function FirstLightPage() {
   const [designSpec, setDesignSpec] = useState<Record<string, unknown> | null>(null)
   const [fabZip, setFabZip] = useState<string | null>(null)
   const [fwZip, setFwZip] = useState<string | null>(null)
+  const [interviewRequest, setInterviewRequest] = useState<string | null>(null)
   const esRef = useRef<EventSource | null>(null)
   const stageStartRef = useRef<Record<string, number>>({})
   const currentStageRef = useRef<string | null>(null)
@@ -286,7 +288,7 @@ export default function FirstLightPage() {
   useEffect(() => () => esRef.current?.close(), [])
 
   return (
-    <main className="flex h-dvh overflow-hidden bg-background text-foreground">
+    <main className="relative flex h-dvh overflow-hidden bg-background text-foreground">
       <RunHistory
         runs={runs}
         selectedId={selectedId}
@@ -342,6 +344,7 @@ export default function FirstLightPage() {
         <div className="flex flex-col gap-3 border-b border-border p-3">
           <PromptComposer
             onGenerate={handleGenerate}
+            onInterview={(p) => setInterviewRequest(p || 'design a custom board')}
             disabled={liveRunId !== null}
           />
           <PipelineTracker run={selectedRun} liveElapsed={liveElapsed} />
@@ -417,6 +420,14 @@ export default function FirstLightPage() {
       </div>
 
       <MetricsRail run={selectedRun} />
+
+      {interviewRequest && (
+        <InterviewPanel
+          request={interviewRequest}
+          onGenerate={handleGenerate}
+          onClose={() => setInterviewRequest(null)}
+        />
+      )}
     </main>
   )
 }
