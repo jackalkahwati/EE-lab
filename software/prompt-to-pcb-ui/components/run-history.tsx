@@ -2,7 +2,7 @@
 
 import { cn } from '@/lib/utils'
 import type { Run } from '@/lib/firstlight'
-import { PanelLeftClose, PanelLeftOpen, CircuitBoard } from 'lucide-react'
+import { PanelLeftClose, PanelLeftOpen, CircuitBoard, X } from 'lucide-react'
 
 function StatusPill({ status }: { status: Run['status'] }) {
   return (
@@ -45,12 +45,14 @@ export function RunHistory({
   runs,
   selectedId,
   onSelect,
+  onDelete,
   collapsed,
   onToggleCollapsed,
 }: {
   runs: Run[]
   selectedId: string
   onSelect: (id: string) => void
+  onDelete: (id: string) => void
   collapsed: boolean
   onToggleCollapsed: () => void
 }) {
@@ -93,12 +95,16 @@ export function RunHistory({
       <nav className="flex-1 overflow-y-auto p-2" aria-label="Run history">
         <ul className="flex flex-col gap-1">
           {runs.map((run) => (
-            <li key={run.id}>
-              <button
-                type="button"
+            <li key={run.id} className="group">
+              <div
+                role="button"
+                tabIndex={0}
                 onClick={() => onSelect(run.id)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') onSelect(run.id)
+                }}
                 className={cn(
-                  'flex w-full flex-col gap-1.5 rounded-sm border px-2.5 py-2 text-left transition-colors',
+                  'flex w-full cursor-pointer flex-col gap-1.5 rounded-sm border px-2.5 py-2 text-left transition-colors',
                   run.id === selectedId
                     ? 'border-primary/40 bg-primary/5'
                     : 'border-transparent hover:border-border hover:bg-secondary',
@@ -108,13 +114,28 @@ export function RunHistory({
                   <span className="truncate text-xs font-medium text-foreground">
                     {run.name}
                   </span>
-                  <StatusPill status={run.status} />
+                  <div className="flex shrink-0 items-center gap-1">
+                    <StatusPill status={run.status} />
+                    {run.status !== 'RUNNING' && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onDelete(run.id)
+                        }}
+                        className="rounded-sm p-0.5 text-muted-foreground opacity-0 transition hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+                        aria-label={`Delete ${run.name}`}
+                      >
+                        <X className="size-3" />
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <span className="font-mono text-[10px] text-muted-foreground">
                   {run.timestamp}
                 </span>
                 <MiniProgress run={run} />
-              </button>
+              </div>
             </li>
           ))}
         </ul>

@@ -107,17 +107,6 @@ export function PipelineTracker({
                 )}
             </div>
 
-            <div className="flex flex-wrap gap-1">
-              {def.substeps.map((sub) => (
-                <span
-                  key={sub}
-                  className="rounded-sm border border-border bg-secondary px-1.5 py-0.5 font-mono text-[10px] leading-none text-muted-foreground"
-                >
-                  {sub}
-                </span>
-              ))}
-            </div>
-
             <div className="mt-auto">
               <span
                 className={cn(
@@ -131,7 +120,7 @@ export function PipelineTracker({
                   isDim && 'border-border bg-secondary text-muted-foreground',
                 )}
               >
-                GATE: {def.gate}
+                {def.gate}
                 {stage.state === 'passed' && ' ✓'}
               </span>
               {stage.state === 'failed' && stage.failReason && (

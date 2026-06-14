@@ -228,6 +228,18 @@ export default function FirstLightPage() {
     [realBoard],
   )
 
+  const handleDelete = useCallback(
+    (id: string) => {
+      if (id === liveRunId) return // never delete a live run
+      setRuns((prev) => {
+        const next = prev.filter((r) => r.id !== id)
+        if (id === selectedId && next.length) setSelectedId(next[0].id)
+        return next
+      })
+    },
+    [liveRunId, selectedId],
+  )
+
   // tick the elapsed timer for whichever stage is running
   useEffect(() => {
     if (!liveRunId) return
@@ -250,6 +262,7 @@ export default function FirstLightPage() {
         runs={runs}
         selectedId={selectedId}
         onSelect={setSelectedId}
+        onDelete={handleDelete}
         collapsed={collapsed}
         onToggleCollapsed={() => setCollapsed((v) => !v)}
       />
@@ -261,7 +274,7 @@ export default function FirstLightPage() {
               FirstLight
             </h1>
             <span className="font-mono text-[10px] tracking-wide text-muted-foreground">
-              {'PROMPT → PCBA + FIRMWARE · 5 STAGES · HARD GATES'}
+              {'PROMPT → PCBA + FIRMWARE'}
             </span>
           </div>
           <div className="flex items-center gap-3">
