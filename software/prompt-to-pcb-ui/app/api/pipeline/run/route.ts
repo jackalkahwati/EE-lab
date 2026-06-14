@@ -150,135 +150,74 @@ export async function GET(req: Request) {
         }
         log('design', 'GATE design: ato build GREEN — PASS', 'ok')
 
-        // ---- prompt's parametric variant -> the DISPLAYED board -------------
-        // The routed/validated board is the proven FL-1 reference, but the
-        // renders + BOM the user sees should reflect what the PROMPT asked for.
-        // gen_board scales the floorplan from the spec; render it and sync its
-        // design metrics + BOM so the visual changes with the prompt.
-        log('design', 'rendering prompt design variant (gen_board)…')
+        // ---- prompt's parametric variant — the board we actually build ------
+        // gen_board scales a real, placed, zoned floorplan from the spec. It is
+        // the board that gets gated, routed, DRC'd, rendered and shipped — so
+        // the whole pipeline reflects the prompt. (The reference copy is kept
+        // only for firmware, which needs the atopile net naming.)
+        log('design', `gen_board: building the prompt's variant…`)
         const genV = await exec('design', KPY, [
           path.join(hwDir, 'scripts/gen_board.py'),
           variantBoard,
         ], { env: { DESIGN_SPEC: specPath } })
-        if (genV.code === 0 || genV.out.includes('gen_board:')) {
-          for (const side of ['top', 'bottom']) {
-            await exec('design', KCLI, [
-              'pcb', 'render', '--side', side, '--background', 'opaque',
-              '--quality', 'basic', '--width', '1600', '--height', '1400',
-              '-o', path.join(pubBoard, `render-${side}.png`), variantBoard,
-            ])
-          }
-          for (const layer of ['F.Cu', 'In1.Cu', 'In2.Cu', 'B.Cu', 'Edge.Cuts', 'F.SilkS']) {
-            await exec('design', KCLI, [
-              'pcb', 'export', 'svg', '--mode-single', '--page-size-mode', '2',
-              '--exclude-drawing-sheet', '--black-and-white', '--negative',
-              '-l', layer, '-o', path.join(pubBoard, `${layer}.svg`), variantBoard,
-            ])
-          }
-          await exec('design', KPY, [
-            path.join(appDir, 'scripts/variant_sync.py'),
-            variantBoard, fl1Bom, pubData,
-          ])
-          log('design', 'design variant rendered — board + BOM reflect the prompt', 'ok')
-        } else {
-          log('design', 'variant render skipped — showing FL-1 reference', 'warn')
+        if (!(genV.code === 0 || genV.out.includes('gen_board:'))) {
+          send({ type: 'stage', id: 'design', state: 'failed', failReason: 'gen_board failed' })
+          send({ type: 'stage', id: 'placement', state: 'blocked' })
+          send({ type: 'stage', id: 'routing', state: 'blocked' })
+          send({ type: 'stage', id: 'validation', state: 'blocked' })
+          send({ type: 'stage', id: 'firmware', state: 'blocked' })
+          send({ type: 'done', status: 'GATE FAILED', boardPath: variantBoard })
+          return
         }
         send({ type: 'stage', id: 'design', state: 'passed' })
 
-        // ---- stage 2: placement + hard gate --------------------------------
+        // ---- stage 2: placement gates on the variant -----------------------
+        // gen_board already placed the variant (with fiducials + zones); gate
+        // it directly — no place_and_zone (that's the atopile placer).
         send({ type: 'stage', id: 'placement', state: 'running' })
-        const place = await exec(
-          'placement',
-          KPY,
-          [path.join(hwDir, 'scripts/place_and_zone.py')],
-          { cwd: ws },
-        )
-        // KiCad 10 standalone python may segfault at interpreter teardown
-        // AFTER saving; the "v3:" summary line is the completion sentinel,
-        // and placement_score.py independently verifies the result next.
-        const placeOk = place.code === 0 || place.out.includes('v3: relay pitch')
-        if (!placeOk) {
-          send({ type: 'stage', id: 'placement', state: 'failed', failReason: 'place_and_zone error' })
+        const pscore = await exec('placement', KPY, [
+          path.join(hwDir, 'scripts/placement_score.py'),
+          variantBoard,
+        ])
+        if (pscore.code !== 0) {
+          send({ type: 'stage', id: 'placement', state: 'failed', failReason: 'placement gate FAIL' })
           send({ type: 'stage', id: 'routing', state: 'blocked' })
           send({ type: 'stage', id: 'validation', state: 'blocked' })
-          send({ type: 'done', status: 'GATE FAILED', boardPath: wsBoard })
-          return
-        }
-        // gate → repair → re-gate: bounded self-repair instead of stopping.
-        // This is the zero-shot policy — iteration happens in here, unattended.
-        let gatePassed = false
-        for (let attempt = 0; attempt <= 2; attempt++) {
-          const gate = await exec('placement', KPY, [
-            path.join(hwDir, 'scripts/placement_score.py'),
-            wsBoard,
-          ])
-          if (gate.code === 0) {
-            gatePassed = true
-            break
-          }
-          if (attempt === 2) break
-          log('placement', `gate FAIL — repair attempt ${attempt + 1}/2`, 'warn')
-          const rep = await exec('placement', KPY, [
-            path.join(appDir, 'scripts/repair_placement.py'),
-            wsBoard,
-          ])
-          if (!(rep.code === 0 || rep.out.includes('REPAIRED'))) {
-            log('placement', 'repair pass failed to run', 'err')
-            break
-          }
-        }
-        if (!gatePassed) {
-          send({ type: 'stage', id: 'placement', state: 'failed', failReason: 'placement gate FAIL after repair' })
-          send({ type: 'stage', id: 'routing', state: 'blocked' })
-          send({ type: 'stage', id: 'validation', state: 'blocked' })
-          send({ type: 'done', status: 'GATE FAILED', boardPath: wsBoard })
+          send({ type: 'stage', id: 'firmware', state: 'blocked' })
+          send({ type: 'done', status: 'GATE FAILED', boardPath: variantBoard })
           return
         }
         log('placement', 'GATE placement (HPWL/overlap) — PASS', 'ok')
-
-        // self-heal: the atopile netlist has no fiducial parts; assembly needs
-        // >= 3. Inject them into free space before the DFM gate (idempotent).
-        const fid = await exec('placement', KPY, [
-          path.join(appDir, 'scripts/add_fiducials.py'),
-          wsBoard,
-        ])
-        const fidN = fid.out.match(/^FIDUCIALS (\d+)/m)?.[1]
-        log('placement',
-          fidN !== undefined
-            ? `assembly fiducials: ${fidN} present`
-            : 'fiducial self-heal did not complete',
-          fidN !== undefined ? 'ok' : 'warn')
-
-        // DFM gate — assembly-house rules KiCad DRC doesn't check
-        // (edge/hole keepout, fiducials, courtyard gaps). Hard gate.
         const dfm = await exec('placement', KPY, [
           path.join(hwDir, 'scripts/dfm_check.py'),
-          wsBoard,
+          variantBoard,
         ])
         if (dfm.code !== 0) {
           send({ type: 'stage', id: 'placement', state: 'failed', failReason: 'DFM gate FAIL' })
           send({ type: 'stage', id: 'routing', state: 'blocked' })
           send({ type: 'stage', id: 'validation', state: 'blocked' })
-          send({ type: 'done', status: 'GATE FAILED', boardPath: wsBoard })
+          send({ type: 'stage', id: 'firmware', state: 'blocked' })
+          send({ type: 'done', status: 'GATE FAILED', boardPath: variantBoard })
           return
         }
         log('placement', 'GATE DFM (edge/hole/fiducial/courtyard) — PASS', 'ok')
         send({ type: 'stage', id: 'placement', state: 'passed' })
 
-        // ---- stage 3: routing (flroute on the real DSN) ---------------------
+        // ---- stage 3: routing (flroute on the variant) ---------------------
         send({ type: 'stage', id: 'routing', state: 'running' })
-        const dsn = path.join(ws, 'board.dsn')
-        const ses = path.join(ws, 'board.ses')
+        const dsn = path.join(ws, 'variant.dsn')
+        const ses = path.join(ws, 'variant.ses')
         const dsnRes = await exec('routing', KPY, [
           path.join(appDir, 'scripts/export_dsn.py'),
-          wsBoard,
+          variantBoard,
           dsn,
         ])
         const dsnOk = dsnRes.code === 0 || dsnRes.out.includes('DSN export OK')
         if (!dsnOk) {
           send({ type: 'stage', id: 'routing', state: 'failed', failReason: 'DSN export failed' })
           send({ type: 'stage', id: 'validation', state: 'blocked' })
-          send({ type: 'done', status: 'GATE FAILED', boardPath: wsBoard })
+          send({ type: 'stage', id: 'firmware', state: 'blocked' })
+          send({ type: 'done', status: 'GATE FAILED', boardPath: variantBoard })
           return
         }
         const zoneNets =
@@ -289,26 +228,28 @@ export async function GET(req: Request) {
         if (route.code !== 0 || !fs.existsSync(ses)) {
           send({ type: 'stage', id: 'routing', state: 'failed', failReason: `flroute exit ${route.code}` })
           send({ type: 'stage', id: 'validation', state: 'blocked' })
-          send({ type: 'done', status: 'GATE FAILED', boardPath: wsBoard })
+          send({ type: 'stage', id: 'firmware', state: 'blocked' })
+          send({ type: 'done', status: 'GATE FAILED', boardPath: variantBoard })
           return
         }
         const imp = await exec('routing', KPY, [
           path.join(appDir, 'scripts/import_ses.py'),
-          wsBoard,
+          variantBoard,
           ses,
         ])
         const impOk = imp.code === 0 || imp.out.includes('IMPORT_OK')
         if (!impOk) {
           send({ type: 'stage', id: 'routing', state: 'failed', failReason: 'SES import failed' })
           send({ type: 'stage', id: 'validation', state: 'blocked' })
-          send({ type: 'done', status: 'GATE FAILED', boardPath: wsBoard })
+          send({ type: 'stage', id: 'firmware', state: 'blocked' })
+          send({ type: 'done', status: 'GATE FAILED', boardPath: variantBoard })
           return
         }
         // pad-entry stitching: closes the flroute-vs-referee connectivity gap
         // (router stops at grid centers 100-400um short of pad copper)
         const stitch = await exec('routing', KPY, [
           path.join(appDir, 'scripts/stitch_pads.py'),
-          wsBoard,
+          variantBoard,
         ])
         const stitched = stitch.out.match(/^STITCHED (\d+)/m)?.[1]
         log(
@@ -318,6 +259,14 @@ export async function GET(req: Request) {
             : 'pad-entry stitching did not complete',
           stitched !== undefined ? 'ok' : 'warn',
         )
+        // fill the GND / coil-rail zones so plane pads connect via the pour
+        await exec('routing', KPY, [
+          '-c',
+          `import pcbnew; b=pcbnew.LoadBoard(${JSON.stringify(variantBoard)}); ` +
+            `pcbnew.ZONE_FILLER(b).Fill(b.Zones()); ` +
+            `pcbnew.SaveBoard(${JSON.stringify(variantBoard)}, b)`,
+        ])
+        log('routing', 'zones filled (GND / coil-rail pours)')
         log('routing', 'GATE emission: only DRC-clean nets shipped — PASS', 'ok')
         send({ type: 'stage', id: 'routing', state: 'passed' })
 
@@ -326,7 +275,7 @@ export async function GET(req: Request) {
         const drcPath = path.join(ws, 'drc.json')
         await exec('validation', KCLI, [
           'pcb', 'drc', '--format', 'json', '--severity-error',
-          '-o', drcPath, wsBoard,
+          '-o', drcPath, variantBoard,
         ])
         let violations = -1
         try {
@@ -342,49 +291,53 @@ export async function GET(req: Request) {
         }
         const drcPass = violations === 0
 
-        // ---- sync: keep the prompt variant's renders+BOM, refresh routing ---
-        // The displayed renders/BOM are the prompt's variant (from the design
-        // stage). Here we only refresh the DRC report + routing stats from the
-        // routed REFERENCE so completion/defects reflect real copper, and the
-        // .ato source for the Schematic/Code tab. Variant board+BOM are kept.
-        log('validation', 'refreshing routing stats from reference (variant render kept)…')
+        // ---- sync: the routed variant IS the board — render it with copper --
+        // One coherent board: renders (now with traces), layer SVGs, routing
+        // stats and BOM all come from the routed variant.
+        log('validation', 'rendering routed variant (board · BOM · stats reflect the prompt)…')
         try {
           fs.copyFileSync(drcPath, path.join(pubData, 'drc.json'))
         } catch {
           /* drc already at pubData or unreadable */
         }
-        // .ato sources (writes ato.json AND a reference bom.json — variant_sync
-        // overwrites the bom.json next so the variant BOM wins)
+        for (const side of ['top', 'bottom']) {
+          await exec('validation', KCLI, [
+            'pcb', 'render', '--side', side, '--background', 'opaque',
+            '--quality', 'basic', '--width', '1600', '--height', '1400',
+            '-o', path.join(pubBoard, `render-${side}.png`), variantBoard,
+          ])
+        }
+        for (const layer of ['F.Cu', 'In1.Cu', 'In2.Cu', 'B.Cu', 'Edge.Cuts', 'F.SilkS']) {
+          await exec('validation', KCLI, [
+            'pcb', 'export', 'svg', '--mode-single', '--page-size-mode', '2',
+            '--exclude-drawing-sheet', '--black-and-white', '--negative',
+            '-l', layer, '-o', path.join(pubBoard, `${layer}.svg`), variantBoard,
+          ])
+        }
+        // the variant's OWN routing stats (real copper)
+        const vStats = path.join(ws, 'variant_board.json')
+        await exec('validation', KPY, [
+          path.join(appDir, 'scripts/extract_stats.py'),
+          variantBoard,
+          drcPath,
+          vStats,
+        ])
+        // .ato source for the Schematic/Code tab (also writes a ref bom.json —
+        // variant_sync overwrites bom.json next so the variant BOM wins)
         await exec('validation', 'python3', [
           path.join(appDir, 'scripts/build_data.py'),
           hwDir,
           pubData,
         ])
-        // reference routing stats -> temp, then merge into the variant board.json
-        const refStats = path.join(ws, 'ref_board.json')
         await exec('validation', KPY, [
-          path.join(appDir, 'scripts/extract_stats.py'),
-          wsBoard,
-          drcPath,
-          refStats,
+          path.join(appDir, 'scripts/variant_sync.py'),
+          variantBoard,
+          fl1Bom,
+          pubData,
+          '--routing-json',
+          vStats,
         ])
-        if (fs.existsSync(variantBoard)) {
-          await exec('validation', KPY, [
-            path.join(appDir, 'scripts/variant_sync.py'),
-            variantBoard,
-            fl1Bom,
-            pubData,
-            '--routing-json',
-            refStats,
-          ])
-          log('validation', 'board: prompt variant · routing stats: reference', 'ok')
-        } else {
-          // no variant — fall back to syncing the reference board fully
-          await exec('validation', 'bash', [path.join(appDir, 'scripts/sync-board.sh')], {
-            cwd: appDir,
-            env: { BOARD: wsBoard, HW_DIR: hwDir },
-          })
-        }
+        log('validation', 'board · BOM · renders · stats — all the prompt variant', 'ok')
 
         let fabZip: string | undefined
         if (drcPass) {
@@ -395,7 +348,7 @@ export async function GET(req: Request) {
           const bomCsv = path.join(hwDir, 'build/builds/default/default.bom.csv')
           const fab = await exec('validation', 'python3', [
             path.join(appDir, 'scripts/export_fab.py'),
-            wsBoard,
+            variantBoard,
             fabDir,
             bomCsv,
           ])

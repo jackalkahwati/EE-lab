@@ -287,6 +287,30 @@ for cx, cy in ((5, 5), (BW - 5, 5), (5, BH - 5), (BW - 5, BH - 5)):
     p += gcircle(X0 + cx, Y0 + cy, 1.6, "Edge.Cuts")
 p += gtext(TITLE, X0 + BW / 2, Y0 - 5, "Dwgs.User", 2.2, True)
 p += gtext("ANALOG ISLAND - reed bank + references", X0 + 100, Y0 + 136, "Cmts.User", 1.4)
+
+
+def gzone(net_name, layer):
+    """Full-board copper pour for a plane net, so the router treats it as
+    zone-served (GND / coil rail) instead of routing every connection."""
+    nid = NET[net_name]
+    pts = "(xy {} {}) (xy {} {}) (xy {} {}) (xy {} {})".format(
+        X0, Y0, X0 + BW, Y0, X0 + BW, Y0 + BH, X0, Y0 + BH)
+    return (
+        '  (zone (net {}) (net_name "{}") (layer "{}") (uuid "{}")\n'
+        '    (hatch edge 0.508)\n'
+        '    (connect_pads yes (clearance 0.2))\n'
+        '    (min_thickness 0.25)\n'
+        '    (fill yes (thermal_gap 0.5) (thermal_bridge_width 0.5))\n'
+        '    (polygon (pts {})))\n'
+    ).format(nid, net_name, layer, U(), pts)
+
+
+# GND pour on outer layers, coil rail on the inner power plane: makes the big
+# nets zone-served so flroute only has to route signal nets.
+p += gzone("GND", "F.Cu")
+p += gzone("GND", "B.Cu")
+p += gzone("GND", "In1.Cu")
+p += gzone("+5V_COIL", "In2.Cu")
 p += body
 p += ')\n'
 
