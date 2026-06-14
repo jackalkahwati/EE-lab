@@ -114,6 +114,16 @@ struct Pin {
 
 struct Image {
     pins: Vec<Pin>,
+    keepouts: Vec<Ko>,
+}
+
+/// A per-image keepout (mounting hole etc.) in image-local coords. `pts` are
+/// the shape's defining points (circle center, or polygon vertices); `r` is an
+/// extra radius (circle radius, 0 for polygons). Transformed by each placement.
+#[derive(Clone)]
+struct Ko {
+    pts: Vec<(f64, f64)>,
+    r: f64,
 }
 
 #[derive(Clone)]
@@ -313,11 +323,45 @@ fn main() {
             let y: f64 = l[idx + 2].sym().parse().unwrap_or(0.0);
             pins.push(Pin { padstack, id, x, y, rot: prot });
         }
-        images.insert(name, Image { pins });
+        // image-level keepouts: per-component holes (e.g. the Pico's NPTH
+        // mounting holes), exported as (keepout "" (circle ...)) or (polygon).
+        // v2 only handled structure-level polygons, so component holes were
+        // invisible to the router (DRC hole_clearance on NPTH pad of U2).
+        let mut keepouts = Vec::new();
+        for ko in im.kids("keepout") {
+            if let Some(circ) = ko.kid("circle") {
+                // (circle layer diameter [cx cy])
+                let r = circ.num(2) / 2.0;
+                let (cx, cy) = if circ.list().len() >= 5 {
+                    (circ.num(3), circ.num(4))
+                } else {
+                    (0.0, 0.0)
+                };
+                keepouts.push(Ko { pts: vec![(cx, cy)], r });
+            } else if let Some(poly) = ko.kid("polygon") {
+                // (polygon layer aperture x y x y ...)
+                let pts: Vec<(f64, f64)> = poly.list()[3..]
+                    .chunks(2)
+                    .filter_map(|c| {
+                        if c.len() == 2 {
+                            Some((c[0].sym().parse().ok()?, c[1].sym().parse().ok()?))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if !pts.is_empty() {
+                    keepouts.push(Ko { pts, r: 0.0 });
+                }
+            }
+        }
+        images.insert(name, Image { pins, keepouts });
     }
 
     // ---------- placement -> absolute pins -----------------------------------
     let mut abs_pins: HashMap<String, AbsPin> = HashMap::new();
+    // world-space bboxes of every placed image keepout (mounting holes etc.)
+    let mut placed_kos: Vec<(f64, f64, f64, f64)> = Vec::new();
     let placement = root.kid("placement").expect("placement");
     for comp in placement.kids("component") {
         let img_name = comp.list()[1].sym();
@@ -388,6 +432,24 @@ fn main() {
                         pad,
                     },
                 );
+            }
+            // transform this component's keepouts into world space
+            let (s, c) = a.sin_cos();
+            for ko in &img.keepouts {
+                let (mut x0, mut y0, mut x1, mut y1) =
+                    (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+                for &(mut px, py) in &ko.pts {
+                    if side == "back" {
+                        px = -px;
+                    }
+                    let wx = cx + px * c - py * s;
+                    let wy = cy + px * s + py * c;
+                    x0 = x0.min(wx);
+                    y0 = y0.min(wy);
+                    x1 = x1.max(wx);
+                    y1 = y1.max(wy);
+                }
+                placed_kos.push((x0 - ko.r, y0 - ko.r, x1 + ko.r, y1 + ko.r));
             }
         }
     }
@@ -552,6 +614,36 @@ fn main() {
             }
         }
         eprintln!("v2 keepout: {} cells blocked", ko_cells);
+    }
+
+    // ---------- v3: image-level keepouts (per-component mounting holes) ------------
+    // Placed component holes (e.g. the Pico's NPTH pads) — block their bbox +
+    // clearance on all layers so no track runs within clearance of the hole.
+    {
+        let mut ik_cells = 0u32;
+        let m = clearance + width / 2.0;
+        for &(kx0, ky0, kx1, ky1) in &placed_kos {
+            let x_lo = (((kx0 - m - bx0) / pitch).floor() as isize).max(0);
+            let x_hi = (((kx1 + m - bx0) / pitch).ceil() as isize).min(gw as isize - 1);
+            let y_lo = (((ky0 - m - by0) / pitch).floor() as isize).max(0);
+            let y_hi = (((ky1 + m - by0) / pitch).ceil() as isize).min(gh as isize - 1);
+            for y in y_lo..=y_hi {
+                for x in x_lo..=x_hi {
+                    for l in 0..nl {
+                        let c = &mut owner[idx(x as usize, y as usize, l)];
+                        if *c == 0 {
+                            *c = u16::MAX;
+                            ik_cells += 1;
+                        }
+                    }
+                }
+            }
+        }
+        eprintln!(
+            "v3 image keepouts: {} holes, {} cells blocked",
+            placed_kos.len(),
+            ik_cells
+        );
     }
 
     // ---------- fanout stubs for fine-pitch pads -----------------------------------

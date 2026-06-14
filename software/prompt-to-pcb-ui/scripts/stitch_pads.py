@@ -18,6 +18,8 @@ from collections import defaultdict
 import pcbnew
 
 MAX_STITCH_NM = 600_000  # 0.6 mm: must exceed worst observed undershoot (400um)
+CLEAR_NM = 200_000       # 0.2 mm board clearance — a stitch that comes within
+                         # this of foreign-net copper is dropped, not shipped.
 
 board_path = sys.argv[1]
 b = pcbnew.LoadBoard(board_path)
@@ -80,8 +82,44 @@ for code, pads in pads_by_net.items():
         plan.append((best[1], pcbnew.VECTOR2I(pad.GetPosition().x, pad.GetPosition().y),
                      best[2], best[3], code, f"{ref}-{pad.GetNumber()}"))
 
-# ---- apply ------------------------------------------------------------------
+# ---- clearance index: foreign-net copper per layer (read-only snapshot) ------
+# A stitch is non-grid copper, so unlike the main router its segment can graze
+# another net within clearance (DRC clearance). Build per-layer shapes of every
+# pad/track/via so each planned stitch can be tested before it is committed.
+COPPER = [pcbnew.F_Cu, pcbnew.In1_Cu, pcbnew.In2_Cu, pcbnew.B_Cu]
+layer_shapes = {L: [] for L in COPPER}
+for fp in b.GetFootprints():
+    for pad in fp.Pads():
+        c = pad.GetNetCode()
+        for L in COPPER:
+            if pad.IsOnLayer(L):
+                layer_shapes[L].append((pad.GetEffectiveShape(L), c))
+for t in b.GetTracks():
+    c = t.GetNetCode()
+    if t.GetClass() == "PCB_VIA":
+        for L in COPPER:
+            layer_shapes[L].append((t.GetEffectiveShape(), c))
+    elif t.GetLayer() in layer_shapes:
+        layer_shapes[t.GetLayer()].append((t.GetEffectiveShape(), c))
+
+
+def clears(seg, layer, code):
+    """True if this stitch segment clears all foreign-net copper on its layer."""
+    for sh, c in layer_shapes.get(layer, []):
+        if c == code:
+            continue
+        if sh.Collide(seg, CLEAR_NM):
+            return False
+    return True
+
+
+# ---- apply (clearance-gated) -------------------------------------------------
+applied, skipped = 0, 0
 for start, end, layer, width, code, label in plan:
+    seg = pcbnew.SHAPE_SEGMENT(start, end, width)
+    if not clears(seg, layer, code):
+        skipped += 1
+        continue
     tr = pcbnew.PCB_TRACK(b)
     tr.SetStart(start)
     tr.SetEnd(end)
@@ -89,8 +127,12 @@ for start, end, layer, width, code, label in plan:
     tr.SetWidth(width)
     tr.SetNetCode(code)
     b.Add(tr)
+    # later stitches must also clear this one
+    layer_shapes[layer].append((seg, code))
+    applied += 1
     print(f"  stitch {label}: {pcbnew.ToMM(start.x - end.x):+.3f},{pcbnew.ToMM(start.y - end.y):+.3f} mm")
 
-if plan:
+if applied:
     pcbnew.SaveBoard(board_path, b)
-print(f"STITCHED {len(plan)}")
+print(f"stitch dropped (clearance): {skipped}")
+print(f"STITCHED {applied}")
