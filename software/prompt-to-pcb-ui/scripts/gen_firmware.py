@@ -80,6 +80,35 @@ def load():
                 probes.add(probe)
                 lanes.add(lane)
                 break
+
+    # Variant fallback: the gen_board floorplan uses simple net names instead of
+    # the atopile coil_n / matrix.sel naming. Trace crosspoints from each relay's
+    # GBANK_<probe> / PBANK_<probe> + lane net so firmware scales with the prompt.
+    # (Bit order here is logical — assigned per relay — since the floorplan does
+    # not model the exact shift-register-to-coil wiring the reference does.)
+    if not cmap:
+        LANE_NETS = {"SCOPE_A", "SCOPE_B", "DAQ_1", "DAQ_2", "LOGIC_1",
+                     "LOGIC_2", "PWR_INJ", "DMM_HI", "DMM_LO", "GND_REF"}
+        bank_re = re.compile(r"^[GP]BANK_(\w+)$")
+        relays = []
+        for fp in b.GetFootprints():
+            nm = str(fp.GetFPID().GetLibItemName())
+            if "G6K" not in nm and "SIL" not in nm:
+                continue
+            nets = [str(p.GetNetname()) for p in fp.Pads()]
+            probe = next((bank_re.match(n).group(1) for n in nets
+                          if bank_re.match(n)), None)
+            lane = next((n for n in nets if n in LANE_NETS), None)
+            if probe and lane:
+                relays.append((fp.GetReference(), probe.upper(), lane.upper()))
+        relays.sort(key=lambda r: int(re.sub(r"[^0-9]", "", r[0]) or 0))
+        for i, (_ref, probe, lane) in enumerate(relays):
+            if (probe, lane) not in cmap:
+                cmap[(probe, lane)] = i + 1
+                probes.add(probe)
+                lanes.add(lane)
+                max_bit = max(max_bit, i + 1)
+
     return pins, cmap, sorted(probes), sorted(lanes), max_bit
 
 

@@ -380,7 +380,7 @@ export async function GET(req: Request) {
         const fwDir = path.join(ws, 'firmware')
         const gen = await exec('firmware', KPY, [
           path.join(appDir, 'scripts/gen_firmware.py'),
-          wsBoard,
+          variantBoard,
           fwDir,
         ])
         if (!gen.out.includes('FIRMWARE:') || gen.out.includes('ERROR')) {
