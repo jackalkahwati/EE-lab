@@ -13,6 +13,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { callLLMText, extractRust } from '@/lib/llm'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 1800
@@ -427,6 +428,76 @@ export async function GET(req: Request) {
           const fwOk = fwBuild.code === 0 || fwBuild.out.includes('Finished')
           if (fwOk) {
             log('firmware', 'GATE firmware: cargo build GREEN — PASS', 'ok')
+
+            // ---- application firmware: frontier model writes the control loop --
+            // The deterministic crate above is the correct-by-construction BSP +
+            // HAL. Here the frontier model writes the *application* logic against
+            // it (a real control loop), gated by cargo build with one self-repair
+            // pass. Best-effort: if it can't be made to compile, the crate still
+            // ships with the verified BSP/HAL — the app layer is just omitted.
+            try {
+              const srcDir = path.join(fwDir, 'src')
+              const libPath = path.join(srcDir, 'lib.rs')
+              const libOrig = fs.readFileSync(libPath, 'utf8')
+              const mods = fs
+                .readdirSync(srcDir)
+                .filter((f) => f.endsWith('.rs') && f !== 'lib.rs' && f !== 'app.rs')
+              const apiDump = mods
+                .map((f) => `// ===== src/${f} =====\n${fs.readFileSync(path.join(srcDir, f), 'utf8')}`)
+                .join('\n\n')
+              const sys =
+                'You are an expert embedded Rust engineer writing no_std firmware. ' +
+                'Output ONLY the Rust source of one module file — no prose, no markdown fences.'
+              const ask =
+                `Target: RP2040 (thumbv6m-none-eabi), no_std, embedded-hal 1.0 only ` +
+                `(NO concrete HAL crate, NO runtime, NO new dependencies).\n` +
+                `Board: ${composeMode ? composeSpec?.boardClass : 'FL-1 relay/probe matrix'}.\n\n` +
+                `The crate already provides these modules — use them, do not redefine them:\n\n` +
+                `${apiDump}\n\n` +
+                `Write src/app.rs: a generic application controller that drives this board ` +
+                `using the modules above. Rules:\n` +
+                `- no_std; reference only crate::{${mods.map((m) => m.replace('.rs', '')).join(', ')}} and embedded-hal 1.0 traits.\n` +
+                `- A struct owning the peripherals it needs, generic over concrete types with EXACTLY these bounds where used: ` +
+                `SPI: embedded_hal::spi::SpiDevice, RST: embedded_hal::digital::OutputPin, ` +
+                `I2C: embedded_hal::i2c::I2c, PWM: embedded_hal::pwm::SetDutyCycle, D: embedded_hal::delay::DelayNs.\n` +
+                `- new(...), init(&mut self) that probes radio/IMU if present, and control_step(&mut self) ` +
+                `running one real iteration (e.g. read IMU, treat a received LoRa byte as 0..=255 throttle, ` +
+                `apply to motors via crate::motors::set_throttle, failsafe-disarm). Only use peripherals that exist above.\n` +
+                `- No main, no #[entry], no panic handler — this is a library module. It MUST compile. Return only src/app.rs.`
+
+              log('firmware', 'app firmware: frontier model writing the control loop…')
+              let appOk = false
+              let provider = ''
+              let lastErr = ''
+              for (let attempt = 0; attempt < 2 && !appOk; attempt++) {
+                const user =
+                  attempt === 0
+                    ? ask
+                    : `${ask}\n\nYour previous src/app.rs failed to compile:\n${lastErr.slice(0, 1800)}\n\nReturn a corrected src/app.rs (code only).`
+                const llm = await callLLMText(sys, user)
+                provider = llm.provider
+                fs.writeFileSync(path.join(srcDir, 'app.rs'), extractRust(llm.text))
+                if (!libOrig.includes('pub mod app;'))
+                  fs.writeFileSync(libPath, libOrig.replace(/\n*$/, '\n') + 'pub mod app;\n')
+                const ab = await exec('firmware', CARGO, ['build', '--release'], { cwd: fwDir })
+                appOk = ab.code === 0 || ab.out.includes('Finished')
+                lastErr = ab.out
+                if (appOk)
+                  log('firmware', `GATE app firmware: ${provider} control loop compiles — PASS`, 'ok')
+                else if (attempt === 0)
+                  log('firmware', 'app firmware: draft failed to compile — self-repair pass…', 'warn')
+              }
+              if (!appOk) {
+                // revert: ship the verified BSP/HAL crate without the app layer
+                fs.rmSync(path.join(srcDir, 'app.rs'), { force: true })
+                fs.writeFileSync(libPath, libOrig)
+                await exec('firmware', CARGO, ['build', '--release'], { cwd: fwDir })
+                log('firmware', 'app firmware: did not compile after repair — shipping BSP/HAL only', 'warn')
+              }
+            } catch (e) {
+              log('firmware', `app firmware skipped: ${String(e)}`, 'warn')
+            }
+
             // zip the crate (exclude target/) for download
             const zipRes = await exec('firmware', 'bash', [
               '-c',
