@@ -155,6 +155,75 @@ struct Routed {
 
 static ATTEMPTED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
+/// Squared distance from point p to segment a-b.
+fn pt_seg_d2(px: f64, py: f64, ax: f64, ay: f64, bx: f64, by: f64) -> f64 {
+    let (dx, dy) = (bx - ax, by - ay);
+    let len2 = dx * dx + dy * dy;
+    let t = if len2 <= 1e-12 {
+        0.0
+    } else {
+        (((px - ax) * dx + (py - ay) * dy) / len2).clamp(0.0, 1.0)
+    };
+    let (cx, cy) = (ax + t * dx, ay + t * dy);
+    (px - cx) * (px - cx) + (py - cy) * (py - cy)
+}
+
+/// Do segments p1-p2 and p3-p4 intersect (proper or touching)?
+fn seg_seg_hit(
+    p1x: f64, p1y: f64, p2x: f64, p2y: f64,
+    p3x: f64, p3y: f64, p4x: f64, p4y: f64,
+) -> bool {
+    let o = |ax: f64, ay: f64, bx: f64, by: f64, cx: f64, cy: f64| {
+        (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+    };
+    let d1 = o(p3x, p3y, p4x, p4y, p1x, p1y);
+    let d2 = o(p3x, p3y, p4x, p4y, p2x, p2y);
+    let d3 = o(p1x, p1y, p2x, p2y, p3x, p3y);
+    let d4 = o(p1x, p1y, p2x, p2y, p4x, p4y);
+    ((d1 > 0.0) != (d2 > 0.0)) && ((d3 > 0.0) != (d4 > 0.0))
+}
+
+/// Minimum distance between segments a-b and c-d (0 if they cross).
+fn seg_seg_dist(ax: f64, ay: f64, bx: f64, by: f64, cx: f64, cy: f64, dx: f64, dy: f64) -> f64 {
+    if seg_seg_hit(ax, ay, bx, by, cx, cy, dx, dy) {
+        return 0.0;
+    }
+    let m = pt_seg_d2(ax, ay, cx, cy, dx, dy)
+        .min(pt_seg_d2(bx, by, cx, cy, dx, dy))
+        .min(pt_seg_d2(cx, cy, ax, ay, bx, by))
+        .min(pt_seg_d2(dx, dy, ax, ay, bx, by));
+    m.sqrt()
+}
+
+/// Minimum distance from segment a-b to an axis-aligned box [x0,y0]-[x1,y1].
+/// 0 if they touch/overlap. Both shapes convex, so the minimum is at a vertex
+/// of one against the other (or an edge crossing).
+fn seg_box_dist(ax: f64, ay: f64, bx: f64, by: f64, x0: f64, y0: f64, x1: f64, y1: f64) -> f64 {
+    // endpoint inside box -> distance 0
+    let inside = |px: f64, py: f64| px >= x0 && px <= x1 && py >= y0 && py <= y1;
+    if inside(ax, ay) || inside(bx, by) {
+        return 0.0;
+    }
+    // segment crosses any box edge -> distance 0
+    let edges = [
+        (x0, y0, x1, y0),
+        (x1, y0, x1, y1),
+        (x1, y1, x0, y1),
+        (x0, y1, x0, y0),
+    ];
+    for &(ex0, ey0, ex1, ey1) in &edges {
+        if seg_seg_hit(ax, ay, bx, by, ex0, ey0, ex1, ey1) {
+            return 0.0;
+        }
+    }
+    // else: min of box-corner-to-segment over the 4 corners
+    let mut m = f64::MAX;
+    for &(cx, cy) in &[(x0, y0), (x1, y0), (x1, y1), (x0, y1)] {
+        m = m.min(pt_seg_d2(cx, cy, ax, ay, bx, by));
+    }
+    m.sqrt()
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
@@ -2132,7 +2201,59 @@ fn main() {
     }
     out.push_str("    )\n");
     out.push_str("    (network_out\n");
+    // Clearance-validated snapping: an end-snap moves a wire onto its pad and
+    // can cross a FOREIGN pad's clearance (DRC clearance on e.g. "Pad of U16").
+    // Build foreign pad boxes (um) and require every snapped terminal segment
+    // to clear them by clearance+width/2; if a full snap fails, fall back to the
+    // grid endpoint (clearance-safe by construction — stitch_pads closes the
+    // residual gap, also clearance-gated). All in um; SES coords are *resolution.
+    let pad_boxes: Vec<(f64, f64, f64, f64, u8, u16)> = abs_pins
+        .iter()
+        .map(|(pname, ap)| {
+            let nid = pin_net.get(pname).copied().unwrap_or(u16::MAX);
+            (ap.x + ap.pad.ox, ap.y + ap.pad.oy, ap.pad.hw, ap.pad.hh, ap.pad.layers, nid)
+        })
+        .collect();
+    // foreign track copper (grid-path segments of every shipped net), per layer,
+    // in um — a snap grazing another net's track is the sub-grid clearance case
+    // the cell-level gate can't see (actual 0.16mm < 0.2mm at 38um short).
+    let mut track_segs: Vec<(f64, f64, f64, f64, usize, u16)> = Vec::new();
     for r in &results {
+        let nid = net_id_of.get(&r.name).copied().unwrap_or(u16::MAX);
+        for (l, cells) in &r.paths {
+            for w in cells.windows(2) {
+                track_segs.push((
+                    bx0 + w[0].0 as f64 * pitch, by0 + w[0].1 as f64 * pitch,
+                    bx0 + w[1].0 as f64 * pitch, by0 + w[1].1 as f64 * pitch,
+                    *l, nid,
+                ));
+            }
+        }
+    }
+    let need_pad = clearance + width / 2.0; // pad copper vs track centerline
+    let need_trk = clearance + width; // track centerline vs track centerline
+    let seg_clears = |ax: f64, ay: f64, bx: f64, by: f64, l: usize, nid: u16| -> bool {
+        for &(cx, cy, hw, hh, mask, pn) in &pad_boxes {
+            if pn == nid || mask & (1 << l) == 0 {
+                continue;
+            }
+            if seg_box_dist(ax, ay, bx, by, cx - hw, cy - hh, cx + hw, cy + hh) < need_pad {
+                return false;
+            }
+        }
+        for &(sx0, sy0, sx1, sy1, sl, pn) in &track_segs {
+            if pn == nid || sl != l {
+                continue;
+            }
+            if seg_seg_dist(ax, ay, bx, by, sx0, sy0, sx1, sy1) < need_trk {
+                return false;
+            }
+        }
+        true
+    };
+    let mut snaps_relaxed = 0u32;
+    for r in &results {
+        let r_nid = net_id_of.get(&r.name).copied().unwrap_or(u16::MAX);
         out.push_str(&format!("      (net \"{}\"\n", r.name));
         let entry = pin_entry.get(&r.name);
         // cells used more than once are tree junctions (or via sites): moving
@@ -2195,16 +2316,37 @@ fn main() {
                     let t = g / d;
                     ((px + dx * t) * resolution, (py + dy * t) * resolution)
                 };
+                let inv = 1.0 / resolution;
                 if let (Some(&(x0, y0)), Some(&(x1, y1))) = (cells.first(), cells.last()) {
                     if use_count.get(&(x0, y0, *layer)).copied().unwrap_or(0) <= 1 {
                         if let Some(&(px, py, hw, hh)) = m.get(&(x0, y0, *layer)) {
-                            pts[0] = snap(x0, y0, px, py, hw, hh);
+                            let cand = snap(x0, y0, px, py, hw, hh);
+                            let adj = pts.get(1).copied();
+                            let ok = adj.map_or(true, |(rx, ry)| {
+                                seg_clears(rx * inv, ry * inv, cand.0 * inv, cand.1 * inv, *layer, r_nid)
+                            });
+                            if ok {
+                                pts[0] = cand;
+                            } else {
+                                pts[0] = cell_xy(x0, y0); // grid endpoint, clearance-safe
+                                snaps_relaxed += 1;
+                            }
                         }
                     }
                     if use_count.get(&(x1, y1, *layer)).copied().unwrap_or(0) <= 1 {
                         if let Some(&(px, py, hw, hh)) = m.get(&(x1, y1, *layer)) {
+                            let cand = snap(x1, y1, px, py, hw, hh);
                             let n = pts.len();
-                            pts[n - 1] = snap(x1, y1, px, py, hw, hh);
+                            let adj = if n >= 2 { Some(pts[n - 2]) } else { None };
+                            let ok = adj.map_or(true, |(rx, ry)| {
+                                seg_clears(rx * inv, ry * inv, cand.0 * inv, cand.1 * inv, *layer, r_nid)
+                            });
+                            if ok {
+                                pts[n - 1] = cand;
+                            } else {
+                                pts[n - 1] = cell_xy(x1, y1); // grid endpoint, clearance-safe
+                                snaps_relaxed += 1;
+                            }
                         }
                     }
                 }
@@ -2263,6 +2405,10 @@ fn main() {
         out.push_str("      )\n");
     }
     out.push_str("    )\n  )\n)\n");
+    eprintln!(
+        "snap clearance gate: {} terminal snaps relaxed to grid endpoints",
+        snaps_relaxed
+    );
     fs::write(&args[2], out).expect("write ses");
 
     eprintln!(
