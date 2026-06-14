@@ -1161,15 +1161,20 @@ fn main() {
         let mut pin_names: Vec<String> = Vec::new();
         for p in &net.pins {
             if let Some(ap) = abs_pins.get(p) {
-                // target = every cell whose center copper lands ON the pad
-                // (sub-grid pads can have their nearest cell claimed by a
-                // neighboring pad's clearance halo — the full extent restores
-                // an entry point)
+                // target = every cell whose center copper lands ON the pad.
+                // Prefer entry cells CLEAR of a foreign pad's clearance halo:
+                // a large pad next to a fine-pitch neighbor (e.g. a regulator's
+                // 1.5mm pad beside a 0.5mm-pitch column) has plenty of clean
+                // entries, and entering from the neighbor-grazing edge is what
+                // put the approach track in the neighbor's clearance (DRC
+                // clearance, actual 0.08mm). Only fall back to dirty cells when
+                // a tiny pad has none — better a near-miss than no entry at all.
                 let pcx = ap.x + ap.pad.ox;
                 let pcy = ap.y + ap.pad.oy;
                 let rx = ap.pad.hw + width / 2.0;
                 let ry = ap.pad.hh + width / 2.0;
                 let mut cells = Vec::new();
+                let mut cells_all = Vec::new();
                 let x_lo = (((pcx - rx - bx0) / pitch).floor() as isize).max(0);
                 let x_hi = (((pcx + rx - bx0) / pitch).ceil() as isize).min(gw as isize - 1);
                 let y_lo = (((pcy - ry - by0) / pitch).floor() as isize).max(0);
@@ -1184,10 +1189,21 @@ fn main() {
                         }
                         for l in 0..nl {
                             if ap.pad.layers & (1 << l) != 0 {
-                                cells.push(idx(x as usize, y as usize, l));
+                                let c = idx(x as usize, y as usize, l);
+                                cells_all.push(c);
+                                // pad_owner == 0 (free) or == nid (own pad) is
+                                // clear; a foreign nid or MAX means this cell
+                                // sits in a neighbor pad's clearance halo.
+                                let o = pad_owner[c];
+                                if o == 0 || o == nid {
+                                    cells.push(c);
+                                }
                             }
                         }
                     }
+                }
+                if cells.is_empty() {
+                    cells = cells_all;
                 }
                 if cells.is_empty() {
                     // pad smaller than a cell: fall back to nearest cell
