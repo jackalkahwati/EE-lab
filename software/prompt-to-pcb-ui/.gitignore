@@ -16,3 +16,7 @@ node_modules
 # pipeline run download artifacts
 public/fab/
 public/firmware/
+
+# transient per-run debug report (regenerated every pipeline run)
+public/data/last-run.json
+public/data/last-run.md

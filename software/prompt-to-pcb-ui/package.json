@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "sync-board": "bash scripts/sync-board.sh"
+    "sync-board": "bash scripts/sync-board.sh",
+    "last-run": "node scripts/show-last-run.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",

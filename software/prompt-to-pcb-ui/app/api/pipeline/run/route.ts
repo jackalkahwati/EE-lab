@@ -66,9 +66,15 @@ export async function GET(req: Request) {
   let child: ChildProcess | null = null
   let cancelled = false
 
+  // Full record of the run — every event in order — persisted on completion so
+  // the last iteration can be inspected later without re-running or screenshots.
+  const startedAt = new Date().toISOString()
+  const events: PipelineEvent[] = []
+
   const stream = new ReadableStream({
     async start(controller) {
       const send = (ev: PipelineEvent) => {
+        events.push(ev)
         try {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(ev)}\n\n`))
         } catch {
@@ -453,6 +459,18 @@ export async function GET(req: Request) {
         clearTimeout(killTimer)
         globalState.__pipelineRunning = false
         try {
+          writeRunReport(appDir, {
+            startedAt,
+            finishedAt: new Date().toISOString(),
+            mode: composeMode ? 'compose' : 'matrix',
+            prompt,
+            composeSpec,
+            events,
+          })
+        } catch {
+          /* never let report writing break the response */
+        }
+        try {
           controller.close()
         } catch {
           /* already closed */
@@ -473,4 +491,137 @@ export async function GET(req: Request) {
       Connection: 'keep-alive',
     },
   })
+}
+
+/**
+ * Persist the complete state of a run to public/data/last-run.{json,md}. The
+ * JSON is the machine record (every event + the final board/DRC/firmware
+ * artifacts inlined); the .md is a human-readable digest you can open or paste.
+ * Self-contained so a run can be debugged later without re-running.
+ */
+function writeRunReport(
+  appDir: string,
+  rec: {
+    startedAt: string
+    finishedAt: string
+    mode: string
+    prompt: string
+    composeSpec: { blocks: string[]; boardClass: string } | null
+    events: PipelineEvent[]
+  },
+) {
+  const pubData = path.join(appDir, 'public/data')
+  fs.mkdirSync(pubData, { recursive: true })
+  const readJson = (p: string) => {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(pubData, p), 'utf8'))
+    } catch {
+      return null
+    }
+  }
+
+  // derive final stage states + the done/error event
+  const stages: Record<string, { state: string; failReason?: string }> = {}
+  let done: Extract<PipelineEvent, { type: 'done' }> | null = null
+  let error: string | null = null
+  for (const ev of rec.events) {
+    if (ev.type === 'stage') stages[ev.id] = { state: ev.state, failReason: ev.failReason }
+    else if (ev.type === 'done') done = ev
+    else if (ev.type === 'error') error = ev.message
+  }
+  const logs = rec.events.filter(
+    (e): e is Extract<PipelineEvent, { type: 'log' }> => e.type === 'log',
+  )
+  const board = readJson('board.json')
+  const drc = readJson('drc.json')
+  const ato = readJson('ato.json') as { name: string; content: string }[] | null
+  const netlist = ato?.find((f) => f.name === 'netlist.txt')?.content ?? null
+  const designTxt = ato?.find((f) => f.name === 'design.txt')?.content ?? null
+
+  const report = {
+    startedAt: rec.startedAt,
+    finishedAt: rec.finishedAt,
+    mode: rec.mode,
+    prompt: rec.prompt,
+    composeSpec: rec.composeSpec,
+    status: error ? 'ERROR' : done?.status ?? 'INCOMPLETE',
+    error,
+    stages,
+    boardPath: done?.boardPath ?? null,
+    fabZip: done?.fabZip ?? null,
+    fwZip: done?.fwZip ?? null,
+    board,
+    drc: drc
+      ? {
+          violations: drc.violations ?? [],
+          unconnected: (drc.unconnected_items ?? []).length,
+        }
+      : null,
+    designSummary: designTxt,
+    netlist,
+    logs: logs.map((l) => ({ stage: l.stage, level: l.level ?? 'info', text: l.text })),
+  }
+  fs.writeFileSync(path.join(pubData, 'last-run.json'), JSON.stringify(report, null, 2))
+
+  // ---- human-readable digest ----
+  const STAGE_ORDER = ['design', 'placement', 'routing', 'validation', 'firmware']
+  const icon = (s?: string) =>
+    s === 'passed' ? '✅' : s === 'failed' ? '❌' : s === 'blocked' ? '⛔' : '·'
+  const md: string[] = []
+  md.push(`# Last run — ${report.status}`)
+  md.push('')
+  md.push(`- when: ${report.startedAt} → ${report.finishedAt}`)
+  md.push(`- mode: \`${report.mode}\`${rec.composeSpec ? ` · ${rec.composeSpec.boardClass}` : ''}`)
+  md.push(`- prompt: ${report.prompt || '(none)'}`)
+  if (rec.composeSpec) md.push(`- blocks: ${rec.composeSpec.blocks.join(', ')}`)
+  md.push('')
+  md.push('## Stages')
+  for (const id of STAGE_ORDER) {
+    if (!stages[id]) continue
+    const fr = stages[id].failReason ? ` — ${stages[id].failReason}` : ''
+    md.push(`- ${icon(stages[id].state)} **${id}** (${stages[id].state})${fr}`)
+  }
+  md.push('')
+  if (board) {
+    md.push('## Board')
+    md.push(
+      `- components ${board.components ?? '?'} · tracks ${board.tracks ?? '?'} · ` +
+        `vias ${board.vias ?? '?'} · nets routed ${board.netsRouted ?? '?'}/${board.netsTotal ?? '?'} · ` +
+        `HPWL ${board.hpwlMm ?? '?'} mm` +
+        (board.boardSize ? ` · ${board.boardSize.wMm}×${board.boardSize.hMm} mm` : ''),
+    )
+    if (board.unroutedNets?.length)
+      md.push(`- unrouted: ${board.unroutedNets.join(', ')}`)
+    if (board.zoneServedNets?.length)
+      md.push(`- zone-served: ${board.zoneServedNets.join(', ')}`)
+  }
+  if (report.drc) {
+    md.push('')
+    md.push(`## DRC — ${report.drc.violations.length} violations, ${report.drc.unconnected} unconnected`)
+    for (const v of report.drc.violations.slice(0, 20)) {
+      md.push(`- ${v.type}: ${(v.description ?? '').slice(0, 90)}`)
+    }
+  }
+  if (report.fabZip || report.fwZip) {
+    md.push('')
+    md.push('## Outputs')
+    if (report.fabZip) md.push(`- fab: \`public${report.fabZip}\``)
+    if (report.fwZip) md.push(`- firmware: \`public${report.fwZip}\``)
+  }
+  if (netlist) {
+    md.push('')
+    md.push('## Netlist')
+    md.push('```')
+    md.push(netlist.trimEnd())
+    md.push('```')
+  }
+  md.push('')
+  md.push('## Log')
+  md.push('```')
+  for (const l of logs) {
+    const tag = l.level && l.level !== 'info' ? `[${l.level}]` : ''
+    md.push(`${l.stage.padEnd(11)} ${tag}${l.text}`)
+  }
+  md.push('```')
+  fs.writeFileSync(path.join(pubData, 'last-run.md'), md.join('\n'))
 }
