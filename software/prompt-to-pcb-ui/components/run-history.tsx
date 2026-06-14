@@ -116,7 +116,7 @@ export function RunHistory({
                   </span>
                   <div className="flex shrink-0 items-center gap-1">
                     <StatusPill status={run.status} />
-                    {run.status !== 'RUNNING' && (
+                    {run.status !== 'RUNNING' && runs.length > 1 && (
                       <button
                         type="button"
                         onClick={(e) => {

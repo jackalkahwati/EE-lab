@@ -71,7 +71,7 @@ export default function FirstLightPage() {
   }, [])
 
   const selectedRun = runs.find((r) => r.id === selectedId) ?? runs[0]
-  const isReal = selectedRun.real === true && realBoard !== null
+  const isReal = selectedRun?.real === true && realBoard !== null
 
   /** REAL pipeline: placement → routing → validation via /api/pipeline/run */
   const handleGenerate = useCallback(
@@ -233,6 +233,7 @@ export default function FirstLightPage() {
     (id: string) => {
       if (id === liveRunId) return // never delete a live run
       setRuns((prev) => {
+        if (prev.length <= 1) return prev // always keep at least one run
         const next = prev.filter((r) => r.id !== id)
         if (id === selectedId && next.length) setSelectedId(next[0].id)
         return next
