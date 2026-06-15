@@ -1,0 +1,31 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+
+component TLV1701DBVR_package:
+    """TLV1701DBVR — Single Supply, Push-Pull/Open-Drain Output Comparator,
+    SOT-23-5. LCSC C7468 (Texas Instruments TLV1701DBVR).
+    Datasheet-verified SOT-23-5 pinout:
+      pin 1 = OUT, pin 2 = VCC, pin 3 = IN+, pin 4 = IN-, pin 5 = GND."""
+
+    trait is_atomic_part<manufacturer="Texas Instruments", partnumber="TLV1701DBVR",
+        footprint="SOT-23-5_L3.0-W1.7-P0.95-LS2.8-BL.kicad_mod", symbol="TLV1701DBVR.kicad_sym",
+        model="SOT-23-5_L2.9-W1.6-H1.1-LS2.8-P0.95.step">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C7468",
+        manufacturer="Texas Instruments", partno="TLV1701DBVR">
+    trait has_designator_prefix<prefix="U">
+    trait has_datasheet<datasheet="https://www.lcsc.com/datasheet/lcsc_datasheet_1808272334_Texas-Instruments-TLV1701DBVR_C7468.pdf">
+
+    # pins — SOT-23-5 comparator
+    pin 1
+    pin 2
+    pin 3
+    pin 4
+    pin 5
+
+    signal OUT ~ pin 1   # Output (open-drain)
+    signal VCC ~ pin 2   # Positive supply
+    signal INp ~ pin 3   # Non-inverting input (IN+)
+    signal INn ~ pin 4   # Inverting input (IN-)
+    signal GND ~ pin 5   # Ground
