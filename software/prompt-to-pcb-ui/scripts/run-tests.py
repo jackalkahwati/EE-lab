@@ -41,6 +41,10 @@ CASES = [
     # two RF subsystems on one board (LoRa + cellular + their UARTs/antennas)
     ("dual-radio", ["battery power", "RP2040 MCU", "LoRa radio", "U.FL antenna",
                     "cellular modem"]),
+    # maximal: every block type at once (placement, board size, all buses, firmware)
+    ("maximal", ["USB-C power", "RP2040 MCU", "MPU6050 IMU", "I2C temperature sensor",
+                 "LoRa radio", "U.FL antenna", "GNSS GPS module", "cellular modem",
+                 "4x ESC motor outputs"]),
 ]
 
 
