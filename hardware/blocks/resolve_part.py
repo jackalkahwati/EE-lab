@@ -210,8 +210,24 @@ def resolve_from_spec(spec, interface, nets):
     lib, fp = footprint_for_package(spec.get("package", ""), len(pins))
     if not fp:
         return {"error": "no footprint for package '%s'" % spec.get("package")}
+    # CRITICAL: the chosen footprint's pads must include every bound pin number,
+    # or some pins (e.g. SDA) silently never get a net — a disconnected part that
+    # passes DRC. Reject the mismatch so the caller falls back to a verified part.
+    fp_pads = _footprint_pads(lib, fp)
+    missing_pads = [num for num in pmap if num not in fp_pads]
+    if missing_pads:
+        return {"error": "footprint %s:%s lacks pads %s for package '%s' (pin/pad mismatch)"
+                % (lib, fp, missing_pads, spec.get("package"))}
     return {"symbol": spec.get("part"), "lib": lib, "footprint": fp, "pmap": pmap,
             "report": rep}
+
+
+def _footprint_pads(lib, name):
+    """Set of pad names declared in a footprint."""
+    try:
+        return set(re.findall(r'\(pad\s+"([^"]+)"', _load(lib, name)))
+    except Exception:
+        return set()
 
 
 def symbol_pinmap(query):

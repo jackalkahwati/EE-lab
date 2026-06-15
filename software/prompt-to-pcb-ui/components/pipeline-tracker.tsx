@@ -53,7 +53,7 @@ export function PipelineTracker({
   liveElapsed: Partial<Record<string, number>>
 }) {
   return (
-    <div className="grid grid-cols-5 gap-px overflow-hidden rounded-sm border border-border bg-border">
+    <div className="grid grid-cols-6 gap-px overflow-hidden rounded-sm border border-border bg-border">
       {STAGE_DEFS.map((def, i) => {
         // older runs (seed / synced real board) predate the firmware stage and
         // have shorter stages arrays — treat a missing stage as pending.

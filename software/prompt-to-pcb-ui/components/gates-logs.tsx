@@ -16,6 +16,7 @@ const STAGE_COLOR: Record<StageId, string> = {
   placement: 'text-[#5fb3e8]',
   routing: 'text-[#c792ea]',
   validation: 'text-success',
+  erc: 'text-[#7fd4a8]',
   firmware: 'text-[#e8b75f]',
 }
 

@@ -173,7 +173,7 @@ export async function GET(req: Request) {
           ])
           if (!comp.out.includes('COMPOSE:')) {
             send({ type: 'stage', id: 'design', state: 'failed', failReason: 'compose failed' })
-            for (const s of ['placement', 'routing', 'validation', 'firmware'] as const)
+            for (const s of ['placement', 'routing', 'validation', 'erc', 'firmware'] as const)
               send({ type: 'stage', id: s, state: 'blocked' })
             send({ type: 'done', status: 'GATE FAILED', boardPath: variantBoard })
             return
@@ -238,7 +238,7 @@ export async function GET(req: Request) {
           const build = await exec('design', ATO, ['build'], { cwd: hwDir })
           if (!(build.code === 0 || build.out.includes('Build successful'))) {
             send({ type: 'stage', id: 'design', state: 'failed', failReason: 'ato build not GREEN' })
-            for (const s of ['placement', 'routing', 'validation', 'firmware'] as const)
+            for (const s of ['placement', 'routing', 'validation', 'erc', 'firmware'] as const)
               send({ type: 'stage', id: s, state: 'blocked' })
             send({ type: 'done', status: 'GATE FAILED', boardPath: wsBoard })
             return
@@ -251,7 +251,7 @@ export async function GET(req: Request) {
           ], { env: { DESIGN_SPEC: specPath } })
           if (!(genV.code === 0 || genV.out.includes('gen_board:'))) {
             send({ type: 'stage', id: 'design', state: 'failed', failReason: 'gen_board failed' })
-            for (const s of ['placement', 'routing', 'validation', 'firmware'] as const)
+            for (const s of ['placement', 'routing', 'validation', 'erc', 'firmware'] as const)
               send({ type: 'stage', id: s, state: 'blocked' })
             send({ type: 'done', status: 'GATE FAILED', boardPath: variantBoard })
             return
@@ -271,6 +271,7 @@ export async function GET(req: Request) {
           send({ type: 'stage', id: 'placement', state: 'failed', failReason: 'placement gate FAIL' })
           send({ type: 'stage', id: 'routing', state: 'blocked' })
           send({ type: 'stage', id: 'validation', state: 'blocked' })
+          send({ type: 'stage', id: 'erc', state: 'blocked' })
           send({ type: 'stage', id: 'firmware', state: 'blocked' })
           send({ type: 'done', status: 'GATE FAILED', boardPath: variantBoard })
           return
@@ -284,6 +285,7 @@ export async function GET(req: Request) {
           send({ type: 'stage', id: 'placement', state: 'failed', failReason: 'DFM gate FAIL' })
           send({ type: 'stage', id: 'routing', state: 'blocked' })
           send({ type: 'stage', id: 'validation', state: 'blocked' })
+          send({ type: 'stage', id: 'erc', state: 'blocked' })
           send({ type: 'stage', id: 'firmware', state: 'blocked' })
           send({ type: 'done', status: 'GATE FAILED', boardPath: variantBoard })
           return
@@ -304,6 +306,7 @@ export async function GET(req: Request) {
         if (!dsnOk) {
           send({ type: 'stage', id: 'routing', state: 'failed', failReason: 'DSN export failed' })
           send({ type: 'stage', id: 'validation', state: 'blocked' })
+          send({ type: 'stage', id: 'erc', state: 'blocked' })
           send({ type: 'stage', id: 'firmware', state: 'blocked' })
           send({ type: 'done', status: 'GATE FAILED', boardPath: variantBoard })
           return
@@ -316,6 +319,7 @@ export async function GET(req: Request) {
         if (route.code !== 0 || !fs.existsSync(ses)) {
           send({ type: 'stage', id: 'routing', state: 'failed', failReason: `flroute exit ${route.code}` })
           send({ type: 'stage', id: 'validation', state: 'blocked' })
+          send({ type: 'stage', id: 'erc', state: 'blocked' })
           send({ type: 'stage', id: 'firmware', state: 'blocked' })
           send({ type: 'done', status: 'GATE FAILED', boardPath: variantBoard })
           return
@@ -329,6 +333,7 @@ export async function GET(req: Request) {
         if (!impOk) {
           send({ type: 'stage', id: 'routing', state: 'failed', failReason: 'SES import failed' })
           send({ type: 'stage', id: 'validation', state: 'blocked' })
+          send({ type: 'stage', id: 'erc', state: 'blocked' })
           send({ type: 'stage', id: 'firmware', state: 'blocked' })
           send({ type: 'done', status: 'GATE FAILED', boardPath: variantBoard })
           return
@@ -467,25 +472,46 @@ export async function GET(req: Request) {
           ? 'PASSED'
           : 'GATE FAILED'
 
-        // ---- gate: level 5 only runs once level 4 is clean -------------------
-        // Validation (DRC) is a hard gate: a board with blocking violations is
-        // not done, so we do NOT proceed to firmware and claim success on a
-        // broken board. The run ends GATE FAILED with firmware blocked.
+        const failBoard = composeMode ? variantBoard : wsBoard
+        // ---- gate: DRC must be clean before electrical/firmware stages -------
         if (!drcPass) {
-          log('validation', `GATE validation FAILED: ${violations} blocking DRC violation(s) — not proceeding to firmware`, 'err')
+          log('validation', `GATE validation FAILED: ${violations} blocking DRC violation(s) — stopping`, 'err')
+          send({ type: 'stage', id: 'erc', state: 'blocked' })
           send({ type: 'stage', id: 'firmware', state: 'blocked' })
-          send({
-            type: 'done',
-            status: 'GATE FAILED',
-            boardPath: composeMode ? variantBoard : wsBoard,
-            fabZip,
-          })
+          send({ type: 'done', status: 'GATE FAILED', boardPath: failBoard, fabZip })
           return
         }
 
-        // ---- stage 5: firmware — netlist-derived BSP + HAL + self-test -------
-        // Reached only when DRC is clean. Firmware comes from the routed netlist;
-        // its own hard gate is `cargo build` for the RP2040 target.
+        // ---- stage 5: ERC — electrical rules the DRC can't see ----------------
+        // DRC proves manufacturable + connected; ERC proves electrically sane
+        // (I2C pull-ups, bus completeness, power/GND per IC, pin-net integrity).
+        // Same gate philosophy as DRC: firmware doesn't run on an unsound board.
+        send({ type: 'stage', id: 'erc', state: 'running' })
+        const ercPath = path.join(ws, 'erc.json')
+        await exec('erc', KPY, [path.join(appDir, 'scripts/erc_check.py'), variantBoard, ercPath])
+        let ercErrors = -1
+        try {
+          const er = JSON.parse(fs.readFileSync(ercPath, 'utf8'))
+          ercErrors = (er.errors ?? []).length
+          for (const e of er.errors ?? []) log('erc', e, 'err')
+          for (const w of (er.warnings ?? []).slice(0, 8)) log('erc', `warn: ${w}`, 'warn')
+          log('erc', `ERC → ${ercErrors} errors, ${(er.warnings ?? []).length} warnings`, ercErrors === 0 ? 'ok' : 'err')
+        } catch {
+          log('erc', 'could not parse ERC report', 'err')
+        }
+        const ercPass = ercErrors === 0
+        if (!ercPass) {
+          log('erc', `GATE ERC FAILED: ${ercErrors} electrical error(s) — not proceeding to firmware`, 'err')
+          send({ type: 'stage', id: 'erc', state: 'failed', failReason: `${ercErrors} ERC errors` })
+          send({ type: 'stage', id: 'firmware', state: 'blocked' })
+          send({ type: 'done', status: 'GATE FAILED', boardPath: failBoard, fabZip })
+          return
+        }
+        log('erc', 'GATE ERC: 0 errors — board electrically sane — PASS', 'ok')
+        send({ type: 'stage', id: 'erc', state: 'passed' })
+
+        // ---- stage 6: firmware — netlist-derived BSP + HAL + self-test -------
+        // Reached only when DRC and ERC are both clean.
         send({ type: 'stage', id: 'firmware', state: 'running' })
         let fwZip: string | undefined
         const fwDir = path.join(ws, 'firmware')
@@ -744,7 +770,7 @@ function writeRunReport(
   fs.writeFileSync(path.join(pubData, 'last-run.json'), JSON.stringify(report, null, 2))
 
   // ---- human-readable digest ----
-  const STAGE_ORDER = ['design', 'placement', 'routing', 'validation', 'firmware']
+  const STAGE_ORDER = ['design', 'placement', 'routing', 'validation', 'erc', 'firmware']
   const icon = (s?: string) =>
     s === 'passed' ? '✅' : s === 'failed' ? '❌' : s === 'blocked' ? '⛔' : '·'
   const md: string[] = []

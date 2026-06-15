@@ -170,6 +170,11 @@ def block_mcu_pico(x, y, n, nets):
     # decoupling caps to the RIGHT of the Pico body, clear of its courtyard
     b += cap("C2", x + 26, y + 22, "+3V3", "GND", nets)
     b += cap("C3", x + 26, y + 30, "+5V", "GND", nets)
+    # I2C bus pull-ups (4.7k to 3V3) — the bus master carries them; an open-drain
+    # I2C bus is non-functional without them. Only when the board has an I2C bus.
+    if "i2c_sda" in n:
+        b += res("R10", x + 26, y + 38, n["i2c_sda"], "+3V3", nets)
+        b += res("R11", x + 26, y + 44, n["i2c_scl"], "+3V3", nets)
     _DEVICES.append({"ref": "U1", "type": "mcu"})
     return b, 30, 56
 

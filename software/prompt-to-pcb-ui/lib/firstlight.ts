@@ -3,6 +3,7 @@ export type StageId =
   | 'placement'
   | 'routing'
   | 'validation'
+  | 'erc'
   | 'firmware'
 export type StageState = 'pending' | 'running' | 'passed' | 'failed' | 'blocked'
 export type RunStatus = 'RUNNING' | 'PASSED' | 'GATE FAILED'
@@ -93,6 +94,14 @@ export const STAGE_DEFS: StageDef[] = [
     durationMs: 8000,
   },
   {
+    id: 'erc',
+    label: 'ERC',
+    tool: 'erc_check',
+    gate: 'ERC = 0',
+    substeps: ['pull-ups + buses', 'power sanity', 'pin-net integrity'],
+    durationMs: 2000,
+  },
+  {
     id: 'firmware',
     label: 'Firmware',
     tool: 'gen_firmware',
@@ -107,6 +116,7 @@ export const STAGE_PREFIX: Record<StageId, string> = {
   placement: 'place',
   routing: 'route',
   validation: 'drc',
+  erc: 'erc',
   firmware: 'fw',
 }
 
@@ -514,6 +524,11 @@ export const SIM_LOGS: Record<StageId, string[]> = {
     'zone fill: 3 zones',
     'kicad-cli pcb drc --severity-error → 0 violations',
     'GATE validation: DRC = 0 — PASS',
+  ],
+  erc: [
+    'I2C pull-ups + bus completeness',
+    'power/ground sanity per IC',
+    'GATE ERC: 0 errors — PASS',
   ],
   firmware: [
     'gen_firmware: pin map + channel map from netlist',
