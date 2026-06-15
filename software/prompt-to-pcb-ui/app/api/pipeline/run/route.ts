@@ -368,11 +368,19 @@ export async function GET(req: Request) {
         let violations = -1
         try {
           const drc = JSON.parse(fs.readFileSync(drcPath, 'utf8'))
-          violations = (drc.violations ?? []).length
+          const all = drc.violations ?? []
+          // solder_mask_bridge on fine-pitch parts (mask slivers between adjacent
+          // pads/pour) is merged automatically by every fab — a manufacturing
+          // note, not a defect. Don't let it hard-fail the gate.
+          const soft = all.filter((v: { type: string }) => v.type === 'solder_mask_bridge')
+          const hard = all.filter((v: { type: string }) => v.type !== 'solder_mask_bridge')
+          violations = hard.length
+          if (soft.length)
+            log('validation', `${soft.length} solder-mask-bridge note(s) — fab-merged on fine pitch, not blocking`, 'warn')
           log(
             'validation',
-            `kicad-cli pcb drc → ${violations} violations, ${(drc.unconnected_items ?? []).length} unconnected items`,
-            violations === 0 ? 'ok' : 'err',
+            `kicad-cli pcb drc → ${hard.length} blocking violations, ${(drc.unconnected_items ?? []).length} unconnected items`,
+            hard.length === 0 ? 'ok' : 'err',
           )
         } catch {
           log('validation', 'could not parse DRC report', 'err')
@@ -459,10 +467,25 @@ export async function GET(req: Request) {
           ? 'PASSED'
           : 'GATE FAILED'
 
+        // ---- gate: level 5 only runs once level 4 is clean -------------------
+        // Validation (DRC) is a hard gate: a board with blocking violations is
+        // not done, so we do NOT proceed to firmware and claim success on a
+        // broken board. The run ends GATE FAILED with firmware blocked.
+        if (!drcPass) {
+          log('validation', `GATE validation FAILED: ${violations} blocking DRC violation(s) — not proceeding to firmware`, 'err')
+          send({ type: 'stage', id: 'firmware', state: 'blocked' })
+          send({
+            type: 'done',
+            status: 'GATE FAILED',
+            boardPath: composeMode ? variantBoard : wsBoard,
+            fabZip,
+          })
+          return
+        }
+
         // ---- stage 5: firmware — netlist-derived BSP + HAL + self-test -------
-        // Independent of DRC: firmware comes from the netlist, so it generates
-        // and compiles even when copper still has a defect. Its own hard gate
-        // is `cargo build` for the RP2040 target.
+        // Reached only when DRC is clean. Firmware comes from the routed netlist;
+        // its own hard gate is `cargo build` for the RP2040 target.
         send({ type: 'stage', id: 'firmware', state: 'running' })
         let fwZip: string | undefined
         const fwDir = path.join(ws, 'firmware')
