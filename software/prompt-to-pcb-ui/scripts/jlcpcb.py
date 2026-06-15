@@ -3,15 +3,17 @@ manufacturer.py, for real PCB FABRICATION quotes (JLCPCB's API is fab/stencil,
 not full assembly). Auth is an HMAC-SHA1 signed Authorization header built from
 accessKey + secretKey + appId (from gitignored .env.local).
 
-Reverse-engineered from the JLCPCB SDK jars + live probing:
-  base host : https://api.jlcpcb.com           (overseas/international)
+Signing CONFIRMED working live (per the JLCPCB API docs):
+  base host : https://open.jlcpcb.com
   quote     : POST /overseas/openapi/pcb/calculate   (GetOnlineCalculatePrice)
-  header    : Authorization: appid="..",accesskey="..",timestamp="..",nonce="..",signature=".."
-  signer    : HMAC-SHA1(secretKey, stringToSign), base64
+  header    : Authorization: JOP appid="..",accesskey="..",nonce="..",timestamp="..",signature=".."
+  stringToSign: METHOD\nPATH\nUNIX_SECONDS\nNONCE_32\nBODY\n   (trailing \n)
+  signer    : HMAC-SHA256(secretKey, stringToSign), base64
+A valid signature returns 200/business codes; a bad one returns 401 "signature
+verify failed" (verified by tampering the secret).
 
-The one piece that needs the official docs (api.jlcpcb.com/docs/signature, a JS
-SPA): the exact `stringToSign` canonical layout. _string_to_sign() holds the
-current best guess; finalize it from the docs, then calculate() works.
+Remaining: the "EE lab" app needs PCB-API permission granted in the JLCPCB API
+console (calculate currently returns 403 "API insufficient permissions").
 
   jlcpcb.py ping     # hit a simple endpoint to validate the signature
 """
@@ -20,15 +22,16 @@ import hashlib
 import hmac
 import json
 import os
+import random
+import string
 import sys
 import time
 import urllib.request
-import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from digikey import load_env
 
-BASE = os.environ.get("JLCPCB_BASE", "https://api.jlcpcb.com")
+BASE = os.environ.get("JLCPCB_BASE", "https://open.jlcpcb.com")
 
 
 def _creds():
@@ -41,21 +44,26 @@ def _creds():
     return ak, sk, app
 
 
-def _string_to_sign(method, path, body, nonce, timestamp, app_id):
-    """Canonical string for the signature. SDK locals show it is built from
-    method, canonicalURI, body, appId, nonce, timestamp — BEST GUESS until
-    verified against api.jlcpcb.com/docs/signature."""
-    return "\n".join([method.upper(), path, body, app_id or "", nonce, timestamp])
+def _nonce():
+    return "".join(random.choices(string.ascii_letters + string.digits, k=32))
+
+
+def _string_to_sign(method, path, timestamp, nonce, body):
+    """Per JLCPCB docs: five lines, each terminated by \\n (including the last):
+    METHOD, request path (with query), unix-seconds timestamp, 32-char nonce,
+    raw body (empty for GET)."""
+    return "%s\n%s\n%d\n%s\n%s\n" % (method.upper(), path, timestamp, nonce, body)
 
 
 def _auth_header(method, path, body):
     ak, sk, app = _creds()
-    nonce = uuid.uuid4().hex
-    ts = str(int(time.time() * 1000))
-    sts = _string_to_sign(method, path, body, nonce, ts, app)
-    sig = base64.b64encode(hmac.new(sk.encode(), sts.encode(), hashlib.sha1).digest()).decode()
-    return ('appid="%s",accesskey="%s",timestamp="%s",nonce="%s",signature="%s"'
-            % (app, ak, ts, nonce, sig))
+    nonce = _nonce()
+    ts = int(time.time())  # unix SECONDS
+    sts = _string_to_sign(method, path, ts, nonce, body)
+    sig = base64.b64encode(hmac.new(sk.encode(), sts.encode(), hashlib.sha256).digest()).decode()
+    # scheme prefix "JOP "; fixed field order; entire value on one line
+    return ('JOP appid="%s",accesskey="%s",nonce="%s",timestamp="%d",signature="%s"'
+            % (app, ak, nonce, ts, sig))
 
 
 def call(path, body=None, method="POST"):
