@@ -1,0 +1,53 @@
+{
+  "board": "eload-rev-a",
+  "eeprom_map": {
+    "0x00": "board_type[8] = 'FL1-ELOAD' (ASCII, zero-padded)",
+    "0x08": "revision[8]   = 'REV-A\\0\\0\\0'",
+    "0x10": "serial[8]     = 8-char ASCII serial number",
+    "0x18": "state[1]      = 0xA5 when calibrated, 0x00 uncalibrated",
+    "0x19": "mfg_date[4]   = unix timestamp uint32 little-endian",
+    "0x1D": "checksum[1]   = XOR of bytes 0x00-0x1C",
+    "0x20": "cal_v_gain_ch1   float32 LE (multiply INA219 V reading)",
+    "0x24": "cal_v_offset_ch1 float32 LE (add to INA219 V reading, in V)",
+    "0x28": "cal_i_gain_ch1   float32 LE (multiply INA219 I reading)",
+    "0x2C": "cal_i_offset_ch1 float32 LE (add to INA219 I reading, in mA)",
+    "0x30": "cal_v_gain_ch2   float32 LE",
+    "0x34": "cal_v_offset_ch2 float32 LE",
+    "0x38": "cal_i_gain_ch2   float32 LE",
+    "0x3C": "cal_i_offset_ch2 float32 LE",
+    "0x40": "cal_v_gain_ch3   float32 LE",
+    "0x44": "cal_v_offset_ch3 float32 LE",
+    "0x48": "cal_i_gain_ch3   float32 LE",
+    "0x4C": "cal_i_offset_ch3 float32 LE",
+    "0x50": "cal_v_gain_ch4   float32 LE",
+    "0x54": "cal_v_offset_ch4 float32 LE",
+    "0x58": "cal_i_gain_ch4   float32 LE",
+    "0x5C": "cal_i_offset_ch4 float32 LE",
+    "0x60": "cal_dac_gain     float32 LE (DAC full-scale correction factor)",
+    "0x64": "cal_temp_offset  float32 LE (NTC temperature offset in C, all channels)"
+  },
+  "calibration_procedure": [
+    "Step 1: Ensure board_type EEPROM = 'FL1-ELOAD' via RUN SELFTEST",
+    "Step 2: Apply 5.000V to CH1 DUT input connector, enable 500mA CC load, wait 5s for thermal steady-state",
+    "Step 3: Read V_ina = read_telemetry().channels[0].v; measure V_actual with NIST-traceable DMM",
+    "Step 4: Compute cal_v_gain_ch1 = V_actual / V_ina; write float32 LE to EEPROM 0x20",
+    "Step 5: Apply 1.000A CC load, measure I_actual with NIST-traceable ammeter (>= 0.05% accuracy)",
+    "Step 6: Compute cal_i_gain_ch1 = I_actual / (I_ina / 1000.0); write float32 LE to EEPROM 0x28",
+    "Step 7: Repeat steps 2-6 for CH2 (0x30-0x3C), CH3 (0x40-0x4C), CH4 (0x50-0x5C)",
+    "Step 8: Set DAC to 1.000V on CH1 (SET LOAD1 <mA for 1V/100mOhm=10A - use lower>), measure V_dac on TP_DAC1 pad",
+    "Step 9: Compute cal_dac_gain = V_measured / 1.000; write to 0x60",
+    "Step 10: Place calibrated thermometer near CH1 MOSFET, read temp_c from telemetry, compute offset",
+    "Step 11: Write cal_temp_offset = T_actual - T_reported; write float32 LE to EEPROM 0x64",
+    "Step 12: Write 0xA5 to EEPROM 0x18 (state = calibrated)",
+    "Step 13: Compute XOR checksum of bytes 0x00-0x1C, write to 0x1D",
+    "Step 14: Run RUN SELFTEST to verify EEPROM readback and board_type check"
+  ],
+  "notes": [
+    "All float32 values use IEEE 754 little-endian (LSB first), matching struct.pack('<f', val)",
+    "Default gain = 1.0, default offset = 0.0 (uncalibrated identity transform)",
+    "Firmware applies: V_cal = (V_raw + v_offset) * v_gain at telemetry read time",
+    "INA219 calib_reg = 4096 gives 10uA current LSB (see INA219 datasheet eq. 3)",
+    "Sense resistor tolerance of ±1% contributes ±1% I accuracy before calibration",
+    "Op-amp gain error (MCP6002 VOS typ 0.5mV) contributes <0.2% at full scale"
+  ]
+}

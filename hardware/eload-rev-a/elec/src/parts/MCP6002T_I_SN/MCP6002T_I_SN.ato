@@ -1,0 +1,34 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+
+component MCP6002T_I_SN_package:
+    """Dual rail-to-rail op-amp 1.8-6V single supply SOIC-8"""
+    # VERIFY: run `ato create part -s MCP6002T-I/SN -a` to confirm LCSC C82756
+    trait is_atomic_part<manufacturer="Microchip Technology", partnumber="MCP6002T-I/SN",
+        footprint="SOIC-8_L4.9-W3.9-P1.27-LS6.0-BL.kicad_mod",
+        symbol="MCP6002T-I_SN.kicad_sym",
+        model="SOIC-8_L4.9-W3.9-H1.7-LS6.0-P1.27.STEP">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C82756",
+        manufacturer="Microchip Technology", partno="MCP6002T-I/SN">
+    trait has_designator_prefix<prefix="U">
+    trait has_datasheet<datasheet="https://www.microchip.com/content/dam/mchp/documents/APID/ProductDocuments/DataSheets/DS21733.pdf">
+    pin 1
+    pin 2
+    pin 3
+    pin 4
+    pin 5
+    pin 6
+    pin 7
+    pin 8
+    # Op-amp A pins (sense amp)
+    signal out_a    ~ pin 1   # output A
+    signal in_a_neg ~ pin 2   # inverting input A
+    signal in_a_pos ~ pin 3   # non-inverting input A
+    signal vss      ~ pin 4   # negative supply (GND)
+    # Op-amp B pins (error amp)
+    signal in_b_pos ~ pin 5   # non-inverting input B
+    signal in_b_neg ~ pin 6   # inverting input B
+    signal out_b    ~ pin 7   # output B
+    signal vdd      ~ pin 8   # positive supply

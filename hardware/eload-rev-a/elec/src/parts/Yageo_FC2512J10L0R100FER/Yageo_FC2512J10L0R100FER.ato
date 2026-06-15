@@ -1,0 +1,19 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+
+component Yageo_FC2512J10L0R100FER_package:
+    """100mOhm 1% 2W 2512 current sense resistor"""
+    # VERIFY: run `ato create part -s FC2512J10L0R100FER -a` to confirm LCSC C2892090
+    trait is_atomic_part<manufacturer="Yageo", partnumber="FC2512J10L0R100FER",
+        footprint="R2512.kicad_mod",
+        symbol="FC2512J10L0R100FER.kicad_sym",
+        model="R2512_L6.3-W3.2-H0.7.STEP">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C2892090",
+        manufacturer="Yageo", partno="FC2512J10L0R100FER">
+    trait has_designator_prefix<prefix="R">
+    pin 1
+    pin 2
+    signal p1 ~ pin 1
+    signal p2 ~ pin 2

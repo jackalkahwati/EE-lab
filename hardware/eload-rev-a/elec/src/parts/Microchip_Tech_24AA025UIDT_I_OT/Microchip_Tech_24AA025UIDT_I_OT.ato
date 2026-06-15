@@ -1,0 +1,23 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+import is_auto_generated
+
+component Microchip_Tech_24AA025UIDT_I_OT_package:
+    # This trait marks this file as auto-generated
+    # If you want to manually change it, remove the trait
+    trait is_auto_generated<system="ato_part", source="easyeda:C2061498", date="2026-06-12T18:58:59.062602+00:00", checksum="7ddeb3c7cebb61eb0bec0672c4fc44b1899382a633c1588abdce005770c2cc0f">
+
+    trait is_atomic_part<manufacturer="Microchip Tech", partnumber="24AA025UIDT-I/OT", footprint="SOT-23-6_L2.9-W1.6-P0.95-LS2.8-BR.kicad_mod", symbol="24AA025UIDT-I_OT.kicad_sym", model="SOT-23-6_L2.9-W1.6-H1.5-LS2.8-P0.95.step">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C2061498", manufacturer="Microchip Tech", partno="24AA025UIDT-I/OT">
+    trait has_designator_prefix<prefix="U">
+    trait has_datasheet<datasheet="https://wmsc.lcsc.com/wmsc/upload/file/pdf/v2/lcsc/2202011000_Microchip-Tech-24AA025UIDT-I-OT_C2061498.pdf">
+
+    # pins
+    signal A0 ~ pin 5
+    signal A1 ~ pin 4
+    signal SCL ~ pin 1
+    signal SDA ~ pin 3
+    signal VCC ~ pin 6
+    signal VSS ~ pin 2

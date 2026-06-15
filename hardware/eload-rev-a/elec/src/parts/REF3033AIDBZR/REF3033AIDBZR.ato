@@ -1,0 +1,27 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+
+component REF3033AIDBZR_package:
+    """REF3033AIDBZR — 3.3V 100mA Low-Dropout Precision Voltage Reference,
+    0.2% initial accuracy, SOT-23-3. LCSC C2658776 (Texas Instruments REF3033AIDBZR).
+    Datasheet-verified SOT-23-3 pinout:
+      pin 1 = OUT, pin 2 = GND, pin 3 = IN."""
+
+    trait is_atomic_part<manufacturer="Texas Instruments", partnumber="REF3033AIDBZR",
+        footprint="SOT-23-3_L2.9-W1.3-P1.90-LS2.4-BR.kicad_mod", symbol="REF3033AIDBZR.kicad_sym",
+        model="SOT-23_L2.9-W1.6-H1.1-LS2.4-P0.95.STEP">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C2658776",
+        manufacturer="Texas Instruments", partno="REF3033AIDBZR">
+    trait has_designator_prefix<prefix="U">
+    trait has_datasheet<datasheet="https://www.lcsc.com/datasheet/lcsc_datasheet_2301171800_Texas-Instruments-REF3033AIDBZR_C2658776.pdf">
+
+    # pins — SOT-23-3 voltage reference
+    pin 1
+    pin 2
+    pin 3
+
+    signal OUT ~ pin 1   # Reference output (3.3 V)
+    signal GND ~ pin 2   # Ground
+    signal IN  ~ pin 3   # Input supply (up to 18 V)

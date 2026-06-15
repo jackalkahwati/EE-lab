@@ -1,0 +1,202 @@
+"""
+Control — Raspberry Pi Pico 2 + TPS3823 watchdog + 7 LEDs + fan FET + service header.
+
+GPIO assignments (firmware shares this table):
+  GP0  / pin 1  — WDI watchdog kick
+  GP1  / pin 2  — nRESET from watchdog (input)
+  GP2  / pin 4  — I2C0 SDA (INA219 x4 + MCP4728 + EEPROM)
+  GP3  / pin 5  — I2C0 SCL
+  GP4  / pin 6  — relay_ch1_in (input relay ch1 coil drive)
+  GP5  / pin 7  — relay_ch1_dis (discharge relay ch1 coil drive)
+  GP6  / pin 9  — relay_ch2_in
+  GP7  / pin 10 — relay_ch2_dis
+  GP8  / pin 11 — relay_ch3_in
+  GP9  / pin 12 — relay_ch3_dis
+  GP10 / pin 14 — relay_ch4_in
+  GP11 / pin 15 — relay_ch4_dis
+  GP12 / pin 16 — LED_power (green)
+  GP13 / pin 17 — LED_fault (red)
+  GP14 / pin 19 — LED_ch1 (yellow)
+  GP15 / pin 20 — LED_ch2 (yellow)
+  GP16 / pin 21 — LED_ch3 (yellow)
+  GP17 / pin 22 — LED_ch4 (yellow)
+  GP18 / pin 24 — LED_thermal (orange/red)
+  GP19 / pin 25 — fan_pwm (25kHz PWM output)
+  GP20 / pin 26 — fan_tach (tachometer input)
+  GP26 / pin 31 — thermistor_ch1 (ADC0)
+  GP27 / pin 32 — thermistor_ch2 (ADC1)
+  GP28 / pin 34 — thermistor_ch3 (ADC2)
+  GP29 / pin 35 — thermistor_ch4 (ADC3/ADC_REF pin)
+"""
+
+import ElectricPower
+import Resistor
+import Capacitor
+from "parts/RaspberryPi_Pico2/RaspberryPi_Pico2.ato" import RaspberryPi_Pico2_package
+from "parts/Texas_Instruments_TPS3823_33DBVR/Texas_Instruments_TPS3823_33DBVR.ato" import Texas_Instruments_TPS3823_33DBVR_package
+from "parts/PN2N7002/PN2N7002.ato" import PN2N7002_package
+from "parts/LED_Red_0603/LED_Red_0603.ato" import LED_Red_0603_package
+
+
+module Control:
+    v3v3    = new ElectricPower   # 3.3V supply from power tree
+
+    # I2C shared bus
+    signal sda
+    signal scl
+
+    # Relay control GPIO signals
+    signal gp4    # relay_ch1_in
+    signal gp5    # relay_ch1_dis
+    signal gp6    # relay_ch2_in
+    signal gp7    # relay_ch2_dis
+    signal gp8    # relay_ch3_in
+    signal gp9    # relay_ch3_dis
+    signal gp10   # relay_ch4_in
+    signal gp11   # relay_ch4_dis
+
+    # Thermistor ADC signals
+    signal gp26   # thermistor_ch1 (ADC0)
+    signal gp27   # thermistor_ch2 (ADC1)
+    signal gp28   # thermistor_ch3 (ADC2)
+    signal gp29   # thermistor_ch4 (ADC3)
+
+    # Fan output signal (to fan connector)
+    signal fan_out
+
+    # --- Raspberry Pi Pico 2 --------------------------------------------------
+    mcu = new RaspberryPi_Pico2_package
+
+    # Power: VSYS from 3.3V rail
+    mcu.vsys ~ v3v3.hv
+    mcu.gnd  ~ v3v3.lv
+
+    # I2C (GP2=SDA, GP3=SCL)
+    mcu.sda ~ sda
+    mcu.scl ~ scl
+
+    # Relay GPIO aliases (use raw pin references — Pico2 part has dut-power aliases)
+    # GP4=pin6, GP5=pin7, GP6=pin9, GP7=pin10, GP8=pin11, GP9=pin12
+    # GP10=pin14, GP11=pin15
+    mcu.rail3_enable ~ gp4    # GP4 = pin 6
+    mcu.rail4_enable ~ gp5    # GP5 = pin 7
+    mcu.rail1_fault_n ~ gp6   # GP6 = pin 9 (reuse aliases for relay signals)
+    signal pin10_gp7
+    signal pin11_gp8
+    signal pin12_gp9
+    mcu.rail2_fault_n ~ gp7   # GP7 = pin 10
+    mcu.wdi ~ gp8             # GP8 = pin 11 — wdi is alias for pin 11 in Pico2 part
+    mcu.rail3_fault_n ~ gp9   # GP9 = pin 12
+    mcu.rail2_fault_clr ~ gp10  # GP10 = pin 14
+    mcu.rail3_fault_clr ~ gp11  # GP11 = pin 15
+
+    # ADC pins (GP26=pin31, GP27=pin32, GP28=pin34, GP29/ADC_REF=pin35)
+    mcu.rail3_led ~ gp26     # GP26 = pin 31
+    mcu.rail4_led ~ gp27     # GP27 = pin 32
+    mcu.fault_led ~ gp28     # GP28 = pin 34
+    mcu.adc_ref   ~ gp29     # ADC_REF = pin 35
+
+    # --- Watchdog: TPS3823-33DBVR ---------------------------------------------
+    wdt = new Texas_Instruments_TPS3823_33DBVR_package
+    wdt.VDD    ~ v3v3.hv
+    wdt.GND    ~ v3v3.lv
+    wdt.WDI    ~ mcu.wdi          # GP8/pin11 = watchdog kick
+    wdt.nRESET ~ mcu.wdt_reset_n  # GP23/pin30 = WDT reset to MCU
+    wdt.nMR    ~ v3v3.hv          # manual reset pulled high
+
+    c_wdt = new Capacitor
+    c_wdt.capacitance = 100nF +/- 10%
+    v3v3.hv ~ c_wdt.unnamed[0]
+    c_wdt.unnamed[1] ~ v3v3.lv
+
+    # --- Fan MOSFET: 2N7002 N-ch SOT-23 (fan PWM drive) ----------------------
+    fan_fet = new PN2N7002_package
+    # Gate pull-down 10kOhm ensures safe-off state on power-up
+    fan_gate_pd = new Resistor
+    fan_gate_pd.resistance = 10kohm +/- 5%
+
+    # fan_pwm from MCU GP19 (pin25 = rail3_disch alias)
+    mcu.rail3_disch ~ fan_fet.gate
+    fan_gate_pd.unnamed[0] ~ fan_fet.gate
+    fan_gate_pd.unnamed[1] ~ v3v3.lv
+    fan_fet.source ~ v3v3.lv
+    fan_fet.drain  ~ fan_out
+
+    # --- LEDs (7 total, 100 Ohm current limiters) ----------------------------
+    # BOM note: All LEDs use same Everlight LCSC C2286 part (red 0603)
+    # LED_power: green — connected to 3.3V always-on
+    led_power = new LED_Red_0603_package
+    r_led_power = new Resistor
+    r_led_power.resistance = 100ohm +/- 5%
+    mcu.rail1_enable ~ r_led_power.unnamed[0]   # GP12 = pin16 = rail4_enable alias
+    r_led_power.unnamed[1] ~ led_power.A
+    led_power.K ~ v3v3.lv
+
+    # LED_fault: red
+    led_fault = new LED_Red_0603_package
+    r_led_fault = new Resistor
+    r_led_fault.resistance = 100ohm +/- 5%
+    mcu.rail2_enable ~ r_led_fault.unnamed[0]   # GP13 = pin17 = rail1_fault_clr alias
+    r_led_fault.unnamed[1] ~ led_fault.A
+    led_fault.K ~ v3v3.lv
+
+    # LED_ch1: yellow (BOM: same C2286 red part — firmware distinction)
+    led_ch1 = new LED_Red_0603_package
+    r_led_ch1 = new Resistor
+    r_led_ch1.resistance = 100ohm +/- 5%
+    mcu.rail4_fault_clr ~ r_led_ch1.unnamed[0]  # GP14 = pin19
+    r_led_ch1.unnamed[1] ~ led_ch1.A
+    led_ch1.K ~ v3v3.lv
+
+    # LED_ch2: yellow
+    led_ch2 = new LED_Red_0603_package
+    r_led_ch2 = new Resistor
+    r_led_ch2.resistance = 100ohm +/- 5%
+    mcu.rail4_fault_n ~ r_led_ch2.unnamed[0]    # GP15 = pin20
+    r_led_ch2.unnamed[1] ~ led_ch2.A
+    led_ch2.K ~ v3v3.lv
+
+    # LED_ch3: yellow
+    led_ch3 = new LED_Red_0603_package
+    r_led_ch3 = new Resistor
+    r_led_ch3.resistance = 100ohm +/- 5%
+    mcu.rail4_disch ~ r_led_ch3.unnamed[0]      # GP16 = pin21
+    r_led_ch3.unnamed[1] ~ led_ch3.A
+    led_ch3.K ~ v3v3.lv
+
+    # LED_ch4: yellow
+    led_ch4 = new LED_Red_0603_package
+    r_led_ch4 = new Resistor
+    r_led_ch4.resistance = 100ohm +/- 5%
+    mcu.rail1_disch ~ r_led_ch4.unnamed[0]      # GP17 = pin22
+    r_led_ch4.unnamed[1] ~ led_ch4.A
+    led_ch4.K ~ v3v3.lv
+
+    # LED_thermal: orange/red
+    led_thermal = new LED_Red_0603_package
+    r_led_thermal = new Resistor
+    r_led_thermal.resistance = 100ohm +/- 5%
+    mcu.rail2_disch ~ r_led_thermal.unnamed[0]  # GP18 = pin24
+    r_led_thermal.unnamed[1] ~ led_thermal.A
+    led_thermal.K ~ v3v3.lv
+
+    # --- MCU decoupling -------------------------------------------------------
+    c_mcu = new Capacitor
+    c_mcu.capacitance = 100nF +/- 10%
+    v3v3.hv ~ c_mcu.unnamed[0]
+    c_mcu.unnamed[1] ~ v3v3.lv
+
+    # --- Service header (6-pin 2.54mm): SWD + UART + 3V3 + GND ---------------
+    signal cal_gnd
+    signal cal_3v3
+    signal cal_sda
+    signal cal_scl
+    signal cal_uart_tx
+    signal cal_uart_rx
+
+    cal_gnd     ~ v3v3.lv
+    cal_3v3     ~ v3v3.hv
+    cal_sda     ~ sda
+    cal_scl     ~ scl
+    cal_uart_tx ~ mcu.uart_tx   # GP0 TX
+    cal_uart_rx ~ mcu.uart_rx   # GP1 RX

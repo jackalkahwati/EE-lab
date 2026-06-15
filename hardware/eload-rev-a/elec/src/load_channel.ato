@@ -1,0 +1,205 @@
+"""
+LoadChannel — one independent programmable electronic load channel.
+
+CC load control loop (2-stage op-amp using MCP6002 dual op-amp):
+  Op-amp A (sense amp, non-inverting, gain=11):
+    IN+ = MOSFET source (Vsense, 0-300mV at 0-3A)
+    IN- = feedback from output via 10kOhm; 1kOhm to GND
+    OUT = Vsense x 11  (0-3.3V representing 0-3A)
+
+  Op-amp B (error amp):
+    IN+ = DAC channel output (MCP4728, 0-3.3V = 0-3A setpoint)
+    IN- = Op-amp A output (actual current scaled)
+    OUT = MOSFET gate (with 33 Ohm series gate resistor)
+    100pF Miller cap from OUT to IN- for stability
+
+INA219 address exposed via addr_a0 / addr_a1 signals (wired in main.ato).
+"""
+
+import ElectricPower
+import Resistor
+import Capacitor
+from "parts/IRFR024NTRPBF/IRFR024NTRPBF.ato" import IRFR024NTRPBF_package
+from "parts/MCP6002T_I_SN/MCP6002T_I_SN.ato" import MCP6002T_I_SN_package
+from "parts/Yageo_FC2512J10L0R100FER/Yageo_FC2512J10L0R100FER.ato" import Yageo_FC2512J10L0R100FER_package
+from "parts/NTC_10K_0402/NTC_10K_0402.ato" import NTC_10K_0402_package
+from "parts/G5LE_1A_E_DC5/G5LE_1A_E_DC5.ato" import G5LE_1A_E_DC5_package
+from "parts/Diode_1N4148WS/Diode_1N4148WS.ato" import Diode_1N4148WS_package
+from "parts/Texas_Instruments_INA219AIDCNR/Texas_Instruments_INA219AIDCNR.ato" import Texas_Instruments_INA219AIDCNR_package
+
+
+module LoadChannel:
+    # --- External power ports --------------------------------------------------
+    v3v3    = new ElectricPower   # 3.3V logic/analog supply
+    v5_coil = new ElectricPower   # 5V relay coil supply
+
+    # --- External signals ------------------------------------------------------
+    signal dut_pos         # DUT positive terminal (to input relay NO contact)
+    signal dac_setpoint    # 0-3.3V from MCP4728 (current setpoint)
+    signal thermistor_adc  # to MCU ADC pin (NTC midpoint voltage)
+    signal relay_in_coil   # MCU GPIO — energise input relay
+    signal relay_dis_coil  # MCU GPIO — energise discharge relay
+    signal i2c_sda         # shared I2C bus
+    signal i2c_scl         # shared I2C bus
+
+    # INA219 address pins (connect A0/A1 in main.ato per channel)
+    signal addr_a0
+    signal addr_a1
+
+    # --- Load MOSFET: IRFR024NTRPBF (55V, 17A, D2PAK) -------------------------
+    load_fet = new IRFR024NTRPBF_package
+
+    # --- Dual op-amp: MCP6002T-I/SN (SOIC-8, R-R I/O, 1.8-6V) ----------------
+    ctrl_opamp = new MCP6002T_I_SN_package
+
+    # Op-amp power
+    ctrl_opamp.vdd ~ v3v3.hv
+    ctrl_opamp.vss ~ v3v3.lv
+
+    # --- 100mOhm sense resistor (2W 2512) --------------------------------------
+    sense_r = new Yageo_FC2512J10L0R100FER_package
+
+    # --- Gate resistor 33 Ohm 0402 ---------------------------------------------
+    gate_r = new Resistor
+    gate_r.resistance = 33ohm +/- 5%
+
+    # --- Miller stability cap 100pF 0402 (op-amp B feedback) -------------------
+    miller_c = new Capacitor
+    miller_c.capacitance = 100pF +/- 10%
+
+    # --- Sense amp gain resistors -----------------------------------------------
+    # Rf = 10kOhm (in feedback, sets gain with Rg)
+    sense_amp_rf = new Resistor
+    sense_amp_rf.resistance = 10kohm +/- 1%
+    # Rg = 1kOhm (from IN- to GND; gain = 1 + Rf/Rg = 11)
+    sense_amp_rg = new Resistor
+    sense_amp_rg.resistance = 1kohm +/- 1%
+
+    # --- Input relay (G5LE-1A-E-DC5, SPST-NO, 5V coil) ------------------------
+    input_relay = new G5LE_1A_E_DC5_package
+    flyback_in  = new Diode_1N4148WS_package
+
+    # --- Discharge relay (G5LE-1A-E-DC5) + bleed resistor ---------------------
+    discharge_relay = new G5LE_1A_E_DC5_package
+    flyback_dis     = new Diode_1N4148WS_package
+
+    discharge_r = new Resistor
+    discharge_r.resistance = 470ohm +/- 5%
+
+    # --- NTC thermistor (10kOhm, 0402) + voltage divider bias -----------------
+    thermistor = new NTC_10K_0402_package
+    therm_bias  = new Resistor
+    therm_bias.resistance = 10kohm +/- 1%
+
+    # --- INA219 current/voltage monitor ----------------------------------------
+    ina = new Texas_Instruments_INA219AIDCNR_package
+
+    # --- Output bypass cap (10uF 1206 on DUT+ side) ----------------------------
+    c_out = new Capacitor
+    c_out.capacitance = 10uF +/- 20%
+
+    # --- INA219 decoupling (100nF 0402) ----------------------------------------
+    decoupling = new Capacitor
+    decoupling.capacitance = 100nF +/- 10%
+
+    # ==========================================================================
+    # SIGNAL NODES
+    # ==========================================================================
+    signal sense_midpoint   # MOSFET source / top of sense_r
+    signal gate_node        # op-amp B output before gate resistor
+    signal relay_dis_nc     # discharge relay NO contact
+
+    # ==========================================================================
+    # MOSFET CONNECTIONS
+    # ==========================================================================
+    # drain ← input relay NO contact (dut_pos flows through relay → MOSFET drain)
+    input_relay.no   ~ load_fet.drain
+    load_fet.source  ~ sense_midpoint
+
+    # ==========================================================================
+    # SENSE RESISTOR
+    # ==========================================================================
+    sense_r.p1 ~ sense_midpoint
+    sense_r.p2 ~ v3v3.lv   # GND ref
+
+    # ==========================================================================
+    # SENSE AMP (op-amp A of MCP6002): non-inverting gain=11
+    # Vout = Vin * (1 + Rf/Rg) = Vin * 11
+    # ==========================================================================
+    ctrl_opamp.in_a_pos ~ sense_midpoint
+    # IN- tied to junction of Rf and Rg
+    sense_amp_rg.unnamed[0] ~ ctrl_opamp.in_a_neg
+    sense_amp_rg.unnamed[1] ~ v3v3.lv
+    sense_amp_rf.unnamed[0] ~ ctrl_opamp.in_a_neg
+    sense_amp_rf.unnamed[1] ~ ctrl_opamp.out_a
+
+    # ==========================================================================
+    # ERROR AMP (op-amp B of MCP6002)
+    # ==========================================================================
+    ctrl_opamp.in_b_pos ~ dac_setpoint
+    ctrl_opamp.in_b_neg ~ ctrl_opamp.out_a   # scaled sense feedback
+    ctrl_opamp.out_b    ~ gate_node
+    # Miller cap (out_b → in_b_neg) for loop stability
+    miller_c.unnamed[0] ~ ctrl_opamp.out_b
+    miller_c.unnamed[1] ~ ctrl_opamp.in_b_neg
+
+    # ==========================================================================
+    # GATE RESISTOR
+    # ==========================================================================
+    gate_r.unnamed[0] ~ gate_node
+    gate_r.unnamed[1] ~ load_fet.gate
+
+    # ==========================================================================
+    # INPUT RELAY
+    # ==========================================================================
+    input_relay.com     ~ dut_pos
+    # input_relay.no connects to load_fet.drain (already done above)
+    input_relay.coil_p  ~ v5_coil.hv
+    input_relay.coil_n  ~ relay_in_coil
+    # Flyback diode: A=coil_n, K=coil_p
+    flyback_in.A ~ relay_in_coil
+    flyback_in.K ~ v5_coil.hv
+
+    # ==========================================================================
+    # DISCHARGE RELAY + BLEED RESISTOR
+    # ==========================================================================
+    discharge_relay.com    ~ dut_pos
+    discharge_relay.no     ~ relay_dis_nc
+    discharge_r.unnamed[0] ~ relay_dis_nc
+    discharge_r.unnamed[1] ~ v3v3.lv   # GND
+    discharge_relay.coil_p ~ v5_coil.hv
+    discharge_relay.coil_n ~ relay_dis_coil
+    flyback_dis.A ~ relay_dis_coil
+    flyback_dis.K ~ v5_coil.hv
+
+    # ==========================================================================
+    # NTC THERMISTOR VOLTAGE DIVIDER
+    # 3.3V → therm_bias → thermistor_adc → thermistor → GND
+    # ==========================================================================
+    therm_bias.unnamed[0]  ~ v3v3.hv
+    therm_bias.unnamed[1]  ~ thermistor_adc
+    thermistor.p1          ~ thermistor_adc
+    thermistor.p2          ~ v3v3.lv
+
+    # ==========================================================================
+    # INA219 CONNECTIONS
+    # Measures current through sense_r (100mOhm)
+    # INpos = MOSFET drain side; INneg = source/sense_r top (sense_midpoint)
+    # Bus voltage reading gives DUT voltage when relay closed
+    # ==========================================================================
+    ina.INpos ~ load_fet.drain
+    ina.INneg ~ sense_midpoint
+    ina.VS    ~ v3v3.hv
+    ina.GND   ~ v3v3.lv
+    ina.SDA   ~ i2c_sda
+    ina.SCL   ~ i2c_scl
+    ina.A0    ~ addr_a0
+    ina.A1    ~ addr_a1
+    decoupling.unnamed[0] ~ v3v3.hv
+    decoupling.unnamed[1] ~ v3v3.lv
+
+    # ==========================================================================
+    # OUTPUT BYPASS CAP (DUT+ side)
+    # ==========================================================================
+    c_out.unnamed[0] ~ dut_pos
+    c_out.unnamed[1] ~ v3v3.lv

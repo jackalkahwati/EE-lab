@@ -1,0 +1,103 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://firstlight.io/schemas/fl1-eload/telemetry/v1",
+  "title": "FL-1 Electronic Load Telemetry Response",
+  "description": "Schema for READ TELEMETRY JSON response from FL-1 Electronic Load + Discharge Board Rev A.",
+  "type": "object",
+  "required": ["mode", "ts_ms", "channels", "coil_v", "coil_ma", "fan_pct", "fan_rpm"],
+  "properties": {
+    "mode": {
+      "type": "string",
+      "const": "telemetry"
+    },
+    "ts_ms": {
+      "type": "integer",
+      "description": "Firmware timestamp in milliseconds since boot (time.ticks_ms()).",
+      "minimum": 0
+    },
+    "channels": {
+      "type": "array",
+      "description": "Telemetry for each load channel (4 elements, index 0=ch1).",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "required": ["ch", "state", "v", "i_ma", "p_mw", "energy_mj", "peak_i_ma", "peak_v", "temp_c"],
+        "properties": {
+          "ch": {
+            "type": "integer",
+            "description": "Channel number (1-4).",
+            "minimum": 1,
+            "maximum": 4
+          },
+          "state": {
+            "type": "string",
+            "description": "Current channel operating mode.",
+            "enum": ["IDLE", "CC", "CR", "CP", "PULSE", "STEP", "DISCHARGE", "FAULT"]
+          },
+          "v": {
+            "type": "number",
+            "description": "DUT terminal voltage as measured by INA219 bus voltage register, in Volts.",
+            "minimum": 0.0,
+            "maximum": 30.0
+          },
+          "i_ma": {
+            "type": "number",
+            "description": "Load current measured via 100mOhm sense resistor, in milliamps.",
+            "minimum": 0.0,
+            "maximum": 5000.0
+          },
+          "p_mw": {
+            "type": "number",
+            "description": "Instantaneous power dissipation (v * i_ma), in milliwatts.",
+            "minimum": 0.0
+          },
+          "energy_mj": {
+            "type": "number",
+            "description": "Accumulated energy since last ENABLE command, in millijoules.",
+            "minimum": 0.0
+          },
+          "peak_i_ma": {
+            "type": "number",
+            "description": "Peak current seen since last ENABLE, in milliamps.",
+            "minimum": 0.0
+          },
+          "peak_v": {
+            "type": "number",
+            "description": "Peak voltage seen since last ENABLE, in Volts.",
+            "minimum": 0.0
+          },
+          "temp_c": {
+            "type": "number",
+            "description": "MOSFET heatsink temperature from NTC thermistor, in Celsius.",
+            "minimum": -40.0,
+            "maximum": 125.0
+          }
+        }
+      }
+    },
+    "coil_v": {
+      "type": "number",
+      "description": "5V coil rail voltage measured by INA219 at addr 0x46, in Volts.",
+      "minimum": 0.0,
+      "maximum": 6.0
+    },
+    "coil_ma": {
+      "type": "number",
+      "description": "Total coil rail current (all relay coils) via 50mOhm shunt, in milliamps.",
+      "minimum": 0.0
+    },
+    "fan_pct": {
+      "type": "integer",
+      "description": "Fan PWM duty cycle (0-100%).",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "fan_rpm": {
+      "type": "integer",
+      "description": "Fan speed in RPM (from tachometer input GP20).",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false
+}

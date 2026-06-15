@@ -1,0 +1,20 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+
+component PN2N7002_package:
+    """N-ch MOSFET 60V 300mA SOT-23 — fan PWM control"""
+    trait is_atomic_part<manufacturer="ON Semiconductor", partnumber="2N7002",
+        footprint="SOT-23_L2.9-W1.6-P1.90-LS2.8-BR.kicad_mod",
+        symbol="2N7002.kicad_sym",
+        model="SOT-23_L2.9-W1.6-H1.1-LS2.8-P1.90.STEP">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C8545",
+        manufacturer="ON Semiconductor", partno="2N7002">
+    trait has_designator_prefix<prefix="Q">
+    pin 1
+    pin 2
+    pin 3
+    signal gate   ~ pin 1
+    signal source ~ pin 2
+    signal drain  ~ pin 3

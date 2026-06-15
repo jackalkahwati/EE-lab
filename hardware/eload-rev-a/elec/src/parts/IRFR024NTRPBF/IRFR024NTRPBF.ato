@@ -1,0 +1,25 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+
+component IRFR024NTRPBF_package:
+    """N-ch MOSFET 55V 17A D2PAK — CC load sink"""
+    # VERIFY: run `ato create part -s IRFR024NTRPBF -a` to confirm LCSC C2899994
+    trait is_atomic_part<manufacturer="Infineon Technologies", partnumber="IRFR024NTRPBF",
+        footprint="TO-252-2_L6.6-W6.1-P4.57-LS9.9-BL.kicad_mod",
+        symbol="IRFR024NTRPBF.kicad_sym",
+        model="TO-252-2_L6.6-W6.1-P4.57-LS9.9-BL.STEP">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C2899994",
+        manufacturer="Infineon Technologies", partno="IRFR024NTRPBF">
+    trait has_designator_prefix<prefix="Q">
+    trait has_datasheet<datasheet="https://www.infineon.com/dgdl/irfr024npbf.pdf">
+    pin 1
+    pin 2
+    pin 3
+    signal gate   ~ pin 1
+    signal source ~ pin 2
+    signal drain  ~ pin 3
+    signal g ~ pin 1
+    signal s ~ pin 2
+    signal d ~ pin 3

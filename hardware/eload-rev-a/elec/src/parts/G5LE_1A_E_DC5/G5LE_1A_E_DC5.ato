@@ -1,0 +1,33 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+
+component G5LE_1A_E_DC5_package:
+    """Omron G5LE-1A-E-DC5 — SPST-NO PCB Power Relay, 5V coil, 10A contacts, DIP-5.
+    LCSC C39559 (Omron Electronics G5LE-1A-E 5VDC).
+    Datasheet-verified DIP-5 pinout:
+      pin 1 = Coil (+), pin 2 = Coil (-), pin 3 = NC (not used in 1A variant),
+      pin 4 = Common, pin 5 = Normally Open.
+    Note: G5LE-1A (SPST-NO): pin1=coil+, pin2=coil-, pin4=COM, pin5=NO."""
+
+    trait is_atomic_part<manufacturer="Omron Electronics", partnumber="G5LE-1A-E 5VDC",
+        footprint="RELAY-TH_G5LE-1-E.kicad_mod", symbol="G5LE-1A-E-DC5.kicad_sym",
+        model="G5LE-1-E.STEP">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C39559",
+        manufacturer="Omron Electronics", partno="G5LE-1A-E 5VDC">
+    trait has_designator_prefix<prefix="K">
+    trait has_datasheet<datasheet="https://www.lcsc.com/datasheet/lcsc_datasheet_2209261000_Omron-Electronics-G5LE-1-E-5VDC_C39559.pdf">
+
+    # pins — DIP-5 SPST-NO relay
+    pin 1
+    pin 2
+    pin 3
+    pin 4
+    pin 5
+
+    signal coil_p  ~ pin 1   # Coil positive terminal
+    signal coil_n  ~ pin 2   # Coil negative terminal
+    signal nc_pin  ~ pin 3   # Not connected (no NC contact in 1A version)
+    signal com     ~ pin 4   # Common contact
+    signal no      ~ pin 5   # Normally-Open contact

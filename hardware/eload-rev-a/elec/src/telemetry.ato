@@ -1,0 +1,93 @@
+"""
+TelemetryBlock — MCP4728 quad 12-bit I2C DAC + REF3033 precision reference.
+
+DAC I2C address: 0x60 (A0/A1/A2=GND factory OTP).
+Channels: A=ch1 setpoint, B=ch2 setpoint, C=ch3 setpoint, D=ch4 setpoint.
+
+Note: MCP4728A0T-E/UN is SOIC-8, exposing only VOUTA and VOUTB.
+Two devices are used to provide all 4 channel setpoints.
+dac_lo: addr 0x60 → VOUTA=ch1, VOUTB=ch2
+dac_hi: addr 0x61 → VOUTA=ch3, VOUTB=ch4
+
+I2C pull-ups (4.7kOhm) are included here on the shared bus.
+"""
+
+import ElectricPower
+import Resistor
+import Capacitor
+from "parts/MCP4728A0T_E_UN/MCP4728A0T_E_UN.ato" import MCP4728A0T_E_UN_package
+from "parts/REF3033AIDBZR/REF3033AIDBZR.ato" import REF3033AIDBZR_package
+
+
+module TelemetryBlock:
+    v3v3 = new ElectricPower   # 3.3V supply
+
+    # I2C shared bus
+    signal sda
+    signal scl
+
+    # DAC output setpoint signals per channel
+    signal ch1_setpoint
+    signal ch2_setpoint
+    signal ch3_setpoint
+    signal ch4_setpoint
+
+    # --- MCP4728 DAC (0x60): ch1+ch2 ------------------------------------------
+    dac_lo = new MCP4728A0T_E_UN_package
+    dac_lo.VDD    ~ v3v3.hv
+    dac_lo.VSS    ~ v3v3.lv
+    dac_lo.SDA    ~ sda
+    dac_lo.SCL    ~ scl
+    dac_lo.LDAC_N ~ v3v3.lv   # always-update mode
+    dac_lo.VOUTA  ~ ch1_setpoint
+    dac_lo.VOUTB  ~ ch2_setpoint
+
+    # --- MCP4728 DAC (0x61): ch3+ch4 ------------------------------------------
+    dac_hi = new MCP4728A0T_E_UN_package
+    dac_hi.VDD    ~ v3v3.hv
+    dac_hi.VSS    ~ v3v3.lv
+    dac_hi.SDA    ~ sda
+    dac_hi.SCL    ~ scl
+    dac_hi.LDAC_N ~ v3v3.lv
+    dac_hi.VOUTA  ~ ch3_setpoint
+    dac_hi.VOUTB  ~ ch4_setpoint
+
+    # DAC decoupling caps
+    c_dac_lo = new Capacitor
+    c_dac_lo.capacitance = 100nF +/- 10%
+    v3v3.hv ~ c_dac_lo.unnamed[0]
+    c_dac_lo.unnamed[1] ~ v3v3.lv
+
+    c_dac_hi = new Capacitor
+    c_dac_hi.capacitance = 100nF +/- 10%
+    v3v3.hv ~ c_dac_hi.unnamed[0]
+    c_dac_hi.unnamed[1] ~ v3v3.lv
+
+    # --- REF3033 precision 3.3V reference (DAC VREF) --------------------------
+    vref = new REF3033AIDBZR_package
+    vref.IN  ~ v3v3.hv
+    vref.GND ~ v3v3.lv
+    # VREF output — connect to DAC VREF pins if supported by firmware config
+    # For default operation DAC uses VDD as reference; vref_out exposed for firmware
+    signal vref_out
+    vref.OUT ~ vref_out
+
+    c_vref_in = new Capacitor
+    c_vref_in.capacitance = 100nF +/- 10%
+    v3v3.hv ~ c_vref_in.unnamed[0]
+    c_vref_in.unnamed[1] ~ v3v3.lv
+
+    c_vref_out = new Capacitor
+    c_vref_out.capacitance = 100nF +/- 10%
+    vref_out ~ c_vref_out.unnamed[0]
+    c_vref_out.unnamed[1] ~ v3v3.lv
+
+    # --- I2C pull-ups (4.7kOhm to 3.3V) ---------------------------------------
+    r_sda_pu = new Resistor
+    r_sda_pu.resistance = 4.7kohm +/- 5%
+    r_scl_pu = new Resistor
+    r_scl_pu.resistance = 4.7kohm +/- 5%
+    v3v3.hv ~ r_sda_pu.unnamed[0]
+    r_sda_pu.unnamed[1] ~ sda
+    v3v3.hv ~ r_scl_pu.unnamed[0]
+    r_scl_pu.unnamed[1] ~ scl

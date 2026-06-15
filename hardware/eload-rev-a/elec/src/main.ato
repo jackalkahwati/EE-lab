@@ -1,0 +1,133 @@
+"""
+ELoadBoard — top-level. FirstLight FL-1 Electronic Load + Discharge Board Rev A.
+
+Board: 160 x 100 mm, 4-layer FR-4 (Sig / GND / PWR_5V / Sig).
+4 independent programmable load channels (CC/CR/CP/pulse/step/discharge modes).
+
+Per-channel:
+  - IRFR024NTRPBF N-ch MOSFET (55V, 17A, D2PAK) load sink
+  - MCP6002 dual op-amp CC control loop (sense amp gain=11 + error amp)
+  - Yageo 100mOhm sense resistor (2W 2512)
+  - G5LE-1A-E-DC5 input relay + discharge relay
+  - INA219 current/voltage monitor (I2C 0x40-0x43)
+  - NTC 10kOhm thermistor + 10kOhm bias divider
+
+INA219 I2C addresses:
+  ch1: A0=GND, A1=GND -> 0x40
+  ch2: A0=VS,  A1=GND -> 0x41
+  ch3: A0=SDA, A1=GND -> 0x42
+  ch4: A0=SCL, A1=GND -> 0x43
+  coil: A0=SDA, A1=GND -> 0x46 (in power.ato, different from ch3 using different A1)
+
+Shared:
+  - MCP4728 quad DAC x2 (I2C 0x60/0x61) for setpoints
+  - REF3033 3.3V precision reference
+  - RP2040 Pico 2 MCU + TPS3823 watchdog
+  - 24AA025UIDT EEPROM (I2C 0x50)
+"""
+
+import ElectricPower
+from "power.ato"        import PowerTree
+from "load_channel.ato" import LoadChannel
+from "telemetry.ato"    import TelemetryBlock
+from "mcu.ato"          import Control
+from "eeprom.ato"       import EepromModule
+
+
+module ELoadBoard:
+    # --- Sub-modules ----------------------------------------------------------
+    power     = new PowerTree
+    ch1       = new LoadChannel
+    ch2       = new LoadChannel
+    ch3       = new LoadChannel
+    ch4       = new LoadChannel
+    telemetry = new TelemetryBlock
+    ctl       = new Control
+    eeprom    = new EepromModule
+
+    # --- Top-level power port (28V DUT supply) --------------------------------
+    v28_in = new ElectricPower
+
+    # ==========================================================================
+    # POWER TREE CONNECTIONS
+    # ==========================================================================
+    power.v28 ~ v28_in
+
+    ctl.v3v3       ~ power.v3v3
+    ch1.v3v3       ~ power.v3v3
+    ch2.v3v3       ~ power.v3v3
+    ch3.v3v3       ~ power.v3v3
+    ch4.v3v3       ~ power.v3v3
+    telemetry.v3v3 ~ power.v3v3
+    eeprom.v3v3    ~ power.v3v3
+
+    ch1.v5_coil ~ power.v5_coil
+    ch2.v5_coil ~ power.v5_coil
+    ch3.v5_coil ~ power.v5_coil
+    ch4.v5_coil ~ power.v5_coil
+
+    # ==========================================================================
+    # I2C BUS (MCU <-> INA219s + DACs + EEPROM + power INA219)
+    # ==========================================================================
+    ctl.sda ~ ch1.i2c_sda
+    ctl.sda ~ ch2.i2c_sda
+    ctl.sda ~ ch3.i2c_sda
+    ctl.sda ~ ch4.i2c_sda
+    ctl.sda ~ telemetry.sda
+    ctl.sda ~ eeprom.sda
+    ctl.sda ~ power.sda
+
+    ctl.scl ~ ch1.i2c_scl
+    ctl.scl ~ ch2.i2c_scl
+    ctl.scl ~ ch3.i2c_scl
+    ctl.scl ~ ch4.i2c_scl
+    ctl.scl ~ telemetry.scl
+    ctl.scl ~ eeprom.scl
+    ctl.scl ~ power.scl
+
+    # ==========================================================================
+    # INA219 ADDRESS WIRING (A0/A1 per channel)
+    # ch1: A0=GND, A1=GND -> 0x40
+    # ch2: A0=VS,  A1=GND -> 0x41
+    # ch3: A0=SDA, A1=GND -> 0x42
+    # ch4: A0=SCL, A1=GND -> 0x43
+    # ==========================================================================
+    ch1.addr_a0 ~ power.v3v3.lv
+    ch1.addr_a1 ~ power.v3v3.lv
+
+    ch2.addr_a0 ~ power.v3v3.hv
+    ch2.addr_a1 ~ power.v3v3.lv
+
+    ch3.addr_a0 ~ ctl.sda
+    ch3.addr_a1 ~ power.v3v3.lv
+
+    ch4.addr_a0 ~ ctl.scl
+    ch4.addr_a1 ~ power.v3v3.lv
+
+    # ==========================================================================
+    # DAC SETPOINTS (MCP4728 -> LoadChannel dac_setpoint)
+    # ==========================================================================
+    telemetry.ch1_setpoint ~ ch1.dac_setpoint
+    telemetry.ch2_setpoint ~ ch2.dac_setpoint
+    telemetry.ch3_setpoint ~ ch3.dac_setpoint
+    telemetry.ch4_setpoint ~ ch4.dac_setpoint
+
+    # ==========================================================================
+    # RELAY CONTROL GPIO
+    # ==========================================================================
+    ctl.gp4  ~ ch1.relay_in_coil
+    ctl.gp5  ~ ch1.relay_dis_coil
+    ctl.gp6  ~ ch2.relay_in_coil
+    ctl.gp7  ~ ch2.relay_dis_coil
+    ctl.gp8  ~ ch3.relay_in_coil
+    ctl.gp9  ~ ch3.relay_dis_coil
+    ctl.gp10 ~ ch4.relay_in_coil
+    ctl.gp11 ~ ch4.relay_dis_coil
+
+    # ==========================================================================
+    # THERMISTOR ADC
+    # ==========================================================================
+    ctl.gp26 ~ ch1.thermistor_adc
+    ctl.gp27 ~ ch2.thermistor_adc
+    ctl.gp28 ~ ch3.thermistor_adc
+    ctl.gp29 ~ ch4.thermistor_adc
