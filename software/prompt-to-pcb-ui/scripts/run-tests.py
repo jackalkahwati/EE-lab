@@ -29,6 +29,18 @@ CASES = [
     ("minimal", ["MCU", "power"]),
     ("kitchen-sink", ["USB-C power", "RP2040 MCU", "MPU6050 IMU",
                       "I2C temperature sensor", "LoRa radio", "U.FL antenna"]),
+    # asset tracker that exposed the clearance + firmware-gating bugs — regression guard
+    ("asset-tracker", ["USB-C power", "low-power MCU", "LoRa radio SX1276",
+                       "GNSS GPS module", "I2C temperature sensor", "U.FL antenna"]),
+    # busy mix: 4 motors + two I2C sensors + USB-C fine pitch (placement + bus + routing)
+    ("robot-ctrl", ["USB-C power", "RP2040 MCU", "MPU6050 IMU",
+                    "I2C temperature sensor", "4x ESC motor outputs"]),
+    # cellular modem in isolation (no GNSS) + sourced sensor
+    ("cellular-logger", ["USB-C power", "RP2040 MCU", "LTE-M cellular modem",
+                         "I2C temperature sensor"]),
+    # two RF subsystems on one board (LoRa + cellular + their UARTs/antennas)
+    ("dual-radio", ["battery power", "RP2040 MCU", "LoRa radio", "U.FL antenna",
+                    "cellular modem"]),
 ]
 
 
