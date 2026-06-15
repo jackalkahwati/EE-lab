@@ -1,0 +1,142 @@
+(footprint "Texas_Instruments_TPS3823_33DBVR:SOT-23-5_L3.0-W1.7-P0.95-LS2.8-BL"
+	(version 20241229)
+	(generator "faebryk_convert")
+	(generator_version "v5")
+	(layer "F.Cu")
+	(tedit "5DC5F6A4")
+	(uuid "704cf61a-3ca5-4e35-bcd2-19e327fc16bd")
+	(property "Reference" "REF**"
+		(at 0 -5.15)
+		(layer "F.SilkS")
+		(uuid "fa078e50-d272-4e31-a75c-846f1b788c27")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Value" "SOT-23-5_L3.0-W1.7-P0.95-LS2.8-BL"
+		(at 0 5.15)
+		(layer "F.Fab")
+		(uuid "cf909763-776c-412c-bb20-fb49139c42df")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(attr smd)
+	(fp_circle
+		(center -1.65 1.14)
+		(end -1.5 1.14)
+		(stroke
+			(width 0.3)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(locked no)
+		(uuid "4263f791-5cf9-48b7-8497-4840160aa539")
+	)
+	(fp_circle
+		(center -0.95 1.76)
+		(end -0.85 1.76)
+		(stroke
+			(width 0.2)
+			(type solid)
+		)
+		(layer "Cmts.User")
+		(locked no)
+		(uuid "3c8a4500-1521-4028-98da-e9ebd3b9f404")
+	)
+	(fp_circle
+		(center -1.42 1.37)
+		(end -1.39 1.37)
+		(stroke
+			(width 0.06)
+			(type solid)
+		)
+		(layer "F.Fab")
+		(locked no)
+		(uuid "c5a10cb2-55d8-4016-b3bb-c7905c40f92c")
+	)
+	(fp_line
+		(start -1.53 0.85)
+		(end -1.53 -0.85)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "37a64214-0a3c-4b40-8c76-e05c729fcf46")
+	)
+	(fp_line
+		(start 1.53 0.85)
+		(end 1.53 -0.85)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "10809cfc-b2ed-40b5-82c7-829cdf38fa5a")
+	)
+	(fp_line
+		(start 0.48 -0.85)
+		(end -0.48 -0.85)
+		(stroke
+			(width 0.15)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(layers "F.SilkS")
+		(locked no)
+		(uuid "2fec4a8e-27f6-4526-93f1-71bd5227aae7")
+	)
+	(pad "1" smd rect
+		(at -0.95 1.15 0)
+		(size 0.49 1.16)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "0fd9df69-4340-47d0-b6de-f93043cc484f")
+	)
+	(pad "2" smd rect
+		(at 0 1.15 0)
+		(size 0.49 1.16)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "ca1e26c6-c2e6-4f45-bf94-3dfe6a60aaed")
+	)
+	(pad "3" smd rect
+		(at 0.95 1.15 0)
+		(size 0.49 1.16)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "626dd4d6-6642-449d-b251-3386df38ecd2")
+	)
+	(pad "4" smd rect
+		(at 0.95 -1.15 0)
+		(size 0.49 1.18)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "45b4fb28-eb80-4c37-8d8f-f6f7b9eeb29a")
+	)
+	(pad "5" smd rect
+		(at -0.95 -1.15 0)
+		(size 0.49 1.18)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "bf2e9142-01b1-40c5-9c19-8146f24cae51")
+	)
+	(model "${KIPRJMOD}/../../src/parts/Texas_Instruments_TPS3823_33DBVR/SOT-23-5_L2.9-W1.6-H1.1-LS2.8-P0.95.step"
+		(offset
+			(xyz 0 0 -0)
+		)
+		(scale
+			(xyz 1 1 1)
+		)
+		(rotate
+			(xyz 0 0 270)
+		)
+	)
+	(embedded_fonts no)
+)

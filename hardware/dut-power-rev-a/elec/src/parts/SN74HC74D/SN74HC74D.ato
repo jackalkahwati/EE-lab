@@ -12,11 +12,8 @@ component SN74HC74D_package:
       pin 12 = 2D, pin 13 = 2CLR_N, pin 14 = VCC.
     Use half as SR latch: D=VCC, CLK=Set (rising edge), CLR_N=Reset_N, Q=Output."""
 
-    trait is_atomic_part<manufacturer="Texas Instruments", partnumber="SN74HC74DR",
-        footprint="SOIC-14_L8.7-W3.9-P1.27-LS6.0-BL.kicad_mod", symbol="SN74HC74D.kicad_sym",
-        model="SOIC-14_L8.6-W3.9-H1.5-LS6.0-P1.27.step">
-    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C5765",
-        manufacturer="Texas Instruments", partno="SN74HC74DR">
+    trait is_atomic_part<manufacturer="Texas Instruments", partnumber="SN74HC74DR", footprint="SOIC-14_L8.7-W3.9-P1.27-LS6.0-BL.kicad_mod", symbol="SN74HC74D.kicad_sym", model="SOIC-14_L8.6-W3.9-H1.5-LS6.0-P1.27.step">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C5765", manufacturer="Texas Instruments", partno="SN74HC74DR">
     trait has_designator_prefix<prefix="U">
     trait has_datasheet<datasheet="https://www.lcsc.com/datasheet/lcsc_datasheet_1810131823_Texas-Instruments-SN74HC74DR_C5765.pdf">
 

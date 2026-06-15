@@ -11,11 +11,8 @@ component G5LE_1A_E_DC5_package:
       pin 4 = Common, pin 5 = Normally Open.
     Note: G5LE-1A (SPST-NO): pin1=coil+, pin2=coil-, pin4=COM, pin5=NO."""
 
-    trait is_atomic_part<manufacturer="Omron Electronics", partnumber="G5LE-1A-E 5VDC",
-        footprint="RELAY-TH_G5LE-1-E.kicad_mod", symbol="G5LE-1A-E-DC5.kicad_sym",
-        model="G5LE-1-E.STEP">
-    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C39559",
-        manufacturer="Omron Electronics", partno="G5LE-1A-E 5VDC">
+    trait is_atomic_part<manufacturer="Omron Electronics", partnumber="G5LE-1A-E 5VDC", footprint="RELAY-TH_G5LE-1-E.kicad_mod", symbol="G5LE-1A-E-DC5.kicad_sym", model="G5LE-1-E.STEP">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C39559", manufacturer="Omron Electronics", partno="G5LE-1A-E 5VDC">
     trait has_designator_prefix<prefix="K">
     trait has_datasheet<datasheet="https://www.lcsc.com/datasheet/lcsc_datasheet_2209261000_Omron-Electronics-G5LE-1-E-5VDC_C39559.pdf">
 

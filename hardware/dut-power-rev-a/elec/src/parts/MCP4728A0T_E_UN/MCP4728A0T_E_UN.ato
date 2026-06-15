@@ -16,11 +16,8 @@ component MCP4728A0T_E_UN_package:
     MCP4728 is 10-MSOP package. SOIC-8 variant is MCP4728 UN package (SOIC-8).
     Correct SOIC-8 pinout: 1=VDD,2=SDA,3=SCL,4=LDAC_N,5=RDY/BSY,6=VOUTA,7=VOUTB,8=VSS."""
 
-    trait is_atomic_part<manufacturer="Microchip Technology", partnumber="MCP4728A0T-E/UN",
-        footprint="SOIC-8_L5.0-W4.0-P1.27-LS6.0-BL.kicad_mod", symbol="MCP4728A0T-E_UN.kicad_sym",
-        model="SOIC-8_L4.9-W3.9-H1.7-LS6.0-P1.27.STEP">
-    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C476753",
-        manufacturer="Microchip Technology", partno="MCP4728A0T-E/UN">
+    trait is_atomic_part<manufacturer="Microchip Technology", partnumber="MCP4728A0T-E/UN", footprint="SOIC-8_L5.0-W4.0-P1.27-LS6.0-BL.kicad_mod", symbol="MCP4728A0T-E_UN.kicad_sym", model="SOIC-8_L4.9-W3.9-H1.7-LS6.0-P1.27.STEP">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C476753", manufacturer="Microchip Technology", partno="MCP4728A0T-E/UN">
     trait has_designator_prefix<prefix="U">
     trait has_datasheet<datasheet="https://www.lcsc.com/datasheet/lcsc_datasheet_2304141800_Microchip-Tech-MCP4728A0T-E-UN_C476753.pdf">
 

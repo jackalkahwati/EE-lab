@@ -11,11 +11,8 @@ component AO4407A_package:
       pin 5 = Drain, pin 6 = Drain, pin 7 = Drain, pin 8 = Drain.
     Note: pins 1+2 tied (Gate bus); 3+4 tied (Source bus); 5+6+7+8 tied (Drain bus)."""
 
-    trait is_atomic_part<manufacturer="Alpha & Omega Semiconductor", partnumber="AO4407A",
-        footprint="SOP-8_L5.0-W4.0-P1.27-LS6.0-BL.kicad_mod", symbol="AO4407A.kicad_sym",
-        model="SOP-8_L4.9-W3.9-H1.7-LS6.0-P1.27.STEP">
-    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C338",
-        manufacturer="Alpha & Omega Semiconductor", partno="AO4407A">
+    trait is_atomic_part<manufacturer="Alpha & Omega Semiconductor", partnumber="AO4407A", footprint="SOP-8_L5.0-W4.0-P1.27-LS6.0-BL.kicad_mod", symbol="AO4407A.kicad_sym", model="SOP-8_L4.9-W3.9-H1.7-LS6.0-P1.27.STEP">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C338", manufacturer="Alpha & Omega Semiconductor", partno="AO4407A">
     trait has_designator_prefix<prefix="Q">
     trait has_datasheet<datasheet="https://www.lcsc.com/datasheet/lcsc_datasheet_2208231130_Alpha---Omega-Semicon-AO4407A_C338.pdf">
 

@@ -8,11 +8,8 @@ component Yageo_FC2512J10L0R010FER_package:
     LCSC C2892044 (YAGEO FC2512J10L0R010FER).
     Two-terminal 2512 resistor; pin 1 = terminal A, pin 2 = terminal B."""
 
-    trait is_atomic_part<manufacturer="YAGEO", partnumber="FC2512J10L0R010FER",
-        footprint="R2512.kicad_mod", symbol="FC2512J10L0R010FER.kicad_sym",
-        model="R2512_L6.3-W3.2-H0.6.STEP">
-    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C2892044",
-        manufacturer="YAGEO", partno="FC2512J10L0R010FER">
+    trait is_atomic_part<manufacturer="YAGEO", partnumber="FC2512J10L0R010FER", footprint="R2512.kicad_mod", symbol="FC2512J10L0R010FER.kicad_sym", model="R2512_L6.3-W3.2-H0.6.STEP">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C2892044", manufacturer="YAGEO", partno="FC2512J10L0R010FER">
     trait has_designator_prefix<prefix="R">
     trait has_datasheet<datasheet="https://www.lcsc.com/datasheet/lcsc_datasheet_2211111800_YAGEO-FC2512J10L0R010FER_C2892044.pdf">
 

@@ -1,0 +1,21 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+import is_auto_generated
+
+component Samsung_Electro_Mechanics_CL21A476MQYNNNE_package:
+    """47uF (476) ±20% 6.3V"""
+
+    # This trait marks this file as auto-generated
+    # If you want to manually change it, remove the trait
+    trait is_auto_generated<system="ato_part", source="easyeda:C16780", date="2026-06-15T15:41:30.948054+00:00", checksum="d547eae3a414d700cedfe49d5793983f5ebd2c15ff537a51927093798eca0e4a">
+
+    trait is_atomic_part<manufacturer="Samsung Electro-Mechanics", partnumber="CL21A476MQYNNNE", footprint="C0805.kicad_mod", symbol="CL21A476MQYNNNE.kicad_sym", model="C0805_L2.0-W1.3-H1.3.step">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C16780", manufacturer="Samsung Electro-Mechanics", partno="CL21A476MQYNNNE">
+    trait has_designator_prefix<prefix="C">
+    trait has_datasheet<datasheet="https://www.lcsc.com/datasheet/lcsc_datasheet_2304140030_Samsung-Electro-Mechanics-CL21A476MQYNNNE_C16780.pdf">
+
+    # pins
+    pin 1
+    pin 2
