@@ -86,9 +86,10 @@ def xyrs_from_board(board_pcb):
 
 
 # ---- the abstraction --------------------------------------------------------
-def quote_board(board_pcb, bom, board_json, quantity=10, name="FirstLight board"):
-    """Create a CM project from our board, upload the BOM + placement, and return
-    a normalized quote dict. Backend: MacroFab. Returns enough for the UI to show
+def quote_board(board_pcb, bom, board_json, quantity=10, name="FirstLight board",
+                gerber_dir=None):
+    """Create a CM project from our board, upload the BOM + gerbers, and return a
+    normalized quote dict. Backend: MacroFab. Returns enough for the UI to show
     the project + price (or the current blocker)."""
     load_env()
     layers = board_json.get("layers", 2)
@@ -102,17 +103,24 @@ def quote_board(board_pcb, bom, board_json, quantity=10, name="FirstLight board"
     result["bom_uploaded"] = (s == 200)
     result["bom_lines"] = len(parts)
 
-    xyrs = xyrs_from_board(board_pcb)
-    s, d = mf.upload_xyrs(pcb_id, 1, xyrs)  # placement; format still firming up
-    result["placement_uploaded"] = (s == 200)
-    result["placement_parts"] = len(xyrs)
+    # gerbers via the S3 presigned flow (each file individually)
+    if gerber_dir and os.path.isdir(gerber_dir):
+        ok = 0
+        files = [f for f in os.listdir(gerber_dir) if not f.startswith(".")]
+        for f in files:
+            good, _ = mf.upload_pcb_file(pcb_id, 1, os.path.join(gerber_dir, f))
+            ok += good
+        result["gerbers_uploaded"] = ok
+        result["gerber_files"] = len(files)
 
     s, q = mf.get_quote(pcb_id, 1, quantity, layer_count=layers, manufacturing="Standard")
     if s == 200:
         result["quote"] = q
         result["status"] = "quoted"
     else:
-        result["status"] = "project_created"  # BOM in; quote needs files finalized
+        # files uploaded to S3 but MacroFab's ingestion hasn't recognized them
+        # yet (no documented post-upload trigger); the quote opens once it does.
+        result["status"] = "files_uploaded_processing"
         result["quote_http"] = s
     return result
 

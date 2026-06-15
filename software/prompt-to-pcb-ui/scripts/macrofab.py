@@ -83,6 +83,35 @@ def upload_xyrs(pcb_id, version, components):
     return _api("POST", "/api/v3/pcb/%s/%s/xyrs" % (pcb_id, version), {"xyrs": components})
 
 
+def upload_pcb_file(pcb_id, version, file_path):
+    """Upload one design file (gerber/drill) to a PCB version via MacroFab's S3
+    presigned-POST flow. Returns (ok, status)."""
+    import uuid as _uuid
+    fname = os.path.basename(file_path)
+    s, d = _api("GET", "/api/v2/sign_s3_upload", params={
+        "filename": fname, "upload_type": "pcb",
+        "pcb_id": pcb_id, "pcb_revision": version})
+    if s != 200 or "form_fields" not in d:
+        return False, s
+    uri, ff = d["uri"], d["form_fields"]
+    fb = open(file_path, "rb").read()
+    boundary = "----mf" + _uuid.uuid4().hex
+    pre = ""
+    for k, v in ff.items():
+        pre += '--%s\r\nContent-Disposition: form-data; name="%s"\r\n\r\n%s\r\n' % (boundary, k, v)
+    pre += ('--%s\r\nContent-Disposition: form-data; name="file"; filename="%s"\r\n'
+            'Content-Type: application/octet-stream\r\n\r\n' % (boundary, fname))
+    body = pre.encode() + fb + ("\r\n--%s--\r\n" % boundary).encode()
+    req = urllib.request.Request(
+        uri, data=body, method="POST",
+        headers={"Content-Type": "multipart/form-data; boundary=%s" % boundary})
+    try:
+        with urllib.request.urlopen(req, timeout=90) as r:
+            return r.status in (200, 204), r.status
+    except urllib.error.HTTPError as e:
+        return False, e.code
+
+
 def get_quote(pcb_id, version=1, quantity=10, **opts):
     params = {"quantity": quantity}
     params.update({k: v for k, v in opts.items() if v is not None})
