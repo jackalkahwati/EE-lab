@@ -42,7 +42,14 @@ for u in drc.get("unconnected_items", []):
         if m:
             unrouted.add(m.group(1))
 zone_nets = {str(z.GetNetname()) for z in b.Zones() if z.GetNetCode() > 0}
-unrouted_signal = sorted(unrouted - zone_nets)
+# A net that DRC lists in unconnected_items is genuinely NOT fully connected,
+# even if a copper zone exists for it: zones are filled before DRC, so KiCad's
+# connectivity already credits zone connections. A pad still flagged unconnected
+# is a real island (e.g. an SMD power pad with no via down to the plane). Do NOT
+# subtract zone_nets here — doing so reported zone-served nets as "routed" while
+# pads sat disconnected (the false "15/15 routed"). zoneServedNets stays below as
+# informational only.
+unrouted_signal = sorted(unrouted)
 
 violations = drc.get("violations", [])
 vio_summaries = [

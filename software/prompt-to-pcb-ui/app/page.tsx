@@ -58,19 +58,48 @@ export default function FirstLightPage() {
   const stageStartRef = useRef<Record<string, number>>({})
   const currentStageRef = useRef<string | null>(null)
 
-  // restore persisted runs on mount (client-only, avoids hydration mismatch)
+  // restore persisted runs on mount (client-only, avoids hydration mismatch).
+  // Only restore runs WITHOUT a runDir: disk-backed runs (those with a runDir)
+  // are authoritative from /api/runs below — restoring them from localStorage is
+  // exactly what resurrected stale runs pointing at deleted snapshot dirs, which
+  // then rendered the wrong (shared-fallback) board under their unique id.
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('fl-runs') || 'null')
       if (Array.isArray(saved) && saved.length) {
-        setRuns(
-          saved.map((r: Run) =>
-            r.status === 'RUNNING' ? { ...r, status: 'GATE FAILED' } : r,
-          ),
-        )
+        const transient = saved.filter((r: Run) => !r.runDir)
+        if (transient.length)
+          setRuns(
+            transient.map((r: Run) =>
+              r.status === 'RUNNING' ? { ...r, status: 'GATE FAILED' } : r,
+            ),
+          )
       }
     } catch {
       /* ignore corrupt storage */
+    }
+  }, [])
+
+  // disk is the source of truth for real runs: load every run that actually has
+  // a snapshot on disk (public/runs/<id>), each with its OWN id + board. Drop any
+  // prior run whose dir no longer exists so a unique id can never show a board
+  // that isn't its own.
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/runs')
+      .then((r) => (r.ok ? r.json() : { runs: [] }))
+      .then(({ runs: disk }: { runs: Run[] }) => {
+        if (cancelled || !Array.isArray(disk)) return
+        const ids = new Set(disk.map((r) => r.id))
+        setRuns((prev) => [
+          ...disk,
+          ...prev.filter((r) => !r.runDir && !ids.has(r.id)),
+        ])
+        if (disk.length > 0) setSelectedId(disk[0].id)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
     }
   }, [])
 
@@ -439,6 +468,24 @@ export default function FirstLightPage() {
               <GatesLogs
                 run={selectedRun}
                 reports={isReal ? real?.reports : null}
+                runDir={selectedRunDir}
+                onRefresh={() => {
+                  // a repair rewrote this run's artifacts — reload its board and
+                  // refresh statuses/metrics from disk without changing selection
+                  loadRealBoard(selectedRunDir ?? '').then((d) => d && setRealBoard(d))
+                  fetch('/api/runs')
+                    .then((r) => (r.ok ? r.json() : { runs: [] }))
+                    .then(({ runs: disk }: { runs: Run[] }) => {
+                      if (!Array.isArray(disk)) return
+                      setRuns((prev) =>
+                        prev.map((r) => {
+                          const u = disk.find((d) => d.id === r.id)
+                          return u ? { ...r, status: u.status, metrics: u.metrics } : r
+                        }),
+                      )
+                    })
+                    .catch(() => {})
+                }}
               />
             )}
             {tab === 'Order' && (

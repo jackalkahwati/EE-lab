@@ -387,6 +387,7 @@ export async function GET(req: Request) {
           '-o', drcPath, variantBoard,
         ])
         let violations = -1
+        let unconnected = -1
         try {
           const drc = JSON.parse(fs.readFileSync(drcPath, 'utf8'))
           const all = drc.violations ?? []
@@ -396,17 +397,30 @@ export async function GET(req: Request) {
           const soft = all.filter((v: { type: string }) => v.type === 'solder_mask_bridge')
           const hard = all.filter((v: { type: string }) => v.type !== 'solder_mask_bridge')
           violations = hard.length
+          // Unconnected items = pads with no copper path to their net. Zones are
+          // filled before DRC, so KiCad already credits zone connections; anything
+          // still listed here is a real island (e.g. an SMD power pad with no via
+          // to the plane). A board with missing connections is NOT fabricable, so
+          // these BLOCK the gate — previously they were only logged, which let
+          // boards pass with a "zone-served" net whose pads weren't connected.
+          unconnected = (drc.unconnected_items ?? []).length
           if (soft.length)
             log('validation', `${soft.length} solder-mask-bridge note(s) — fab-merged on fine pitch, not blocking`, 'warn')
           log(
             'validation',
-            `kicad-cli pcb drc → ${hard.length} blocking violations, ${(drc.unconnected_items ?? []).length} unconnected items`,
-            hard.length === 0 ? 'ok' : 'err',
+            `kicad-cli pcb drc → ${hard.length} rule violations, ${unconnected} unconnected (missing connections)`,
+            hard.length === 0 && unconnected === 0 ? 'ok' : 'err',
           )
+          if (unconnected > 0)
+            log(
+              'validation',
+              `${unconnected} pad(s) not connected to their net — board is electrically incomplete (not fabricable)`,
+              'err',
+            )
         } catch {
           log('validation', 'could not parse DRC report', 'err')
         }
-        const drcPass = violations === 0
+        const drcPass = violations === 0 && unconnected === 0
 
         // ---- sync: the routed variant IS the board — render it with copper --
         // One coherent board: renders (now with traces), layer SVGs, routing
@@ -456,6 +470,22 @@ export async function GET(req: Request) {
         ])
         log('validation', 'board · BOM · renders · stats — all the prompt variant', 'ok')
 
+        // ---- persist the editable board into the run dir so defects can be
+        // repaired later WITHOUT re-running the whole pipeline (Phase 1 of
+        // incremental repair). /api/pipeline/repair loads this file, applies one
+        // targeted fix, refills zones, re-DRCs and rewrites this run's artifacts.
+        // Also enables a manual KiCad round-trip (download → fix → upload).
+        if (runRoot) {
+          try {
+            fs.copyFileSync(variantBoard, path.join(runRoot, 'variant.kicad_pcb'))
+            const wsSes = path.join(ws, 'variant.ses')
+            if (fs.existsSync(wsSes))
+              fs.copyFileSync(wsSes, path.join(runRoot, 'variant.ses'))
+          } catch {
+            /* persist best-effort; repair just won't be available for this run */
+          }
+        }
+
         let fabZip: string | undefined
         if (drcPass) {
           log('validation', 'GATE validation: DRC = 0 — PASS', 'ok')
@@ -482,7 +512,16 @@ export async function GET(req: Request) {
           }
           send({ type: 'stage', id: 'validation', state: 'passed' })
         } else {
-          send({ type: 'stage', id: 'validation', state: 'failed', failReason: `${violations} DRC violations` })
+          send({
+            type: 'stage',
+            id: 'validation',
+            state: 'failed',
+            failReason:
+              violations > 0
+                ? `${violations} DRC violations` +
+                  (unconnected > 0 ? `, ${unconnected} unconnected` : '')
+                : `${unconnected} unconnected (missing connections)`,
+          })
         }
         const validationStatus: 'PASSED' | 'GATE FAILED' = drcPass
           ? 'PASSED'
@@ -491,7 +530,7 @@ export async function GET(req: Request) {
         const failBoard = composeMode ? variantBoard : wsBoard
         // ---- gate: DRC must be clean before electrical/firmware stages -------
         if (!drcPass) {
-          log('validation', `GATE validation FAILED: ${violations} blocking DRC violation(s) — stopping`, 'err')
+          log('validation', `GATE validation FAILED: ${violations} blocking violation(s), ${unconnected} unconnected pad(s) — stopping`, 'err')
           send({ type: 'stage', id: 'erc', state: 'blocked' })
           send({ type: 'stage', id: 'firmware', state: 'blocked' })
           send({ type: 'done', status: 'GATE FAILED', boardPath: failBoard, fabZip })
@@ -659,8 +698,11 @@ export async function GET(req: Request) {
         try {
           // write the report INTO this run's own data dir (fixes the prior
           // off-by-one where the report landed in shared data and got snapshotted
-          // by the NEXT run), then publish this run's outputs to the shared
-          // public/{data,board} so the default no-id view shows the latest board.
+          // by the NEXT run). NOTE: we deliberately do NOT publish to the shared
+          // public/{data,board} — that location is the stable FL-1 reference board
+          // shown as the default "live board". Each run is served from its OWN
+          // /runs/<id> snapshot (via runDir + /api/runs), so publishing here only
+          // corrupted the reference. The run dir is the single source of truth.
           writeRunReport(appDir, pubData, runId, {
             startedAt,
             finishedAt: new Date().toISOString(),
@@ -669,7 +711,6 @@ export async function GET(req: Request) {
             composeSpec,
             events,
           })
-          if (runRoot) publishLatest(appDir, runRoot)
         } catch {
           /* never let report writing break the response */
         }
@@ -694,23 +735,6 @@ export async function GET(req: Request) {
       Connection: 'keep-alive',
     },
   })
-}
-
-/**
- * Publish a finished run's outputs (board renders + data) to the shared
- * public/{board,data} so the default no-id view shows the most recent board.
- * The run's own public/runs/<id>/ dir remains the source of truth; this is just
- * a copy of the latest, never read back into another run.
- */
-function publishLatest(appDir: string, runRoot: string) {
-  for (const sub of ['board', 'data']) {
-    const src = path.join(runRoot, sub)
-    const dest = path.join(appDir, 'public', sub)
-    if (fs.existsSync(src)) {
-      fs.rmSync(dest, { recursive: true, force: true })
-      fs.cpSync(src, dest, { recursive: true })
-    }
-  }
 }
 
 /**

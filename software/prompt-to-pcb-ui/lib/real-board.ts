@@ -65,7 +65,10 @@ async function fetchJson<T>(url: string): Promise<T | null> {
 function buildRun(b: RealBoardJson): Run {
   const placementPass =
     b.placement.overlaps === 0 && b.placement.offBoard.length === 0
-  const drcPass = b.drc.violations === 0
+  // unconnected items (missing connections) make a board electrically incomplete
+  // and not fabricable, so they fail validation just like a rule violation. A net
+  // "served by a zone" is NOT routed if its pads aren't actually connected to it.
+  const drcPass = b.drc.violations === 0 && b.drc.unconnectedItems === 0
   const passed = placementPass && drcPass
 
   const logs: LogLine[] = [
@@ -77,7 +80,15 @@ function buildRun(b: RealBoardJson): Run {
     { stage: 'placement', prefix: 'place', text: `GATE placement: ${placementPass ? 'PASS' : 'FAIL'}`, level: placementPass ? 'ok' : 'err' },
     { stage: 'routing', prefix: 'route', text: `copper on board: ${b.tracks} track segments, ${b.vias} vias` },
     { stage: 'routing', prefix: 'route', text: `${b.netsRouted}/${b.netsTotal} nets fully routed (${b.unroutedNets.length} open, ${b.zoneServedNets.length} zone-served)` },
-    { stage: 'routing', prefix: 'route', text: 'GATE emission: only DRC-clean nets shipped — PASS', level: 'ok' },
+    {
+      stage: 'routing',
+      prefix: 'route',
+      text:
+        b.drc.unconnectedItems === 0
+          ? 'GATE emission: every pad connected to its net — PASS'
+          : `GATE emission: ${b.drc.unconnectedItems} pad(s) not connected to their net — FAIL`,
+      level: b.drc.unconnectedItems === 0 ? 'ok' : 'err',
+    },
     { stage: 'validation', prefix: 'drc', text: `kicad-cli pcb drc (${b.drc.kicadVersion}) → ${b.drc.violations} violations, ${b.drc.unconnectedItems} unconnected items`, level: drcPass ? 'ok' : 'err' },
     ...b.drc.violationSummaries.slice(0, 5).map<LogLine>((v) => ({
       stage: 'validation',
@@ -196,9 +207,12 @@ function buildReports(b: RealBoardJson): GateReport[] {
           pass: b.drc.violations === 0,
         },
         {
-          rule: 'unconnected items tracked',
-          measured: `${b.drc.unconnectedItems} known (${b.unroutedNets.length} open nets)`,
-          pass: true,
+          rule: 'unconnected items = 0',
+          measured:
+            b.drc.unconnectedItems === 0
+              ? '0 unconnected'
+              : `${b.drc.unconnectedItems} pad(s) not connected to their net`,
+          pass: b.drc.unconnectedItems === 0,
         },
       ],
     },

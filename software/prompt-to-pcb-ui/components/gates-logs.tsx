@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import {
   GATE_REPORTS_PASSED,
@@ -9,7 +9,17 @@ import {
   type Run,
   type StageId,
 } from '@/lib/firstlight'
-import { Check, X, FileJson2 } from 'lucide-react'
+import {
+  Check,
+  X,
+  FileJson2,
+  Wrench,
+  RefreshCw,
+  Download,
+  Upload,
+  Loader2,
+  Stethoscope,
+} from 'lucide-react'
 
 const STAGE_COLOR: Record<StageId, string> = {
   design: 'text-primary',
@@ -20,19 +30,104 @@ const STAGE_COLOR: Record<StageId, string> = {
   firmware: 'text-[#e8b75f]',
 }
 
+type RepairOp =
+  | 'revalidate'
+  | 'clearance'
+  | 'placement'
+  | 'stitch'
+  | 'stitch-plane'
+  | 'reroute'
+  | 'diagnose'
+
+// map a failing gate check to the repair that addresses it
+function opForRule(rule: string): { op: RepairOp; label: string } | null {
+  const r = rule.toLowerCase()
+  // unconnected pads are almost always SMD power/gnd pins with no via to their
+  // plane — stitch_to_plane fixes that directly (reroute is the signal-net path).
+  if (r.includes('unconnected'))
+    return { op: 'stitch-plane', label: 'Fix: stitch pads to plane' }
+  if (r.includes('drc violations')) return { op: 'clearance', label: 'Fix: repair clearance' }
+  if (r.includes('overlap') || r.includes('off-board') || r.includes('courtyard'))
+    return { op: 'placement', label: 'Fix: repair placement' }
+  return null
+}
+
 export function GatesLogs({
   run,
   reports: reportsProp,
+  runDir,
+  onRefresh,
 }: {
   run: Run
   reports?: GateReport[] | null
+  runDir?: string
+  onRefresh?: () => void
 }) {
   const logRef = useRef<HTMLDivElement>(null)
+  const [busy, setBusy] = useState<RepairOp | null>(null)
+  const [result, setResult] = useState<string | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     const el = logRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [run.logs.length])
+
+  // repair is only possible for a real run that has its own persisted board dir
+  const canRepair = run.real === true && !!runDir && run.status !== 'RUNNING'
+
+  async function runRepair(op: RepairOp) {
+    if (busy) return
+    setBusy(op)
+    setResult(null)
+    try {
+      const res = await fetch('/api/pipeline/repair', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ runId: run.id, op }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setResult(`✗ ${data.error ?? 'repair failed'}`)
+      } else if (op === 'diagnose') {
+        setResult(data.diagnosis || 'no diagnosis returned')
+      } else {
+        const b = data.before
+        const a = data.after
+        setResult(
+          `${op}: violations ${b.violations}→${a.violations}, ` +
+            `unconnected ${b.unconnected}→${a.unconnected} — ${data.status}`,
+        )
+        onRefresh?.()
+      }
+    } catch (e) {
+      setResult(`✗ ${String(e)}`)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function uploadBoard(file: File) {
+    setBusy('revalidate')
+    setResult(null)
+    try {
+      const text = await file.text()
+      const up = await fetch(`/api/pipeline/upload?runId=${encodeURIComponent(run.id)}`, {
+        method: 'POST',
+        body: text,
+      })
+      if (!up.ok) {
+        const d = await up.json()
+        setResult(`✗ upload: ${d.error ?? up.status}`)
+        return
+      }
+      setBusy(null)
+      await runRepair('revalidate')
+    } catch (e) {
+      setResult(`✗ ${String(e)}`)
+      setBusy(null)
+    }
+  }
 
   const reports =
     reportsProp ??
@@ -81,6 +176,57 @@ export function GatesLogs({
 
       {/* gate report cards */}
       <div className="flex w-full flex-col gap-3 lg:w-80 lg:shrink-0">
+        {/* incremental-repair toolbar — fix defects without re-running the pipeline */}
+        {canRepair && (
+          <div className="flex flex-col gap-2 rounded-sm border border-border bg-card p-2.5">
+            <div className="flex items-center gap-2">
+              <Wrench className="size-3.5 text-primary" />
+              <span className="font-mono text-[11px] text-foreground">repair this run</span>
+              {busy && <Loader2 className="size-3 animate-spin text-primary" />}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                disabled={!!busy}
+                onClick={() => runRepair('revalidate')}
+                className="flex items-center gap-1 rounded-sm border border-border bg-secondary px-2 py-1 font-mono text-[10px] text-foreground transition-colors hover:border-primary/40 hover:text-primary disabled:opacity-40"
+              >
+                <RefreshCw className="size-3" /> Re-validate
+              </button>
+              <a
+                href={`${runDir}/variant.kicad_pcb`}
+                download
+                className="flex items-center gap-1 rounded-sm border border-border bg-secondary px-2 py-1 font-mono text-[10px] text-foreground transition-colors hover:border-primary/40 hover:text-primary"
+              >
+                <Download className="size-3" /> Download .kicad_pcb
+              </a>
+              <button
+                type="button"
+                disabled={!!busy}
+                onClick={() => fileRef.current?.click()}
+                className="flex items-center gap-1 rounded-sm border border-border bg-secondary px-2 py-1 font-mono text-[10px] text-foreground transition-colors hover:border-primary/40 hover:text-primary disabled:opacity-40"
+              >
+                <Upload className="size-3" /> Upload fixed
+              </button>
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".kicad_pcb"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  if (f) uploadBoard(f)
+                  e.target.value = ''
+                }}
+              />
+            </div>
+            {result && (
+              <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-sm bg-[#07090c] p-2 font-mono text-[10px] leading-relaxed text-foreground/80">
+                {result}
+              </pre>
+            )}
+          </div>
+        )}
         {reports.map((report) => {
           const allPass = report.checks.every((c) => c.pass)
           return (
@@ -135,6 +281,28 @@ export function GatesLogs({
                       >
                         {check.pass ? 'PASS' : 'FAIL'}, {check.measured}
                       </span>
+                      {!check.pass && canRepair && opForRule(check.rule) && (
+                        <span className="mt-1 flex flex-wrap gap-1.5">
+                          <button
+                            type="button"
+                            disabled={!!busy}
+                            onClick={() => runRepair(opForRule(check.rule)!.op)}
+                            className="flex items-center gap-1 rounded-sm border border-primary/40 bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] text-primary transition-colors hover:bg-primary/20 disabled:opacity-40"
+                          >
+                            <Wrench className="size-2.5" /> {opForRule(check.rule)!.label}
+                          </button>
+                          {opForRule(check.rule)!.op === 'stitch-plane' && (
+                            <button
+                              type="button"
+                              disabled={!!busy}
+                              onClick={() => runRepair('diagnose')}
+                              className="flex items-center gap-1 rounded-sm border border-border bg-secondary px-1.5 py-0.5 font-mono text-[10px] text-foreground transition-colors hover:border-primary/40 hover:text-primary disabled:opacity-40"
+                            >
+                              <Stethoscope className="size-2.5" /> Diagnose
+                            </button>
+                          )}
+                        </span>
+                      )}
                     </span>
                   </li>
                 ))}
