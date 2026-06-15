@@ -49,29 +49,50 @@ CASES = [
 
 
 def run(name, blocks):
+    import time
     spec = base64.b64encode(json.dumps(
         {"blocks": blocks, "boardClass": name}).encode()).decode()
     url = "{}?prompt={}&runId=test-{}&compose=1&spec={}".format(
         BASE, name, name, urllib.parse.quote(spec))
     stages, logs, status, err = {}, [], "?", None
+    # the pipeline serializes runs with a global lock; wait out a 409 (another
+    # run in progress) and open the streaming connection exactly once.
+    resp = None
+    for attempt in range(40):
+        try:
+            resp = urllib.request.urlopen(url, timeout=400)
+            break
+        except urllib.error.HTTPError as e:
+            if e.code == 409:
+                time.sleep(5)
+                continue
+            err = "HTTP %d" % e.code
+            break
+        except Exception as e:  # noqa: BLE001
+            err = "open error: %s" % str(e)[:60]
+            break
+    if resp is None:
+        return {"name": name, "status": status, "failed": [], "err": err or "no response",
+                "drc": "", "routed": "", "dropped": 0}
     try:
-        with urllib.request.urlopen(url, timeout=400) as r:
-            for raw in r:
-                line = raw.decode("utf-8", "replace").strip()
-                if not line.startswith("data:"):
-                    continue
-                ev = json.loads(line[5:].strip())
-                t = ev.get("type")
-                if t == "stage":
-                    stages[ev["id"]] = ev["state"]
-                elif t == "log":
-                    logs.append(ev.get("text", ""))
-                elif t == "done":
-                    status = ev.get("status")
-                elif t == "error":
-                    err = ev.get("message")
+        for raw in resp:
+            line = raw.decode("utf-8", "replace").strip()
+            if not line.startswith("data:"):
+                continue
+            ev = json.loads(line[5:].strip())
+            t = ev.get("type")
+            if t == "stage":
+                stages[ev["id"]] = ev["state"]
+            elif t == "log":
+                logs.append(ev.get("text", ""))
+            elif t == "done":
+                status = ev.get("status")
+            elif t == "error":
+                err = ev.get("message")
     except Exception as e:  # noqa: BLE001
         err = "stream error: %s" % e
+    finally:
+        resp.close()
 
     failed = [s for s, st in stages.items() if st == "failed"]
     drc = next((l for l in logs if "DRC →" in l or "violations," in l), "")
