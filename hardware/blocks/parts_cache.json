@@ -1,53 +1,43 @@
 {
  "i2c_sensor::i2c temperature sensor": {
-  "datasheet": "https://www.ti.com/lit/ds/symlink/tmp1075.pdf",
+  "datasheet": "https://www.ti.com/general/docs/suppproductinfo.tsp?distId=10&gotoUrl=https%3A%2F%2Fwww.ti.com%2Flit%2Fgpn%2Ftmp112",
   "manufacturer": "Texas Instruments",
-  "mpn": "TMP1075DGKR",
-  "package": "VSSOP-8",
+  "mpn": "TMP112NAIDRLR",
+  "package": "SOT563-6 (DRL)",
   "pins": [
-   {
-    "function": "I2C data, open-drain I/O",
-    "name": "SDA",
-    "number": "1"
-   },
    {
     "function": "I2C clock input",
     "name": "SCL",
+    "number": "1"
+   },
+   {
+    "function": "Ground",
+    "name": "GND",
     "number": "2"
    },
    {
-    "function": "Overtemperature alert, open-drain output",
+    "function": "Overtemperature/open-drain alert output",
     "name": "ALERT",
     "number": "3"
    },
    {
-    "function": "Ground reference",
-    "name": "GND",
+    "function": "I2C address select input",
+    "name": "ADD0",
     "number": "4"
    },
    {
-    "function": "I2C address select",
-    "name": "A2",
+    "function": "Supply input",
+    "name": "V+",
     "number": "5"
    },
    {
-    "function": "I2C address select",
-    "name": "A1",
+    "function": "I2C data input/output, open-drain",
+    "name": "SDA",
     "number": "6"
-   },
-   {
-    "function": "I2C address select",
-    "name": "A0",
-    "number": "7"
-   },
-   {
-    "function": "Supply voltage input",
-    "name": "V+",
-    "number": "8"
    }
   ],
   "price": 0.54,
-  "stock": 66719,
+  "stock": 9372,
   "verified": "unverified (no symbol)"
  }
 }

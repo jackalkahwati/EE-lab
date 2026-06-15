@@ -231,7 +231,9 @@ def block_lora_rfm95(x, y, n, nets):
         "5": n["spi_cs"], "6": n["ctrl_rst"], "7": n["ctrl_irq"],
         "15": n["ant"],
     }
-    b = place("RF_Module", "HOPERF_RFM9XW_SMD", "U2", x + 8, y + 9, 0, pmap, nets)
+    # the RFM95 module has no 3D model in KiCad — give it a body for the render
+    b = with_body(place("RF_Module", "HOPERF_RFM9XW_SMD", "U2", x + 8, y + 9, 0, pmap, nets),
+                  16, 16, 3)
     b += cap("C4", x + 8, y + 21, "+3V3", "GND", nets)  # below the module
     _DEVICES.append({"ref": "U2", "type": "radio"})
     return b, 17, 25

@@ -19,6 +19,7 @@ a sourced+verified part from a fallback.
 """
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -35,7 +36,11 @@ CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "parts_cac
 FALLBACK = {"i2c_sensor": "LM75B"}
 
 # routability of common package families parsed from a DigiKey description
-_PKG_GOOD = ("SOIC", "SO", "SOP", "TSSOP", "MSOP", "SSOP", "SOT", "TO-92", "DIP")
+# coarse, easy-to-route leaded packages (>= ~1mm pitch)
+_PKG_GOOD = ("SOIC", "SOP", "SO", "SOT", "TO-92", "DIP")
+# leaded but FINE pitch (<= ~0.65mm) — routable but tight; worse than SOIC.
+# Checked before _PKG_GOOD because VSSOP/MSOP/SSOP all contain the "SO" substring.
+_PKG_FINE = ("TSSOP", "VSSOP", "MSOP", "SSOP", "QSOP")
 _PKG_BAD = ("QFN", "DFN", "WSON", "BGA", "SON", "USON", "LGA", "CSP")
 
 
@@ -53,17 +58,26 @@ def _save_cache(c):
         pass
 
 
+def _pkg_match(up, keyword):
+    # the package token must not be inside another word (so 'SO' does NOT match
+    # 'SENSOR'); DigiKey writes packages as '8SO', '8VSSOP', 'SOT563', '4-DFN'.
+    return re.search(r"(?<![A-Z])" + re.escape(keyword), up) is not None
+
+
 def _pkg_rank(desc):
     """Lower is more routable. Parse the package hint from a DigiKey description
-    like 'SENSOR DIGITAL -55C-125C 8SOIC'."""
+    like 'SENSOR DIGITAL -55C-125C 8SOIC'. SOIC (1.27mm) beats fine-pitch
+    SO-variants (VSSOP/TSSOP, <=0.65mm) beats leadless (QFN/DFN). Unknown
+    package ranks below any recognized leaded one."""
     up = (desc or "").upper()
-    for k in _PKG_BAD:
-        if k in up:
-            return 20
+    if any(_pkg_match(up, k) for k in _PKG_BAD):
+        return 20
+    if any(_pkg_match(up, k) for k in _PKG_FINE):  # before _PKG_GOOD (they contain "SO")
+        return 10
     for i, k in enumerate(_PKG_GOOD):
-        if k in up:
+        if _pkg_match(up, k):
             return i
-    return 10
+    return 12
 
 
 def rank_candidates(cands):
