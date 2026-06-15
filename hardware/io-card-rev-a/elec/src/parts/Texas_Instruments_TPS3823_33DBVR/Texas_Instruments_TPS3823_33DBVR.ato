@@ -1,0 +1,22 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+import is_auto_generated
+
+component Texas_Instruments_TPS3823_33DBVR_package:
+    # This trait marks this file as auto-generated
+    # If you want to manually change it, remove the trait
+    trait is_auto_generated<system="ato_part", source="easyeda:C7719", date="2026-06-12T18:44:35.435780+00:00", checksum="98a2d84b53994980a1e11bf05054e93c11e2681eb6aa215a7b9dd22a88af95a3">
+
+    trait is_atomic_part<manufacturer="Texas Instruments", partnumber="TPS3823-33DBVR", footprint="SOT-23-5_L3.0-W1.7-P0.95-LS2.8-BL.kicad_mod", symbol="TPS3823-33DBVR.kicad_sym", model="SOT-23-5_L2.9-W1.6-H1.1-LS2.8-P0.95.step">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C7719", manufacturer="Texas Instruments", partno="TPS3823-33DBVR">
+    trait has_designator_prefix<prefix="U">
+    trait has_datasheet<datasheet="https://www.lcsc.com/datasheet/lcsc_datasheet_1810181824_Texas-Instruments-TPS3823-33DBVR_C7719.pdf">
+
+    # pins
+    signal GND ~ pin 2
+    signal VDD ~ pin 5
+    signal WDI ~ pin 4
+    signal nMR ~ pin 3
+    signal nRESET ~ pin 1

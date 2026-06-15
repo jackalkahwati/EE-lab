@@ -1,0 +1,440 @@
+"""
+DigitalDomain — FL-1 I/O Card Rev A digital I/O block.
+
+Right half of board (80-160mm):
+  - 4x MCP23017-E/SO GPIO expanders (I2C 0x20-0x23)
+    0x20: DI channels 1-16 (inputs)
+    0x21: DI channels 17-24 + 8 spare (inputs)
+    0x22: DO_LS 1-16 outputs -> 2x ULN2803 low-side drivers
+    0x23: 8 GPIO outputs (3.3V direct)
+  - 2x ULN2803ADR2G low-side MOSFET driver arrays (16 channels DO_LS1-16)
+  - Digital input protection: 24kOhm series + 3.3kOhm divider (24V -> 2.9V)
+  - MCP23017 interrupt line (INTA)
+"""
+
+import ElectricPower
+import Resistor
+import Capacitor
+from "parts/MCP23017_E_SO/MCP23017_E_SO.ato" import MCP23017_E_SO_package
+from "parts/ULN2803ADR2G/ULN2803ADR2G.ato" import ULN2803ADR2G_package
+
+
+module DigitalDomain:
+    # Power ports
+    v3v3 = new ElectricPower
+    v24  = new ElectricPower
+
+    # I2C bus
+    signal sda
+    signal scl
+
+    # MCP23017 interrupt output to MCU
+    signal gpio_inta
+
+    # Digital input signals (24V-tolerant, protected)
+    signal di_1
+    signal di_2
+    signal di_3
+    signal di_4
+    signal di_5
+    signal di_6
+    signal di_7
+    signal di_8
+    signal di_9
+    signal di_10
+    signal di_11
+    signal di_12
+    signal di_13
+    signal di_14
+    signal di_15
+    signal di_16
+    signal di_17
+    signal di_18
+    signal di_19
+    signal di_20
+    signal di_21
+    signal di_22
+    signal di_23
+    signal di_24
+
+    # Low-side output signals (open-collector to load)
+    signal do_ls_1
+    signal do_ls_2
+    signal do_ls_3
+    signal do_ls_4
+    signal do_ls_5
+    signal do_ls_6
+    signal do_ls_7
+    signal do_ls_8
+    signal do_ls_9
+    signal do_ls_10
+    signal do_ls_11
+    signal do_ls_12
+    signal do_ls_13
+    signal do_ls_14
+    signal do_ls_15
+    signal do_ls_16
+
+    # 3.3V GPIO direct outputs
+    signal gpio_out_1
+    signal gpio_out_2
+    signal gpio_out_3
+    signal gpio_out_4
+    signal gpio_out_5
+    signal gpio_out_6
+    signal gpio_out_7
+    signal gpio_out_8
+
+    # ==========================================================================
+    # GPIO expanders: 4x MCP23017-E/SO
+    # ==========================================================================
+    gpio_di_a  = new MCP23017_E_SO_package   # 0x20: A0=A1=A2=GND, DI 1-16
+    gpio_di_b  = new MCP23017_E_SO_package   # 0x21: A0=VDD, A1=A2=GND, DI 17-24
+    gpio_do_ls = new MCP23017_E_SO_package   # 0x22: A0=A1=GND, A2=VDD, DO_LS 1-16
+    gpio_do_lv = new MCP23017_E_SO_package   # 0x23: A0=VDD, A1=GND, A2=VDD, GPIO 1-8
+
+    # gpio_di_a (0x20)
+    gpio_di_a.VDD   ~ v3v3.hv
+    gpio_di_a.VSS   ~ v3v3.lv
+    gpio_di_a.SCL   ~ scl
+    gpio_di_a.SDA   ~ sda
+    gpio_di_a.RESET ~ v3v3.hv
+    gpio_di_a.A0    ~ v3v3.lv
+    gpio_di_a.A1    ~ v3v3.lv
+    gpio_di_a.A2    ~ v3v3.lv
+    gpio_di_a.INTA  ~ gpio_inta
+
+    c_di_a = new Capacitor
+    c_di_a.capacitance = 100nF +/- 10%
+    v3v3.hv ~ c_di_a.unnamed[0]
+    c_di_a.unnamed[1] ~ v3v3.lv
+
+    # gpio_di_b (0x21)
+    gpio_di_b.VDD   ~ v3v3.hv
+    gpio_di_b.VSS   ~ v3v3.lv
+    gpio_di_b.SCL   ~ scl
+    gpio_di_b.SDA   ~ sda
+    gpio_di_b.RESET ~ v3v3.hv
+    gpio_di_b.A0    ~ v3v3.hv
+    gpio_di_b.A1    ~ v3v3.lv
+    gpio_di_b.A2    ~ v3v3.lv
+
+    c_di_b = new Capacitor
+    c_di_b.capacitance = 100nF +/- 10%
+    v3v3.hv ~ c_di_b.unnamed[0]
+    c_di_b.unnamed[1] ~ v3v3.lv
+
+    # gpio_do_ls (0x22)
+    gpio_do_ls.VDD   ~ v3v3.hv
+    gpio_do_ls.VSS   ~ v3v3.lv
+    gpio_do_ls.SCL   ~ scl
+    gpio_do_ls.SDA   ~ sda
+    gpio_do_ls.RESET ~ v3v3.hv
+    gpio_do_ls.A0    ~ v3v3.lv
+    gpio_do_ls.A1    ~ v3v3.lv
+    gpio_do_ls.A2    ~ v3v3.hv
+
+    c_do_ls = new Capacitor
+    c_do_ls.capacitance = 100nF +/- 10%
+    v3v3.hv ~ c_do_ls.unnamed[0]
+    c_do_ls.unnamed[1] ~ v3v3.lv
+
+    # gpio_do_lv (0x23)
+    gpio_do_lv.VDD   ~ v3v3.hv
+    gpio_do_lv.VSS   ~ v3v3.lv
+    gpio_do_lv.SCL   ~ scl
+    gpio_do_lv.SDA   ~ sda
+    gpio_do_lv.RESET ~ v3v3.hv
+    gpio_do_lv.A0    ~ v3v3.hv
+    gpio_do_lv.A1    ~ v3v3.lv
+    gpio_do_lv.A2    ~ v3v3.hv
+
+    c_do_lv = new Capacitor
+    c_do_lv.capacitance = 100nF +/- 10%
+    v3v3.hv ~ c_do_lv.unnamed[0]
+    c_do_lv.unnamed[1] ~ v3v3.lv
+
+    # 3.3V GPIO outputs from gpio_do_lv GPA0-GPA7
+    gpio_do_lv.GPA0 ~ gpio_out_1
+    gpio_do_lv.GPA1 ~ gpio_out_2
+    gpio_do_lv.GPA2 ~ gpio_out_3
+    gpio_do_lv.GPA3 ~ gpio_out_4
+    gpio_do_lv.GPA4 ~ gpio_out_5
+    gpio_do_lv.GPA5 ~ gpio_out_6
+    gpio_do_lv.GPA6 ~ gpio_out_7
+    gpio_do_lv.GPA7 ~ gpio_out_8
+
+    # ==========================================================================
+    # Digital Input protection: 24kOhm series + 3.3kOhm to GND divider
+    # 24V * (3.3k / (24k + 3.3k)) = 24 * 0.121 = 2.9V -> logic HIGH on MCP23017 ✓
+    # ==========================================================================
+
+    # DI1-DI8: gpio_di_a GPA0-GPA7
+    r_di1_s = new Resistor
+    r_di1_s.resistance = 24kohm +/- 5%
+    r_di1_p = new Resistor
+    r_di1_p.resistance = 3.3kohm +/- 5%
+    di_1 ~ r_di1_s.unnamed[0]
+    r_di1_s.unnamed[1] ~ r_di1_p.unnamed[0]
+    r_di1_p.unnamed[1] ~ v3v3.lv
+    r_di1_s.unnamed[1] ~ gpio_di_a.GPA0
+
+    r_di2_s = new Resistor
+    r_di2_s.resistance = 24kohm +/- 5%
+    r_di2_p = new Resistor
+    r_di2_p.resistance = 3.3kohm +/- 5%
+    di_2 ~ r_di2_s.unnamed[0]
+    r_di2_s.unnamed[1] ~ r_di2_p.unnamed[0]
+    r_di2_p.unnamed[1] ~ v3v3.lv
+    r_di2_s.unnamed[1] ~ gpio_di_a.GPA1
+
+    r_di3_s = new Resistor
+    r_di3_s.resistance = 24kohm +/- 5%
+    r_di3_p = new Resistor
+    r_di3_p.resistance = 3.3kohm +/- 5%
+    di_3 ~ r_di3_s.unnamed[0]
+    r_di3_s.unnamed[1] ~ r_di3_p.unnamed[0]
+    r_di3_p.unnamed[1] ~ v3v3.lv
+    r_di3_s.unnamed[1] ~ gpio_di_a.GPA2
+
+    r_di4_s = new Resistor
+    r_di4_s.resistance = 24kohm +/- 5%
+    r_di4_p = new Resistor
+    r_di4_p.resistance = 3.3kohm +/- 5%
+    di_4 ~ r_di4_s.unnamed[0]
+    r_di4_s.unnamed[1] ~ r_di4_p.unnamed[0]
+    r_di4_p.unnamed[1] ~ v3v3.lv
+    r_di4_s.unnamed[1] ~ gpio_di_a.GPA3
+
+    r_di5_s = new Resistor
+    r_di5_s.resistance = 24kohm +/- 5%
+    r_di5_p = new Resistor
+    r_di5_p.resistance = 3.3kohm +/- 5%
+    di_5 ~ r_di5_s.unnamed[0]
+    r_di5_s.unnamed[1] ~ r_di5_p.unnamed[0]
+    r_di5_p.unnamed[1] ~ v3v3.lv
+    r_di5_s.unnamed[1] ~ gpio_di_a.GPA4
+
+    r_di6_s = new Resistor
+    r_di6_s.resistance = 24kohm +/- 5%
+    r_di6_p = new Resistor
+    r_di6_p.resistance = 3.3kohm +/- 5%
+    di_6 ~ r_di6_s.unnamed[0]
+    r_di6_s.unnamed[1] ~ r_di6_p.unnamed[0]
+    r_di6_p.unnamed[1] ~ v3v3.lv
+    r_di6_s.unnamed[1] ~ gpio_di_a.GPA5
+
+    r_di7_s = new Resistor
+    r_di7_s.resistance = 24kohm +/- 5%
+    r_di7_p = new Resistor
+    r_di7_p.resistance = 3.3kohm +/- 5%
+    di_7 ~ r_di7_s.unnamed[0]
+    r_di7_s.unnamed[1] ~ r_di7_p.unnamed[0]
+    r_di7_p.unnamed[1] ~ v3v3.lv
+    r_di7_s.unnamed[1] ~ gpio_di_a.GPA6
+
+    r_di8_s = new Resistor
+    r_di8_s.resistance = 24kohm +/- 5%
+    r_di8_p = new Resistor
+    r_di8_p.resistance = 3.3kohm +/- 5%
+    di_8 ~ r_di8_s.unnamed[0]
+    r_di8_s.unnamed[1] ~ r_di8_p.unnamed[0]
+    r_di8_p.unnamed[1] ~ v3v3.lv
+    r_di8_s.unnamed[1] ~ gpio_di_a.GPA7
+
+    # DI9-DI16: gpio_di_a GPB0-GPB7
+    r_di9_s = new Resistor
+    r_di9_s.resistance = 24kohm +/- 5%
+    r_di9_p = new Resistor
+    r_di9_p.resistance = 3.3kohm +/- 5%
+    di_9 ~ r_di9_s.unnamed[0]
+    r_di9_s.unnamed[1] ~ r_di9_p.unnamed[0]
+    r_di9_p.unnamed[1] ~ v3v3.lv
+    r_di9_s.unnamed[1] ~ gpio_di_a.GPB0
+
+    r_di10_s = new Resistor
+    r_di10_s.resistance = 24kohm +/- 5%
+    r_di10_p = new Resistor
+    r_di10_p.resistance = 3.3kohm +/- 5%
+    di_10 ~ r_di10_s.unnamed[0]
+    r_di10_s.unnamed[1] ~ r_di10_p.unnamed[0]
+    r_di10_p.unnamed[1] ~ v3v3.lv
+    r_di10_s.unnamed[1] ~ gpio_di_a.GPB1
+
+    r_di11_s = new Resistor
+    r_di11_s.resistance = 24kohm +/- 5%
+    r_di11_p = new Resistor
+    r_di11_p.resistance = 3.3kohm +/- 5%
+    di_11 ~ r_di11_s.unnamed[0]
+    r_di11_s.unnamed[1] ~ r_di11_p.unnamed[0]
+    r_di11_p.unnamed[1] ~ v3v3.lv
+    r_di11_s.unnamed[1] ~ gpio_di_a.GPB2
+
+    r_di12_s = new Resistor
+    r_di12_s.resistance = 24kohm +/- 5%
+    r_di12_p = new Resistor
+    r_di12_p.resistance = 3.3kohm +/- 5%
+    di_12 ~ r_di12_s.unnamed[0]
+    r_di12_s.unnamed[1] ~ r_di12_p.unnamed[0]
+    r_di12_p.unnamed[1] ~ v3v3.lv
+    r_di12_s.unnamed[1] ~ gpio_di_a.GPB3
+
+    r_di13_s = new Resistor
+    r_di13_s.resistance = 24kohm +/- 5%
+    r_di13_p = new Resistor
+    r_di13_p.resistance = 3.3kohm +/- 5%
+    di_13 ~ r_di13_s.unnamed[0]
+    r_di13_s.unnamed[1] ~ r_di13_p.unnamed[0]
+    r_di13_p.unnamed[1] ~ v3v3.lv
+    r_di13_s.unnamed[1] ~ gpio_di_a.GPB4
+
+    r_di14_s = new Resistor
+    r_di14_s.resistance = 24kohm +/- 5%
+    r_di14_p = new Resistor
+    r_di14_p.resistance = 3.3kohm +/- 5%
+    di_14 ~ r_di14_s.unnamed[0]
+    r_di14_s.unnamed[1] ~ r_di14_p.unnamed[0]
+    r_di14_p.unnamed[1] ~ v3v3.lv
+    r_di14_s.unnamed[1] ~ gpio_di_a.GPB5
+
+    r_di15_s = new Resistor
+    r_di15_s.resistance = 24kohm +/- 5%
+    r_di15_p = new Resistor
+    r_di15_p.resistance = 3.3kohm +/- 5%
+    di_15 ~ r_di15_s.unnamed[0]
+    r_di15_s.unnamed[1] ~ r_di15_p.unnamed[0]
+    r_di15_p.unnamed[1] ~ v3v3.lv
+    r_di15_s.unnamed[1] ~ gpio_di_a.GPB6
+
+    r_di16_s = new Resistor
+    r_di16_s.resistance = 24kohm +/- 5%
+    r_di16_p = new Resistor
+    r_di16_p.resistance = 3.3kohm +/- 5%
+    di_16 ~ r_di16_s.unnamed[0]
+    r_di16_s.unnamed[1] ~ r_di16_p.unnamed[0]
+    r_di16_p.unnamed[1] ~ v3v3.lv
+    r_di16_s.unnamed[1] ~ gpio_di_a.GPB7
+
+    # DI17-DI24: gpio_di_b GPA0-GPA7
+    r_di17_s = new Resistor
+    r_di17_s.resistance = 24kohm +/- 5%
+    r_di17_p = new Resistor
+    r_di17_p.resistance = 3.3kohm +/- 5%
+    di_17 ~ r_di17_s.unnamed[0]
+    r_di17_s.unnamed[1] ~ r_di17_p.unnamed[0]
+    r_di17_p.unnamed[1] ~ v3v3.lv
+    r_di17_s.unnamed[1] ~ gpio_di_b.GPA0
+
+    r_di18_s = new Resistor
+    r_di18_s.resistance = 24kohm +/- 5%
+    r_di18_p = new Resistor
+    r_di18_p.resistance = 3.3kohm +/- 5%
+    di_18 ~ r_di18_s.unnamed[0]
+    r_di18_s.unnamed[1] ~ r_di18_p.unnamed[0]
+    r_di18_p.unnamed[1] ~ v3v3.lv
+    r_di18_s.unnamed[1] ~ gpio_di_b.GPA1
+
+    r_di19_s = new Resistor
+    r_di19_s.resistance = 24kohm +/- 5%
+    r_di19_p = new Resistor
+    r_di19_p.resistance = 3.3kohm +/- 5%
+    di_19 ~ r_di19_s.unnamed[0]
+    r_di19_s.unnamed[1] ~ r_di19_p.unnamed[0]
+    r_di19_p.unnamed[1] ~ v3v3.lv
+    r_di19_s.unnamed[1] ~ gpio_di_b.GPA2
+
+    r_di20_s = new Resistor
+    r_di20_s.resistance = 24kohm +/- 5%
+    r_di20_p = new Resistor
+    r_di20_p.resistance = 3.3kohm +/- 5%
+    di_20 ~ r_di20_s.unnamed[0]
+    r_di20_s.unnamed[1] ~ r_di20_p.unnamed[0]
+    r_di20_p.unnamed[1] ~ v3v3.lv
+    r_di20_s.unnamed[1] ~ gpio_di_b.GPA3
+
+    r_di21_s = new Resistor
+    r_di21_s.resistance = 24kohm +/- 5%
+    r_di21_p = new Resistor
+    r_di21_p.resistance = 3.3kohm +/- 5%
+    di_21 ~ r_di21_s.unnamed[0]
+    r_di21_s.unnamed[1] ~ r_di21_p.unnamed[0]
+    r_di21_p.unnamed[1] ~ v3v3.lv
+    r_di21_s.unnamed[1] ~ gpio_di_b.GPA4
+
+    r_di22_s = new Resistor
+    r_di22_s.resistance = 24kohm +/- 5%
+    r_di22_p = new Resistor
+    r_di22_p.resistance = 3.3kohm +/- 5%
+    di_22 ~ r_di22_s.unnamed[0]
+    r_di22_s.unnamed[1] ~ r_di22_p.unnamed[0]
+    r_di22_p.unnamed[1] ~ v3v3.lv
+    r_di22_s.unnamed[1] ~ gpio_di_b.GPA5
+
+    r_di23_s = new Resistor
+    r_di23_s.resistance = 24kohm +/- 5%
+    r_di23_p = new Resistor
+    r_di23_p.resistance = 3.3kohm +/- 5%
+    di_23 ~ r_di23_s.unnamed[0]
+    r_di23_s.unnamed[1] ~ r_di23_p.unnamed[0]
+    r_di23_p.unnamed[1] ~ v3v3.lv
+    r_di23_s.unnamed[1] ~ gpio_di_b.GPA6
+
+    r_di24_s = new Resistor
+    r_di24_s.resistance = 24kohm +/- 5%
+    r_di24_p = new Resistor
+    r_di24_p.resistance = 3.3kohm +/- 5%
+    di_24 ~ r_di24_s.unnamed[0]
+    r_di24_s.unnamed[1] ~ r_di24_p.unnamed[0]
+    r_di24_p.unnamed[1] ~ v3v3.lv
+    r_di24_s.unnamed[1] ~ gpio_di_b.GPA7
+
+    # ==========================================================================
+    # Low-side drivers: 2x ULN2803ADR2G
+    # gpio_do_ls GPA -> uln_a INx -> OUTx = open-collector sink
+    # COM = v24.hv (flyback clamp to 24V via internal diodes)
+    # ==========================================================================
+    uln_a = new ULN2803ADR2G_package   # DO_LS 1-8
+    uln_b = new ULN2803ADR2G_package   # DO_LS 9-16
+
+    uln_a.GND ~ v3v3.lv
+    uln_a.COM ~ v24.hv
+    uln_b.GND ~ v3v3.lv
+    uln_b.COM ~ v24.hv
+
+    # GPIO expander outputs (gpio_do_ls GPA) -> ULN2803 inputs
+    gpio_do_ls.GPA0 ~ uln_a.IN1
+    gpio_do_ls.GPA1 ~ uln_a.IN2
+    gpio_do_ls.GPA2 ~ uln_a.IN3
+    gpio_do_ls.GPA3 ~ uln_a.IN4
+    gpio_do_ls.GPA4 ~ uln_a.IN5
+    gpio_do_ls.GPA5 ~ uln_a.IN6
+    gpio_do_ls.GPA6 ~ uln_a.IN7
+    gpio_do_ls.GPA7 ~ uln_a.IN8
+
+    gpio_do_ls.GPB0 ~ uln_b.IN1
+    gpio_do_ls.GPB1 ~ uln_b.IN2
+    gpio_do_ls.GPB2 ~ uln_b.IN3
+    gpio_do_ls.GPB3 ~ uln_b.IN4
+    gpio_do_ls.GPB4 ~ uln_b.IN5
+    gpio_do_ls.GPB5 ~ uln_b.IN6
+    gpio_do_ls.GPB6 ~ uln_b.IN7
+    gpio_do_ls.GPB7 ~ uln_b.IN8
+
+    # Open-collector outputs
+    uln_a.OUT1 ~ do_ls_1
+    uln_a.OUT2 ~ do_ls_2
+    uln_a.OUT3 ~ do_ls_3
+    uln_a.OUT4 ~ do_ls_4
+    uln_a.OUT5 ~ do_ls_5
+    uln_a.OUT6 ~ do_ls_6
+    uln_a.OUT7 ~ do_ls_7
+    uln_a.OUT8 ~ do_ls_8
+
+    uln_b.OUT1 ~ do_ls_9
+    uln_b.OUT2 ~ do_ls_10
+    uln_b.OUT3 ~ do_ls_11
+    uln_b.OUT4 ~ do_ls_12
+    uln_b.OUT5 ~ do_ls_13
+    uln_b.OUT6 ~ do_ls_14
+    uln_b.OUT7 ~ do_ls_15
+    uln_b.OUT8 ~ do_ls_16

@@ -1,0 +1,23 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+
+component Diode_1N4148WS_package:
+    """1N4148WS — silicon switching diode, SOD-323.
+    LCSC C57759 (Micro Commercial Co. 1N4148WT).
+    Datasheet-verified pinout for SOD-323 (KiCad D_SOD-323):
+      pin 1 = Anode (A), pin 2 = Cathode (K)."""
+
+    trait is_atomic_part<manufacturer="Micro Commercial Co", partnumber="1N4148WT",
+        footprint="D_SOD-323_HandSoldering.kicad_mod", symbol="1N4148WT.kicad_sym",
+        model="D_SOD-323.STEP">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C57759",
+        manufacturer="Micro Commercial Co", partno="1N4148WT">
+    trait has_designator_prefix<prefix="D">
+    trait has_datasheet<datasheet="https://wmsc.lcsc.com/wmsc/upload/file/pdf/v2/lcsc/2201271300_Micro-Commercial-Co-1N4148WT_C57759.pdf">
+
+    pin 1
+    pin 2
+    signal A ~ pin 1
+    signal K ~ pin 2

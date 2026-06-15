@@ -1,0 +1,33 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+
+component SHT31_DIS_B_package:
+    """Temperature and humidity sensor I2C DFN-8"""
+    # VERIFY: run `ato create part -s SHT31-DIS-B -a` to confirm LCSC C46765
+    trait is_atomic_part<manufacturer="Sensirion", partnumber="SHT31-DIS-B",
+        footprint="DFN-8_L2.5-W2.5-P0.5-BL.kicad_mod",
+        symbol="SHT31-DIS-B.kicad_sym",
+        model="DFN-8_L2.5-W2.5-H0.9-P0.5.STEP">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C46765",
+        manufacturer="Sensirion", partno="SHT31-DIS-B">
+    trait has_designator_prefix<prefix="U">
+    trait has_datasheet<datasheet="https://www.sensirion.com/fileadmin/user_upload/customers/sensirion/Dokumente/2_Humidity_Sensors/Datasheets/Sensirion_Humidity_Sensors_SHT3x_Datasheet_digital.pdf">
+
+    pin 1
+    pin 2
+    pin 3
+    pin 4
+    pin 5
+    pin 6
+    pin 7
+    pin 8
+
+    signal SDA    ~ pin 1
+    signal ADDR   ~ pin 2
+    signal ALERT  ~ pin 3
+    signal SCL    ~ pin 4
+    signal VDD    ~ pin 6
+    signal nRESET ~ pin 7
+    signal GND    ~ pin 8

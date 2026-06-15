@@ -1,0 +1,84 @@
+{
+  "board": "io-card-rev-a",
+  "eeprom_device": "24AA025UIDT-I/OT",
+  "eeprom_size_bytes": 256,
+  "eeprom_i2c_addr": "0x50",
+  "memory_map": {
+    "0x00-0x07": {"name": "board_type",    "type": "ascii[8]",  "value": "FL1-IOCRD"},
+    "0x08-0x0F": {"name": "revision",      "type": "ascii[8]",  "value": "REV-A"},
+    "0x10-0x17": {"name": "serial",        "type": "ascii[8]",  "description": "8-char ASCII serial number"},
+    "0x18":      {"name": "board_state",   "type": "uint8",     "value_calibrated": "0xA5"},
+    "0x19":      {"name": "checksum",      "type": "uint8",     "description": "XOR of bytes 0x00-0x18"},
+    "0x1A-0x1F": {"name": "reserved",      "type": "bytes[6]"},
+    "0x20-0x23": {"name": "mfg_date",      "type": "uint32_le", "description": "Unix timestamp"},
+    "0x24-0x27": {"name": "cal_date",      "type": "uint32_le", "description": "Last calibration unix timestamp"},
+    "0x28-0x2F": {"name": "ai1_cal",       "type": "float32x2", "description": "AI1 gain + offset"},
+    "0x30-0x37": {"name": "ai2_cal",       "type": "float32x2", "description": "AI2 gain + offset"},
+    "0x38-0x3F": {"name": "ai3_cal",       "type": "float32x2"},
+    "0x40-0x47": {"name": "ai4_cal",       "type": "float32x2"},
+    "0x48-0x4F": {"name": "ai5_cal",       "type": "float32x2"},
+    "0x50-0x57": {"name": "ai6_cal",       "type": "float32x2"},
+    "0x58-0x5F": {"name": "ai7_cal",       "type": "float32x2"},
+    "0x60-0x67": {"name": "ai8_cal",       "type": "float32x2"},
+    "0x68-0x6F": {"name": "ai9_cal",       "type": "float32x2"},
+    "0x70-0x77": {"name": "ai10_cal",      "type": "float32x2"},
+    "0x78-0x7F": {"name": "ai11_cal",      "type": "float32x2"},
+    "0x80-0x87": {"name": "ai12_cal",      "type": "float32x2"},
+    "0x88-0x8F": {"name": "ai13_ntc1_cal", "type": "float32x2"},
+    "0x90-0x97": {"name": "ai14_ntc2_cal", "type": "float32x2"},
+    "0x98-0x9F": {"name": "ai15_ntc3_cal", "type": "float32x2"},
+    "0xA0-0xA7": {"name": "ai16_ntc4_cal", "type": "float32x2"},
+    "0xA8-0xAF": {"name": "ao1_cal",       "type": "float32x2", "description": "AO1 gain + offset"},
+    "0xB0-0xB7": {"name": "ao2_cal",       "type": "float32x2"},
+    "0xB8-0xBF": {"name": "ao3_cal",       "type": "float32x2"},
+    "0xC0-0xC7": {"name": "ao4_cal",       "type": "float32x2"},
+    "0xC8-0xCF": {"name": "diff1_offset",  "type": "float32x2", "description": "DIFF1 gain + offset (ADS1256)"},
+    "0xD0-0xD7": {"name": "diff2_offset",  "type": "float32x2"},
+    "0xD8-0xDF": {"name": "diff3_offset",  "type": "float32x2"},
+    "0xE0-0xE7": {"name": "diff4_offset",  "type": "float32x2"},
+    "0xE8-0xF7": {"name": "reserved2",     "type": "bytes[16]"},
+    "0xF8-0xFF": {"name": "unique_id",      "type": "bytes[8]",  "description": "Factory 64-bit MAC (read-only)"}
+  },
+  "calibration_procedure": [
+    {
+      "step": 1,
+      "name": "AI voltage reference calibration",
+      "description": "Apply precision voltage reference (e.g. 12.000V) to each AI channel. Record actual voltage vs set voltage. Compute gain=V_ref/V_measured, offset=0. Write to EEPROM.",
+      "channels": "AI1-AI12",
+      "equipment": "Fluke 8846A DMM or equivalent 6.5-digit meter"
+    },
+    {
+      "step": 2,
+      "name": "NTC thermistor verification",
+      "description": "At 25C ambient, verify AI13-AI16 read ~1.65V (midpoint of 10k/10k divider). Compute offset correction.",
+      "channels": "AI13-AI16",
+      "equipment": "Calibrated temperature chamber"
+    },
+    {
+      "step": 3,
+      "name": "AO calibration",
+      "description": "Set each AO to 0V, 2.5V, 5.0V. Measure output with DMM. Compute gain and offset. Write to EEPROM via CALIBRATE DAC command.",
+      "channels": "AO1-AO4",
+      "equipment": "DMM 4.5-digit minimum"
+    },
+    {
+      "step": 4,
+      "name": "ADS1256 self-calibration",
+      "description": "Send CALIBRATE ADC command. Board runs SELFCAL sequence. Verify status=OK.",
+      "channels": "DIFF1-4",
+      "equipment": "None (onboard reference)"
+    },
+    {
+      "step": 5,
+      "name": "Mark calibrated",
+      "description": "Write board_state=0xA5, cal_date=current_unix_ts, checksum=XOR(0x00..0x18) to EEPROM.",
+      "equipment": "Host library: io.calibrate_adc() + io.calibrate_dac()"
+    }
+  ],
+  "cal_data_format": {
+    "float32x2": "Two consecutive IEEE 754 float32 little-endian values: [gain, offset]",
+    "applied_as": "corrected_value = raw_value * gain + offset",
+    "default_gain": 1.0,
+    "default_offset": 0.0
+  }
+}

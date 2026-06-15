@@ -1,0 +1,38 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+
+component DAC8552IDGKT_package:
+    """16-bit dual-channel DAC SPI VSSOP-10"""
+    # VERIFY: run `ato create part -s DAC8552IDGKT -a` to confirm LCSC C8726
+    trait is_atomic_part<manufacturer="Texas Instruments", partnumber="DAC8552IDGKT",
+        footprint="VSSOP-10_L3.0-W3.0-P0.50-LS3.4-BL.kicad_mod",
+        symbol="DAC8552IDGKT.kicad_sym",
+        model="VSSOP-10_L3.0-W3.0-H1.1-LS3.4-P0.50.STEP">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C8726",
+        manufacturer="Texas Instruments", partno="DAC8552IDGKT">
+    trait has_designator_prefix<prefix="U">
+    trait has_datasheet<datasheet="https://www.ti.com/lit/ds/symlink/dac8552.pdf">
+
+    pin 1
+    pin 2
+    pin 3
+    pin 4
+    pin 5
+    pin 6
+    pin 7
+    pin 8
+    pin 9
+    pin 10
+
+    signal VDD   ~ pin 1
+    signal VOUTA ~ pin 2
+    signal VOUTB ~ pin 3
+    signal GND   ~ pin 4
+    signal LDAC  ~ pin 5
+    signal CLR   ~ pin 6
+    signal SCLK  ~ pin 7
+    signal DIN   ~ pin 8
+    signal SYNC  ~ pin 9
+    signal VREF  ~ pin 10

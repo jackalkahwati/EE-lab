@@ -1,0 +1,30 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+
+component REF5025IDGKT_package:
+    """5.0V precision voltage reference 3ppm/degC VSSOP-8"""
+    # VERIFY: run `ato create part -s REF5025IDGKT -a` to confirm LCSC C2968855
+    trait is_atomic_part<manufacturer="Texas Instruments", partnumber="REF5025IDGKT",
+        footprint="VSSOP-8_L3.0-W3.0-P0.65-LS3.4-BL.kicad_mod",
+        symbol="REF5025IDGKT.kicad_sym",
+        model="VSSOP-8_L3.0-W3.0-H1.1-LS3.4-P0.65.STEP">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C2968855",
+        manufacturer="Texas Instruments", partno="REF5025IDGKT">
+    trait has_designator_prefix<prefix="U">
+    trait has_datasheet<datasheet="https://www.ti.com/lit/ds/symlink/ref5025.pdf">
+
+    pin 1
+    pin 2
+    pin 3
+    pin 4
+    pin 5
+    pin 6
+    pin 7
+    pin 8
+
+    signal IN  ~ pin 3
+    signal GND ~ pin 2
+    signal OUT ~ pin 6
+    signal NR  ~ pin 5

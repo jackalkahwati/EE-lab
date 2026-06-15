@@ -1,0 +1,74 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+
+component MCP23017_E_SO_package:
+    """16-bit I2C GPIO expander SOIC-28"""
+    # Confirmed: LCSC C47499
+    trait is_atomic_part<manufacturer="Microchip Technology", partnumber="MCP23017-E/SO",
+        footprint="SOIC-28_L17.9-W7.5-P1.27-LS10.3-BL.kicad_mod",
+        symbol="MCP23017-E_SO.kicad_sym",
+        model="SOIC-28_L17.9-W7.5-H2.65-LS10.3-P1.27.STEP">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C47499",
+        manufacturer="Microchip Technology", partno="MCP23017-E/SO">
+    trait has_designator_prefix<prefix="U">
+    trait has_datasheet<datasheet="https://ww1.microchip.com/downloads/en/devicedoc/20001952c.pdf">
+
+    pin 1
+    pin 2
+    pin 3
+    pin 4
+    pin 5
+    pin 6
+    pin 7
+    pin 8
+    pin 9
+    pin 10
+    pin 11
+    pin 12
+    pin 13
+    pin 14
+    pin 15
+    pin 16
+    pin 17
+    pin 18
+    pin 19
+    pin 20
+    pin 21
+    pin 22
+    pin 23
+    pin 24
+    pin 25
+    pin 26
+    pin 27
+    pin 28
+
+    signal GPB0 ~ pin 1
+    signal GPB1 ~ pin 2
+    signal GPB2 ~ pin 3
+    signal GPB3 ~ pin 4
+    signal GPB4 ~ pin 5
+    signal GPB5 ~ pin 6
+    signal GPB6 ~ pin 7
+    signal GPB7 ~ pin 8
+    signal VDD  ~ pin 9
+    signal VSS  ~ pin 10
+    signal NC   ~ pin 11
+    signal SCL  ~ pin 12
+    signal SDA  ~ pin 13
+    signal NC2  ~ pin 14
+    signal A0   ~ pin 15
+    signal A1   ~ pin 16
+    signal A2   ~ pin 17
+    signal RESET ~ pin 18
+    signal INTB ~ pin 19
+    signal INTA ~ pin 20
+    signal GPA0 ~ pin 21
+    signal GPA1 ~ pin 22
+    signal GPA2 ~ pin 23
+    signal GPA3 ~ pin 24
+    signal GPA4 ~ pin 25
+    signal GPA5 ~ pin 26
+    signal GPA6 ~ pin 27
+    signal GPA7 ~ pin 28

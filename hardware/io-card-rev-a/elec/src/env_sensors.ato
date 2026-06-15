@@ -1,0 +1,90 @@
+"""
+EnvSensors — FL-1 I/O Card Rev A environmental sensing.
+
+  - SHT31-DIS-B: board temperature + humidity (I2C 0x44, ADDR=GND)
+  - 5x NTC_10K_0402: PCB temperature monitoring (NTC thermistors)
+    Each NTC biased with 10kOhm to 3.3V, midpoint -> AI13-AI17 (via analog domain)
+    Steinhart-Hart B=3950: T = 1/(ln(R/10000)/3950 + 1/298.15) - 273.15
+"""
+
+import ElectricPower
+import Resistor
+import Capacitor
+from "parts/SHT31_DIS_B/SHT31_DIS_B.ato" import SHT31_DIS_B_package
+from "parts/NTC_10K_0402/NTC_10K_0402.ato" import NTC_10K_0402_package
+
+
+module EnvSensors:
+    v3v3 = new ElectricPower
+
+    signal sda
+    signal scl
+
+    # NTC midpoint output signals (connect to ADC AI channels 13-16 + spare)
+    signal ntc_1_out
+    signal ntc_2_out
+    signal ntc_3_out
+    signal ntc_4_out
+    signal ntc_5_out
+
+    # ==========================================================================
+    # SHT31-DIS-B temperature + humidity sensor (I2C 0x44)
+    # ==========================================================================
+    sht31 = new SHT31_DIS_B_package
+
+    sht31.VDD    ~ v3v3.hv
+    sht31.GND    ~ v3v3.lv
+    sht31.SDA    ~ sda
+    sht31.SCL    ~ scl
+    sht31.ADDR   ~ v3v3.lv    # ADDR=GND -> I2C 0x44
+    sht31.nRESET ~ v3v3.hv    # nRESET tied high
+
+    c_sht31 = new Capacitor
+    c_sht31.capacitance = 100nF +/- 10%
+    v3v3.hv ~ c_sht31.unnamed[0]
+    c_sht31.unnamed[1] ~ v3v3.lv
+
+    # ==========================================================================
+    # NTC thermistors (5x 10kOhm at 25C, B=3950)
+    # Voltage divider: 3.3V -> 10kOhm bias R -> midpoint -> NTC -> GND
+    # At 25C: midpoint = 3.3V * 10k/(10k+10k) = 1.65V
+    # ==========================================================================
+    ntc_1 = new NTC_10K_0402_package
+    ntc_bias_1 = new Resistor
+    ntc_bias_1.resistance = 10kohm +/- 1%
+    v3v3.hv ~ ntc_bias_1.unnamed[0]
+    ntc_bias_1.unnamed[1] ~ ntc_1.p1
+    ntc_1.p1 ~ ntc_1_out
+    ntc_1.p2 ~ v3v3.lv
+
+    ntc_2 = new NTC_10K_0402_package
+    ntc_bias_2 = new Resistor
+    ntc_bias_2.resistance = 10kohm +/- 1%
+    v3v3.hv ~ ntc_bias_2.unnamed[0]
+    ntc_bias_2.unnamed[1] ~ ntc_2.p1
+    ntc_2.p1 ~ ntc_2_out
+    ntc_2.p2 ~ v3v3.lv
+
+    ntc_3 = new NTC_10K_0402_package
+    ntc_bias_3 = new Resistor
+    ntc_bias_3.resistance = 10kohm +/- 1%
+    v3v3.hv ~ ntc_bias_3.unnamed[0]
+    ntc_bias_3.unnamed[1] ~ ntc_3.p1
+    ntc_3.p1 ~ ntc_3_out
+    ntc_3.p2 ~ v3v3.lv
+
+    ntc_4 = new NTC_10K_0402_package
+    ntc_bias_4 = new Resistor
+    ntc_bias_4.resistance = 10kohm +/- 1%
+    v3v3.hv ~ ntc_bias_4.unnamed[0]
+    ntc_bias_4.unnamed[1] ~ ntc_4.p1
+    ntc_4.p1 ~ ntc_4_out
+    ntc_4.p2 ~ v3v3.lv
+
+    ntc_5 = new NTC_10K_0402_package
+    ntc_bias_5 = new Resistor
+    ntc_bias_5.resistance = 10kohm +/- 1%
+    v3v3.hv ~ ntc_bias_5.unnamed[0]
+    ntc_bias_5.unnamed[1] ~ ntc_5.p1
+    ntc_5.p1 ~ ntc_5_out
+    ntc_5.p2 ~ v3v3.lv

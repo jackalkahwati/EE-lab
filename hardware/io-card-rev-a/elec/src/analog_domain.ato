@@ -1,0 +1,678 @@
+"""
+AnalogDomain — FL-1 I/O Card Rev A analog measurement block.
+
+Left half of board (0-80mm):
+  - 4x ADS1115IDGST GP ADC (I2C 0x48-0x4B), 16 single-ended channels AI1-AI16
+    Each channel: 100kOhm series + 100nF filter + 700kOhm/100kOhm divider (0-24V -> 0-3V)
+  - ADS1256DBRG precision 24-bit ADC (SPI), 4 differential pairs, AVDD=+5V_ANA, AVSS=-5V_ANA
+  - REF5025IDGKT 5V precision reference for ADS1256 and DAC8552
+  - 2x DAC8552IDGKT 16-bit DAC (SPI), 4 analog outputs AO1-AO4
+  - TLV2374IDR (quad op-amp #1): 4x unity-gain DAC output buffers
+  - TLV2374IDR (quad op-amp #2): 2x V/I converter for RTD excitation
+"""
+
+import ElectricPower
+import Resistor
+import Capacitor
+from "parts/ADS1115IDGST/ADS1115IDGST.ato" import ADS1115IDGST_package
+from "parts/ADS1256DBRG/ADS1256DBRG.ato" import ADS1256DBRG_package
+from "parts/REF5025IDGKT/REF5025IDGKT.ato" import REF5025IDGKT_package
+from "parts/DAC8552IDGKT/DAC8552IDGKT.ato" import DAC8552IDGKT_package
+from "parts/TLV2374IDR/TLV2374IDR.ato" import TLV2374IDR_package
+from "parts/Diode_1N4148WS/Diode_1N4148WS.ato" import Diode_1N4148WS_package
+
+
+module AnalogDomain:
+    # Power ports
+    v3v3    = new ElectricPower
+    v5_ana  = new ElectricPower
+    vm5_ana = new ElectricPower
+
+    # I2C bus (GP ADC)
+    signal sda
+    signal scl
+
+    # SPI bus to ADS1256 precision ADC
+    signal ads1256_sclk
+    signal ads1256_din
+    signal ads1256_dout
+    signal ads1256_cs
+    signal ads1256_drdy
+
+    # SPI bus to DAC8552 (shared clock/data)
+    signal dac_sclk
+    signal dac_din
+    signal dac_cs_a
+    signal dac_cs_b
+
+    # PWM excitation inputs from MCU
+    signal exc1_pwm_in
+    signal exc2_pwm_in
+
+    # Analog input signals (0-24V range, via divider)
+    signal ai_1
+    signal ai_2
+    signal ai_3
+    signal ai_4
+    signal ai_5
+    signal ai_6
+    signal ai_7
+    signal ai_8
+    signal ai_9
+    signal ai_10
+    signal ai_11
+    signal ai_12
+    signal ai_13
+    signal ai_14
+    signal ai_15
+    signal ai_16
+
+    # Precision differential input pairs
+    signal diff_1p
+    signal diff_1n
+    signal diff_2p
+    signal diff_2n
+    signal diff_3p
+    signal diff_3n
+    signal diff_4p
+    signal diff_4n
+
+    # Analog outputs (buffered)
+    signal ao_1_out
+    signal ao_2_out
+    signal ao_3_out
+    signal ao_4_out
+
+    # RTD excitation current source outputs
+    signal exc_1_out
+    signal exc_2_out
+
+    # ==========================================================================
+    # GP ADC — 4x ADS1115IDGST (I2C 16-bit ADC)
+    # ==========================================================================
+    gp_adc_1 = new ADS1115IDGST_package   # addr 0x48 (ADDR=GND)
+    gp_adc_2 = new ADS1115IDGST_package   # addr 0x49 (ADDR=VDD)
+    gp_adc_3 = new ADS1115IDGST_package   # addr 0x4A (ADDR=SDA)
+    gp_adc_4 = new ADS1115IDGST_package   # addr 0x4B (ADDR=SCL)
+
+    # Power all 4 ADCs from 3.3V (digital I2C ADC, handles analog signals)
+    gp_adc_1.VDD ~ v3v3.hv
+    gp_adc_1.GND ~ v3v3.lv
+    gp_adc_1.SDA ~ sda
+    gp_adc_1.SCL ~ scl
+    gp_adc_1.ADDR ~ v3v3.lv   # 0x48
+
+    gp_adc_2.VDD ~ v3v3.hv
+    gp_adc_2.GND ~ v3v3.lv
+    gp_adc_2.SDA ~ sda
+    gp_adc_2.SCL ~ scl
+    gp_adc_2.ADDR ~ v3v3.hv   # 0x49
+
+    gp_adc_3.VDD ~ v3v3.hv
+    gp_adc_3.GND ~ v3v3.lv
+    gp_adc_3.SDA ~ sda
+    gp_adc_3.SCL ~ scl
+    gp_adc_3.ADDR ~ sda       # 0x4A
+
+    gp_adc_4.VDD ~ v3v3.hv
+    gp_adc_4.GND ~ v3v3.lv
+    gp_adc_4.SDA ~ sda
+    gp_adc_4.SCL ~ scl
+    gp_adc_4.ADDR ~ scl       # 0x4B
+
+    # Decoupling caps for each ADS1115
+    c_adc1 = new Capacitor
+    c_adc1.capacitance = 100nF +/- 10%
+    v3v3.hv ~ c_adc1.unnamed[0]
+    c_adc1.unnamed[1] ~ v3v3.lv
+
+    c_adc2 = new Capacitor
+    c_adc2.capacitance = 100nF +/- 10%
+    v3v3.hv ~ c_adc2.unnamed[0]
+    c_adc2.unnamed[1] ~ v3v3.lv
+
+    c_adc3 = new Capacitor
+    c_adc3.capacitance = 100nF +/- 10%
+    v3v3.hv ~ c_adc3.unnamed[0]
+    c_adc3.unnamed[1] ~ v3v3.lv
+
+    c_adc4 = new Capacitor
+    c_adc4.capacitance = 100nF +/- 10%
+    v3v3.hv ~ c_adc4.unnamed[0]
+    c_adc4.unnamed[1] ~ v3v3.lv
+
+    # ------------------------------------------------------------------
+    # Per-channel input conditioning: 100kOhm series + 100nF + 700k/100k divider
+    # Divider ratio = 100k/(700k+100k) = 0.125, so 24V -> 3V (within ADS1115 range)
+    # ------------------------------------------------------------------
+
+    # ADC1 channels: AI1-AI4 -> AIN0-AIN3
+    r_ser_ai1 = new Resistor
+    r_ser_ai1.resistance = 100kohm +/- 1%
+    r_top_ai1 = new Resistor
+    r_top_ai1.resistance = 700kohm +/- 1%
+    r_bot_ai1 = new Resistor
+    r_bot_ai1.resistance = 100kohm +/- 1%
+    c_filt_ai1 = new Capacitor
+    c_filt_ai1.capacitance = 100nF +/- 10%
+    ai_1 ~ r_ser_ai1.unnamed[0]
+    r_ser_ai1.unnamed[1] ~ r_top_ai1.unnamed[0]
+    r_top_ai1.unnamed[1] ~ gp_adc_1.AIN0
+    gp_adc_1.AIN0 ~ c_filt_ai1.unnamed[0]
+    c_filt_ai1.unnamed[1] ~ v3v3.lv
+    gp_adc_1.AIN0 ~ r_bot_ai1.unnamed[0]
+    r_bot_ai1.unnamed[1] ~ v3v3.lv
+
+    r_ser_ai2 = new Resistor
+    r_ser_ai2.resistance = 100kohm +/- 1%
+    r_top_ai2 = new Resistor
+    r_top_ai2.resistance = 700kohm +/- 1%
+    r_bot_ai2 = new Resistor
+    r_bot_ai2.resistance = 100kohm +/- 1%
+    c_filt_ai2 = new Capacitor
+    c_filt_ai2.capacitance = 100nF +/- 10%
+    ai_2 ~ r_ser_ai2.unnamed[0]
+    r_ser_ai2.unnamed[1] ~ r_top_ai2.unnamed[0]
+    r_top_ai2.unnamed[1] ~ gp_adc_1.AIN1
+    gp_adc_1.AIN1 ~ c_filt_ai2.unnamed[0]
+    c_filt_ai2.unnamed[1] ~ v3v3.lv
+    gp_adc_1.AIN1 ~ r_bot_ai2.unnamed[0]
+    r_bot_ai2.unnamed[1] ~ v3v3.lv
+
+    r_ser_ai3 = new Resistor
+    r_ser_ai3.resistance = 100kohm +/- 1%
+    r_top_ai3 = new Resistor
+    r_top_ai3.resistance = 700kohm +/- 1%
+    r_bot_ai3 = new Resistor
+    r_bot_ai3.resistance = 100kohm +/- 1%
+    c_filt_ai3 = new Capacitor
+    c_filt_ai3.capacitance = 100nF +/- 10%
+    ai_3 ~ r_ser_ai3.unnamed[0]
+    r_ser_ai3.unnamed[1] ~ r_top_ai3.unnamed[0]
+    r_top_ai3.unnamed[1] ~ gp_adc_1.AIN2
+    gp_adc_1.AIN2 ~ c_filt_ai3.unnamed[0]
+    c_filt_ai3.unnamed[1] ~ v3v3.lv
+    gp_adc_1.AIN2 ~ r_bot_ai3.unnamed[0]
+    r_bot_ai3.unnamed[1] ~ v3v3.lv
+
+    r_ser_ai4 = new Resistor
+    r_ser_ai4.resistance = 100kohm +/- 1%
+    r_top_ai4 = new Resistor
+    r_top_ai4.resistance = 700kohm +/- 1%
+    r_bot_ai4 = new Resistor
+    r_bot_ai4.resistance = 100kohm +/- 1%
+    c_filt_ai4 = new Capacitor
+    c_filt_ai4.capacitance = 100nF +/- 10%
+    ai_4 ~ r_ser_ai4.unnamed[0]
+    r_ser_ai4.unnamed[1] ~ r_top_ai4.unnamed[0]
+    r_top_ai4.unnamed[1] ~ gp_adc_1.AIN3
+    gp_adc_1.AIN3 ~ c_filt_ai4.unnamed[0]
+    c_filt_ai4.unnamed[1] ~ v3v3.lv
+    gp_adc_1.AIN3 ~ r_bot_ai4.unnamed[0]
+    r_bot_ai4.unnamed[1] ~ v3v3.lv
+
+    # ADC2 channels: AI5-AI8 -> AIN0-AIN3
+    r_ser_ai5 = new Resistor
+    r_ser_ai5.resistance = 100kohm +/- 1%
+    r_top_ai5 = new Resistor
+    r_top_ai5.resistance = 700kohm +/- 1%
+    r_bot_ai5 = new Resistor
+    r_bot_ai5.resistance = 100kohm +/- 1%
+    c_filt_ai5 = new Capacitor
+    c_filt_ai5.capacitance = 100nF +/- 10%
+    ai_5 ~ r_ser_ai5.unnamed[0]
+    r_ser_ai5.unnamed[1] ~ r_top_ai5.unnamed[0]
+    r_top_ai5.unnamed[1] ~ gp_adc_2.AIN0
+    gp_adc_2.AIN0 ~ c_filt_ai5.unnamed[0]
+    c_filt_ai5.unnamed[1] ~ v3v3.lv
+    gp_adc_2.AIN0 ~ r_bot_ai5.unnamed[0]
+    r_bot_ai5.unnamed[1] ~ v3v3.lv
+
+    r_ser_ai6 = new Resistor
+    r_ser_ai6.resistance = 100kohm +/- 1%
+    r_top_ai6 = new Resistor
+    r_top_ai6.resistance = 700kohm +/- 1%
+    r_bot_ai6 = new Resistor
+    r_bot_ai6.resistance = 100kohm +/- 1%
+    c_filt_ai6 = new Capacitor
+    c_filt_ai6.capacitance = 100nF +/- 10%
+    ai_6 ~ r_ser_ai6.unnamed[0]
+    r_ser_ai6.unnamed[1] ~ r_top_ai6.unnamed[0]
+    r_top_ai6.unnamed[1] ~ gp_adc_2.AIN1
+    gp_adc_2.AIN1 ~ c_filt_ai6.unnamed[0]
+    c_filt_ai6.unnamed[1] ~ v3v3.lv
+    gp_adc_2.AIN1 ~ r_bot_ai6.unnamed[0]
+    r_bot_ai6.unnamed[1] ~ v3v3.lv
+
+    r_ser_ai7 = new Resistor
+    r_ser_ai7.resistance = 100kohm +/- 1%
+    r_top_ai7 = new Resistor
+    r_top_ai7.resistance = 700kohm +/- 1%
+    r_bot_ai7 = new Resistor
+    r_bot_ai7.resistance = 100kohm +/- 1%
+    c_filt_ai7 = new Capacitor
+    c_filt_ai7.capacitance = 100nF +/- 10%
+    ai_7 ~ r_ser_ai7.unnamed[0]
+    r_ser_ai7.unnamed[1] ~ r_top_ai7.unnamed[0]
+    r_top_ai7.unnamed[1] ~ gp_adc_2.AIN2
+    gp_adc_2.AIN2 ~ c_filt_ai7.unnamed[0]
+    c_filt_ai7.unnamed[1] ~ v3v3.lv
+    gp_adc_2.AIN2 ~ r_bot_ai7.unnamed[0]
+    r_bot_ai7.unnamed[1] ~ v3v3.lv
+
+    r_ser_ai8 = new Resistor
+    r_ser_ai8.resistance = 100kohm +/- 1%
+    r_top_ai8 = new Resistor
+    r_top_ai8.resistance = 700kohm +/- 1%
+    r_bot_ai8 = new Resistor
+    r_bot_ai8.resistance = 100kohm +/- 1%
+    c_filt_ai8 = new Capacitor
+    c_filt_ai8.capacitance = 100nF +/- 10%
+    ai_8 ~ r_ser_ai8.unnamed[0]
+    r_ser_ai8.unnamed[1] ~ r_top_ai8.unnamed[0]
+    r_top_ai8.unnamed[1] ~ gp_adc_2.AIN3
+    gp_adc_2.AIN3 ~ c_filt_ai8.unnamed[0]
+    c_filt_ai8.unnamed[1] ~ v3v3.lv
+    gp_adc_2.AIN3 ~ r_bot_ai8.unnamed[0]
+    r_bot_ai8.unnamed[1] ~ v3v3.lv
+
+    # ADC3 channels: AI9-AI12
+    r_ser_ai9 = new Resistor
+    r_ser_ai9.resistance = 100kohm +/- 1%
+    r_top_ai9 = new Resistor
+    r_top_ai9.resistance = 700kohm +/- 1%
+    r_bot_ai9 = new Resistor
+    r_bot_ai9.resistance = 100kohm +/- 1%
+    c_filt_ai9 = new Capacitor
+    c_filt_ai9.capacitance = 100nF +/- 10%
+    ai_9 ~ r_ser_ai9.unnamed[0]
+    r_ser_ai9.unnamed[1] ~ r_top_ai9.unnamed[0]
+    r_top_ai9.unnamed[1] ~ gp_adc_3.AIN0
+    gp_adc_3.AIN0 ~ c_filt_ai9.unnamed[0]
+    c_filt_ai9.unnamed[1] ~ v3v3.lv
+    gp_adc_3.AIN0 ~ r_bot_ai9.unnamed[0]
+    r_bot_ai9.unnamed[1] ~ v3v3.lv
+
+    r_ser_ai10 = new Resistor
+    r_ser_ai10.resistance = 100kohm +/- 1%
+    r_top_ai10 = new Resistor
+    r_top_ai10.resistance = 700kohm +/- 1%
+    r_bot_ai10 = new Resistor
+    r_bot_ai10.resistance = 100kohm +/- 1%
+    c_filt_ai10 = new Capacitor
+    c_filt_ai10.capacitance = 100nF +/- 10%
+    ai_10 ~ r_ser_ai10.unnamed[0]
+    r_ser_ai10.unnamed[1] ~ r_top_ai10.unnamed[0]
+    r_top_ai10.unnamed[1] ~ gp_adc_3.AIN1
+    gp_adc_3.AIN1 ~ c_filt_ai10.unnamed[0]
+    c_filt_ai10.unnamed[1] ~ v3v3.lv
+    gp_adc_3.AIN1 ~ r_bot_ai10.unnamed[0]
+    r_bot_ai10.unnamed[1] ~ v3v3.lv
+
+    r_ser_ai11 = new Resistor
+    r_ser_ai11.resistance = 100kohm +/- 1%
+    r_top_ai11 = new Resistor
+    r_top_ai11.resistance = 700kohm +/- 1%
+    r_bot_ai11 = new Resistor
+    r_bot_ai11.resistance = 100kohm +/- 1%
+    c_filt_ai11 = new Capacitor
+    c_filt_ai11.capacitance = 100nF +/- 10%
+    ai_11 ~ r_ser_ai11.unnamed[0]
+    r_ser_ai11.unnamed[1] ~ r_top_ai11.unnamed[0]
+    r_top_ai11.unnamed[1] ~ gp_adc_3.AIN2
+    gp_adc_3.AIN2 ~ c_filt_ai11.unnamed[0]
+    c_filt_ai11.unnamed[1] ~ v3v3.lv
+    gp_adc_3.AIN2 ~ r_bot_ai11.unnamed[0]
+    r_bot_ai11.unnamed[1] ~ v3v3.lv
+
+    r_ser_ai12 = new Resistor
+    r_ser_ai12.resistance = 100kohm +/- 1%
+    r_top_ai12 = new Resistor
+    r_top_ai12.resistance = 700kohm +/- 1%
+    r_bot_ai12 = new Resistor
+    r_bot_ai12.resistance = 100kohm +/- 1%
+    c_filt_ai12 = new Capacitor
+    c_filt_ai12.capacitance = 100nF +/- 10%
+    ai_12 ~ r_ser_ai12.unnamed[0]
+    r_ser_ai12.unnamed[1] ~ r_top_ai12.unnamed[0]
+    r_top_ai12.unnamed[1] ~ gp_adc_3.AIN3
+    gp_adc_3.AIN3 ~ c_filt_ai12.unnamed[0]
+    c_filt_ai12.unnamed[1] ~ v3v3.lv
+    gp_adc_3.AIN3 ~ r_bot_ai12.unnamed[0]
+    r_bot_ai12.unnamed[1] ~ v3v3.lv
+
+    # ADC4 channels: AI13-AI16 (reserved for NTC inputs from env_sensors)
+    r_ser_ai13 = new Resistor
+    r_ser_ai13.resistance = 100kohm +/- 1%
+    r_top_ai13 = new Resistor
+    r_top_ai13.resistance = 700kohm +/- 1%
+    r_bot_ai13 = new Resistor
+    r_bot_ai13.resistance = 100kohm +/- 1%
+    c_filt_ai13 = new Capacitor
+    c_filt_ai13.capacitance = 100nF +/- 10%
+    ai_13 ~ r_ser_ai13.unnamed[0]
+    r_ser_ai13.unnamed[1] ~ r_top_ai13.unnamed[0]
+    r_top_ai13.unnamed[1] ~ gp_adc_4.AIN0
+    gp_adc_4.AIN0 ~ c_filt_ai13.unnamed[0]
+    c_filt_ai13.unnamed[1] ~ v3v3.lv
+    gp_adc_4.AIN0 ~ r_bot_ai13.unnamed[0]
+    r_bot_ai13.unnamed[1] ~ v3v3.lv
+
+    r_ser_ai14 = new Resistor
+    r_ser_ai14.resistance = 100kohm +/- 1%
+    r_top_ai14 = new Resistor
+    r_top_ai14.resistance = 700kohm +/- 1%
+    r_bot_ai14 = new Resistor
+    r_bot_ai14.resistance = 100kohm +/- 1%
+    c_filt_ai14 = new Capacitor
+    c_filt_ai14.capacitance = 100nF +/- 10%
+    ai_14 ~ r_ser_ai14.unnamed[0]
+    r_ser_ai14.unnamed[1] ~ r_top_ai14.unnamed[0]
+    r_top_ai14.unnamed[1] ~ gp_adc_4.AIN1
+    gp_adc_4.AIN1 ~ c_filt_ai14.unnamed[0]
+    c_filt_ai14.unnamed[1] ~ v3v3.lv
+    gp_adc_4.AIN1 ~ r_bot_ai14.unnamed[0]
+    r_bot_ai14.unnamed[1] ~ v3v3.lv
+
+    r_ser_ai15 = new Resistor
+    r_ser_ai15.resistance = 100kohm +/- 1%
+    r_top_ai15 = new Resistor
+    r_top_ai15.resistance = 700kohm +/- 1%
+    r_bot_ai15 = new Resistor
+    r_bot_ai15.resistance = 100kohm +/- 1%
+    c_filt_ai15 = new Capacitor
+    c_filt_ai15.capacitance = 100nF +/- 10%
+    ai_15 ~ r_ser_ai15.unnamed[0]
+    r_ser_ai15.unnamed[1] ~ r_top_ai15.unnamed[0]
+    r_top_ai15.unnamed[1] ~ gp_adc_4.AIN2
+    gp_adc_4.AIN2 ~ c_filt_ai15.unnamed[0]
+    c_filt_ai15.unnamed[1] ~ v3v3.lv
+    gp_adc_4.AIN2 ~ r_bot_ai15.unnamed[0]
+    r_bot_ai15.unnamed[1] ~ v3v3.lv
+
+    r_ser_ai16 = new Resistor
+    r_ser_ai16.resistance = 100kohm +/- 1%
+    r_top_ai16 = new Resistor
+    r_top_ai16.resistance = 700kohm +/- 1%
+    r_bot_ai16 = new Resistor
+    r_bot_ai16.resistance = 100kohm +/- 1%
+    c_filt_ai16 = new Capacitor
+    c_filt_ai16.capacitance = 100nF +/- 10%
+    ai_16 ~ r_ser_ai16.unnamed[0]
+    r_ser_ai16.unnamed[1] ~ r_top_ai16.unnamed[0]
+    r_top_ai16.unnamed[1] ~ gp_adc_4.AIN3
+    gp_adc_4.AIN3 ~ c_filt_ai16.unnamed[0]
+    c_filt_ai16.unnamed[1] ~ v3v3.lv
+    gp_adc_4.AIN3 ~ r_bot_ai16.unnamed[0]
+    r_bot_ai16.unnamed[1] ~ v3v3.lv
+
+    # ==========================================================================
+    # Precision reference REF5025IDGKT (5V reference for ADS1256 and DAC8552)
+    # ==========================================================================
+    ref5025 = new REF5025IDGKT_package
+
+    v5_ana.hv ~ ref5025.IN
+    ref5025.GND ~ v5_ana.lv
+    # NR cap on noise-reduction pin
+    c_ref_nr = new Capacitor
+    c_ref_nr.capacitance = 10uF +/- 20%
+    ref5025.NR ~ c_ref_nr.unnamed[0]
+    c_ref_nr.unnamed[1] ~ v5_ana.lv
+
+    c_ref_dec = new Capacitor
+    c_ref_dec.capacitance = 100nF +/- 10%
+    v5_ana.hv ~ c_ref_dec.unnamed[0]
+    c_ref_dec.unnamed[1] ~ v5_ana.lv
+
+    # ==========================================================================
+    # Precision ADC — ADS1256DBRG (24-bit 8-ch SPI)
+    # ==========================================================================
+    prec_adc = new ADS1256DBRG_package
+
+    prec_adc.AVDD ~ v5_ana.hv
+    prec_adc.AVSS ~ vm5_ana.hv
+    prec_adc.DVDD ~ v3v3.hv
+    prec_adc.DGND ~ v3v3.lv
+    prec_adc.VREFP ~ ref5025.OUT
+    prec_adc.VREFN ~ v3v3.lv
+    prec_adc.AINCOM ~ v3v3.lv
+
+    # SPI connections
+    prec_adc.SCLK ~ ads1256_sclk
+    prec_adc.DIN  ~ ads1256_din
+    prec_adc.DOUT ~ ads1256_dout
+    prec_adc.CS   ~ ads1256_cs
+    prec_adc.DRDY ~ ads1256_drdy
+    prec_adc.SYNC ~ v3v3.hv   # SYNC tied high: continuous conversion
+    prec_adc.PDWN ~ v3v3.hv   # PDWN tied high: not in power-down
+
+    # Decoupling
+    c_avdd_bulk = new Capacitor
+    c_avdd_bulk.capacitance = 10uF +/- 20%
+    c_avdd_dec = new Capacitor
+    c_avdd_dec.capacitance = 100nF +/- 10%
+    v5_ana.hv ~ c_avdd_bulk.unnamed[0]
+    c_avdd_bulk.unnamed[1] ~ v5_ana.lv
+    v5_ana.hv ~ c_avdd_dec.unnamed[0]
+    c_avdd_dec.unnamed[1] ~ v5_ana.lv
+
+    c_dvdd_dec = new Capacitor
+    c_dvdd_dec.capacitance = 100nF +/- 10%
+    v3v3.hv ~ c_dvdd_dec.unnamed[0]
+    c_dvdd_dec.unnamed[1] ~ v3v3.lv
+
+    c_avss_bulk = new Capacitor
+    c_avss_bulk.capacitance = 10uF +/- 20%
+    vm5_ana.hv ~ c_avss_bulk.unnamed[0]
+    c_avss_bulk.unnamed[1] ~ v3v3.lv
+
+    # Differential input pairs with Schottky clamp protection (1N4148WS to +-5V rails)
+    # Diff pair 1: AIN0(+) / AIN1(-)
+    d_clamp_1p_hi = new Diode_1N4148WS_package
+    d_clamp_1p_lo = new Diode_1N4148WS_package
+    d_clamp_1n_hi = new Diode_1N4148WS_package
+    d_clamp_1n_lo = new Diode_1N4148WS_package
+
+    diff_1p ~ d_clamp_1p_hi.A
+    d_clamp_1p_hi.K ~ v5_ana.hv
+    vm5_ana.hv ~ d_clamp_1p_lo.A
+    d_clamp_1p_lo.K ~ diff_1p
+    diff_1p ~ prec_adc.AIN0
+
+    diff_1n ~ d_clamp_1n_hi.A
+    d_clamp_1n_hi.K ~ v5_ana.hv
+    vm5_ana.hv ~ d_clamp_1n_lo.A
+    d_clamp_1n_lo.K ~ diff_1n
+    diff_1n ~ prec_adc.AIN1
+
+    # Diff pair 2: AIN2(+) / AIN3(-)
+    d_clamp_2p_hi = new Diode_1N4148WS_package
+    d_clamp_2p_lo = new Diode_1N4148WS_package
+    d_clamp_2n_hi = new Diode_1N4148WS_package
+    d_clamp_2n_lo = new Diode_1N4148WS_package
+
+    diff_2p ~ d_clamp_2p_hi.A
+    d_clamp_2p_hi.K ~ v5_ana.hv
+    vm5_ana.hv ~ d_clamp_2p_lo.A
+    d_clamp_2p_lo.K ~ diff_2p
+    diff_2p ~ prec_adc.AIN2
+
+    diff_2n ~ d_clamp_2n_hi.A
+    d_clamp_2n_hi.K ~ v5_ana.hv
+    vm5_ana.hv ~ d_clamp_2n_lo.A
+    d_clamp_2n_lo.K ~ diff_2n
+    diff_2n ~ prec_adc.AIN3
+
+    # Diff pair 3: AIN4(+) / AIN5(-)
+    d_clamp_3p_hi = new Diode_1N4148WS_package
+    d_clamp_3p_lo = new Diode_1N4148WS_package
+    d_clamp_3n_hi = new Diode_1N4148WS_package
+    d_clamp_3n_lo = new Diode_1N4148WS_package
+
+    diff_3p ~ d_clamp_3p_hi.A
+    d_clamp_3p_hi.K ~ v5_ana.hv
+    vm5_ana.hv ~ d_clamp_3p_lo.A
+    d_clamp_3p_lo.K ~ diff_3p
+    diff_3p ~ prec_adc.AIN4
+
+    diff_3n ~ d_clamp_3n_hi.A
+    d_clamp_3n_hi.K ~ v5_ana.hv
+    vm5_ana.hv ~ d_clamp_3n_lo.A
+    d_clamp_3n_lo.K ~ diff_3n
+    diff_3n ~ prec_adc.AIN5
+
+    # Diff pair 4: AIN6(+) / AIN7(-)
+    d_clamp_4p_hi = new Diode_1N4148WS_package
+    d_clamp_4p_lo = new Diode_1N4148WS_package
+    d_clamp_4n_hi = new Diode_1N4148WS_package
+    d_clamp_4n_lo = new Diode_1N4148WS_package
+
+    diff_4p ~ d_clamp_4p_hi.A
+    d_clamp_4p_hi.K ~ v5_ana.hv
+    vm5_ana.hv ~ d_clamp_4p_lo.A
+    d_clamp_4p_lo.K ~ diff_4p
+    diff_4p ~ prec_adc.AIN6
+
+    diff_4n ~ d_clamp_4n_hi.A
+    d_clamp_4n_hi.K ~ v5_ana.hv
+    vm5_ana.hv ~ d_clamp_4n_lo.A
+    d_clamp_4n_lo.K ~ diff_4n
+    diff_4n ~ prec_adc.AIN7
+
+    # ==========================================================================
+    # DAC — 2x DAC8552IDGKT (16-bit dual-channel SPI DAC)
+    # ==========================================================================
+    dac_a = new DAC8552IDGKT_package   # AO1, AO2
+    dac_b = new DAC8552IDGKT_package   # AO3, AO4
+
+    dac_a.VDD  ~ v5_ana.hv
+    dac_a.GND  ~ v5_ana.lv
+    dac_a.VREF ~ ref5025.OUT
+    dac_a.LDAC ~ v5_ana.lv   # LDAC tied low: simultaneous update
+    dac_a.CLR  ~ v3v3.hv     # CLR tied high: not clearing
+    dac_a.SCLK ~ dac_sclk
+    dac_a.DIN  ~ dac_din
+    dac_a.SYNC ~ dac_cs_a
+
+    dac_b.VDD  ~ v5_ana.hv
+    dac_b.GND  ~ v5_ana.lv
+    dac_b.VREF ~ ref5025.OUT
+    dac_b.LDAC ~ v5_ana.lv
+    dac_b.CLR  ~ v3v3.hv
+    dac_b.SCLK ~ dac_sclk
+    dac_b.DIN  ~ dac_din
+    dac_b.SYNC ~ dac_cs_b
+
+    # DAC decoupling
+    c_dac_a = new Capacitor
+    c_dac_a.capacitance = 100nF +/- 10%
+    v5_ana.hv ~ c_dac_a.unnamed[0]
+    c_dac_a.unnamed[1] ~ v5_ana.lv
+
+    c_dac_b = new Capacitor
+    c_dac_b.capacitance = 100nF +/- 10%
+    v5_ana.hv ~ c_dac_b.unnamed[0]
+    c_dac_b.unnamed[1] ~ v5_ana.lv
+
+    # ==========================================================================
+    # DAC output buffers — TLV2374IDR #1 (quad op-amp, unity gain)
+    # ==========================================================================
+    buf_opamp = new TLV2374IDR_package
+
+    buf_opamp.VDD ~ v5_ana.hv
+    buf_opamp.VSS ~ v5_ana.lv
+
+    # Buffer A: VOUTA of dac_a -> AO1
+    # IN1A+ <- VOUTA dac_a, IN1A- <- OUT1A (unity gain feedback)
+    buf_opamp.IN1A_P ~ dac_a.VOUTA
+    buf_opamp.IN1A_N ~ buf_opamp.OUT1A
+    r_ao1 = new Resistor
+    r_ao1.resistance = 100ohm +/- 5%
+    buf_opamp.OUT1A ~ r_ao1.unnamed[0]
+    r_ao1.unnamed[1] ~ ao_1_out
+
+    # Buffer B: VOUTB of dac_a -> AO2
+    buf_opamp.IN2A_P ~ dac_a.VOUTB
+    buf_opamp.IN2A_N ~ buf_opamp.OUT2A
+    r_ao2 = new Resistor
+    r_ao2.resistance = 100ohm +/- 5%
+    buf_opamp.OUT2A ~ r_ao2.unnamed[0]
+    r_ao2.unnamed[1] ~ ao_2_out
+
+    # Buffer C: VOUTA of dac_b -> AO3
+    buf_opamp.IN2B_P ~ dac_b.VOUTA
+    buf_opamp.IN2B_N ~ buf_opamp.OUT2B
+    r_ao3 = new Resistor
+    r_ao3.resistance = 100ohm +/- 5%
+    buf_opamp.OUT2B ~ r_ao3.unnamed[0]
+    r_ao3.unnamed[1] ~ ao_3_out
+
+    # Buffer D: VOUTB of dac_b -> AO4
+    buf_opamp.IN1B_P ~ dac_b.VOUTB
+    buf_opamp.IN1B_N ~ buf_opamp.OUT1B
+    r_ao4 = new Resistor
+    r_ao4.resistance = 100ohm +/- 5%
+    buf_opamp.OUT1B ~ r_ao4.unnamed[0]
+    r_ao4.unnamed[1] ~ ao_4_out
+
+    c_buf_opamp = new Capacitor
+    c_buf_opamp.capacitance = 100nF +/- 10%
+    v5_ana.hv ~ c_buf_opamp.unnamed[0]
+    c_buf_opamp.unnamed[1] ~ v5_ana.lv
+
+    # ==========================================================================
+    # RTD excitation — TLV2374IDR #2 (2x V/I converter)
+    # PWM from MCU -> 10kOhm + 1uF RC filter -> op-amp buffer -> V/I converter
+    # Iout = Vexc / 3.3kOhm = 0-1mA for PT100/PT1000
+    # ==========================================================================
+    exc_opamp = new TLV2374IDR_package
+
+    exc_opamp.VDD ~ v3v3.hv
+    exc_opamp.VSS ~ v3v3.lv
+
+    # Excitation channel 1: GP26 PWM -> RC filter -> op-amp V/I converter
+    r_pwm1_filt = new Resistor
+    r_pwm1_filt.resistance = 10kohm +/- 5%
+    c_pwm1_filt = new Capacitor
+    c_pwm1_filt.capacitance = 1uF +/- 20%
+
+    exc1_pwm_in ~ r_pwm1_filt.unnamed[0]
+    r_pwm1_filt.unnamed[1] ~ c_pwm1_filt.unnamed[0]
+    c_pwm1_filt.unnamed[1] ~ v3v3.lv
+    signal exc1_vset
+    r_pwm1_filt.unnamed[1] ~ exc1_vset
+
+    # Op-amp A as V/I: IN+ = Vset, feedback via sense resistor
+    exc_opamp.IN1A_P ~ exc1_vset
+    # 3.3kOhm sense resistor: Iout = Vin / 3.3kOhm
+    r_exc1_sense = new Resistor
+    r_exc1_sense.resistance = 3.3kohm +/- 1%
+    exc_opamp.OUT1A ~ r_exc1_sense.unnamed[0]
+    r_exc1_sense.unnamed[1] ~ v3v3.lv
+    exc_opamp.IN1A_N ~ r_exc1_sense.unnamed[0]  # feedback from sense node
+    exc_opamp.OUT1A ~ exc_1_out
+
+    # Excitation channel 2: GP27 PWM -> RC filter -> op-amp V/I converter
+    r_pwm2_filt = new Resistor
+    r_pwm2_filt.resistance = 10kohm +/- 5%
+    c_pwm2_filt = new Capacitor
+    c_pwm2_filt.capacitance = 1uF +/- 20%
+
+    exc2_pwm_in ~ r_pwm2_filt.unnamed[0]
+    r_pwm2_filt.unnamed[1] ~ c_pwm2_filt.unnamed[0]
+    c_pwm2_filt.unnamed[1] ~ v3v3.lv
+    signal exc2_vset
+    r_pwm2_filt.unnamed[1] ~ exc2_vset
+
+    exc_opamp.IN2A_P ~ exc2_vset
+    r_exc2_sense = new Resistor
+    r_exc2_sense.resistance = 3.3kohm +/- 1%
+    exc_opamp.OUT2A ~ r_exc2_sense.unnamed[0]
+    r_exc2_sense.unnamed[1] ~ v3v3.lv
+    exc_opamp.IN2A_N ~ r_exc2_sense.unnamed[0]
+    exc_opamp.OUT2A ~ exc_2_out
+
+    c_exc_opamp = new Capacitor
+    c_exc_opamp.capacitance = 100nF +/- 10%
+    v3v3.hv ~ c_exc_opamp.unnamed[0]
+    c_exc_opamp.unnamed[1] ~ v3v3.lv

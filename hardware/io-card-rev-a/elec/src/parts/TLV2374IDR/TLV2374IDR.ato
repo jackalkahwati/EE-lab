@@ -1,0 +1,51 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+
+component TLV2374IDR_package:
+    """Quad rail-to-rail op-amp 5.5V SOIC-14"""
+    # VERIFY: run `ato create part -s TLV2374IDR -a` to confirm LCSC C9362
+    trait is_atomic_part<manufacturer="Texas Instruments", partnumber="TLV2374IDR",
+        footprint="SOIC-14_L8.7-W3.9-P1.27-LS6.0-BL.kicad_mod",
+        symbol="TLV2374IDR.kicad_sym",
+        model="SOIC-14_L8.7-W3.9-H1.7-LS6.0-P1.27.STEP">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C9362",
+        manufacturer="Texas Instruments", partno="TLV2374IDR">
+    trait has_designator_prefix<prefix="U">
+    trait has_datasheet<datasheet="https://www.ti.com/lit/ds/symlink/tlv2374.pdf">
+
+    pin 1
+    pin 2
+    pin 3
+    pin 4
+    pin 5
+    pin 6
+    pin 7
+    pin 8
+    pin 9
+    pin 10
+    pin 11
+    pin 12
+    pin 13
+    pin 14
+
+    # TLV2374 SOIC-14 verified pinout:
+    # Pin 1: OUT1A, Pin 2: IN1A-, Pin 3: IN1A+, Pin 4: VSS
+    # Pin 5: IN2A+, Pin 6: IN2A-, Pin 7: OUT2A
+    # Pin 8: OUT2B, Pin 9: IN2B-, Pin 10: IN2B+, Pin 11: VDD
+    # Pin 12: IN1B+, Pin 13: IN1B-, Pin 14: OUT1B
+    signal OUT1A  ~ pin 1
+    signal IN1A_N ~ pin 2
+    signal IN1A_P ~ pin 3
+    signal VSS    ~ pin 4
+    signal IN2A_P ~ pin 5
+    signal IN2A_N ~ pin 6
+    signal OUT2A  ~ pin 7
+    signal OUT2B  ~ pin 8
+    signal IN2B_N ~ pin 9
+    signal IN2B_P ~ pin 10
+    signal VDD    ~ pin 11
+    signal IN1B_P ~ pin 12
+    signal IN1B_N ~ pin 13
+    signal OUT1B  ~ pin 14
