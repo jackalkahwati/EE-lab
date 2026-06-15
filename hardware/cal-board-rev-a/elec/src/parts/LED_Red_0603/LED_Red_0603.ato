@@ -1,0 +1,23 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+
+component LED_Red_0603_package:
+    """Everlight 19-217/R6C-AL1M2VY/3T — red 0603 LED.
+    LCSC C2286. Vf typ 2.0 V at 10 mA. 630 nm dominant wavelength.
+    Datasheet-verified pinout (SOD-123-compatible 0603 LED):
+      pin 1 = Cathode (K), pin 2 = Anode (A)."""
+
+    trait is_atomic_part<manufacturer="Everlight Elec", partnumber="19-217/R6C-AL1M2VY/3T",
+        footprint="LED_0603_1608Metric_Pad1.05x0.95mm_HandSoldering.kicad_mod",
+        symbol="19-217_R6C-AL1M2VY_3T.kicad_sym", model="LED_0603_1608Metric.STEP">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C2286",
+        manufacturer="Everlight Elec", partno="19-217/R6C-AL1M2VY/3T">
+    trait has_designator_prefix<prefix="LED">
+    trait has_datasheet<datasheet="https://wmsc.lcsc.com/wmsc/upload/file/pdf/v2/lcsc/2108302020_Everlight-Elec-19-217-R6C-AL1M2VY-3T_C2286.pdf">
+
+    pin 1
+    pin 2
+    signal K ~ pin 1
+    signal A ~ pin 2

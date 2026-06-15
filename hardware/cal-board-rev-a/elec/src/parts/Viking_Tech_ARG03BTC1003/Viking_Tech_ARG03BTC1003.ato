@@ -1,0 +1,20 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+
+component Viking_Tech_ARG03BTC1003_package:
+    """Viking Tech ARG03BTC1003 — 100 kΩ 0.01% 0603 thin-film precision resistor.
+    Same part as used in pcba-rev-a reference block. LCSC C335088 confirmed."""
+
+    trait is_atomic_part<manufacturer="Viking Tech", partnumber="ARG03BTC1003",
+        footprint="R0603.kicad_mod", symbol="ARG03BTC1003.kicad_sym", model="R0603.STEP">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C335088",
+        manufacturer="Viking Tech", partno="ARG03BTC1003">
+    trait has_designator_prefix<prefix="R">
+    trait has_datasheet<datasheet="https://wmsc.lcsc.com/wmsc/upload/file/pdf/v2/lcsc/2304140030_Viking-Tech-ARG03BTC1003_C335088.pdf">
+
+    pin 1
+    pin 2
+    signal p1 ~ pin 1
+    signal p2 ~ pin 2

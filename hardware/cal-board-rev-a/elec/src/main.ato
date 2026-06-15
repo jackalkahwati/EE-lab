@@ -1,0 +1,144 @@
+"""
+CalibrationBoard — top-level module. FirstLight FL-1 calibration and
+self-test board Rev A.
+
+Purpose (hardware-expansion-spec.md section 5; relay-probe-matrix-rev-a.md
+section 5): validate the relay/probe matrix, probe cartridges, DMM/Kelvin
+paths, and instrument-lane routing before every FL-1 test run. All reference
+elements are exposed as 2.0 mm pogo-friendly circular probe pads in a
+regular 10 mm pitch grid so the FL-1's pogo cluster can contact any pad
+without a cartridge swap.
+
+Board: 90 × 80 mm, 4-layer FR-4, 30 components, 23 probe pads, 3 fiducials.
+Power: entirely passive — no on-board power supply. EEPROM powered through
+TP18 (3.3 V from FL-1 PWR_INJ lane or LabJack DAC).
+Signal envelope: DC only; all reference elements designed for DMM/DAQ paths.
+
+Probe-pad layout (10 mm pitch grid, top copper, 2 mm diameter):
+  Row 1 (y = 15 mm):  TP01–TP08
+  Row 2 (y = 35 mm):  TP09–TP16
+  Row 3 (y = 55 mm):  TP17–TP23
+  Fiducials: FID1 (10,10), FID2 (80,10), FID3 (10,70)
+"""
+
+import ElectricPower
+from "references.ato" import References
+from "eeprom.ato" import EepromModule
+from "parts/TestPad_D2mm/TestPad_D2mm.ato" import TestPad_D2mm_package
+from "parts/Fiducial_1mm/Fiducial_1mm.ato" import Fiducial_1mm_package
+
+
+module CalibrationBoard:
+    refs = new References
+    ee   = new EepromModule
+
+    # ---- probe pads (23 total) ---------------------------------------------------
+
+    # TP01 — GND reference; star ground for all low-side connections
+    tp01_gnd      = new TestPad_D2mm_package
+
+    # TP02 / TP03 — short-circuit reference (same net; copper trace = short)
+    tp02_short_a  = new TestPad_D2mm_package
+    tp03_short_b  = new TestPad_D2mm_package
+
+    # TP04 / TP05 — 10 Ω 0.01% reference
+    tp04_r10_a    = new TestPad_D2mm_package
+    tp05_r10_b    = new TestPad_D2mm_package
+
+    # TP06 / TP07 — 1 kΩ 0.01% reference
+    tp06_r1k_a    = new TestPad_D2mm_package
+    tp07_r1k_b    = new TestPad_D2mm_package
+
+    # TP08 / TP09 — 100 kΩ 0.01% reference
+    tp08_r100k_a  = new TestPad_D2mm_package
+    tp09_r100k_b  = new TestPad_D2mm_package
+
+    # TP10 / TP11 — silicon diode (1N4148WS): anode / cathode
+    tp10_di_a     = new TestPad_D2mm_package
+    tp11_di_k     = new TestPad_D2mm_package
+
+    # TP12 / TP13 — Schottky diode (BAT54,215): anode / cathode
+    tp12_ds_a     = new TestPad_D2mm_package
+    tp13_ds_k     = new TestPad_D2mm_package
+
+    # TP14 / TP15 — LED path (entry before 330 Ω current-limit R) / cathode
+    tp14_led_a    = new TestPad_D2mm_package
+    tp15_led_k    = new TestPad_D2mm_package
+
+    # TP16 / TP17 — RC network input / R–C junction
+    tp16_rc_in    = new TestPad_D2mm_package
+    tp17_rc_mid   = new TestPad_D2mm_package
+
+    # TP18–TP21 — EEPROM I2C (VCC / GND / SDA / SCL)
+    tp18_ee_vcc   = new TestPad_D2mm_package
+    tp19_ee_gnd   = new TestPad_D2mm_package
+    tp20_ee_sda   = new TestPad_D2mm_package
+    tp21_ee_scl   = new TestPad_D2mm_package
+
+    # TP22 / TP23 — open-circuit reference (no internal connection; ERC: no-connect)
+    tp22_open_a   = new TestPad_D2mm_package
+    tp23_open_b   = new TestPad_D2mm_package
+
+    # ---- fiducials (3 required by dfm_check.py gate) ----------------------------
+    fid1 = new Fiducial_1mm_package
+    fid2 = new Fiducial_1mm_package
+    fid3 = new Fiducial_1mm_package
+
+    # ---- power domains ----------------------------------------------------------
+    # GND bus: TP01 + TP19 + all reference low sides
+    gnd_rail = new ElectricPower
+    tp01_gnd.pad   ~ gnd_rail.lv
+    tp19_ee_gnd.pad ~ gnd_rail.lv
+
+    # EEPROM VCC: driven through probe pad TP18 by FL-1 (3.3 V / ≤ 10 mA)
+    ee_vcc_rail = new ElectricPower
+    ee_vcc_rail.lv ~ gnd_rail.lv
+    tp18_ee_vcc.pad ~ ee_vcc_rail.hv
+    ee.vcc ~ ee_vcc_rail
+
+    # EEPROM I2C bus (pull-ups are inside EepromModule, wired to ee_vcc_rail)
+    ee.sda ~ tp20_ee_sda.pad
+    ee.scl ~ tp21_ee_scl.pad
+
+    # ---- reference network connections ------------------------------------------
+
+    # short reference: TP02 + TP03 share the same net; copper trace ≈ 0 Ω
+    tp02_short_a.pad ~ tp03_short_b.pad
+
+    # 10 Ω
+    tp04_r10_a.pad  ~ refs.r10_a
+    tp05_r10_b.pad  ~ refs.r10_b
+    refs.r10_b      ~ gnd_rail.lv
+
+    # 1 kΩ
+    tp06_r1k_a.pad  ~ refs.r1k_a
+    tp07_r1k_b.pad  ~ refs.r1k_b
+    refs.r1k_b      ~ gnd_rail.lv
+
+    # 100 kΩ
+    tp08_r100k_a.pad ~ refs.r100k_a
+    tp09_r100k_b.pad ~ refs.r100k_b
+    refs.r100k_b     ~ gnd_rail.lv
+
+    # silicon diode
+    tp10_di_a.pad ~ refs.di_a
+    tp11_di_k.pad ~ refs.di_k
+    refs.di_k     ~ gnd_rail.lv
+
+    # Schottky diode
+    tp12_ds_a.pad ~ refs.ds_a
+    tp13_ds_k.pad ~ refs.ds_k
+    refs.ds_k     ~ gnd_rail.lv
+
+    # LED path
+    tp14_led_a.pad ~ refs.led_a
+    tp15_led_k.pad ~ refs.led_k
+    refs.led_k     ~ gnd_rail.lv
+
+    # RC network
+    tp16_rc_in.pad  ~ refs.rc_in
+    tp17_rc_mid.pad ~ refs.rc_mid
+    refs.rc_gnd     ~ gnd_rail.lv
+
+    # open pads: intentionally unconnected (no-connect at layout sync)
+    # tp22_open_a and tp23_open_b are declared above; leave nets floating

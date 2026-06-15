@@ -1,0 +1,8 @@
+# atopile project — FirstLight FL-1 calibration / self-test board Rev A
+requires-atopile: ">=0.15.0"
+paths:
+  src: elec/src
+  layout: elec/layout
+builds:
+  default:
+    entry: elec/src/main.ato:CalibrationBoard

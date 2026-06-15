@@ -1,0 +1,87 @@
+"""
+References — passive calibration reference network for the FL-1 cal board.
+
+All high-node signals exposed as named ports; low nodes tie to the GND bus
+in main.ato. No active components — completely passive fixture.
+
+Precision resistors: Viking Tech ARG03 series 0.01% 0603 thin-film.
+Diodes: silicon 1N4148WS (SOD-323) + Schottky BAT54,215 (SOD-323).
+LED: Everlight red 0603 with 330 Ω inline current limiter (10 mA at 3.3 V).
+RC: 10 kΩ (1%) + 100 nF (10%) — τ = 1 ms, known cap for DMM cal check.
+"""
+
+import Resistor
+import Capacitor
+from "parts/Viking_Tech_ARG03BTC100R/Viking_Tech_ARG03BTC100R.ato" import Viking_Tech_ARG03BTC100R_package
+from "parts/Viking_Tech_ARG03BTC1001/Viking_Tech_ARG03BTC1001.ato" import Viking_Tech_ARG03BTC1001_package
+from "parts/Viking_Tech_ARG03BTC1003/Viking_Tech_ARG03BTC1003.ato" import Viking_Tech_ARG03BTC1003_package
+from "parts/Diode_1N4148WS/Diode_1N4148WS.ato" import Diode_1N4148WS_package
+from "parts/Nexperia_BAT54_215/Nexperia_BAT54_215.ato" import Nexperia_BAT54_215_package
+from "parts/LED_Red_0603/LED_Red_0603.ato" import LED_Red_0603_package
+
+
+module References:
+    # exposed signals — connect to probe pads in main.ato
+    signal r10_a        # 10 Ω high side
+    signal r10_b        # 10 Ω low side  → GND in main
+    signal r1k_a        # 1 kΩ high side
+    signal r1k_b        # 1 kΩ low side  → GND in main
+    signal r100k_a      # 100 kΩ high side
+    signal r100k_b      # 100 kΩ low side → GND in main
+    signal di_a         # silicon diode anode
+    signal di_k         # silicon diode cathode → GND in main
+    signal ds_a         # Schottky anode
+    signal ds_k         # Schottky cathode → GND in main
+    signal led_a        # LED entry (before R_LED)
+    signal led_k        # LED cathode → GND in main
+    signal rc_in        # RC input (one side of R_RC)
+    signal rc_mid       # RC junction (R–C node, exposed as second pad)
+    signal rc_gnd       # C low side → GND in main
+
+    # ---- 10 Ω 0.01% precision reference ----------------------------------------
+    r10 = new Viking_Tech_ARG03BTC100R_package
+    r10.p1 ~ r10_a
+    r10.p2 ~ r10_b
+
+    # ---- 1 kΩ 0.01% precision reference -----------------------------------------
+    r1k = new Viking_Tech_ARG03BTC1001_package
+    r1k.p1 ~ r1k_a
+    r1k.p2 ~ r1k_b
+
+    # ---- 100 kΩ 0.01% precision reference ----------------------------------------
+    r100k = new Viking_Tech_ARG03BTC1003_package
+    r100k.p1 ~ r100k_a
+    r100k.p2 ~ r100k_b
+
+    # ---- silicon switching diode (1N4148WS SOD-323, LCSC C57759) ----------------
+    d_si = new Diode_1N4148WS_package
+    d_si.A ~ di_a
+    d_si.K ~ di_k
+
+    # ---- Schottky diode (BAT54,215 SOD-323, LCSC C2152) -------------------------
+    d_sch = new Nexperia_BAT54_215_package
+    d_sch.A ~ ds_a
+    d_sch.K ~ ds_k
+
+    # ---- LED path: R_LED (330 Ω) then red 0603 LED --------------------------------
+    # Design for 3.3 V drive: I = (3.3 - 2.0) / 330 ≈ 4 mA.
+    # Confirmed visible; DMM6500 or DAQ_1 can read Vf across LED.K to GND.
+    led = new LED_Red_0603_package
+    r_led = new Resistor
+    r_led.resistance = 330ohm +/- 5%
+    led_a ~ r_led.unnamed[0]
+    r_led.unnamed[1] ~ led.A
+    led.K ~ led_k
+
+    # ---- RC network: 10 kΩ (1%) + 100 nF (10%) ----------------------------------
+    # FL-1 measures τ = R × C → back-calculates capacitance.
+    # Expected: τ = 10 000 × 100e-9 = 1.00 ms ± 11%.
+    # rc_in → R_RC → rc_mid → C_RC → rc_gnd(GND)
+    r_rc = new Resistor
+    r_rc.resistance = 10kohm +/- 1%
+    c_rc = new Capacitor
+    c_rc.capacitance = 100nF +/- 10%
+    rc_in ~ r_rc.unnamed[0]
+    r_rc.unnamed[1] ~ rc_mid
+    rc_mid ~ c_rc.unnamed[0]
+    c_rc.unnamed[1] ~ rc_gnd

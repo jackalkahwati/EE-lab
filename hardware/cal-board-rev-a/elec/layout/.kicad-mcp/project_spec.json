@@ -1,0 +1,44 @@
+{
+  "project": "FL-1 calibration / self-test board Rev A",
+  "source": "compiled from elec/src/*.ato (atopile) — same stack as pcba-rev-a",
+  "board_outline_mm": [90, 80],
+  "layers": 4,
+  "stackup": "Sig / GND / PWR / Sig",
+  "connector_refs": [],
+  "critical_nets": [
+    "GND",
+    "SHORT",
+    "R10_A", "R10_B",
+    "R1K_A", "R1K_B",
+    "R100K_A", "R100K_B",
+    "DI_A", "DI_K",
+    "DS_A", "DS_K",
+    "LED_A", "LED_K",
+    "RC_IN", "RC_MID",
+    "EE_VCC", "EE_SDA", "EE_SCL"
+  ],
+  "placement_intent": {
+    "rows_top": [
+      "TP01–TP08 at y=15 mm, x=10,20,30,40,50,60,70,80 mm (row 1)",
+      "TP09–TP16 at y=35 mm, same x spacing (row 2)",
+      "TP17–TP23 at y=55 mm, x=10..70 mm (row 3)"
+    ],
+    "passives": [
+      "Precision resistors R10/R1K/R100K between rows 1-2 near their pad pairs",
+      "Diodes D_SI/D_SCH between rows 2-3 near TP10-TP13",
+      "R_LED + LED between rows 2-3 near TP14-TP15",
+      "R_RC + C_RC between rows 2-3 near TP16-TP17"
+    ],
+    "corner_bottom_right": [
+      "EEPROM U1 (SOT-23-6) with decoupling cap + I2C pull-ups near TP18-TP21"
+    ],
+    "fiducials": [
+      "FID1 at (10, 10)",
+      "FID2 at (80, 10)",
+      "FID3 at (10, 70)"
+    ]
+  },
+  "analog_refs_note": "All reference elements are passive; no analog island moat required. Keep GND plane continuous on In1. Short reference TP02-TP03 trace runs directly between pads (<5 mm, wide copper).",
+  "probe_pad_note": "TestPoint:TestPoint_Pad_D2.0mm pads on F.Cu only; 2.5 mm solder-mask opening; no via. Pad pitch 10 mm to match FL-1 pogo cluster 60x50 mm footprint. Label each pad on F.Silkscreen with TP number and net name.",
+  "board_size_note": "90x80 mm fits inside FL-1 fixture (450x350 mm reachable). Stay well within 100x100 mm mechanical spec."
+}

@@ -1,0 +1,13 @@
+import has_designator_prefix
+import is_atomic_part
+
+component Fiducial_1mm_package:
+    """1 mm fiducial marker for machine-vision board registration.
+    No supplier part — board feature only.
+    Footprint: Fiducial:Fiducial_1mm_Mask2mm (KiCad standard).
+    Three required per dfm_check.py DFM gate."""
+
+    trait is_atomic_part<manufacturer="KiCad", partnumber="Fiducial_1mm",
+        footprint="Fiducial:Fiducial_1mm_Mask2mm.kicad_mod",
+        symbol="Fiducial.kicad_sym", model="">
+    trait has_designator_prefix<prefix="FID">

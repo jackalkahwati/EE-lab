@@ -1,0 +1,16 @@
+import has_designator_prefix
+import is_atomic_part
+
+component TestPad_D2mm_package:
+    """2.0 mm circular SMD test pad for pogo-probe contact.
+    No supplier part — board feature only (has_part_removed).
+    Footprint: TestPoint:TestPoint_Pad_D2.0mm (KiCad standard).
+    Place top copper only; solder mask open; no via."""
+
+    trait is_atomic_part<manufacturer="KiCad", partnumber="TestPad_D2mm",
+        footprint="TestPoint:TestPoint_Pad_D2.0mm.kicad_mod",
+        symbol="TestPad.kicad_sym", model="">
+    trait has_designator_prefix<prefix="TP">
+
+    pin 1
+    signal pad ~ pin 1

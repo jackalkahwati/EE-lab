@@ -1,0 +1,62 @@
+"""
+EepromModule — 24AA025UIDT-I/OT I2C EEPROM with pull-ups and decoupling.
+
+Powered through the TP18 (EE_VCC) probe pad; FL-1 must drive 3.3 V on that
+pad before issuing I2C transactions. Address: 0x50 (A0=A1=GND).
+
+Memory map written at board test and stored here for self-test firmware:
+  0x00–0x07  board type   "FL1-CAL-"
+  0x08–0x0F  revision     "REV-A\0\0\0"
+  0x10–0x17  serial no.   8-char ASCII e.g. "00000001"
+  0x18       board state  0xA5 = calibrated
+  0x19       checksum     XOR of 0x00–0x18
+  0x20–0x23  r10_ohms     float32 (measured actual value)
+  0x24–0x27  r1k_ohms     float32
+  0x28–0x2B  r100k_ohms   float32
+  0x2C–0x2F  di_vf_mv     float32 (silicon diode Vf in mV at 1 mA)
+  0x30–0x33  ds_vf_mv     float32 (Schottky Vf in mV at 1 mA)
+  0x34–0x37  c_rc_nf      float32 (measured RC capacitor in nF)
+  0x38–0x7F  reserved     0xFF
+  0x80–0xF8  unique ID    factory-programmed (read-only, 64-bit MAC)
+"""
+
+import ElectricPower
+import Resistor
+import Capacitor
+from "parts/Microchip_Tech_24AA025UIDT_I_OT/Microchip_Tech_24AA025UIDT_I_OT.ato" import Microchip_Tech_24AA025UIDT_I_OT_package
+
+
+module EepromModule:
+    vcc = new ElectricPower     # VCC from TP18 probe pad; GND from vcc.lv
+    signal sda                   # to TP20
+    signal scl                   # to TP21
+
+    eeprom = new Microchip_Tech_24AA025UIDT_I_OT_package
+
+    # address pins grounded → I2C address 0x50
+    eeprom.A0 ~ vcc.lv
+    eeprom.A1 ~ vcc.lv
+
+    # power
+    eeprom.VCC ~ vcc.hv
+    eeprom.VSS ~ vcc.lv
+
+    # I2C
+    eeprom.SDA ~ sda
+    eeprom.SCL ~ scl
+
+    # SDA / SCL pull-ups to VCC (4.7 kΩ; I2C standard-mode 100 kHz)
+    r_sda = new Resistor
+    r_sda.resistance = 4.7kohm +/- 5%
+    r_scl = new Resistor
+    r_scl.resistance = 4.7kohm +/- 5%
+    vcc.hv ~ r_sda.unnamed[0]
+    r_sda.unnamed[1] ~ sda
+    vcc.hv ~ r_scl.unnamed[0]
+    r_scl.unnamed[1] ~ scl
+
+    # VCC decoupling
+    c_vcc = new Capacitor
+    c_vcc.capacitance = 100nF +/- 10%
+    vcc.hv ~ c_vcc.unnamed[0]
+    c_vcc.unnamed[1] ~ vcc.lv

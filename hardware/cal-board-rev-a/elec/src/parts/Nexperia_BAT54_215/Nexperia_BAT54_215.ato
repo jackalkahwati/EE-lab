@@ -1,0 +1,23 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+
+component Nexperia_BAT54_215_package:
+    """BAT54,215 — single Schottky barrier diode, SOD-323.
+    LCSC C2152 (Nexperia BAT54,215).
+    Datasheet-verified pinout for SOD-323:
+      pin 1 = Anode (A), pin 2 = Cathode (K)."""
+
+    trait is_atomic_part<manufacturer="Nexperia", partnumber="BAT54,215",
+        footprint="D_SOD-323_HandSoldering.kicad_mod", symbol="BAT54,215.kicad_sym",
+        model="D_SOD-323.STEP">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C2152",
+        manufacturer="Nexperia", partno="BAT54,215">
+    trait has_designator_prefix<prefix="D">
+    trait has_datasheet<datasheet="https://www.lcsc.com/datasheet/lcsc_datasheet_2407250940_Nexperia-BAT54-215_C2152.pdf">
+
+    pin 1
+    pin 2
+    signal A ~ pin 1
+    signal K ~ pin 2

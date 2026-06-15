@@ -1,0 +1,451 @@
+{
+  "manifest_version": "1.0",
+  "board": "FL-1 Calibration / Self-Test Board Rev A",
+  "eeprom_board_type": "FL1-CAL-",
+  "eeprom_i2c_addr": "0x51",
+  "description": "Machine-readable manifest of every test point, probe-lane assignment, and expected measurement range for the FL-1 startup self-test sequence.",
+
+  "probe_lane_assignments": {
+    "GND_REFERENCE":  {"probe": "P1", "lane": "GND_REF"},
+    "PRIMARY_HI":     {"probe": "P2", "lane": "DMM_HI"},
+    "PRIMARY_LO":     {"probe": "P3", "lane": "DMM_LO"},
+    "KELVIN_FORCE_P": {"probe": "KFP", "lane": "DMM_HI"},
+    "KELVIN_FORCE_N": {"probe": "KFN", "lane": "DMM_LO"},
+    "KELVIN_SENSE_P": {"probe": "KSP", "lane": "DAQ_1"},
+    "KELVIN_SENSE_N": {"probe": "KSN", "lane": "DAQ_2"},
+    "SCOPE_CH":       {"probe": "P4", "lane": "SCOPE_A"}
+  },
+
+  "test_points": [
+    {
+      "id": "TP01",
+      "net": "GND",
+      "label": "GND",
+      "description": "Star ground reference for all measurements",
+      "position_mm": [10, 15],
+      "pad_diameter_mm": 2.0,
+      "tests": [
+        {
+          "name": "gnd_continuity",
+          "instrument": "DMM6500",
+          "mode": "continuity",
+          "probe_hi": "P1",
+          "probe_lo": "GND_REF",
+          "expect": {"max_ohm": 0.5},
+          "gate": true
+        }
+      ]
+    },
+    {
+      "id": "TP02",
+      "net": "SHORT",
+      "label": "SHORT_A",
+      "description": "Short-circuit reference high side",
+      "position_mm": [20, 15],
+      "pad_diameter_mm": 2.0,
+      "tests": []
+    },
+    {
+      "id": "TP03",
+      "net": "SHORT",
+      "label": "SHORT_B",
+      "description": "Short-circuit reference low side (same net as TP02)",
+      "position_mm": [30, 15],
+      "pad_diameter_mm": 2.0,
+      "tests": [
+        {
+          "name": "short_reference",
+          "instrument": "DMM6500",
+          "mode": "4wire_resistance",
+          "probe_hi": "KFP",
+          "probe_force_lo": "KFN",
+          "probe_sense_hi": "KSP",
+          "probe_sense_lo": "KSN",
+          "probe_hi_pad": "TP02",
+          "probe_lo_pad": "TP03",
+          "expect": {"max_ohm": 0.5},
+          "note": "Kelvin pair to measure trace + contact resistance; expect < 500 mΩ",
+          "gate": true
+        }
+      ]
+    },
+    {
+      "id": "TP04",
+      "net": "R10_A",
+      "label": "R10_A",
+      "description": "10 Ω 0.01% precision resistor high side",
+      "position_mm": [40, 15],
+      "pad_diameter_mm": 2.0,
+      "tests": []
+    },
+    {
+      "id": "TP05",
+      "net": "R10_B",
+      "label": "R10_B",
+      "description": "10 Ω 0.01% precision resistor low side (to GND)",
+      "position_mm": [50, 15],
+      "pad_diameter_mm": 2.0,
+      "tests": [
+        {
+          "name": "resistance_10ohm",
+          "instrument": "DMM6500",
+          "mode": "4wire_resistance",
+          "probe_hi_pad": "TP04",
+          "probe_lo_pad": "TP05",
+          "expect": {"min_ohm": 9.95, "max_ohm": 10.05},
+          "note": "0.01% ref: nominal 10.000 Ω ± 0.001 Ω; allow ± 0.5% for probe/contact resistance measurement uncertainty",
+          "gate": true
+        }
+      ]
+    },
+    {
+      "id": "TP06",
+      "net": "R1K_A",
+      "label": "R1K_A",
+      "description": "1 kΩ 0.01% precision resistor high side",
+      "position_mm": [60, 15],
+      "pad_diameter_mm": 2.0,
+      "tests": []
+    },
+    {
+      "id": "TP07",
+      "net": "R1K_B",
+      "label": "R1K_B",
+      "description": "1 kΩ 0.01% precision resistor low side (to GND)",
+      "position_mm": [70, 15],
+      "pad_diameter_mm": 2.0,
+      "tests": [
+        {
+          "name": "resistance_1kohm",
+          "instrument": "DMM6500",
+          "mode": "4wire_resistance",
+          "probe_hi_pad": "TP06",
+          "probe_lo_pad": "TP07",
+          "expect": {"min_ohm": 999.0, "max_ohm": 1001.0},
+          "note": "0.01% ref: nominal 1000.0 Ω ± 0.1 Ω; allow ± 0.1% for probe/contact",
+          "gate": true
+        }
+      ]
+    },
+    {
+      "id": "TP08",
+      "net": "R100K_A",
+      "label": "R100K_A",
+      "description": "100 kΩ 0.01% precision resistor high side",
+      "position_mm": [80, 15],
+      "pad_diameter_mm": 2.0,
+      "tests": []
+    },
+    {
+      "id": "TP09",
+      "net": "R100K_B",
+      "label": "R100K_B",
+      "description": "100 kΩ 0.01% precision resistor low side (to GND)",
+      "position_mm": [10, 35],
+      "pad_diameter_mm": 2.0,
+      "tests": [
+        {
+          "name": "resistance_100kohm",
+          "instrument": "DMM6500",
+          "mode": "4wire_resistance",
+          "probe_hi_pad": "TP08",
+          "probe_lo_pad": "TP09",
+          "expect": {"min_ohm": 99900.0, "max_ohm": 100100.0},
+          "note": "0.01% ref: nominal 100.000 kΩ ± 10 Ω; allow ± 0.1% total",
+          "gate": true
+        }
+      ]
+    },
+    {
+      "id": "TP10",
+      "net": "DI_A",
+      "label": "DI_A",
+      "description": "Silicon diode (1N4148WS) anode",
+      "position_mm": [20, 35],
+      "pad_diameter_mm": 2.0,
+      "tests": []
+    },
+    {
+      "id": "TP11",
+      "net": "DI_K",
+      "label": "DI_K",
+      "description": "Silicon diode (1N4148WS) cathode (to GND)",
+      "position_mm": [30, 35],
+      "pad_diameter_mm": 2.0,
+      "tests": [
+        {
+          "name": "silicon_diode_vf",
+          "instrument": "DMM6500",
+          "mode": "diode",
+          "probe_hi_pad": "TP10",
+          "probe_lo_pad": "TP11",
+          "expect": {"min_v": 0.55, "max_v": 0.75},
+          "note": "1N4148WS Vf at DMM test current (0.1–1 mA typ): 0.60–0.70 V",
+          "gate": true
+        },
+        {
+          "name": "silicon_diode_reverse",
+          "instrument": "DMM6500",
+          "mode": "diode",
+          "probe_hi_pad": "TP11",
+          "probe_lo_pad": "TP10",
+          "expect": {"min_v": 1.0},
+          "note": "Reversed: DMM should show OL (>1 V range) = diode blocking",
+          "gate": false
+        }
+      ]
+    },
+    {
+      "id": "TP12",
+      "net": "DS_A",
+      "label": "DS_A",
+      "description": "Schottky diode (BAT54,215) anode",
+      "position_mm": [40, 35],
+      "pad_diameter_mm": 2.0,
+      "tests": []
+    },
+    {
+      "id": "TP13",
+      "net": "DS_K",
+      "label": "DS_K",
+      "description": "Schottky diode (BAT54,215) cathode (to GND)",
+      "position_mm": [50, 35],
+      "pad_diameter_mm": 2.0,
+      "tests": [
+        {
+          "name": "schottky_diode_vf",
+          "instrument": "DMM6500",
+          "mode": "diode",
+          "probe_hi_pad": "TP12",
+          "probe_lo_pad": "TP13",
+          "expect": {"min_v": 0.20, "max_v": 0.45},
+          "note": "BAT54 Vf at 1 mA: 0.25–0.40 V typical",
+          "gate": true
+        }
+      ]
+    },
+    {
+      "id": "TP14",
+      "net": "LED_A",
+      "label": "LED_A",
+      "description": "LED path anode entry (before 330 Ω series resistor)",
+      "position_mm": [60, 35],
+      "pad_diameter_mm": 2.0,
+      "tests": []
+    },
+    {
+      "id": "TP15",
+      "net": "LED_K",
+      "label": "LED_K",
+      "description": "LED cathode (after LED, to GND)",
+      "position_mm": [70, 35],
+      "pad_diameter_mm": 2.0,
+      "tests": [
+        {
+          "name": "led_path_resistance",
+          "instrument": "DMM6500",
+          "mode": "2wire_resistance",
+          "probe_hi_pad": "TP14",
+          "probe_lo_pad": "TP15",
+          "expect": {"min_ohm": 320.0, "max_ohm": 360.0},
+          "note": "330 Ω ± 5% series R dominates; LED forward-drop biases reading slightly high",
+          "gate": false
+        },
+        {
+          "name": "led_functional",
+          "instrument": "DP832+DAQ",
+          "mode": "voltage_force_current_measure",
+          "force_voltage_v": 3.3,
+          "force_pad": "TP14",
+          "measure_pad": "TP15",
+          "expect": {"led_vf_min_v": 1.7, "led_vf_max_v": 2.4, "current_min_ma": 3.0},
+          "note": "Apply 3.3 V at TP14; LED should illuminate, Vf across TP14-TP15 minus 330Ω drop",
+          "gate": false
+        }
+      ]
+    },
+    {
+      "id": "TP16",
+      "net": "RC_IN",
+      "label": "RC_IN",
+      "description": "RC network input (one terminal of 10 kΩ series resistor)",
+      "position_mm": [80, 35],
+      "pad_diameter_mm": 2.0,
+      "tests": []
+    },
+    {
+      "id": "TP17",
+      "net": "RC_MID",
+      "label": "RC_MID",
+      "description": "RC junction between 10 kΩ R and 100 nF C (C to GND)",
+      "position_mm": [10, 55],
+      "pad_diameter_mm": 2.0,
+      "tests": [
+        {
+          "name": "rc_capacitance",
+          "instrument": "DMM6500",
+          "mode": "capacitance",
+          "probe_hi_pad": "TP17",
+          "probe_lo_pad": "TP01",
+          "expect": {"min_nf": 85.0, "max_nf": 115.0},
+          "note": "100 nF ± 10%; DMM6500 capacitance mode measures C_RC directly to GND",
+          "gate": true
+        },
+        {
+          "name": "rc_time_constant",
+          "instrument": "PicoScope+DP832",
+          "mode": "time_constant_measure",
+          "force_pad": "TP16",
+          "measure_pad": "TP17",
+          "step_voltage_v": 3.3,
+          "series_resistance_kohm": 10.0,
+          "expect": {"tau_min_ms": 0.80, "tau_max_ms": 1.20},
+          "note": "τ = 10 kΩ × 100 nF = 1.00 ms ± 11%; measure via PicoScope step response",
+          "gate": false
+        }
+      ]
+    },
+    {
+      "id": "TP18",
+      "net": "EE_VCC",
+      "label": "EE_VCC",
+      "description": "EEPROM VCC supply input (FL-1 must drive 3.3 V here)",
+      "position_mm": [20, 55],
+      "pad_diameter_mm": 2.0,
+      "tests": []
+    },
+    {
+      "id": "TP19",
+      "net": "GND",
+      "label": "EE_GND",
+      "description": "EEPROM GND (shared with board star ground)",
+      "position_mm": [30, 55],
+      "pad_diameter_mm": 2.0,
+      "tests": []
+    },
+    {
+      "id": "TP20",
+      "net": "EE_SDA",
+      "label": "EE_SDA",
+      "description": "EEPROM I2C SDA (pulled up to EE_VCC on board)",
+      "position_mm": [40, 55],
+      "pad_diameter_mm": 2.0,
+      "tests": []
+    },
+    {
+      "id": "TP21",
+      "net": "EE_SCL",
+      "label": "EE_SCL",
+      "description": "EEPROM I2C SCL (pulled up to EE_VCC on board)",
+      "position_mm": [50, 55],
+      "pad_diameter_mm": 2.0,
+      "tests": [
+        {
+          "name": "eeprom_read",
+          "instrument": "DUT_LINK_FT4232H",
+          "mode": "i2c_read",
+          "i2c_addr": "0x51",
+          "read_addr": "0x00",
+          "read_len": 26,
+          "expect_header": {
+            "board_type": "FL1-CAL-",
+            "checksum_ok": true
+          },
+          "note": "FL-1 drives 3.3 V on TP18, GND on TP19; FT4232H I2C on TP20/21",
+          "gate": true
+        },
+        {
+          "name": "eeprom_cal_constants",
+          "instrument": "DUT_LINK_FT4232H",
+          "mode": "i2c_read",
+          "i2c_addr": "0x51",
+          "read_addr": "0x20",
+          "read_len": 24,
+          "expect": {
+            "r10_ohm_range": [9.0, 11.0],
+            "r1k_ohm_range": [990.0, 1010.0],
+            "r100k_ohm_range": [99000.0, 101000.0],
+            "di_vf_mv_range": [550.0, 750.0],
+            "ds_vf_mv_range": [200.0, 450.0],
+            "c_rc_nf_range": [80.0, 120.0]
+          },
+          "note": "Validates that cal constants page has been programmed",
+          "gate": false
+        }
+      ]
+    },
+    {
+      "id": "TP22",
+      "net": "OPEN_A",
+      "label": "OPEN_A",
+      "description": "Open-circuit reference pad A (no internal connection)",
+      "position_mm": [60, 55],
+      "pad_diameter_mm": 2.0,
+      "tests": []
+    },
+    {
+      "id": "TP23",
+      "net": "OPEN_B",
+      "label": "OPEN_B",
+      "description": "Open-circuit reference pad B (no internal connection)",
+      "position_mm": [70, 55],
+      "pad_diameter_mm": 2.0,
+      "tests": [
+        {
+          "name": "open_reference",
+          "instrument": "DMM6500",
+          "mode": "2wire_resistance",
+          "probe_hi_pad": "TP22",
+          "probe_lo_pad": "TP23",
+          "expect": {"min_ohm": 1e7},
+          "note": "Expect OL (>10 MΩ); verifies DMM can detect open circuit",
+          "gate": true
+        }
+      ]
+    }
+  ],
+
+  "test_sequence": [
+    "gnd_continuity",
+    "eeprom_read",
+    "eeprom_cal_constants",
+    "short_reference",
+    "open_reference",
+    "resistance_10ohm",
+    "resistance_1kohm",
+    "resistance_100kohm",
+    "silicon_diode_vf",
+    "silicon_diode_reverse",
+    "schottky_diode_vf",
+    "led_path_resistance",
+    "led_functional",
+    "rc_capacitance",
+    "rc_time_constant"
+  ],
+
+  "gate_tests": [
+    "gnd_continuity",
+    "eeprom_read",
+    "short_reference",
+    "open_reference",
+    "resistance_10ohm",
+    "resistance_1kohm",
+    "resistance_100kohm",
+    "silicon_diode_vf",
+    "schottky_diode_vf",
+    "rc_capacitance"
+  ],
+
+  "pass_criteria": "All gate_tests must pass. Non-gate tests log but do not block the FL-1 from proceeding to DUT testing.",
+
+  "fiducials": [
+    {"id": "FID1", "position_mm": [10, 10]},
+    {"id": "FID2", "position_mm": [80, 10]},
+    {"id": "FID3", "position_mm": [10, 70]}
+  ],
+
+  "board_outline_mm": [90, 80],
+  "mounting_holes_mm": [
+    [5, 5], [85, 5], [5, 75], [85, 75]
+  ]
+}
