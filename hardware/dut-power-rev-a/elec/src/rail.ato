@@ -1,0 +1,307 @@
+"""
+ProgrammableRail — single DUT power rail with:
+  - TPS54331DR buck (28V→programmable 1.8–24.8V, DAC-controlled)
+  - AO4407A high-side P-ch MOSFET fast-trip (< 1 µs turnoff)
+  - BSS84 level-shift helper for AO4407A gate drive
+  - TLV1701DBVR fast comparator (overcurrent trip)
+  - SN74HC74D half used as SR latch (latching fault memory)
+  - INA219AIDCNR calibrated current/voltage telemetry
+  - G5LE-1A-E-DC5 5A output isolation relay
+  - G6K-2F-Y-TR-DC5 discharge relay
+  - Yageo FC2512J10L0R010FER 10 mΩ sense resistor
+  - Flyback diodes for both relay coils
+
+DAC voltage programming (R1=30kΩ, R2=1kΩ, R3=4.3kΩ):
+  Vout = Vref * (1 + R1/R2) - Vdac * (R1/R3) / (1 + R1/R2)
+  ≈ 24.8V @ Vdac=0V, ≈ 1.8V @ Vdac=3.3V (firmware cal corrects)
+
+Fast-trip logic:
+  Normal:    BSS84 OFF → AO4407A gate at GND via 10kΩ → Vgs<0 → FET ON
+  OC trip:   comparator OUT goes HIGH → SR latch Q goes HIGH → BSS84 ON
+             BSS84 source=Vbuck, drain=AO4407A gate, gate pulled HIGH
+             → AO4407A gate = Vbuck → Vgs=0 → FET OFF  (< 1 µs)
+  Note: works for Vbuck > 2V; relay provides isolation at < 2V
+
+Buck feedback injection:
+  Vout → R1(30kΩ) → VSENSE node → R2(1kΩ) → GND
+  DAC → R3(4.3kΩ) → VSENSE node
+  TPS54331 regulates VSENSE to Vref=0.8V
+"""
+
+import ElectricPower
+import Resistor
+import Capacitor
+import Inductor
+import Fuse
+from "parts/Texas_Instruments_TPS54331DR/Texas_Instruments_TPS54331DR.ato" import Texas_Instruments_TPS54331DR_package
+from "parts/AO4407A/AO4407A.ato" import AO4407A_package
+from "parts/BSS84/BSS84.ato" import BSS84_package
+from "parts/TLV1701DBVR/TLV1701DBVR.ato" import TLV1701DBVR_package
+from "parts/SN74HC74D/SN74HC74D.ato" import SN74HC74D_package
+from "parts/G5LE_1A_E_DC5/G5LE_1A_E_DC5.ato" import G5LE_1A_E_DC5_package
+from "parts/Omron_Electronics_G6K_2F_Y_TR_DC5/Omron_Electronics_G6K_2F_Y_TR_DC5.ato" import Omron_Electronics_G6K_2F_Y_TR_DC5_package
+from "parts/Yageo_FC2512J10L0R010FER/Yageo_FC2512J10L0R010FER.ato" import Yageo_FC2512J10L0R010FER_package
+from "parts/Diode_1N4148WS/Diode_1N4148WS.ato" import Diode_1N4148WS_package
+
+
+module ProgrammableRail:
+    # --- External power ports --------------------------------------------------
+    v_in    = new ElectricPower   # 28V DUT supply input
+    v_out   = new ElectricPower   # DUT output (relay NO contact → DUT)
+    v5_coil = new ElectricPower   # 5V relay coil supply
+    v3v3    = new ElectricPower   # 3.3V logic (INA219, comparator, SR latch)
+
+    # --- MCU control signals ---------------------------------------------------
+    signal v_set           # 0–3.3V from DAC #1 (sets Vout)
+    signal i_limit_ref     # 0–3.3V from DAC #2 (sets OCP threshold)
+    signal enable          # MCU GPIO high → close output relay
+    signal fault_n         # to MCU, active-low latched fault
+    signal discharge_en    # MCU GPIO high → close discharge relay
+    signal fault_clr       # MCU GPIO pulse → clear SR latch (CLR_N)
+    signal led_active      # MCU GPIO → drives per-rail LED
+
+    # --- INA219 telemetry sense passthrough (wired in main.ato to telemetry) --
+    signal ina_inpos       # → sense resistor IN side (pfet drain)
+    signal ina_inneg       # → sense resistor OUT side (vsense_node)
+
+    # --- I2C stubs (not used within this rail; present for ERC/EEM completeness) ---
+    # INA219 is in telemetry.ato, connected via ina_inpos/ina_inneg in main.ato
+    signal i2c_sda
+    signal i2c_scl
+
+    # ==========================================================================
+    # BUCK CONVERTER: TPS54331DR, 28V→programmable Vout
+    # ==========================================================================
+    buck = new Texas_Instruments_TPS54331DR_package
+
+    fuse_in = new Fuse
+    fuse_in.trip_current = 5A +/- 20%
+
+    l_out = new Inductor
+    l_out.inductance = 10uH +/- 20%
+
+    c_in = new Capacitor
+    c_in.capacitance = 47uF +/- 20%
+
+    c_out1 = new Capacitor
+    c_out1.capacitance = 47uF +/- 20%
+    c_out2 = new Capacitor
+    c_out2.capacitance = 47uF +/- 20%
+
+    c_boot = new Capacitor
+    c_boot.capacitance = 100nF +/- 10%
+
+    # Feedback resistors (DAC injection):
+    # R1: Vout → VSENSE, 30kΩ
+    # R2: VSENSE → GND, 1kΩ
+    # R3: DAC → VSENSE, 4.3kΩ
+    r_fb1 = new Resistor
+    r_fb1.resistance = 30kohm +/- 1%
+    r_fb2 = new Resistor
+    r_fb2.resistance = 1kohm +/- 1%
+    r_fb3 = new Resistor
+    r_fb3.resistance = 4.3kohm +/- 1%
+
+    # 28V → fuse → buck VIN
+    v_in.hv ~ fuse_in.unnamed[0]
+    fuse_in.unnamed[1] ~ buck.VIN
+
+    buck.GND ~ v_in.lv
+    buck.EN  ~ buck.VIN   # always enabled (MCU controls via relay)
+
+    # BOOT cap
+    buck.BOOT ~ c_boot.unnamed[0]
+    c_boot.unnamed[1] ~ buck.PH
+
+    # Input cap
+    buck.VIN ~ c_in.unnamed[0]
+    c_in.unnamed[1] ~ v_in.lv
+
+    # Inductor: PH → Vbuck_node
+    buck.PH ~ l_out.unnamed[0]
+    signal vbuck_node
+    l_out.unnamed[1] ~ vbuck_node
+
+    # Output caps
+    vbuck_node ~ c_out1.unnamed[0]
+    c_out1.unnamed[1] ~ v_in.lv
+    vbuck_node ~ c_out2.unnamed[0]
+    c_out2.unnamed[1] ~ v_in.lv
+
+    # Feedback divider with DAC injection
+    vbuck_node  ~ r_fb1.unnamed[0]
+    r_fb1.unnamed[1] ~ buck.VSENSE
+    buck.VSENSE ~ r_fb2.unnamed[0]
+    r_fb2.unnamed[1] ~ v_in.lv
+    v_set ~ r_fb3.unnamed[0]
+    r_fb3.unnamed[1] ~ buck.VSENSE
+
+    # ==========================================================================
+    # HIGH-SIDE P-CH MOSFET FAST-TRIP: AO4407A + BSS84
+    # ==========================================================================
+    pfet    = new AO4407A_package       # -30V/-12A P-ch, SOP-8
+    bss84   = new BSS84_package         # P-ch level-shift helper, SOT-23
+
+    pfet_pd = new Resistor              # 10kΩ gate pull-down
+    pfet_pd.resistance = 10kohm +/- 1%
+
+    # AO4407A: source = Vbuck_node, drain feeds into sense resistor
+    # Gate default: 10kΩ to GND → Vgs = -Vbuck → FET ON
+    pfet.S  ~ vbuck_node
+    pfet.S2 ~ vbuck_node
+    pfet.G  ~ pfet_pd.unnamed[0]
+    pfet.G2 ~ pfet_pd.unnamed[0]
+    pfet_pd.unnamed[1] ~ v_in.lv     # pull-down to GND
+
+    # BSS84: source = Vbuck (follows pfet source), gate = SR latch Q (fault signal)
+    # On fault (Q=HIGH=3.3V): BSS84 turns ON → pulls AO4407A gate toward Vbuck → OFF
+    # Normal (Q=LOW=0V): BSS84 OFF → AO4407A gate at GND via 10kΩ → ON
+    bss84.S ~ vbuck_node            # BSS84 source follows pfet source
+    bss84.D ~ pfet.G                # BSS84 drain drives pfet gate (overrides pull-down)
+    # BSS84 gate connected to SR latch output (active-HIGH fault trips = turns BSS84 ON)
+    signal trip_gate                # HIGH = trip AO4407A off
+    bss84.G ~ trip_gate
+
+    # ==========================================================================
+    # CURRENT SENSE RESISTOR: 10 mΩ / 1W / 2512
+    # ==========================================================================
+    r_sense = new Yageo_FC2512J10L0R010FER_package
+
+    # pfet drain → sense resistor → vsense_node → relay
+    pfet.D  ~ r_sense.p1
+    pfet.D2 ~ r_sense.p1
+    pfet.D3 ~ r_sense.p1
+    pfet.D4 ~ r_sense.p1
+    signal vsense_node
+    r_sense.p2 ~ vsense_node
+
+    # Expose sense nodes to telemetry block (INA219 in telemetry.ato)
+    ina_inpos ~ r_sense.p1      # IN+ = pfet drain (high side of sense R)
+    ina_inneg ~ vsense_node     # IN- = low side of sense R
+
+    # ==========================================================================
+    # FAST-TRIP COMPARATOR: TLV1701DBVR
+    # ==========================================================================
+    comp = new TLV1701DBVR_package
+
+    # Sense voltage scaling: vsense_node → 10kΩ/100kΩ divider → IN+
+    # Scales sense voltage (≈ I × 0.01Ω) to comparator input range
+    r_comp_in  = new Resistor       # 10kΩ series from vsense_node to IN+
+    r_comp_in.resistance  = 10kohm +/- 1%
+    r_comp_ref = new Resistor       # 100kΩ from IN+ to GND (divider)
+    r_comp_ref.resistance = 100kohm +/- 1%
+
+    vsense_node ~ r_comp_in.unnamed[0]
+    r_comp_in.unnamed[1] ~ comp.INp
+    comp.INp ~ r_comp_ref.unnamed[0]
+    r_comp_ref.unnamed[1] ~ v_in.lv
+
+    # Current limit reference: filtered DAC output → IN-
+    # 10kΩ filter resistor + 10µF cap (DAC smoothing)
+    r_ilim_filt = new Resistor
+    r_ilim_filt.resistance = 10kohm +/- 5%
+    c_ilim_filt = new Capacitor
+    c_ilim_filt.capacitance = 10uF +/- 20%
+
+    i_limit_ref ~ r_ilim_filt.unnamed[0]
+    r_ilim_filt.unnamed[1] ~ comp.INn
+    comp.INn ~ c_ilim_filt.unnamed[0]
+    c_ilim_filt.unnamed[1] ~ v_in.lv
+
+    # Comparator power
+    comp.VCC ~ v3v3.hv
+    comp.GND ~ v_in.lv
+
+    # Comparator output pull-up (open-drain → 3.3V)
+    r_comp_pu = new Resistor
+    r_comp_pu.resistance = 10kohm +/- 5%
+    v3v3.hv ~ r_comp_pu.unnamed[0]
+    r_comp_pu.unnamed[1] ~ comp.OUT
+
+    # ==========================================================================
+    # SR LATCH: SN74HC74D (half used — FF1)
+    # ==========================================================================
+    sr_latch = new SN74HC74D_package
+
+    # Using FF1 as SR latch:
+    #   D1 = VCC (always 1)
+    #   CLK1 = comparator OUT (rising edge = Set = latch fault)
+    #   PRE1_N = VCC (disable async preset)
+    #   CLR1_N = fault_clr (MCU GPIO pulse, active LOW = clear)
+    #   Q1 = fault output (HIGH = fault latched)
+    #   Q1_N = fault_n (active-low fault to MCU)
+    # FF2: unused — D2=GND, CLK2=GND, PRE2_N=VCC, CLR2_N=VCC
+
+    sr_latch.VCC    ~ v3v3.hv
+    sr_latch.GND    ~ v_in.lv
+
+    # FF1 (used as SR)
+    sr_latch.D1     ~ v3v3.hv     # D always HIGH
+    sr_latch.CLK1   ~ comp.OUT    # comparator trip → Set
+    sr_latch.PRE1_N ~ v3v3.hv    # preset disabled
+    sr_latch.CLR1_N ~ fault_clr  # MCU clears fault (pulse LOW)
+    sr_latch.Q1     ~ trip_gate  # HIGH fault → trip AO4407A via BSS84
+    sr_latch.Q1_N   ~ fault_n   # active-low fault to MCU
+
+    # FF2 unused — tie to safe states
+    sr_latch.D2     ~ v_in.lv
+    sr_latch.CLK2   ~ v_in.lv
+    sr_latch.PRE2_N ~ v3v3.hv
+    sr_latch.CLR2_N ~ v3v3.hv
+
+    # ==========================================================================
+    # OUTPUT RELAY: G5LE-1A-E-DC5 (SPST-NO, 5V coil, 10A contacts)
+    # ==========================================================================
+    relay_out   = new G5LE_1A_E_DC5_package
+    d_relay_out = new Diode_1N4148WS_package
+
+    # Relay: vsense_node → COM → NO → v_out.hv
+    vsense_node   ~ relay_out.com
+    relay_out.no  ~ v_out.hv
+    v_out.lv      ~ v_in.lv
+
+    # Coil: driven by MCU enable GPIO via 5V rail
+    # Coil (+) = 5V; coil (-) = enable (active low drive from NPN or direct GPIO)
+    # For simplicity, coil- tied to enable signal (assumes MCU can sink 80mA OR uses driver)
+    # TODO: add NPN driver transistor at layout review if GPIO current limit exceeded
+    v5_coil.hv    ~ relay_out.coil_p
+    enable         ~ relay_out.coil_n
+
+    # Flyback diode across coil (cathode to coil+, anode to coil-)
+    d_relay_out.K ~ relay_out.coil_p
+    d_relay_out.A ~ relay_out.coil_n
+
+    # ==========================================================================
+    # DISCHARGE RELAY: G6K-2F-Y-TR-DC5 (DPDT, 5V coil)
+    # ==========================================================================
+    relay_disch   = new Omron_Electronics_G6K_2F_Y_TR_DC5_package
+    d_relay_disch = new Diode_1N4148WS_package
+
+    # 100Ω 5W discharge resistor (1206; real 5W part TBD at layout — use Vishay RH050)
+    r_discharge = new Resistor
+    r_discharge.resistance = 100ohm +/- 5%
+    # Note: 5W dissipation requires Vishay RH050 or equiv 1W rated 1206 in series group.
+    # At layout: replace stdlib Resistor with actual 5W 2512 part.
+
+    # Discharge path: vsense_node → discharge relay COM → NO → 100Ω → GND
+    vsense_node          ~ relay_disch.com
+    relay_disch.no       ~ r_discharge.unnamed[0]
+    r_discharge.unnamed[1] ~ v_in.lv
+
+    # Discharge relay coil driven by discharge_en signal
+    v5_coil.hv        ~ relay_disch.coil_p
+    discharge_en       ~ relay_disch.coil_n
+
+    # Flyback diode
+    d_relay_disch.K ~ relay_disch.coil_p
+    d_relay_disch.A ~ relay_disch.coil_n
+
+    # ==========================================================================
+    # PER-RAIL ACTIVE LED (yellow, 0603) with 330Ω series resistor
+    # ==========================================================================
+    r_led = new Resistor
+    r_led.resistance = 330ohm +/- 5%
+    signal led_a_node
+    led_active ~ r_led.unnamed[0]
+    r_led.unnamed[1] ~ led_a_node
+    # LED anode = led_a_node, cathode → GND (LED part instantiated in main.ato or layout)

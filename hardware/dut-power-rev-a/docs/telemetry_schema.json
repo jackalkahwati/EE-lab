@@ -1,0 +1,135 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "fl1-dut-power-telemetry-v1",
+  "title": "FL-1 DUT Power Board Telemetry",
+  "description": "Response schema for READ TELEMETRY command from FL-1 DUT Power + Fast-Trip Board",
+  "type": "object",
+  "required": ["timestamp_ms", "board_id", "rails", "coil_rail"],
+  "properties": {
+    "timestamp_ms": {
+      "type": "integer",
+      "description": "Milliseconds since MCU boot"
+    },
+    "board_id": {
+      "type": "string",
+      "description": "Board serial number from EEPROM (8-char ASCII)"
+    },
+    "rails": {
+      "type": "array",
+      "description": "Per-rail telemetry, index 0=rail1 through 3=rail4",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "required": [
+          "rail_id", "state", "fault_code",
+          "voltage_v", "current_a", "power_w", "energy_wh",
+          "peak_current_a", "peak_voltage_v",
+          "set_voltage_v", "limit_current_a",
+          "ina219_bus_voltage_v", "ina219_shunt_mv",
+          "timestamp_ms"
+        ],
+        "properties": {
+          "rail_id": {
+            "type": "integer",
+            "enum": [1, 2, 3, 4],
+            "description": "Rail number (1-indexed)"
+          },
+          "state": {
+            "type": "string",
+            "enum": ["IDLE", "PRE_CHECK", "RAMPING", "ON", "FAULT", "DISCHARGE"],
+            "description": "Current rail state machine state"
+          },
+          "fault_code": {
+            "type": "integer",
+            "description": "0=no fault; bitmask: bit0=OCP, bit1=OVP, bit2=UVP, bit3=short, bit4=latch_set",
+            "minimum": 0,
+            "maximum": 255
+          },
+          "fault_description": {
+            "type": "string",
+            "description": "Human-readable fault summary"
+          },
+          "voltage_v": {
+            "type": "number",
+            "description": "Calibrated output voltage in volts (INA219 bus voltage)",
+            "minimum": 0,
+            "maximum": 30
+          },
+          "current_a": {
+            "type": "number",
+            "description": "Calibrated output current in amperes (INA219 shunt)",
+            "minimum": -0.1,
+            "maximum": 12
+          },
+          "power_w": {
+            "type": "number",
+            "description": "Instantaneous output power in watts",
+            "minimum": 0,
+            "maximum": 360
+          },
+          "energy_wh": {
+            "type": "number",
+            "description": "Cumulative energy delivered since last enable, in watt-hours",
+            "minimum": 0
+          },
+          "peak_current_a": {
+            "type": "number",
+            "description": "Peak current since last enable or fault clear, in amperes",
+            "minimum": 0,
+            "maximum": 12
+          },
+          "peak_voltage_v": {
+            "type": "number",
+            "description": "Peak voltage since last enable, in volts",
+            "minimum": 0,
+            "maximum": 30
+          },
+          "set_voltage_v": {
+            "type": "number",
+            "description": "Programmed output voltage setpoint in volts",
+            "minimum": 0,
+            "maximum": 25
+          },
+          "limit_current_a": {
+            "type": "number",
+            "description": "Programmed overcurrent trip threshold in amperes",
+            "minimum": 0,
+            "maximum": 10
+          },
+          "ina219_bus_voltage_v": {
+            "type": "number",
+            "description": "Raw INA219 bus voltage register value in volts",
+            "minimum": 0,
+            "maximum": 30
+          },
+          "ina219_shunt_mv": {
+            "type": "number",
+            "description": "Raw INA219 shunt voltage in millivolts (full scale ±320 mV)",
+            "minimum": -320,
+            "maximum": 320
+          },
+          "inrush_profile_a": {
+            "type": "array",
+            "description": "Optional: 500kS/s inrush capture (10ms, 5000 samples) at last enable",
+            "items": { "type": "number" }
+          },
+          "timestamp_ms": {
+            "type": "integer",
+            "description": "Timestamp of this rail sample in ms since boot"
+          }
+        }
+      }
+    },
+    "coil_rail": {
+      "type": "object",
+      "description": "5V relay coil rail telemetry (INA219 on power tree)",
+      "required": ["voltage_v", "current_a", "power_w"],
+      "properties": {
+        "voltage_v":  { "type": "number", "minimum": 0, "maximum": 6 },
+        "current_a":  { "type": "number", "minimum": 0, "maximum": 5 },
+        "power_w":    { "type": "number", "minimum": 0, "maximum": 30 }
+      }
+    }
+  }
+}

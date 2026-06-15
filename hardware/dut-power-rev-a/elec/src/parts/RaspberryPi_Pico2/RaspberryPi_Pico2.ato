@@ -52,7 +52,7 @@ component RaspberryPi_Pico2_package:
     pin 39
     pin 40
 
-    # EE-lab pin aliases
+    # EE-lab pin aliases (shared with pcba-rev-a)
     signal vsys ~ pin 39
     signal gnd ~ pin 38
     signal v3v3_out ~ pin 36
@@ -63,3 +63,35 @@ component RaspberryPi_Pico2_package:
     signal sda ~ pin 9
     signal scl ~ pin 10
     signal wdi ~ pin 11
+
+    # dut-power-rev-a GPIO aliases (Pico2 pin numbers)
+    # GP0=pin1 GP1=pin2 GP2=pin4 GP3=pin5 GP4=pin6 GP5=pin7
+    # GP6=pin9 GP7=pin10 GP8=pin11 GP9=pin12 GP10=pin14 GP11=pin15
+    # GP12=pin16 GP13=pin17 GP14=pin19 GP15=pin20 GP16=pin21
+    # GP17=pin22 GP18=pin24 GP19=pin25 GP20=pin26 GP21=pin27
+    # GP22=pin29 GP23=pin30 GP26=pin31 GP27=pin32 GP28=pin34
+    signal uart_tx       ~ pin 1    # GP0
+    signal uart_rx       ~ pin 2    # GP1
+    signal rail1_enable  ~ pin 4    # GP2
+    signal rail2_enable  ~ pin 5    # GP3
+    signal rail3_enable  ~ pin 6    # GP4
+    signal rail4_enable  ~ pin 7    # GP5
+    signal rail1_fault_n ~ pin 12   # GP9
+    signal rail2_fault_n ~ pin 14   # GP10
+    signal rail3_fault_n ~ pin 15   # GP11
+    signal rail4_fault_n ~ pin 16   # GP12
+    signal rail1_fault_clr ~ pin 17 # GP13
+    signal rail2_fault_clr ~ pin 19 # GP14
+    signal rail3_fault_clr ~ pin 20 # GP15
+    signal rail4_fault_clr ~ pin 21 # GP16
+    signal rail1_disch   ~ pin 22   # GP17
+    signal rail2_disch   ~ pin 24   # GP18
+    signal rail3_disch   ~ pin 25   # GP19
+    signal rail4_disch   ~ pin 26   # GP20
+    signal rail1_led     ~ pin 27   # GP21
+    signal rail2_led     ~ pin 29   # GP22
+    signal wdt_reset_n   ~ pin 30   # GP23 (watchdog nRESET input)
+    signal rail3_led     ~ pin 31   # GP26
+    signal rail4_led     ~ pin 32   # GP27
+    signal fault_led     ~ pin 34   # GP28
+    signal adc_ref       ~ pin 35   # ADC_VREF

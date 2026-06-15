@@ -1,0 +1,80 @@
+{
+  "description": "Calibration constants structure for FL-1 DUT Power Board Rev A",
+  "eeprom_address": "0x50",
+  "eeprom_memory_map": {
+    "0x00-0x07": "board_type: ASCII 'FL1-DPWR'",
+    "0x08-0x0F": "revision: ASCII 'REV-A\\0\\0\\0'",
+    "0x10-0x17": "serial_no: 8-char ASCII",
+    "0x18":      "board_state: 0xA5=calibrated, 0x00=uncalibrated",
+    "0x19":      "checksum: XOR of bytes 0x00-0x18",
+    "0x20-0x23": "rail1_Vout_gain: float32",
+    "0x24-0x27": "rail1_Vout_offset: float32",
+    "0x28-0x2B": "rail1_I_gain: float32",
+    "0x2C-0x2F": "rail1_I_offset: float32",
+    "0x30-0x33": "rail2_Vout_gain: float32",
+    "0x34-0x37": "rail2_Vout_offset: float32",
+    "0x38-0x3B": "rail2_I_gain: float32",
+    "0x3C-0x3F": "rail2_I_offset: float32",
+    "0x40-0x43": "rail3_Vout_gain: float32",
+    "0x44-0x47": "rail3_Vout_offset: float32",
+    "0x48-0x4B": "rail3_I_gain: float32",
+    "0x4C-0x4F": "rail3_I_offset: float32",
+    "0x50-0x53": "rail4_Vout_gain: float32",
+    "0x54-0x57": "rail4_Vout_offset: float32",
+    "0x58-0x5B": "rail4_I_gain: float32",
+    "0x5C-0x5F": "rail4_I_offset: float32",
+    "0x60-0x7F": "reserved: 0xFF",
+    "0x80-0xF8": "unique_id: factory-programmed 64-bit MAC (read-only)"
+  },
+  "cal_constants_per_rail": {
+    "Vout_gain": {
+      "type": "float32",
+      "units": "V/V",
+      "default": 1.0,
+      "description": "Multiplier for DAC→Vout mapping (corrects buck gain error)",
+      "formula": "Vout_actual = (Vout_set - Vout_offset) / Vout_gain"
+    },
+    "Vout_offset": {
+      "type": "float32",
+      "units": "V",
+      "default": 0.0,
+      "description": "Additive offset to Vout setpoint (corrects DAC zero error)"
+    },
+    "I_gain": {
+      "type": "float32",
+      "units": "A/A",
+      "default": 1.0,
+      "description": "Multiplier for INA219 current reading (corrects shunt resistance error)"
+    },
+    "I_offset": {
+      "type": "float32",
+      "units": "A",
+      "default": 0.0,
+      "description": "Additive offset to INA219 current reading (corrects input bias)"
+    }
+  },
+  "dac_constants": {
+    "V_dac_lsb_mv": {
+      "type": "float32",
+      "units": "mV/LSB",
+      "default": 0.80586,
+      "description": "MCP4728 12-bit DAC LSB voltage at 3.3V VDD: 3300/4096 = 0.806 mV/LSB"
+    },
+    "I_limit_lsb_ma": {
+      "type": "float32",
+      "units": "mA/LSB",
+      "description": "Current limit threshold DAC LSB in milliamps (depends on comparator divider scaling)",
+      "default": 2.44,
+      "note": "At full scale (3.3V DAC), comparator IN- = 3.3V. Scaling via 10k/100k divider gives trip = DAC * (10k/110k) / (Rsense * 100k/110k). Calibrate per-rail."
+    }
+  },
+  "calibration_procedure": {
+    "step1": "Connect precision DMM to DUT output connector",
+    "step2": "Issue SET RAIL<n> 5.0V; measure actual Vout with DMM",
+    "step3": "Compute Vout_gain = Vout_measured / 5.0; Vout_offset = 0.0",
+    "step4": "Connect precision current source (1A, 2A, 5A); issue SET LIMIT RAIL<n> 10000mA",
+    "step5": "Measure INA219 current vs. actual; fit I_gain and I_offset",
+    "step6": "Write cal constants to EEPROM at 0x20+; set board_state=0xA5; update checksum",
+    "step7": "Issue RUN SELFTEST to confirm calibration accepted"
+  }
+}

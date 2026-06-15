@@ -1,0 +1,131 @@
+"""
+PowerTree — 28V DUT control power in → 5V → 3.3V.
+
+Control power rail (separate from DUT 28V power) feeds:
+  TPS54331DR (28V→5V buck, 3A), TPS62086RLTR (5V→3.3V dig buck).
+5V coil rail powers relay coils (×4 output relays + ×4 discharge relays = 8 relays).
+3.3V rail powers MCU, INA219s, comparators, DACs, EEPROM.
+
+Feedback values:
+  28V → 5V: R1=30kΩ, R2=1kΩ → Vout = 0.8*(1 + 30k/1k) = 25.6 V -- use 11k/2k for 5V.
+  Corrected for 5V: Vout=5V, Vref=0.8V → ratio=5.25 → R_top/R_bot=5.25-1=4.25
+    Use R_top=10.5kΩ, R_bot=2kΩ as in pcba-rev-a.
+  5V → 3.3V (TPS62086): Vref=0.45V, Vout=3.3V → R_top=100kΩ, R_bot=15.8kΩ as in pcba-rev-a.
+"""
+
+import ElectricPower
+import Resistor
+import Capacitor
+import Inductor
+import Fuse
+from "parts/Texas_Instruments_TPS54331DR/Texas_Instruments_TPS54331DR.ato" import Texas_Instruments_TPS54331DR_package
+from "parts/Texas_Instruments_TPS62086RLTR/Texas_Instruments_TPS62086RLTR.ato" import Texas_Instruments_TPS62086RLTR_package
+from "parts/Texas_Instruments_INA219AIDCNR/Texas_Instruments_INA219AIDCNR.ato" import Texas_Instruments_INA219AIDCNR_package
+
+
+module PowerTree:
+    # External ports
+    v28_ctrl = new ElectricPower   # 28V control input (separate from DUT 28V supply)
+    v5_coil  = new ElectricPower   # 5V coil rail (relay coils)
+    v3v3     = new ElectricPower   # 3.3V logic/analog rail
+
+    # I2C bus (coil rail INA219 monitor)
+    signal sda
+    signal scl
+
+    # --- 28V → 5V: TPS54331DR ------------------------------------------------
+    fuse_ctrl = new Fuse
+    fuse_ctrl.trip_current = 3A +/- 20%
+
+    buck28 = new Texas_Instruments_TPS54331DR_package
+
+    l_buck28 = new Inductor
+    l_buck28.inductance = 10uH +/- 20%
+
+    c_boot28 = new Capacitor
+    c_boot28.capacitance = 100nF +/- 10%
+
+    # Feedback: Vref=0.8V, Vout=5V → R_top=10.5kΩ, R_bot=2kΩ
+    fb28_top = new Resistor
+    fb28_top.resistance = 10.5kohm +/- 1%
+    fb28_bot = new Resistor
+    fb28_bot.resistance = 2kohm +/- 1%
+
+    # 28V entry fuse
+    v28_ctrl.hv ~ fuse_ctrl.unnamed[0]
+    fuse_ctrl.unnamed[1] ~ buck28.VIN
+
+    buck28.GND ~ v28_ctrl.lv
+    buck28.EN  ~ buck28.VIN
+
+    # BOOT cap
+    buck28.BOOT ~ c_boot28.unnamed[0]
+    c_boot28.unnamed[1] ~ buck28.PH
+
+    # Inductor (PH → raw 5V)
+    buck28.PH ~ l_buck28.unnamed[0]
+    signal v5_raw
+    l_buck28.unnamed[1] ~ v5_raw
+
+    # Feedback divider
+    v5_raw ~ fb28_top.unnamed[0]
+    fb28_top.unnamed[1] ~ buck28.VSENSE
+    buck28.VSENSE ~ fb28_bot.unnamed[0]
+    fb28_bot.unnamed[1] ~ v28_ctrl.lv
+
+    # Output bulk cap
+    c_out28 = new Capacitor
+    c_out28.capacitance = 47uF +/- 20%
+    v5_raw ~ c_out28.unnamed[0]
+    c_out28.unnamed[1] ~ v28_ctrl.lv
+
+    # --- 5V coil rail: v5_raw through INA219 shunt ----------------------------
+    shunt_coil = new Resistor
+    shunt_coil.resistance = 0.05ohm +/- 1%
+
+    coil_mon = new Texas_Instruments_INA219AIDCNR_package
+
+    v5_raw ~ shunt_coil.unnamed[0]
+    shunt_coil.unnamed[1] ~ v5_coil.hv
+    coil_mon.INpos ~ shunt_coil.unnamed[0]
+    coil_mon.INneg ~ shunt_coil.unnamed[1]
+    coil_mon.VS  ~ v3v3.hv
+    coil_mon.GND ~ v28_ctrl.lv
+    coil_mon.SDA ~ sda
+    coil_mon.SCL ~ scl
+    coil_mon.A0  ~ v28_ctrl.lv
+    coil_mon.A1  ~ v28_ctrl.lv
+
+    # --- 5V → 3.3V dig: TPS62086RLTR -----------------------------------------
+    buck5 = new Texas_Instruments_TPS62086RLTR_package
+
+    l_buck5 = new Inductor
+    l_buck5.inductance = 2.2uH +/- 20%
+
+    # Feedback: Vref=0.45V, Vout=3.3V → R_top=100kΩ, R_bot=15.8kΩ
+    fb5_top = new Resistor
+    fb5_top.resistance = 100kohm +/- 1%
+    fb5_bot = new Resistor
+    fb5_bot.resistance = 15.8kohm +/- 1%
+
+    v5_raw ~ buck5.VIN
+    buck5.GND ~ v28_ctrl.lv
+    buck5.EN  ~ buck5.VIN
+    buck5.SW  ~ l_buck5.unnamed[0]
+    l_buck5.unnamed[1] ~ v3v3.hv
+    buck5.VOS ~ v3v3.hv
+
+    v3v3.hv ~ fb5_top.unnamed[0]
+    fb5_top.unnamed[1] ~ buck5.FB
+    buck5.FB ~ fb5_bot.unnamed[0]
+    fb5_bot.unnamed[1] ~ v28_ctrl.lv
+
+    # Output decoupling
+    c_out3v3 = new Capacitor
+    c_out3v3.capacitance = 47uF +/- 20%
+    v3v3.hv ~ c_out3v3.unnamed[0]
+    c_out3v3.unnamed[1] ~ v28_ctrl.lv
+
+    # GND stitching
+    v5_coil.lv ~ v28_ctrl.lv
+    v3v3.lv    ~ v28_ctrl.lv

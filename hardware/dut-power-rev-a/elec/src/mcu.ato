@@ -1,0 +1,184 @@
+"""
+Control — Raspberry Pi Pico 2 (socketed) + TPS3823 watchdog + LEDs + USB-C
++ service calibration connector.
+
+Pico 2 GPIO assignments (firmware shares this table):
+  GP0  / pin 1  — UART TX (debug)
+  GP1  / pin 2  — UART RX (debug)
+  GP2  / pin 4  — Rail 1 enable
+  GP3  / pin 5  — Rail 2 enable
+  GP4  / pin 6  — Rail 3 enable
+  GP5  / pin 7  — Rail 4 enable
+  GP6  / pin 9  — I2C0 SDA (INA219 + DAC + EEPROM)
+  GP7  / pin 10 — I2C0 SCL
+  GP8  / pin 11 — WDI (watchdog kick)
+  GP9  / pin 12 — Rail 1 fault_n (input, IRQ)
+  GP10 / pin 14 — Rail 2 fault_n (input, IRQ)
+  GP11 / pin 15 — Rail 3 fault_n (input, IRQ)
+  GP12 / pin 16 — Rail 4 fault_n (input, IRQ)
+  GP13 / pin 17 — Rail 1 fault_clr (output)
+  GP14 / pin 19 — Rail 2 fault_clr (output)
+  GP15 / pin 20 — Rail 3 fault_clr (output)
+  GP16 / pin 21 — Rail 4 fault_clr (output)
+  GP17 / pin 22 — Rail 1 discharge_en
+  GP18 / pin 24 — Rail 2 discharge_en
+  GP19 / pin 25 — Rail 3 discharge_en
+  GP20 / pin 26 — Rail 4 discharge_en
+  GP21 / pin 27 — Rail 1 LED active
+  GP22 / pin 29 — Rail 2 LED active
+  GP26 / pin 31 — Rail 3 LED active (ADC0 also available)
+  GP27 / pin 32 — Rail 4 LED active (ADC1 also available)
+  GP28 / pin 34 — Fault LED (red, any rail fault)
+  ADC_REF / pin 35 — REF3033 reference input
+  VSYS / pin 39 — 3.3V supply (Pico runs from 3.3V via VSYS on this board)
+  GND  / pin 38 — Ground
+"""
+
+import ElectricPower
+import Resistor
+import Capacitor
+from "parts/RaspberryPi_Pico2/RaspberryPi_Pico2.ato" import RaspberryPi_Pico2_package
+from "parts/Texas_Instruments_TPS3823_33DBVR/Texas_Instruments_TPS3823_33DBVR.ato" import Texas_Instruments_TPS3823_33DBVR_package
+
+
+module Control:
+    v3v3    = new ElectricPower   # 3.3V supply from power tree
+    v5_coil = new ElectricPower   # 5V for watchdog VDD (TPS3823 tolerates 5V)
+
+    # I2C shared bus
+    signal sda
+    signal scl
+
+    # Per-rail GPIO signals (connected in main.ato to each rail)
+    signal rail1_enable
+    signal rail2_enable
+    signal rail3_enable
+    signal rail4_enable
+
+    signal rail1_fault_n
+    signal rail2_fault_n
+    signal rail3_fault_n
+    signal rail4_fault_n
+
+    signal rail1_fault_clr
+    signal rail2_fault_clr
+    signal rail3_fault_clr
+    signal rail4_fault_clr
+
+    signal rail1_discharge_en
+    signal rail2_discharge_en
+    signal rail3_discharge_en
+    signal rail4_discharge_en
+
+    signal rail1_led_active
+    signal rail2_led_active
+    signal rail3_led_active
+    signal rail4_led_active
+
+    # --- Raspberry Pi Pico 2 (socketed) ----------------------------------------
+    mcu = new RaspberryPi_Pico2_package
+
+    # Power: VSYS from 3.3V rail (Pico's internal LDO bypassed when VSYS=3.3V)
+    mcu.vsys ~ v3v3.hv
+    mcu.gnd  ~ v3v3.lv
+
+    # I2C bus
+    mcu.sda ~ sda
+    mcu.scl ~ scl
+
+    # Watchdog kick → GP8 (wdi alias in Pico2 part)
+    mcu.wdi ~ wdt.WDI
+
+    # Rail enables (GP2–GP5, aliases in Pico2 part)
+    mcu.rail1_enable ~ rail1_enable
+    mcu.rail2_enable ~ rail2_enable
+    mcu.rail3_enable ~ rail3_enable
+    mcu.rail4_enable ~ rail4_enable
+
+    # Rail fault_n (GP9–GP12)
+    mcu.rail1_fault_n ~ rail1_fault_n
+    mcu.rail2_fault_n ~ rail2_fault_n
+    mcu.rail3_fault_n ~ rail3_fault_n
+    mcu.rail4_fault_n ~ rail4_fault_n
+
+    # Rail fault_clr (GP13–GP16)
+    mcu.rail1_fault_clr ~ rail1_fault_clr
+    mcu.rail2_fault_clr ~ rail2_fault_clr
+    mcu.rail3_fault_clr ~ rail3_fault_clr
+    mcu.rail4_fault_clr ~ rail4_fault_clr
+
+    # Rail discharge_en (GP17–GP20)
+    mcu.rail1_disch ~ rail1_discharge_en
+    mcu.rail2_disch ~ rail2_discharge_en
+    mcu.rail3_disch ~ rail3_discharge_en
+    mcu.rail4_disch ~ rail4_discharge_en
+
+    # Rail LED active (GP21, GP22, GP26, GP27)
+    mcu.rail1_led ~ rail1_led_active
+    mcu.rail2_led ~ rail2_led_active
+    mcu.rail3_led ~ rail3_led_active
+    mcu.rail4_led ~ rail4_led_active
+
+    # --- Watchdog: TPS3823-33DBVR ----------------------------------------------
+    wdt = new Texas_Instruments_TPS3823_33DBVR_package
+    wdt.VDD    ~ v3v3.hv
+    wdt.GND    ~ v3v3.lv
+    wdt.WDI    ~ mcu.wdi
+    wdt.nRESET ~ mcu.wdt_reset_n    # GP23 (pin 30): WDT reset output to MCU
+    wdt.nMR    ~ v3v3.hv       # Manual reset pulled high (not used)
+
+    # WDT decoupling
+    c_wdt = new Capacitor
+    c_wdt.capacitance = 100nF +/- 10%
+    v3v3.hv ~ c_wdt.unnamed[0]
+    c_wdt.unnamed[1] ~ v3v3.lv
+
+    # --- LEDs ------------------------------------------------------------------
+    # Green: power good (always on when 3.3V up)
+    # TODO: instantiate LED_Green_0603 part at layout sync; stub is 330Ω → open net
+    # Real net: v3v3.hv → 330Ω → LED anode → LED cathode → GND
+    r_led_pwr = new Resistor
+    r_led_pwr.resistance = 330ohm +/- 5%
+    signal led_pwr_a
+    v3v3.hv ~ r_led_pwr.unnamed[0]
+    r_led_pwr.unnamed[1] ~ led_pwr_a   # LED anode stub — connect LED K to GND at layout
+
+    # Red: fault (any rail) — driven by MCU GP28 (pin 34)
+    r_led_fault = new Resistor
+    r_led_fault.resistance = 330ohm +/- 5%
+    signal led_fault_a
+    mcu.fault_led ~ r_led_fault.unnamed[0]
+    r_led_fault.unnamed[1] ~ led_fault_a
+
+    # Blue: watchdog heartbeat — driven by MCU uart_tx (GP0) toggled in firmware
+    r_led_wdt = new Resistor
+    r_led_wdt.resistance = 330ohm +/- 5%
+    signal led_wdt_a
+    mcu.uart_tx ~ r_led_wdt.unnamed[0]  # GP0 TX; firmware toggles for WDT heartbeat
+    r_led_wdt.unnamed[1] ~ led_wdt_a
+
+    # Per-rail yellow LEDs — driven through rail led_active signals above (via r in rail.ato)
+
+    # --- MCU decoupling --------------------------------------------------------
+    c_mcu = new Capacitor
+    c_mcu.capacitance = 100nF +/- 10%
+    v3v3.hv ~ c_mcu.unnamed[0]
+    c_mcu.unnamed[1] ~ v3v3.lv
+
+    # --- Service calibration connector (2×6, 2.54mm) ---------------------------
+    # 12 pins: GND, 3V3, SDA, SCL, rail1_enable, rail2_enable, rail3_enable, rail4_enable,
+    #          UART_TX, UART_RX, WDT_RST, SPARE
+    # Exposed as 12-pin header stub — layout assigns J connector reference
+    signal cal_gnd
+    signal cal_3v3
+    signal cal_sda
+    signal cal_scl
+    signal cal_uart_tx
+    signal cal_uart_rx
+
+    cal_gnd     ~ v3v3.lv
+    cal_3v3     ~ v3v3.hv
+    cal_sda     ~ sda
+    cal_scl     ~ scl
+    cal_uart_tx ~ mcu.uart_tx   # GP0 TX
+    cal_uart_rx ~ mcu.uart_rx   # GP1 RX

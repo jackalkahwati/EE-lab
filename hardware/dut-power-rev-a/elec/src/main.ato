@@ -1,0 +1,152 @@
+"""
+DUTPowerBoard — top-level. FirstLight FL-1 DUT Power + Fast-Trip Board Rev A.
+
+Board: 160 × 100 mm, 4-layer FR-4 (Sig / GND / PWR_5V / Sig).
+4 independent programmable DUT power rails, each with:
+  - TPS54331DR buck (28V→1.8–24.8V, DAC-controlled)
+  - AO4407A high-side P-ch MOSFET fast-trip (< 1 µs)
+  - TLV1701DBVR fast OCP comparator + SR latch
+  - INA219 telemetry (I2C 0x40–0x43)
+  - G5LE-1A-E output relay (5A)
+  - G6K discharge relay + 100Ω load
+Control: RP2040 Pico 2 + TPS3823 watchdog + USB-C + service cal header.
+Telemetry: 4× MCP4728 DAC (2× SOIC-8 units per function group) + REF3033.
+Power: 28V DUT supply in + 28V control in → 5V → 3.3V.
+Connectors: 4× Molex Mini-Fit Jr DUT outputs, 28V power input, backplane 2×20.
+"""
+
+import ElectricPower
+from "power.ato"     import PowerTree
+from "rail.ato"      import ProgrammableRail
+from "mcu.ato"       import Control
+from "telemetry.ato" import TelemetryBlock
+from "eeprom.ato"    import EepromModule
+
+
+module DUTPowerBoard:
+    # --- Sub-modules -----------------------------------------------------------
+    pwr  = new PowerTree
+    rail1 = new ProgrammableRail
+    rail2 = new ProgrammableRail
+    rail3 = new ProgrammableRail
+    rail4 = new ProgrammableRail
+    ctl  = new Control
+    tel  = new TelemetryBlock
+    ee   = new EepromModule
+
+    # --- Top-level power ports (exposed to backplane connectors) ---------------
+    v28_dut_in  = new ElectricPower   # 28V DUT power (Mini-Fit Jr input)
+    v28_ctrl_in = new ElectricPower   # 28V control power (separate input)
+
+    # ==========================================================================
+    # POWER TREE CONNECTIONS
+    # ==========================================================================
+    # Control power: 28V → 5V coil + 3.3V logic
+    pwr.v28_ctrl ~ v28_ctrl_in
+
+    # All rails share the same DUT 28V supply
+    rail1.v_in ~ v28_dut_in
+    rail2.v_in ~ v28_dut_in
+    rail3.v_in ~ v28_dut_in
+    rail4.v_in ~ v28_dut_in
+
+    # 5V coil supply to all rails' relay coils
+    rail1.v5_coil ~ pwr.v5_coil
+    rail2.v5_coil ~ pwr.v5_coil
+    rail3.v5_coil ~ pwr.v5_coil
+    rail4.v5_coil ~ pwr.v5_coil
+
+    # 3.3V logic to all rails' comparators, SR latches
+    rail1.v3v3 ~ pwr.v3v3
+    rail2.v3v3 ~ pwr.v3v3
+    rail3.v3v3 ~ pwr.v3v3
+    rail4.v3v3 ~ pwr.v3v3
+
+    # 3.3V to MCU + telemetry + EEPROM
+    ctl.v3v3  ~ pwr.v3v3
+    tel.v3v3  ~ pwr.v3v3
+    ee.vcc    ~ pwr.v3v3
+
+    # 5V to MCU watchdog coil rail
+    ctl.v5_coil ~ pwr.v5_coil
+
+    # ==========================================================================
+    # I2C BUS (shared: MCU ↔ INA219s + DACs + EEPROM + power INA219)
+    # ==========================================================================
+    ctl.sda ~ pwr.sda
+    ctl.scl ~ pwr.scl
+
+    ctl.sda ~ tel.sda
+    ctl.scl ~ tel.scl
+
+    ctl.sda ~ ee.sda
+    ctl.scl ~ ee.scl
+
+    # Rail I2C: rails use telemetry block's INA219s (tel.ina_r1–r4)
+    # Sense nodes from each rail → telemetry INA219 INpos/INneg
+    rail1.ina_inpos ~ tel.r1_inpos
+    rail1.ina_inneg ~ tel.r1_inneg
+    rail2.ina_inpos ~ tel.r2_inpos
+    rail2.ina_inneg ~ tel.r2_inneg
+    rail3.ina_inpos ~ tel.r3_inpos
+    rail3.ina_inneg ~ tel.r3_inneg
+    rail4.ina_inpos ~ tel.r4_inpos
+    rail4.ina_inneg ~ tel.r4_inneg
+
+    # Rail I2C stubs (rails don't have their own I2C; stub GND for ERC)
+    rail1.i2c_sda ~ pwr.v3v3.lv
+    rail1.i2c_scl ~ pwr.v3v3.lv
+    rail2.i2c_sda ~ pwr.v3v3.lv
+    rail2.i2c_scl ~ pwr.v3v3.lv
+    rail3.i2c_sda ~ pwr.v3v3.lv
+    rail3.i2c_scl ~ pwr.v3v3.lv
+    rail4.i2c_sda ~ pwr.v3v3.lv
+    rail4.i2c_scl ~ pwr.v3v3.lv
+
+    # ==========================================================================
+    # DAC OUTPUTS → RAIL Vout programming + current limit thresholds
+    # ==========================================================================
+    # DAC Vout (dac_r1_vset–dac_r4_vset from telemetry block)
+    rail1.v_set ~ tel.dac_r1_vset
+    rail2.v_set ~ tel.dac_r2_vset
+    rail3.v_set ~ tel.dac_r3_vset
+    rail4.v_set ~ tel.dac_r4_vset
+
+    # DAC current limit (dac_r1_ilim–dac_r4_ilim from telemetry block)
+    rail1.i_limit_ref ~ tel.dac_r1_ilim
+    rail2.i_limit_ref ~ tel.dac_r2_ilim
+    rail3.i_limit_ref ~ tel.dac_r3_ilim
+    rail4.i_limit_ref ~ tel.dac_r4_ilim
+
+    # ==========================================================================
+    # MCU GPIO → RAIL CONTROL SIGNALS
+    # ==========================================================================
+    # Enable (output relay coil drive)
+    rail1.enable ~ ctl.rail1_enable
+    rail2.enable ~ ctl.rail2_enable
+    rail3.enable ~ ctl.rail3_enable
+    rail4.enable ~ ctl.rail4_enable
+
+    # Fault status (active-low latched, MCU reads)
+    rail1.fault_n ~ ctl.rail1_fault_n
+    rail2.fault_n ~ ctl.rail2_fault_n
+    rail3.fault_n ~ ctl.rail3_fault_n
+    rail4.fault_n ~ ctl.rail4_fault_n
+
+    # Fault clear (pulse to clear SR latch)
+    rail1.fault_clr ~ ctl.rail1_fault_clr
+    rail2.fault_clr ~ ctl.rail2_fault_clr
+    rail3.fault_clr ~ ctl.rail3_fault_clr
+    rail4.fault_clr ~ ctl.rail4_fault_clr
+
+    # Discharge enable
+    rail1.discharge_en ~ ctl.rail1_discharge_en
+    rail2.discharge_en ~ ctl.rail2_discharge_en
+    rail3.discharge_en ~ ctl.rail3_discharge_en
+    rail4.discharge_en ~ ctl.rail4_discharge_en
+
+    # Per-rail active LEDs
+    rail1.led_active ~ ctl.rail1_led_active
+    rail2.led_active ~ ctl.rail2_led_active
+    rail3.led_active ~ ctl.rail3_led_active
+    rail4.led_active ~ ctl.rail4_led_active

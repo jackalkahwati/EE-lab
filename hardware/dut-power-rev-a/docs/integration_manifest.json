@@ -1,0 +1,124 @@
+{
+  "board": "FL-1 DUT Power + Fast-Trip Board Rev A",
+  "hw_version": "dut-power-rev-a",
+  "fw_version": "1.0.0",
+  "interface": {
+    "usb_cdc": {
+      "description": "USB CDC virtual serial port (RP2040 native USB)",
+      "vid": "0x2E8A",
+      "pid": "0x0005",
+      "port_name_pattern": "/dev/ttyACM*",
+      "baud": 115200,
+      "line_ending": "\r\n",
+      "echo": false,
+      "timeout_s": 2.0
+    }
+  },
+  "commands": {
+    "SET RAIL<n> <V>V": {
+      "description": "Set output voltage for rail n (1-4)",
+      "example": "SET RAIL1 3.3V",
+      "response": "OK RAIL1 VOLTAGE=3.3V\r\n"
+    },
+    "SET LIMIT RAIL<n> <I>mA": {
+      "description": "Set overcurrent trip threshold for rail n in milliamps",
+      "example": "SET LIMIT RAIL2 500mA",
+      "response": "OK RAIL2 LIMIT=500mA\r\n"
+    },
+    "ENABLE RAIL<n>": {
+      "description": "Enable output relay and start rail n (runs PRE_CHECK first)",
+      "example": "ENABLE RAIL1",
+      "response": "OK RAIL1 ENABLED\r\n or FAULT RAIL1 <reason>\r\n"
+    },
+    "DISABLE RAIL<n>": {
+      "description": "Disable output relay for rail n (goes to IDLE)",
+      "example": "DISABLE RAIL2",
+      "response": "OK RAIL2 DISABLED\r\n"
+    },
+    "ENABLE ALL": {
+      "description": "Enable all 4 rails (sequenced with configured delay)",
+      "response": "OK ALL ENABLED\r\n"
+    },
+    "DISABLE ALL": {
+      "description": "Disable all 4 rails simultaneously",
+      "response": "OK ALL DISABLED\r\n"
+    },
+    "READ TELEMETRY": {
+      "description": "Read per-rail and coil rail telemetry as JSON",
+      "response_schema": "docs/telemetry_schema.json"
+    },
+    "READ FAULTS": {
+      "description": "Read fault log ring buffer (last 32 faults) as JSON",
+      "response_format": "[{\"rail\": 1, \"type\": \"OCP\", \"timestamp_ms\": 12345, \"i_peak_a\": 5.2}, ...]"
+    },
+    "RUN SELFTEST": {
+      "description": "Run full board self-test (INA219, DAC, relay, discharge). Returns JSON.",
+      "response_format": "{\"pass\": true, \"tests\": [{\"name\": \"INA219_R1\", \"pass\": true}, ...], \"duration_ms\": 850}"
+    },
+    "CLEAR FAULT RAIL<n>": {
+      "description": "Clear SR latch fault for rail n (resets fast-trip MOSFET)",
+      "example": "CLEAR FAULT RAIL1",
+      "response": "OK RAIL1 FAULT CLEARED\r\n"
+    },
+    "SEQUENCE <json>": {
+      "description": "Set power-up sequence order and inter-rail delay",
+      "example": "SEQUENCE {\"order\": [1,2,3,4], \"delay_ms\": 100}",
+      "response": "OK SEQUENCE SET\r\n"
+    },
+    "SET DISCHARGE RAIL<n>": {
+      "description": "Manually trigger discharge relay for rail n (100Ω load path)",
+      "example": "SET DISCHARGE RAIL3",
+      "response": "OK RAIL3 DISCHARGE ACTIVE\r\n"
+    }
+  },
+  "i2c_addresses": {
+    "INA219_rail1": "0x40",
+    "INA219_rail2": "0x41",
+    "INA219_rail3": "0x42",
+    "INA219_rail4": "0x43",
+    "INA219_coil":  "0x44",
+    "MCP4728_vout_lo": "0x60",
+    "MCP4728_vout_hi": "0x61",
+    "MCP4728_ilim_lo": "0x62",
+    "MCP4728_ilim_hi": "0x63",
+    "EEPROM_24AA025": "0x50"
+  },
+  "gpio_map": {
+    "GP0":  "UART_TX (debug)",
+    "GP1":  "UART_RX (debug)",
+    "GP2":  "RAIL1_ENABLE",
+    "GP3":  "RAIL2_ENABLE",
+    "GP4":  "RAIL3_ENABLE",
+    "GP5":  "RAIL4_ENABLE",
+    "GP6":  "I2C0_SDA",
+    "GP7":  "I2C0_SCL",
+    "GP8":  "WDI (watchdog kick)",
+    "GP9":  "RAIL1_FAULT_N (IRQ)",
+    "GP10": "RAIL2_FAULT_N (IRQ)",
+    "GP11": "RAIL3_FAULT_N (IRQ)",
+    "GP12": "RAIL4_FAULT_N (IRQ)",
+    "GP13": "RAIL1_FAULT_CLR",
+    "GP14": "RAIL2_FAULT_CLR",
+    "GP15": "RAIL3_FAULT_CLR",
+    "GP16": "RAIL4_FAULT_CLR",
+    "GP17": "RAIL1_DISCHARGE_EN",
+    "GP18": "RAIL2_DISCHARGE_EN",
+    "GP19": "RAIL3_DISCHARGE_EN",
+    "GP20": "RAIL4_DISCHARGE_EN",
+    "GP21": "RAIL1_LED_ACTIVE",
+    "GP22": "RAIL2_LED_ACTIVE",
+    "GP23": "WDT_RESET_N (input from TPS3823)",
+    "GP26": "RAIL3_LED_ACTIVE",
+    "GP27": "RAIL4_LED_ACTIVE",
+    "GP28": "FAULT_LED_RED"
+  },
+  "interrupt_gpios": {
+    "RAIL1_FAULT_N": {"gpio": "GP9",  "polarity": "active_low", "trigger": "falling_edge"},
+    "RAIL2_FAULT_N": {"gpio": "GP10", "polarity": "active_low", "trigger": "falling_edge"},
+    "RAIL3_FAULT_N": {"gpio": "GP11", "polarity": "active_low", "trigger": "falling_edge"},
+    "RAIL4_FAULT_N": {"gpio": "GP12", "polarity": "active_low", "trigger": "falling_edge"}
+  },
+  "self_test_expected_pass_time_ms": 1500,
+  "watchdog_timeout_ms": 250,
+  "watchdog_kick_interval_ms": 100
+}

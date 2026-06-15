@@ -1,0 +1,76 @@
+{
+  "project": "dut-power-rev-a",
+  "board_name": "FirstLight FL-1 DUT Power + Fast-Trip Board Rev A",
+  "board_file": "dut-power-rev-a.kicad_pcb",
+  "board_size_mm": { "width": 160, "height": 100 },
+  "layer_stackup": [
+    { "layer": 1, "name": "F.Cu",  "type": "signal",  "note": "Top signal / high-current DUT traces" },
+    { "layer": 2, "name": "In1.Cu","type": "ground",   "note": "Full GND plane" },
+    { "layer": 3, "name": "In2.Cu","type": "power",    "note": "5V coil pour" },
+    { "layer": 4, "name": "B.Cu",  "type": "signal",   "note": "Bottom signal / control traces" }
+  ],
+  "copper_layers": 4,
+  "min_trace_width_mm": 0.15,
+  "min_clearance_mm": 0.15,
+  "high_current_trace_width_mm": 2.0,
+  "via_drill_mm": 0.3,
+  "via_pad_mm": 0.6,
+  "board_origin_mm": { "x": 40.0, "y": 40.0 },
+  "placement_regions": {
+    "control_strip": {
+      "description": "Control power tree, MCU, USB-C, LEDs",
+      "x_mm": 0, "y_mm": 0, "width_mm": 160, "height_mm": 20
+    },
+    "rail_columns": [
+      { "rail": 1, "x_mm": 0,   "y_mm": 20, "width_mm": 38, "height_mm": 65 },
+      { "rail": 2, "x_mm": 40,  "y_mm": 20, "width_mm": 38, "height_mm": 65 },
+      { "rail": 3, "x_mm": 80,  "y_mm": 20, "width_mm": 38, "height_mm": 65 },
+      { "rail": 4, "x_mm": 120, "y_mm": 20, "width_mm": 38, "height_mm": 65 }
+    ],
+    "bottom_strip": {
+      "description": "INA219s, DACs, EEPROM, connectors",
+      "x_mm": 0, "y_mm": 85, "width_mm": 160, "height_mm": 15
+    }
+  },
+  "placement_intent": {
+    "control_power": { "x_mm": 5,  "y_mm": 5 },
+    "mcu_pico2":     { "x_mm": 80, "y_mm": 5 },
+    "leds_usbc":     { "x_mm": 140,"y_mm": 5 },
+    "buck_ics":      [
+      { "rail": 1, "x_mm": 12, "y_mm": 25 },
+      { "rail": 2, "x_mm": 52, "y_mm": 25 },
+      { "rail": 3, "x_mm": 92, "y_mm": 25 },
+      { "rail": 4, "x_mm": 132,"y_mm": 25 }
+    ],
+    "power_fets":    [
+      { "rail": 1, "x_mm": 12, "y_mm": 45 },
+      { "rail": 2, "x_mm": 52, "y_mm": 45 },
+      { "rail": 3, "x_mm": 92, "y_mm": 45 },
+      { "rail": 4, "x_mm": 132,"y_mm": 45 }
+    ],
+    "output_relays": [
+      { "rail": 1, "x_mm": 12, "y_mm": 65 },
+      { "rail": 2, "x_mm": 52, "y_mm": 65 },
+      { "rail": 3, "x_mm": 92, "y_mm": 65 },
+      { "rail": 4, "x_mm": 132,"y_mm": 65 }
+    ],
+    "ina219_row":    { "y_mm": 90, "pitch_mm": 20, "x_start_mm": 10 },
+    "dac_row":       { "y_mm": 90, "x_start_mm": 90 }
+  },
+  "connector_placement": {
+    "dut_outputs": { "edge": "right", "ref_prefix": "J_DUT" },
+    "dut_28v_input": { "edge": "left", "position_mm": { "x": 0, "y": 50 } },
+    "usb_c": { "edge": "top-left", "position_mm": { "x": 10, "y": 0 } },
+    "backplane_2x20": { "edge": "bottom", "ref_prefix": "J_BP" }
+  },
+  "net_classes": {
+    "DUT_PWR": { "clearance_mm": 0.5, "trace_width_mm": 2.0, "note": "28V DUT rails" },
+    "COIL_5V": { "clearance_mm": 0.3, "trace_width_mm": 0.8, "note": "5V relay coils" },
+    "LOGIC_3V3": { "clearance_mm": 0.15,"trace_width_mm": 0.2, "note": "3.3V logic" },
+    "I2C": { "clearance_mm": 0.15, "trace_width_mm": 0.2, "note": "I2C bus 100kHz" }
+  },
+  "zone_fills": [
+    { "layer": "In1.Cu", "net": "GND", "priority": 1, "connect": "solid" },
+    { "layer": "In2.Cu", "net": "5V_COIL", "priority": 1, "connect": "solid" }
+  ]
+}

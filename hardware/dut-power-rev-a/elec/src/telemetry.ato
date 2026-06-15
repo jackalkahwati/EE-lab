@@ -1,0 +1,192 @@
+"""
+TelemetryBlock — 4× INA219 current/voltage monitors + 2× MCP4728 quad DACs
++ REF3033 precision voltage reference.
+
+INA219 I2C addresses (A1, A0 pins):
+  ina219_r1: A1=GND, A0=GND → 0x40
+  ina219_r2: A1=GND, A0=VCC → 0x41
+  ina219_r3: A1=VCC, A0=GND → 0x42
+  ina219_r4: A1=VCC, A0=VCC → 0x43
+
+MCP4728 I2C addresses (factory OTP):
+  dac_vout:   addr 0x60 → ch0–ch3 = rail 1–4 Vout programming
+  dac_ilimit: addr 0x61 → ch0–ch3 = rail 1–4 current limit thresholds
+
+REF3033: 3.3V precision reference for MCU ADC VREF.
+
+Note on MCP4728 package: LCSC C476753 is MSOP-10 (10-pin) giving all 4 channels.
+The part file defines the SOIC-8 footprint but the MSOP-10 is the correct package
+to get all 4 channels. Verify package with LCSC at order time.
+"""
+
+import ElectricPower
+import Resistor
+import Capacitor
+from "parts/Texas_Instruments_INA219AIDCNR/Texas_Instruments_INA219AIDCNR.ato" import Texas_Instruments_INA219AIDCNR_package
+from "parts/MCP4728A0T_E_UN/MCP4728A0T_E_UN.ato" import MCP4728A0T_E_UN_package
+from "parts/REF3033AIDBZR/REF3033AIDBZR.ato" import REF3033AIDBZR_package
+
+
+module TelemetryBlock:
+    v3v3 = new ElectricPower   # 3.3V supply for INA219, DACs, REF
+
+    # I2C shared bus (all devices)
+    signal sda
+    signal scl
+
+    # Per-rail INpos/INneg current sense connections (routed in main.ato)
+    # Rail 1
+    signal r1_inpos
+    signal r1_inneg
+    # Rail 2
+    signal r2_inpos
+    signal r2_inneg
+    # Rail 3
+    signal r3_inpos
+    signal r3_inneg
+    # Rail 4
+    signal r4_inpos
+    signal r4_inneg
+
+    # DAC output signals (routed to rail v_set / i_limit_ref)
+    signal dac_r1_vset
+    signal dac_r2_vset
+    signal dac_r3_vset
+    signal dac_r4_vset
+    signal dac_r1_ilim
+    signal dac_r2_ilim
+    signal dac_r3_ilim
+    signal dac_r4_ilim
+
+    # Precision ADC voltage reference output
+    signal vref_3v3
+
+    # --- INA219 per rail -------------------------------------------------------
+    # Rail 1: addr 0x40 (A1=GND, A0=GND)
+    ina219_r1 = new Texas_Instruments_INA219AIDCNR_package
+    ina219_r1.VS  ~ v3v3.hv
+    ina219_r1.GND ~ v3v3.lv
+    ina219_r1.SDA ~ sda
+    ina219_r1.SCL ~ scl
+    ina219_r1.A0  ~ v3v3.lv
+    ina219_r1.A1  ~ v3v3.lv
+    ina219_r1.INpos ~ r1_inpos
+    ina219_r1.INneg ~ r1_inneg
+
+    c_ina1 = new Capacitor
+    c_ina1.capacitance = 100nF +/- 10%
+    v3v3.hv ~ c_ina1.unnamed[0]
+    c_ina1.unnamed[1] ~ v3v3.lv
+
+    # Rail 2: addr 0x41 (A1=GND, A0=VCC)
+    ina219_r2 = new Texas_Instruments_INA219AIDCNR_package
+    ina219_r2.VS  ~ v3v3.hv
+    ina219_r2.GND ~ v3v3.lv
+    ina219_r2.SDA ~ sda
+    ina219_r2.SCL ~ scl
+    ina219_r2.A0  ~ v3v3.hv
+    ina219_r2.A1  ~ v3v3.lv
+    ina219_r2.INpos ~ r2_inpos
+    ina219_r2.INneg ~ r2_inneg
+
+    c_ina2 = new Capacitor
+    c_ina2.capacitance = 100nF +/- 10%
+    v3v3.hv ~ c_ina2.unnamed[0]
+    c_ina2.unnamed[1] ~ v3v3.lv
+
+    # Rail 3: addr 0x42 (A1=VCC, A0=GND)
+    ina219_r3 = new Texas_Instruments_INA219AIDCNR_package
+    ina219_r3.VS  ~ v3v3.hv
+    ina219_r3.GND ~ v3v3.lv
+    ina219_r3.SDA ~ sda
+    ina219_r3.SCL ~ scl
+    ina219_r3.A0  ~ v3v3.lv
+    ina219_r3.A1  ~ v3v3.hv
+    ina219_r3.INpos ~ r3_inpos
+    ina219_r3.INneg ~ r3_inneg
+
+    c_ina3 = new Capacitor
+    c_ina3.capacitance = 100nF +/- 10%
+    v3v3.hv ~ c_ina3.unnamed[0]
+    c_ina3.unnamed[1] ~ v3v3.lv
+
+    # Rail 4: addr 0x43 (A1=VCC, A0=VCC)
+    ina219_r4 = new Texas_Instruments_INA219AIDCNR_package
+    ina219_r4.VS  ~ v3v3.hv
+    ina219_r4.GND ~ v3v3.lv
+    ina219_r4.SDA ~ sda
+    ina219_r4.SCL ~ scl
+    ina219_r4.A0  ~ v3v3.hv
+    ina219_r4.A1  ~ v3v3.hv
+    ina219_r4.INpos ~ r4_inpos
+    ina219_r4.INneg ~ r4_inneg
+
+    c_ina4 = new Capacitor
+    c_ina4.capacitance = 100nF +/- 10%
+    v3v3.hv ~ c_ina4.unnamed[0]
+    c_ina4.unnamed[1] ~ v3v3.lv
+
+    # --- MCP4728 DAC #1 (0x60): Vout programming, rails 1–4 -------------------
+    # Using two MCP4728 SOIC-8 units (each provides 2 ch); Ch A=rail1, Ch B=rail2
+    dac_vout_lo = new MCP4728A0T_E_UN_package   # ch A=rail1, ch B=rail2
+    dac_vout_lo.VDD  ~ v3v3.hv
+    dac_vout_lo.VSS  ~ v3v3.lv
+    dac_vout_lo.SDA  ~ sda
+    dac_vout_lo.SCL  ~ scl
+    dac_vout_lo.LDAC_N ~ v3v3.lv   # always-update mode
+    dac_vout_lo.VOUTA ~ dac_r1_vset
+    dac_vout_lo.VOUTB ~ dac_r2_vset
+
+    dac_vout_hi = new MCP4728A0T_E_UN_package   # ch A=rail3, ch B=rail4 (addr 0x61)
+    dac_vout_hi.VDD  ~ v3v3.hv
+    dac_vout_hi.VSS  ~ v3v3.lv
+    dac_vout_hi.SDA  ~ sda
+    dac_vout_hi.SCL  ~ scl
+    dac_vout_hi.LDAC_N ~ v3v3.lv
+    dac_vout_hi.VOUTA ~ dac_r3_vset
+    dac_vout_hi.VOUTB ~ dac_r4_vset
+
+    c_dac1 = new Capacitor
+    c_dac1.capacitance = 100nF +/- 10%
+    v3v3.hv ~ c_dac1.unnamed[0]
+    c_dac1.unnamed[1] ~ v3v3.lv
+
+    # --- MCP4728 DAC #2 (0x62/0x63): current limit thresholds, rails 1–4 ------
+    dac_ilim_lo = new MCP4728A0T_E_UN_package   # ch A=rail1, ch B=rail2 (addr 0x62)
+    dac_ilim_lo.VDD  ~ v3v3.hv
+    dac_ilim_lo.VSS  ~ v3v3.lv
+    dac_ilim_lo.SDA  ~ sda
+    dac_ilim_lo.SCL  ~ scl
+    dac_ilim_lo.LDAC_N ~ v3v3.lv
+    dac_ilim_lo.VOUTA ~ dac_r1_ilim
+    dac_ilim_lo.VOUTB ~ dac_r2_ilim
+
+    dac_ilim_hi = new MCP4728A0T_E_UN_package   # ch A=rail3, ch B=rail4 (addr 0x63)
+    dac_ilim_hi.VDD  ~ v3v3.hv
+    dac_ilim_hi.VSS  ~ v3v3.lv
+    dac_ilim_hi.SDA  ~ sda
+    dac_ilim_hi.SCL  ~ scl
+    dac_ilim_hi.LDAC_N ~ v3v3.lv
+    dac_ilim_hi.VOUTA ~ dac_r3_ilim
+    dac_ilim_hi.VOUTB ~ dac_r4_ilim
+
+    c_dac2 = new Capacitor
+    c_dac2.capacitance = 100nF +/- 10%
+    v3v3.hv ~ c_dac2.unnamed[0]
+    c_dac2.unnamed[1] ~ v3v3.lv
+
+    # --- REF3033 precision voltage reference -----------------------------------
+    ref = new REF3033AIDBZR_package
+    ref.IN  ~ v3v3.hv
+    ref.GND ~ v3v3.lv
+    ref.OUT ~ vref_3v3
+
+    c_ref_in = new Capacitor
+    c_ref_in.capacitance = 1uF +/- 10%
+    v3v3.hv ~ c_ref_in.unnamed[0]
+    c_ref_in.unnamed[1] ~ v3v3.lv
+
+    c_ref_out = new Capacitor
+    c_ref_out.capacitance = 1uF +/- 10%
+    vref_3v3 ~ c_ref_out.unnamed[0]
+    c_ref_out.unnamed[1] ~ v3v3.lv
