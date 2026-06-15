@@ -134,6 +134,12 @@ export function RunHistory({
                 <span className="font-mono text-[10px] text-muted-foreground">
                   {run.timestamp}
                 </span>
+                <span
+                  className="truncate font-mono text-[10px] text-muted-foreground/70"
+                  title={run.id}
+                >
+                  id: {run.id}
+                </span>
                 <MiniProgress run={run} />
               </div>
             </li>

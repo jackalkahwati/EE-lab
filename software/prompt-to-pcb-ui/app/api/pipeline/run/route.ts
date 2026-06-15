@@ -69,6 +69,18 @@ export async function GET(req: Request) {
   const flroute = path.join(hwDir, 'tools/flroute/target/release/flroute')
   const ATO = process.env.ATO_BIN || `${process.env.HOME}/.local/bin/ato`
   const CARGO = process.env.CARGO_BIN || `${process.env.HOME}/.cargo/bin/cargo`
+  // Each run owns an id-scoped output dir (public/runs/<id>/{data,board}); nothing
+  // is shared between runs, so one run's board/BOM/renders can NEVER leak into
+  // another. With no runId we fall back to the shared public/data + public/board
+  // (the default "latest" view). At the end we also publish a run's outputs to
+  // that shared location so the no-id default view shows the most recent board.
+  const runRoot = runId ? path.join(appDir, 'public/runs', runId) : null
+  const pubData = runRoot
+    ? path.join(runRoot, 'data')
+    : path.join(appDir, 'public/data')
+  const pubBoard = runRoot
+    ? path.join(runRoot, 'board')
+    : path.join(appDir, 'public/board')
   const encoder = new TextEncoder()
   let child: ChildProcess | null = null
   let cancelled = false
@@ -81,15 +93,11 @@ export async function GET(req: Request) {
   const stream = new ReadableStream({
     async start(controller) {
       const send = (ev: PipelineEvent) => {
-        // snapshot this run's artifacts into public/runs/<id> BEFORE telling the
-        // client it's done, so the run keeps its own board even after the next
-        // run overwrites public/board.
+        // this run's artifacts were written straight into public/runs/<id> — point
+        // the client at that snapshot. No copy needed; the dir already holds only
+        // this run's board (publish-to-shared happens after the report is written).
         if (ev.type === 'done' && runId) {
-          try {
-            ev.runDir = snapshotRun(process.cwd(), runId)
-          } catch {
-            /* snapshot best-effort; UI falls back to shared /board */
-          }
+          ev.runDir = `/runs/${runId}`
         }
         events.push(ev)
         try {
@@ -152,10 +160,18 @@ export async function GET(req: Request) {
         }
         const wsBoard = path.join(wsLayout, 'rev-a-routed.kicad_pcb')
         const variantBoard = path.join(ws, 'variant.kicad_pcb')
-        const pubBoard = path.join(appDir, 'public/board')
-        const pubData = path.join(appDir, 'public/data')
         const fl1Bom = path.join(hwDir, 'build/builds/default/default.bom.csv')
         log('design', `workspace: ${ws} (working board untouched)`)
+
+        // ---- start this run's id-scoped output dir CLEAN. Every artifact below
+        // is written straight into it, so a run only ever contains its own board.
+        // A run that gate-fails before the render/validation stage leaves no
+        // board.json — loadRealBoard keys off that, so it honestly shows no board
+        // rather than inheriting another run's files. Wiping first also means a
+        // re-run of the same id can't keep stale files from the prior attempt.
+        if (runRoot) fs.rmSync(runRoot, { recursive: true, force: true })
+        fs.mkdirSync(pubBoard, { recursive: true })
+        fs.mkdirSync(pubData, { recursive: true })
 
         // ---- stage 1: design --------------------------------------------------
         send({ type: 'stage', id: 'design', state: 'running' })
@@ -641,7 +657,11 @@ export async function GET(req: Request) {
         clearTimeout(killTimer)
         globalState.__pipelineRunning = false
         try {
-          writeRunReport(appDir, {
+          // write the report INTO this run's own data dir (fixes the prior
+          // off-by-one where the report landed in shared data and got snapshotted
+          // by the NEXT run), then publish this run's outputs to the shared
+          // public/{data,board} so the default no-id view shows the latest board.
+          writeRunReport(appDir, pubData, runId, {
             startedAt,
             finishedAt: new Date().toISOString(),
             mode: composeMode ? 'compose' : 'matrix',
@@ -649,6 +669,7 @@ export async function GET(req: Request) {
             composeSpec,
             events,
           })
+          if (runRoot) publishLatest(appDir, runRoot)
         } catch {
           /* never let report writing break the response */
         }
@@ -676,21 +697,20 @@ export async function GET(req: Request) {
 }
 
 /**
- * Copy this run's artifacts (board renders + data) into public/runs/<id>/ so the
- * run keeps its own board after the next run overwrites the shared public/board.
- * Returns the public URL base (e.g. /runs/<id>).
+ * Publish a finished run's outputs (board renders + data) to the shared
+ * public/{board,data} so the default no-id view shows the most recent board.
+ * The run's own public/runs/<id>/ dir remains the source of truth; this is just
+ * a copy of the latest, never read back into another run.
  */
-function snapshotRun(appDir: string, runId: string): string {
-  const dest = path.join(appDir, 'public/runs', runId)
-  fs.rmSync(dest, { recursive: true, force: true })
-  fs.mkdirSync(dest, { recursive: true })
+function publishLatest(appDir: string, runRoot: string) {
   for (const sub of ['board', 'data']) {
-    const src = path.join(appDir, 'public', sub)
+    const src = path.join(runRoot, sub)
+    const dest = path.join(appDir, 'public', sub)
     if (fs.existsSync(src)) {
-      fs.cpSync(src, path.join(dest, sub), { recursive: true })
+      fs.rmSync(dest, { recursive: true, force: true })
+      fs.cpSync(src, dest, { recursive: true })
     }
   }
-  return `/runs/${runId}`
 }
 
 /**
@@ -701,6 +721,8 @@ function snapshotRun(appDir: string, runId: string): string {
  */
 function writeRunReport(
   appDir: string,
+  dataDir: string,
+  runId: string,
   rec: {
     startedAt: string
     finishedAt: string
@@ -710,7 +732,7 @@ function writeRunReport(
     events: PipelineEvent[]
   },
 ) {
-  const pubData = path.join(appDir, 'public/data')
+  const pubData = dataDir
   fs.mkdirSync(pubData, { recursive: true })
   const readJson = (p: string) => {
     try {
@@ -737,12 +759,27 @@ function writeRunReport(
     (e): e is Extract<PipelineEvent, { type: 'log' }> => e.type === 'log',
   )
   const board = readJson('board.json')
+  // stamp the run id into board.json so the artifact is self-identifying: any
+  // consumer can verify which run a board belongs to, and a misplaced file is
+  // detectable rather than silently mis-attributed.
+  if (board && runId) {
+    board.runId = runId
+    try {
+      fs.writeFileSync(
+        path.join(pubData, 'board.json'),
+        JSON.stringify(board, null, 1),
+      )
+    } catch {
+      /* board.json stamp best-effort */
+    }
+  }
   const drc = readJson('drc.json')
   const ato = readJson('ato.json') as { name: string; content: string }[] | null
   const netlist = ato?.find((f) => f.name === 'netlist.txt')?.content ?? null
   const designTxt = ato?.find((f) => f.name === 'design.txt')?.content ?? null
 
   const report = {
+    runId: runId || null,
     startedAt: rec.startedAt,
     finishedAt: rec.finishedAt,
     mode: rec.mode,

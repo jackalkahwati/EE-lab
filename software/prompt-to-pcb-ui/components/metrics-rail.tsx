@@ -2,7 +2,7 @@
 
 import { cn } from '@/lib/utils'
 import { ARTIFACTS, type Run } from '@/lib/firstlight'
-import { REAL_ARTIFACTS } from '@/lib/real-board'
+import { realArtifacts } from '@/lib/real-board'
 import { Download, Cpu, Layers, Ruler, Activity } from 'lucide-react'
 
 function RoutingRadial({ run }: { run: Run }) {
@@ -146,6 +146,12 @@ export function MetricsRail({ run }: { run: Run }) {
         <p className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">
           {run.name}
         </p>
+        <p
+          className="truncate font-mono text-[10px] text-muted-foreground/70"
+          title={run.id}
+        >
+          id: {run.id}
+        </p>
       </div>
 
       <Section title="ROUTING COMPLETION">
@@ -228,7 +234,7 @@ export function MetricsRail({ run }: { run: Run }) {
       <Section title="ARTIFACTS">
         {run.real ? (
           <ul className="flex flex-col gap-1">
-            {REAL_ARTIFACTS.map((artifact) => (
+            {realArtifacts(run.runDir).map((artifact) => (
               <li key={artifact.name}>
                 <a
                   href={artifact.href}

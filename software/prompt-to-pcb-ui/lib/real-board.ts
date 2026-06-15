@@ -41,6 +41,10 @@ export interface RealBoardJson {
 }
 
 export interface RealBoard {
+  /** the snapshot this board was loaded from ('' = shared latest, '/runs/<id>'
+   * = a run's own snapshot). Used to guard against rendering one run's board
+   * while another run is selected. */
+  base: string
   board: RealBoardJson
   run: Run
   reports: GateReport[]
@@ -209,13 +213,26 @@ export async function loadRealBoard(base = ''): Promise<RealBoard | null> {
     fetchJson<BomLine[]>(`${base}/data/bom.json`),
     fetchJson<AtoFile[]>(`${base}/data/ato.json`),
   ])
-  return { board, run: buildRun(board), reports: buildReports(board), bom, ato }
+  return { base, board, run: buildRun(board), reports: buildReports(board), bom, ato }
 }
 
-export const REAL_ARTIFACTS = [
-  { name: 'render-top.png', href: '/board/render-top.png' },
-  { name: 'render-bottom.png', href: '/board/render-bottom.png' },
-  { name: 'drc.json', href: '/data/drc.json' },
-  { name: 'board.json', href: '/data/board.json' },
-  { name: 'bom.json', href: '/data/bom.json' },
-]
+/**
+ * Download links for a real run's artifacts. Each run has its own snapshot under
+ * /runs/<id> (board/ + data/); pass that runDir so every board's downloads point
+ * at ITS OWN files. With no runDir, fall back to the shared latest /board + /data
+ * (a live run that hasn't been snapshotted yet).
+ */
+export function realArtifacts(runDir?: string) {
+  const board = runDir ? `${runDir}/board` : '/board'
+  const data = runDir ? `${runDir}/data` : '/data'
+  return [
+    { name: 'render-top.png', href: `${board}/render-top.png` },
+    { name: 'render-bottom.png', href: `${board}/render-bottom.png` },
+    { name: 'drc.json', href: `${data}/drc.json` },
+    { name: 'board.json', href: `${data}/board.json` },
+    { name: 'bom.json', href: `${data}/bom.json` },
+  ]
+}
+
+/** Shared-latest artifacts (no run snapshot). Prefer realArtifacts(runDir). */
+export const REAL_ARTIFACTS = realArtifacts()

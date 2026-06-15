@@ -101,14 +101,20 @@ export default function FirstLightPage() {
   }, [])
 
   const selectedRun = runs.find((r) => r.id === selectedId) ?? runs[0]
-  const isReal = selectedRun?.real === true && realBoard !== null
+  const selectedRunDir = selectedRun?.runDir
+  const selectedReal = selectedRun?.real
+  // Single source of truth: only treat the loaded board as the selected run's
+  // when it was loaded from THIS run's snapshot. Until the new run's snapshot
+  // finishes loading, `real` is null — so we never render one run's board, BOM,
+  // metrics or artifacts under a different run.
+  const real =
+    realBoard && realBoard.base === (selectedRunDir ?? '') ? realBoard : null
+  const isReal = selectedRun?.real === true && real !== null
   // images for the selected run come from ITS snapshot, not the shared latest
-  const boardBase = selectedRun?.runDir ? `${selectedRun.runDir}/board` : '/board'
+  const boardBase = selectedRunDir ? `${selectedRunDir}/board` : '/board'
 
   // when the user switches to a real run, load THAT run's own artifact snapshot
   // so the board view / metrics reflect the selected run (not the latest one)
-  const selectedRunDir = selectedRun?.runDir
-  const selectedReal = selectedRun?.real
   useEffect(() => {
     if (!selectedReal) return
     let cancelled = false
@@ -126,7 +132,9 @@ export default function FirstLightPage() {
       prompt: string,
       compose?: { blocks: string[]; boardClass: string },
     ) => {
-      const id = `run-${Date.now()}`
+      // unique per run: timestamp + random suffix so two runs started in the same
+      // millisecond can never collide on an id (and thus never share a run dir).
+      const id = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
       const base: Run = {
         id,
         name: compose
@@ -140,18 +148,19 @@ export default function FirstLightPage() {
           state: 'pending' as StageState,
           elapsedMs: 0,
         })),
+        // a brand-new run starts with neutral metrics — never seeded from the
+        // previously selected board. Its real numbers arrive from its OWN
+        // snapshot when the pipeline finishes (metrics: data.run.metrics).
         metrics: {
           netsRouted: 0,
-          netsTotal: realBoard?.board.netsTotal ?? 174,
+          netsTotal: 0,
           copperDefects: 0,
           hpwl: 0,
-          hpwlHistory: realBoard ? [realBoard.board.hpwlMm] : [],
-          components: realBoard?.board.components ?? 172,
-          bomLines: 29,
-          boardSize: realBoard
-            ? `${Math.round(realBoard.board.boardSize.wMm)} × ${Math.round(realBoard.board.boardSize.hMm)} mm`
-            : '200 × 175 mm',
-          layers: realBoard?.board.layers ?? 4,
+          hpwlHistory: [],
+          components: 0,
+          bomLines: 0,
+          boardSize: '—',
+          layers: 0,
           routeTimeSec: 0,
         },
         logs: [
@@ -292,7 +301,7 @@ export default function FirstLightPage() {
         )
       }
     },
-    [realBoard],
+    [],
   )
 
   const handleDelete = useCallback(
@@ -415,34 +424,37 @@ export default function FirstLightPage() {
             {tab === 'Board' && (
               <BoardCanvas
                 run={selectedRun}
-                realBoard={isReal ? realBoard?.board : null}
+                realBoard={isReal ? real?.board : null}
                 basePath={boardBase}
               />
             )}
             {tab === 'Schematic / Code' && (
               <CodeViewer
                 key={isReal ? 'real' : 'seed'}
-                files={isReal ? realBoard?.ato : null}
+                files={isReal ? real?.ato : null}
               />
             )}
-            {tab === 'BOM' && <BomTable lines={isReal ? realBoard?.bom : null} />}
+            {tab === 'BOM' && <BomTable lines={isReal ? real?.bom : null} />}
             {tab === 'Gates & Logs' && (
               <GatesLogs
                 run={selectedRun}
-                reports={isReal ? realBoard?.reports : null}
+                reports={isReal ? real?.reports : null}
               />
             )}
             {tab === 'Order' && (
               <OrderPanel
-                boardW={realBoard?.board.boardSize.wMm ?? 200}
-                boardH={realBoard?.board.boardSize.hMm ?? 146}
-                layers={realBoard?.board.layers ?? selectedRun.metrics.layers}
+                boardW={(isReal ? real?.board.boardSize.wMm : null) ?? 200}
+                boardH={(isReal ? real?.board.boardSize.hMm : null) ?? 146}
+                layers={
+                  (isReal ? real?.board.layers : null) ?? selectedRun.metrics.layers
+                }
                 components={
-                  realBoard?.board.components ?? selectedRun.metrics.components
+                  (isReal ? real?.board.components : null) ??
+                  selectedRun.metrics.components
                 }
                 bomTotal={
-                  realBoard?.board.bomTotal ??
-                  (isReal ? realBoard?.bom : null)?.reduce(
+                  (isReal ? real?.board.bomTotal : null) ??
+                  (isReal ? real?.bom : null)?.reduce(
                     (s, l) => s + (l.lineTotal ?? l.unitPrice * l.qty),
                     0,
                   ) ??
@@ -456,7 +468,9 @@ export default function FirstLightPage() {
         </div>
       </div>
 
-      <MetricsRail run={selectedRun} />
+      <MetricsRail
+        run={isReal && real ? { ...selectedRun, metrics: real.run.metrics } : selectedRun}
+      />
 
       {interviewRequest && (
         <InterviewPanel
