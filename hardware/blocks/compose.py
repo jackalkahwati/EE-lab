@@ -101,6 +101,26 @@ def place(lib, name, ref, x, y, rot, netmap, nets):
     return "  " + t.strip() + "\n"
 
 
+BOX_WRL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "generic_module.wrl")
+
+
+def with_body(fp_text, w, d, h):
+    """Inject a generic box 3D body into a footprint whose real model is missing
+    from the library, so it shows up in the 3D render instead of appearing as
+    bare pads. Electrically irrelevant — purely the visualization. w×d×h in mm,
+    centered on the footprint origin and sitting on the board.
+    KiCad treats VRML model units as 0.1 inch for (scale), so divide by 2.54."""
+    f = 2.54
+    model = ('  (model "{}"\n'
+             '    (offset (xyz 0 0 {:.3f}))\n'
+             '    (scale (xyz {:.4f} {:.4f} {:.4f}))\n'
+             '    (rotate (xyz 0 0 0))\n'
+             '  )\n').format(BOX_WRL, h / 2.0, w / f, d / f, h / f)
+    s = fp_text.rstrip()
+    idx = s.rfind(")")
+    return s[:idx] + model + s[idx:] + "\n"
+
+
 def cap(ref, x, y, a, b, nets):
     """0402 decoupling/bulk cap between nets a and b."""
     return place("Capacitor_SMD", "C_0402_1005Metric", ref, x, y, 0,
@@ -231,7 +251,10 @@ def block_gnss(x, y, n, nets):
         "1": "+3V3", "2": "+3V3", "3": n["uart_gps_tx"], "4": n["uart_gps_rx"],
         "5": "GND", "8": "GND", "10": "GND", "12": "GND",
     }
-    b = place("RF_GPS", "Quectel_L80-R", "U4", x + 10, y + 11, 0, pmap, nets)
+    # the L80-R has no 3D model in KiCad's library, so give it a generic body
+    # (16x13x6mm patch module) for the render
+    b = with_body(place("RF_GPS", "Quectel_L80-R", "U4", x + 10, y + 11, 0, pmap, nets),
+                  16, 13, 6)
     b += cap("C7", x + 10, y + 22, "+3V3", "GND", nets)  # below the patch module
     _DEVICES.append({"ref": "U4", "type": "gnss"})
     return b, 20, 28
