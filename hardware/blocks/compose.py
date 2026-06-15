@@ -51,6 +51,11 @@ class Nets:
 # ---- footprint primitives (shared with gen_board's approach) ----------------
 _cache = {}
 
+# Device manifest: what each placed IC/module actually IS, so firmware drives the
+# right part instead of guessing from nets (an I2C temp sensor and an I2C IMU
+# look identical on the bus). Blocks append; compose() resets + writes it.
+_DEVICES = []
+
 
 def _load(lib, name):
     key = (lib, name)
@@ -145,6 +150,7 @@ def block_mcu_pico(x, y, n, nets):
     # decoupling caps to the RIGHT of the Pico body, clear of its courtyard
     b += cap("C2", x + 26, y + 22, "+3V3", "GND", nets)
     b += cap("C3", x + 26, y + 30, "+5V", "GND", nets)
+    _DEVICES.append({"ref": "U1", "type": "mcu"})
     return b, 30, 56
 
 
@@ -165,6 +171,7 @@ def block_imu(x, y, n, nets):
     b = place("Connector_PinHeader_2.54mm", "PinHeader_1x08_P2.54mm_Vertical",
               "U3", x + 4, y + 6, 0, pmap, nets)
     b += cap("C5", x + 11, y + 12, "+3V3", "GND", nets)  # local decoupling
+    _DEVICES.append({"ref": "U3", "type": "imu"})
     return b, 15, 30
 
 
@@ -206,6 +213,7 @@ def block_lora_rfm95(x, y, n, nets):
     }
     b = place("RF_Module", "HOPERF_RFM9XW_SMD", "U2", x + 8, y + 9, 0, pmap, nets)
     b += cap("C4", x + 8, y + 21, "+3V3", "GND", nets)  # below the module
+    _DEVICES.append({"ref": "U2", "type": "radio"})
     return b, 17, 25
 
 
@@ -225,6 +233,7 @@ def block_gnss(x, y, n, nets):
     }
     b = place("RF_GPS", "Quectel_L80-R", "U4", x + 10, y + 11, 0, pmap, nets)
     b += cap("C7", x + 10, y + 22, "+3V3", "GND", nets)  # below the patch module
+    _DEVICES.append({"ref": "U4", "type": "gnss"})
     return b, 20, 28
 
 
@@ -240,6 +249,7 @@ def block_cellular(x, y, n, nets):
     b = place("Connector_PinHeader_2.54mm", "PinHeader_1x06_P2.54mm_Vertical",
               "U5", x + 4, y + 6, 0, pmap, nets)
     b += cap("C8", x + 11, y + 10, "+5V", "GND", nets)
+    _DEVICES.append({"ref": "U5", "type": "cellular"})
     return b, 16, 24
 
 
@@ -256,6 +266,7 @@ def block_tempsensor(x, y, n, nets):
         raise RuntimeError("tempsensor source failed: " + r["error"])
     b = place(r["lib"], r["footprint"], "U6", x + 6, y + 6, 0, r["pmap"], nets)
     b += cap("C9", x + 6, y + 14, "+3V3", "GND", nets)  # decoupling per power pin
+    _DEVICES.append({"ref": "U6", "type": "i2c_tempsensor", "mpn": r.get("mpn")})
     print("SOURCED:" + json.dumps({
         "ref": "U6", "mpn": r.get("mpn"), "manufacturer": r.get("manufacturer"),
         "price": r.get("price"), "stock": r.get("stock"),
@@ -412,6 +423,7 @@ def _unique_refs(body):
 
 def compose(spec, blocks, out_path):
     nets = Nets()
+    _DEVICES[:] = []  # reset the per-board device manifest
     keys, dropped = classify(blocks)
 
     # shared interface nets — allocated only for the buses that are actually
@@ -513,6 +525,9 @@ def compose(spec, blocks, out_path):
             "# clearance is supported by every standard 2-layer fab.\n"
             '(rule "fab_6mil"\n'
             "  (constraint clearance (min 0.13mm)))\n")
+
+    # device manifest sidecar — firmware reads this to drive the actual parts
+    open(os.path.splitext(out_path)[0] + ".devices.json", "w").write(json.dumps(_DEVICES))
 
     print("COMPOSE: blocks {} -> {} components placed, {:.0f}x{:.0f}mm, {} nets".format(
         keys, p.count("(footprint "), BW, BH, len(nets.order) - 1))

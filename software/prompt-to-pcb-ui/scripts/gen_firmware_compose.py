@@ -14,6 +14,7 @@ The hard gate (run separately) is `cargo build --target thumbv6m-none-eabi`.
 Usage:  <kicad-python3> gen_firmware_compose.py <board.kicad_pcb> <out_dir>
 Prints  FIRMWARE: peripherals <...>, pins <SIG=GPn ...>
 """
+import json
 import os
 import re
 import sys
@@ -58,17 +59,35 @@ def load():
                 if sig in SIGNALS and pin in PICO_PIN_TO_GP:
                     pins[sig] = PICO_PIN_TO_GP[pin]
 
-    peripherals = []
-    if "LORA_NSS" in nets_on_board or "SPI_SCK" in nets_on_board:
-        peripherals.append("radio")
-    if "I2C_SDA" in nets_on_board:
-        peripherals.append("imu")
-    if "GPS_TX" in nets_on_board:
-        peripherals.append("gnss")
-    if "CELL_TX" in nets_on_board:
-        peripherals.append("cellular")
     motors = sorted(n for n in nets_on_board if re.fullmatch(r"MOTOR\d+", n))
-    if motors:
+
+    # Prefer the composer's device manifest: it knows what each part IS, so an
+    # I2C temp sensor gets a temp-sensor driver instead of being guessed as an
+    # IMU (both share the I2C bus). Fall back to net-based guessing if absent.
+    manifest = os.path.splitext(BOARD)[0] + ".devices.json"
+    type_to_periph = {"radio": "radio", "imu": "imu", "gnss": "gnss",
+                      "cellular": "cellular", "i2c_tempsensor": "tempsensor"}
+    if os.path.exists(manifest):
+        try:
+            devs = json.load(open(manifest))
+        except Exception:
+            devs = []
+        peripherals = []
+        for d in devs:
+            p = type_to_periph.get(d.get("type"))
+            if p and p not in peripherals:
+                peripherals.append(p)
+    else:
+        peripherals = []
+        if "LORA_NSS" in nets_on_board or "SPI_SCK" in nets_on_board:
+            peripherals.append("radio")
+        if "I2C_SDA" in nets_on_board:
+            peripherals.append("imu")
+        if "GPS_TX" in nets_on_board:
+            peripherals.append("gnss")
+        if "CELL_TX" in nets_on_board:
+            peripherals.append("cellular")
+    if motors and "motors" not in peripherals:
         peripherals.append("motors")
     return pins, peripherals, motors
 
@@ -283,6 +302,44 @@ impl<S: Read + Write> Modem<S> {
 '''
 
 
+TEMPSENSOR_RS = '''//! I2C temperature sensor (LM75 / TMP1075 family) over an embedded-hal I2C bus.
+//! 12-bit, left-justified temperature register; A0-A2 grounded -> address 0x48.
+//! Generated — do not edit.
+#![allow(dead_code)]
+use embedded_hal::i2c::I2c;
+
+/// 7-bit address with A0-A2 tied low (the board grounds them).
+pub const ADDR: u8 = 0x48;
+const REG_TEMP: u8 = 0x00;
+
+pub struct TempSensor<I2C> {
+    i2c: I2C,
+}
+
+impl<I2C: I2c> TempSensor<I2C> {
+    pub fn new(i2c: I2C) -> Self {
+        Self { i2c }
+    }
+
+    fn raw(&mut self) -> Result<i16, I2C::Error> {
+        let mut b = [0u8; 2];
+        self.i2c.write_read(ADDR, &[REG_TEMP], &mut b)?;
+        Ok(i16::from_be_bytes(b) >> 4) // 12-bit, left-justified
+    }
+
+    /// Temperature in milli-degrees Celsius (0.0625 C/LSB).
+    pub fn read_milli_c(&mut self) -> Result<i32, I2C::Error> {
+        Ok(self.raw()? as i32 * 625 / 10)
+    }
+
+    /// Liveness: a successful temperature register read.
+    pub fn probe(&mut self) -> Result<bool, I2C::Error> {
+        self.raw().map(|_| true)
+    }
+}
+'''
+
+
 def emit_motors(motors):
     chans = "\n".join(
         "    /// {m} ESC signal (BSP `{m}_GPIO`).\n    {m},".format(m=m) for m in motors)
@@ -361,6 +418,14 @@ def emit_selftest(peripherals):
         imu.wake()?;
         Ok(true)
     }''')
+    if "tempsensor" in peripherals:
+        doc.append("//! - tempsensor: read the temperature register")
+        steps.append('''    /// Bring up the temperature sensor: confirm a register read succeeds.
+    pub fn tempsensor<I2C: embedded_hal::i2c::I2c>(t: &mut crate::tempsensor::TempSensor<I2C>)
+        -> Result<bool, I2C::Error>
+    {
+        t.probe()
+    }''')
     if "gnss" in peripherals:
         doc.append("//! - gnss: read a sentence, confirm a valid NMEA fix frame")
         steps.append('''    /// Bring up the GNSS: confirm it is emitting valid NMEA fix sentences.
@@ -413,6 +478,9 @@ def emit(pins, peripherals, motors):
     if "imu" in peripherals:
         open(os.path.join(OUT, "src", "imu.rs"), "w").write(IMU_RS)
         mods.append("imu")
+    if "tempsensor" in peripherals:
+        open(os.path.join(OUT, "src", "tempsensor.rs"), "w").write(TEMPSENSOR_RS)
+        mods.append("tempsensor")
     if "motors" in peripherals:
         open(os.path.join(OUT, "src", "motors.rs"), "w").write(emit_motors(motors))
         mods.append("motors")
