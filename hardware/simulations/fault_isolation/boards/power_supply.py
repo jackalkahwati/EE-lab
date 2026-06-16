@@ -60,16 +60,15 @@ def build() -> Board:
     b.add_c("C_BYPASS_5V", "5V", "GND", 100e-9)
 
     # --- Test points ---
-    # Original TPs
-    b.add_tp("TP_VIN", "VIN_FUSED")    # after fuse, before regulator
+    b.add_tp("TP_VIN", "VIN_FUSED")    # after fuse — isolates F1 from downstream
     b.add_tp("TP_5V", "5V")
     b.add_tp("TP_3V3", "3V3")
-    b.add_tp("TP_FB1", "FB1")
+    b.add_tp("TP_FB1", "FB1")          # 1st feedback divider midpoint
+    b.add_tp("TP_FB2", "FB2")          # 2nd feedback divider midpoint
     b.add_tp("TP_GND", "GND")
-    # Added: interior TPs that split previously ambiguous paths
-    b.add_tp("TP_SW1", "SW1")          # switching node: isolates L1 from D1
-    b.add_tp("TP_FB2", "FB2")          # 2nd feedback divider: isolates RFB3 from RFB4
-    b.add_tp("TP_5V_LOAD", "5V")       # redundant on 5V rail for load-side separation
+    b.add_tp("TP_SW1", "SW1")          # 1st stage switching node (between L1 and D1)
+    b.add_tp("TP_BOOT1", "BOOT1")      # bootstrap cap node (between SW1 and CBOOT)
+    b.add_tp("TP_SW2", "SW2")          # 2nd stage switching node (between L2 and D2)
 
     return b
 
