@@ -19,13 +19,28 @@ from dataclasses import dataclass, field
 from typing import Optional
 import math
 
+import math
 from board_model import Board, Component, ComponentType, FaultType
-from oracle import solve_dc, measure_resistance
+from oracle import solve_dc, measure_resistance, measure_impedance
 
 
 VOLTAGE_TOL    = 0.10   # 10% relative tolerance
 RESISTANCE_TOL = 3.0    # pass band: [1/TOL … TOL] × nominal
+IMPEDANCE_TOL  = 2.5    # same ratio band for AC impedance
 PASS_PENALTY   = 0.25   # pass-path vote deduction
+
+# Bayesian prior: multiply final score by component-type failure rate weight.
+# Values are relative (fuses fail more than precision refs).
+COMPONENT_PRIOR: dict[ComponentType, float] = {
+    ComponentType.FUSE:     2.5,   # designed to fail
+    ComponentType.DIODE:    1.5,   # junction degradation
+    ComponentType.VREG:     1.4,   # thermal stress
+    ComponentType.VREF:     0.8,   # precision, rarely fails
+    ComponentType.RESISTOR: 0.9,
+    ComponentType.CAPACITOR: 1.2,  # electrolytic aging
+    ComponentType.INDUCTOR:  0.5,  # very reliable
+    ComponentType.IC:        1.0,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -165,10 +180,13 @@ class IsolationResult:
 # ---------------------------------------------------------------------------
 
 def isolate_fault(board: Board, healthy_voltages: dict[str, float],
+                  healthy_impedances: Optional[dict] = None,
                   injected: Optional[Component] = None) -> IsolationResult:
     """
     Run fault isolation on a board that already has a fault injected.
     healthy_voltages: result of solve_dc on the healthy (unfaulted) board.
+    healthy_impedances: {(net_a, net_b, freq_hz): |Z|} from healthy board.
+                        Pass to enable AC impedance sweep (Phase 3).
     injected: the component whose fault was injected (for correctness scoring).
     """
     fail_v: dict[str, float] = defaultdict(float)
@@ -252,7 +270,47 @@ def isolate_fault(board: Board, healthy_voltages: dict[str, float],
                 # Anomalously HIGH resistance → open fault on the normal path.
                 vote(nom_path, True)
 
-    # ---- Score hypotheses ----
+    # ---- Phase 3: impedance sweep (1 kHz, 10 kHz, 100 kHz) ----
+    # Compares |Z_faulted| against pre-measured healthy board impedances.
+    # healthy_impedances[(na, nb, freq)] = |Z| on the unfaulted board.
+    # This correctly captures parallel cap/inductor paths that path-sum misses.
+    AC_FREQS = [1e3, 10e3, 100e3]
+    if healthy_impedances:
+        for freq in AC_FREQS:
+            for i in range(len(tps)):
+                for j in range(i + 1, len(tps)):
+                    na, nb = tps[i].net_a, tps[j].net_a
+                    if na == nb:
+                        continue
+
+                    z_healthy = healthy_impedances.get((na, nb, freq), float("nan"))
+                    if math.isnan(z_healthy):
+                        continue  # no healthy baseline → skip
+
+                    nom_path = _bfs(radj, {na}, nb)
+                    z_faulted = measure_impedance(board, na, nb, freq)
+                    meas_count += 1
+
+                    if math.isnan(z_faulted):
+                        failed = True
+                        ratio = float("inf")
+                    else:
+                        ratio = z_faulted / max(z_healthy, 1e-9)
+                        failed = ratio > IMPEDANCE_TOL or ratio < 1.0 / IMPEDANCE_TOL
+
+                    if not failed:
+                        vote(nom_path, False)
+                        continue
+
+                    if ratio < 1.0 / IMPEDANCE_TOL:
+                        fpath = _bfs(fadj, {na}, nb)
+                        nom_names = {c.name for c in nom_path}
+                        new_comps = [c for c in fpath if c.name not in nom_names]
+                        vote(new_comps if new_comps else (fpath or nom_path), True)
+                    else:
+                        vote(nom_path, True)
+
+    # ---- Score hypotheses with Bayesian prior ----
     hyps: list[FaultHypothesis] = []
     for comp in board.components:
         if comp.ctype == ComponentType.TESTPOINT:
@@ -262,7 +320,9 @@ def isolate_fault(board: Board, healthy_voltages: dict[str, float],
             continue
         fv = fail_v.get(comp.name, 0.0)
         pv = pass_v.get(comp.name, 0.0)
-        score = (fv - PASS_PENALTY * pv) / tot
+        evidence_score = (fv - PASS_PENALTY * pv) / tot
+        prior = COMPONENT_PRIOR.get(comp.ctype, 1.0)
+        score = evidence_score * prior
         hyps.append(FaultHypothesis(comp, score, fv, pv, tot))
 
     hyps.sort(key=lambda h: (-h.score, -h.failed_votes))

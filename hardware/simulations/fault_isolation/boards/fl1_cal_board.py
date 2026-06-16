@@ -77,6 +77,7 @@ def build() -> Board:
     # =========================================================
     # Test points (FL-1 probe destinations)
     # =========================================================
+    # Original TPs
     b.add_tp("TP_3V3", "3V3")
     b.add_tp("TP_NODE_A", "NODE_A")       # between R10 and R1K
     b.add_tp("TP_NODE_B", "NODE_B")       # between R1K and R100K
@@ -88,6 +89,11 @@ def build() -> Board:
     b.add_tp("TP_VREF", "VREF_OUT")
     b.add_tp("TP_SDA", "SDA")
     b.add_tp("TP_GND", "GND")
+    # Added: interior TPs that were previously unprobed
+    b.add_tp("TP_LED_A", "LED_A")         # between R_LED and D_LED anode
+    b.add_tp("TP_D3", "D3_NET")           # reverse-biased diode net
+    b.add_tp("TP_VREF_IN", "VREF_IN")     # reference input (between R_REF1 and U_REF)
+    b.add_tp("TP_SCL", "SCL")             # I2C clock (mirrors SDA coverage)
 
     return b
 

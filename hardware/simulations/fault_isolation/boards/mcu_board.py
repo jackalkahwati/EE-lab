@@ -58,12 +58,20 @@ def build() -> Board:
     b.add_c("C_FLASH", "3V3", "GND", 100e-9)
 
     # --- Test points ---
+    # Original TPs
     b.add_tp("TP_5V", "5V")
     b.add_tp("TP_3V3", "3V3")
     b.add_tp("TP_nRST", "nRST")
     b.add_tp("TP_SDA", "I2C_SDA")
     b.add_tp("TP_SCL", "I2C_SCL")
     b.add_tp("TP_GND", "GND")
+    # Added: interior TPs between LED series R and diode anode.
+    # Previously all 3 LEDs were indistinguishable — each was just 3V3→GND
+    # with no internal probe point. These split each string into R + diode.
+    b.add_tp("TP_LED1_A", "LED1_A")    # between R_LED1 and D_LED1
+    b.add_tp("TP_LED2_A", "LED2_A")    # between R_LED2 and D_LED2
+    b.add_tp("TP_LED3_A", "LED3_A")    # between R_LED3 and D_LED3
+    b.add_tp("TP_MR", "MR_NET")        # watchdog MR pin pull-up node
 
     return b
 

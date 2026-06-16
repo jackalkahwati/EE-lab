@@ -169,3 +169,111 @@ def measure_resistance(board: Board, net_a: str, net_b: str) -> float:
 def check_continuity(board: Board, net_a: str, net_b: str,
                      threshold: float = 10.0) -> bool:
     return measure_resistance(board, net_a, net_b) < threshold
+
+
+# ---------------------------------------------------------------------------
+# Impedance sweep (AC analysis)
+# ---------------------------------------------------------------------------
+
+def _impedance_at_freq(comp: Component, freq_hz: float) -> float:
+    """
+    Effective impedance magnitude of a component at a given frequency.
+    Capacitors and inductors get frequency-dependent values.
+    Faulted components use effective_resistance() (fault model unchanged).
+    """
+    import math
+    f = comp.fault
+    ct = comp.ctype
+
+    if f in (FaultType.OPEN, FaultType.MISSING):
+        return 1e12
+    if f == FaultType.SHORT:
+        return 1e-3
+
+    if ct == ComponentType.CAPACITOR:
+        if freq_hz <= 0:
+            return 1e12
+        xc = 1.0 / (2 * math.pi * freq_hz * comp.value)
+        if f == FaultType.DEGRADED:
+            xc *= comp.fault_magnitude  # degraded cap: higher ESR/lower C
+        return max(xc, 1e-3)
+
+    if ct == ComponentType.INDUCTOR:
+        if freq_hz <= 0:
+            return 1e-6
+        xl = 2 * math.pi * freq_hz * comp.value
+        if f == FaultType.WRONG_VALUE:
+            xl *= comp.fault_magnitude
+        elif f == FaultType.DEGRADED:
+            xl *= comp.fault_magnitude
+        return max(xl, 1e-9)
+
+    # All other types: use DC effective resistance
+    return comp.effective_resistance()
+
+
+def _solve_ac(board: Board, freq_hz: float) -> Optional[dict[str, float]]:
+    """
+    Solve board impedance at freq_hz (powered-down — no voltage sources).
+    Returns node voltages for 1A current injection (used internally by
+    measure_impedance to compute |Z|).
+    """
+    nets = board.nets
+    n_idx = {n: i for i, n in enumerate(nets)}
+    N = len(nets)
+    gnd_i = n_idx.get(GND, -1)
+
+    A = np.zeros((N, N))
+
+    for comp in board.components:
+        if comp.ctype == ComponentType.TESTPOINT:
+            continue
+        if comp.ctype in (ComponentType.VREG, ComponentType.VREF):
+            continue  # no active sources at AC (powered down)
+
+        z = _impedance_at_freq(comp, freq_hz)
+        g = 1.0 / max(z, 1e-12)
+        ia = n_idx[comp.net_a]
+        ib = n_idx[comp.net_b]
+        A[ia, ia] += g; A[ib, ib] += g
+        A[ia, ib] -= g; A[ib, ia] -= g
+
+    if gnd_i >= 0:
+        A[gnd_i, :] = 0.0
+        A[gnd_i, gnd_i] = 1.0
+
+    return A, n_idx, N
+
+
+def measure_impedance(board: Board, net_a: str, net_b: str,
+                      freq_hz: float = 1e3) -> float:
+    """
+    Measure impedance magnitude |Z| between net_a and net_b at freq_hz.
+    Board is modelled as powered-down (no DC sources active).
+    Uses 1A injection: |Z| = |V(net_a) - V(net_b)|.
+    """
+    try:
+        A, n_idx, N = _solve_ac(board, freq_hz)
+    except Exception:
+        return float("nan")
+
+    b_vec = np.zeros(N)
+    ia = n_idx.get(net_a, -1)
+    ib = n_idx.get(net_b, -1)
+    gnd_i = n_idx.get(GND, -1)
+
+    if ia < 0 or ib < 0:
+        return float("nan")
+
+    # Inject +1A at net_a, -1A at net_b (current source in parallel)
+    if ia != gnd_i:
+        b_vec[ia] += 1.0
+    if ib != gnd_i:
+        b_vec[ib] -= 1.0
+
+    try:
+        v = np.linalg.solve(A, b_vec)
+    except np.linalg.LinAlgError:
+        return float("nan")
+
+    return abs(float(v[ia]) - float(v[ib]))
