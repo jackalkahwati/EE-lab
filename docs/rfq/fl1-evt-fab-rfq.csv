@@ -56,3 +56,6 @@ item,part_number,description,qty,material,process,envelope_mm,finish,drawing,ref
 55,EE-FAB-TRIM,Trim - Rear Filler Left,2,Aluminum 5052 sheet,Sheet metal,752 x 30 x 4,Powder coat (RAL 9005 matte black int.),model only,Trim - Rear Filler Left; Trim - Rear Filler Right
 56,EE-FAB-TRIM,Trim - Front Sill,1,Aluminum 5052 sheet,Sheet metal,790 x 60 x 8,Powder coat (RAL 9005 matte black int.),model only,Trim - Front Sill
 57,EE-FAB-VAC,Vacuum Port Boss FL,4,Aluminum 6061-T6,CNC machining,12 x 12 x 8,Clear anodize,model only,Vacuum Port Boss FL; Vacuum Port Boss FR; Vacuum Port Boss RL; Vacuum Port Boss RR
+58,EE-CAL-FID,Calibration Fiducial Target,1,Aluminum 6061-T6,CNC machining,40 x 40 x 3,Clear anodize + printed target label,model only,Calibration Fiducial Target
+59,EE-CAL-TOP,Probe Touch-Off Pad,1,Steel alloy (hardened),CNC machining + harden,O16 x 3,Ground top face,model only,Probe Touch-Off Pad
+60,EE-CAL-FCP,Force Calibration Post,1,Stainless 303,CNC machining,O12 x 15,Passivate,model only,Force Calibration Post

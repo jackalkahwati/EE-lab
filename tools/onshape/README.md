@@ -50,6 +50,16 @@ quota. The original document under the free account is a frozen archive.
 - `fix_pass2_audit_defects.py` — the 19 park-position defect fixes
 - `audit_run5.py` — full audit: states, naming, park interference with
   containment whitelist, per-body swept checks, coaxiality, stack heights
+- `prod_probe.py` — read-only production probe (3 calls): bboxes to disk,
+  evDistance on suspect pairs, group mass properties. NOTE: audit §6's
+  "X motor vs shell −1.0 mm" is a bbox artifact of the hollow shell —
+  evDistance shows 64 mm true. Always evDistance before believing a bbox
+  number against a hollow/L-shaped body.
+- `phase_e_production.py` — Phase E production pass (2026-07-03): journal
+  trims for 2 mm coupling axial float, E-stop + panel hole, glass-door
+  hinges/interlock, grounding studs, calibration assets, straggler
+  materials, Version PROD-PASS-1 + STEP v6 export. Idempotent; deletes
+  scoped cuts that land non-OK; auto-corrects front-plane mirror landings.
 
 ## Capabilities proven (all via POST, no rate-limited GETs needed)
 
