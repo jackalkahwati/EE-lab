@@ -146,6 +146,30 @@ partIds/assembly untouched.
 - Cosmetic machining features; drawings are MBD "per 3D model" so the
   drawing set inherits them.
 
+## 3f. ID-PASS-3: proper window corners + real interior colors (2026-07-03)
+
+Version **ID-PASS-3** (`e9aaaf81bf2d69904d54f3c3`), STEP
+`Part_Studio_1_v11.step`.
+
+- **Window corners fixed** — the R60 glass fillet left bright untinted
+  notches at the corners (square aperture, rounded pane: sightline hit
+  the white shell interior with no glass in the path). Reworked the way
+  the Fuse does it: fillet deleted (square pane fills the aperture
+  completely) + four near-black **corner gussets** behind the glass
+  (quarter-concave R60, Y −456..−450, EE-FAB-GLZ family, RFQ line 61)
+  so the aperture reads rounded through the amber with no gaps.
+- **Real interior colors** — 249 bodies painted by name-pattern rules:
+  steel rails/screws/blocks, black NEMA motors, clear-anodize plates and
+  stages, green PCBs with dark ICs, brass pogos, black cameras/chains,
+  vendor-true instruments (PicoScope blue, LabJack red, Omron safety
+  relay yellow, Keithley graphite), yellow interlock, matte-black deck.
+- **Window unhidden in the document view state** (driven through the
+  Onshape UI via CDP — the REST API does not expose per-part
+  show/hide). Note: the glass had been hidden since the interior CAD
+  passes; renders needed showAllParts until now.
+- New renders: front, hero, FIRSTLIGHT FL-1 wordmark + LCD close-up,
+  interior detail, probe-station detail.
+
 ## 4. Remaining work to true production (not CAD-scriptable, tracked)
 
 1. ~~Motion Check assembly~~ **DONE (same session)**: all 14 bodies

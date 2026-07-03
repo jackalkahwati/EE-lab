@@ -70,6 +70,13 @@ quota. The original document under the free account is a frozen archive.
   translation (t = −R·target; assembly targets need the gauge offset
   added). Glass drops to opacity 110 for filming, restored after.
   Resumable (skips existing frames); encode via ffmpeg.
+- `id_pass_3.py` — square glass + R60 corner gussets (fillet notches
+  fixed), 249-body interior color pass. LESSONS: (1) rounding the GLASS
+  against a square aperture opens untinted sightline notches — round the
+  aperture (gussets), keep the pane square; (2) per-part show/hide is NOT
+  in the REST API — drive the UI via CDP on the 9222 Chrome (suppress
+  websocket Origin header; PUT /json/new then Page.navigate; right-click
+  canvas -> "Show all parts").
 - `id_pass_2.py` — Fuse panel breaks: window/display shadow-gap recess
   rings (inner outline inset 1 mm into the opening so no cut wall lands
   on a scope-body face) + Z=0 body seam wrapping shells and rear.
