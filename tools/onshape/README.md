@@ -70,6 +70,13 @@ quota. The original document under the free account is a frozen archive.
   translation (t = −R·target; assembly targets need the gauge offset
   added). Glass drops to opacity 110 for filming, restored after.
   Resumable (skips existing frames); encode via ffmpeg.
+- `phase_g_drawer.py` / `phase_g2_drawer_fix.py` — fixture drawer + M5
+  grid. LESSON: check the WHOLE travel path, not just the destination —
+  v1 put a tray at Z 20..28 straight through the measurement-bay stack
+  (Z 5..43) and ignored that the Base Frame front member is solid
+  Z 0..80 (nothing exits forward without a tunnel). v2: plate-as-drawer
+  on side slides above the bay, kinematic standoff seats, frame tunnel
+  with intact top chord so the limit-switch mounts survive.
 - `id_pass_3.py` — square glass + R60 corner gussets (fillet notches
   fixed), 249-body interior color pass. LESSONS: (1) rounding the GLASS
   against a square aperture opens untinted sightline notches — round the

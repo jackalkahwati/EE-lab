@@ -13,7 +13,7 @@ item,part_number,description,qty,material,process,envelope_mm,finish,drawing,ref
 12,EE-FAB-DSPBZL,Touch Display Bezel,1,Aluminum 6061-T6,CNC machining,370 x 220 x 2,Cosmetic Class A black,drawings/,Touch Display Bezel
 13,EE-FAB-DUTIF,DUT Interface Bulkhead,1,Aluminum 6061-T6,CNC machining,140 x 130 x 6,Clear anodize,drawings/,DUT Interface Bulkhead
 14,EE-FAB-EMB,Probe Head Logo Emblem,1,ABS / PC,SLA/SLS print,20 x 20 x 2,As-printed,model only,Probe Head Logo Emblem
-15,EE-FAB-FIXP,PCB Fixture Plate,1,Aluminum 6061-T6,CNC machining,520 x 420 x 18,Clear anodize,drawings/,PCB Fixture Plate
+15,EE-FAB-FIXP,PCB Fixture Plate,1,Aluminum 6061-T6,CNC machining (+269x O4.2 M5-tap grid @25mm),520 x 420 x 18,Clear anodize,drawings/,PCB Fixture Plate
 16,EE-FAB-FRM 4040,Base Frame,1,Aluminum 6063 extrusion,Cut extrusion,740 x 640 x 80,Clear anodize,model only,Base Frame
 17,EE-FAB-FSC,Plinth Fascia,1,Aluminum 5052 sheet,Sheet metal,870 x 300 x 20,Powder coat (RAL 9005 matte black int.),model only,Plinth Fascia
 18,EE-FAB-GLZ black PMMA,Glass Frame Side L+R,2,PMMA (near-black),Laser/waterjet cut,392 x 20 x 10,"Polished, smoked tint",model only,Glass Frame Side L+R
@@ -60,3 +60,8 @@ item,part_number,description,qty,material,process,envelope_mm,finish,drawing,ref
 59,EE-CAL-TOP,Probe Touch-Off Pad,1,Steel alloy (hardened),CNC machining + harden,O16 x 3,Ground top face,model only,Probe Touch-Off Pad
 60,EE-CAL-FCP,Force Calibration Post,1,Stainless 303,CNC machining,O12 x 15,Passivate,model only,Force Calibration Post
 61,EE-FAB-GLZ black PMMA,Window Corner Gusset (TL/TR/BL/BR),4,PMMA (near-black),Laser/waterjet cut,60 x 60 x 6 R60 concave,Matte,model only,Window Corner Gusset TL; Window Corner Gusset TR; Window Corner Gusset BL; Window Corner Gusset BR
+62,EE-FAB-DRWRAIL,Drawer Support Rail,2,Aluminum 6061-T6,CNC machining,420 x 16 x 10,Clear anodize,model only,Drawer Support Rail Left; Drawer Support Rail Right
+63,EE-FAB-DRWPOST,Drawer Rail Post,4,Aluminum 6061-T6,CNC machining,12 x 12 x 39,Clear anodize,model only,Drawer Post FL; Drawer Post FR; Drawer Post RL; Drawer Post RR
+64,EE-FAB-DRWARM,Drawer Fascia Arm,2,Aluminum 6061-T6,CNC machining,242 x 20 x 10,Black anodize,model only,Drawer Arm Left; Drawer Arm Right
+65,EE-FAB-DRWPNL,Drawer Front Panel,1,Aluminum 5052 sheet,Sheet metal,576 x 64 x 10,Cosmetic Class A black,model only,Drawer Front Panel
+66,EE-FAB-DRWHNDL,Drawer Handle,1,Aluminum 6061-T6,CNC machining,240 x 16 x 14,Black anodize,model only,Drawer Handle

@@ -170,6 +170,40 @@ Version **ID-PASS-3** (`e9aaaf81bf2d69904d54f3c3`), STEP
 - New renders: front, hero, FIRSTLIGHT FL-1 wordmark + LCD close-up,
   interior detail, probe-station detail.
 
+## 3g. PROD-PASS-4/4b: fixture drawer + universal M5 grid (2026-07-03)
+
+Versions **PROD-PASS-4** + **PROD-PASS-4b** (`3ec42e9e6ca7e141831fc4fc`),
+STEP `Part_Studio_1_v12.step`. Closes the two CAD items from the
+serviceability review.
+
+**Slide-out fixture drawer** — the fixture plate itself is the drawer:
+- Accuride DZ9301-class full-extension slides clamp the plate side
+  faces at Z 44..54 — above the measurement-bay stack (relay matrix,
+  blind-mate pogos, protection board, Saleae; tallest 43) and 1 mm
+  under the deck. Support rails on four posts at verified-clear spots.
+- The fixture standoffs stay full height as **closed-position kinematic
+  seats**: slides carry travel, the plate settles onto standoffs + the
+  Southco latch when closed — probing loads bypass the slides and the Z
+  datum repeats. Blind-mate bay pogos re-engage on close.
+- **Frame tunnel** X ±290, Z 36..72 through the Base Frame front member
+  (8 mm top chord — X limit-switch mounts untouched; 36 mm bottom web;
+  reinforce chord at DVT). Front aperture through sill + glass-frame
+  bottom, filled by a black fascia panel + handle with 2 mm reveal,
+  connected by two arms through the tunnel (8 mm true clearance).
+- Constraint (documented): drawer ride-through headroom is ~12 mm above
+  board top (force-cal post trimmed to Z 68 to comply); taller
+  assemblies top-load through the door as before. Drawer-open breaks
+  the same G9SE guard circuit as the door.
+- v1 lesson: the first tray-under-standoffs architecture collided with
+  the bay stack and ignored the solid frame front member — caught by
+  the overlap scan, removed, re-architected (phase_g2_drawer_fix.py).
+
+**Universal fixture grid** — 269 Ø4.2 (M5 tap) holes at 25 mm pitch,
+X ±225 / Y ±175, keep-outs auto-skipped around vacuum ports/bosses and
+calibration assets. With the locating pins this enables per-board
+3D-printed nest plates → any outline/panel within the plate becomes
+fixturable. RFQ updated (lines 62–68 + FIXP note).
+
 ## 4. Remaining work to true production (not CAD-scriptable, tracked)
 
 1. ~~Motion Check assembly~~ **DONE (same session)**: all 14 bodies
