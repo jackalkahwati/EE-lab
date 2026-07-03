@@ -55,6 +55,15 @@ quota. The original document under the free account is a frozen archive.
   "X motor vs shell −1.0 mm" is a bbox artifact of the hollow shell —
   evDistance shows 64 mm true. Always evDistance before believing a bbox
   number against a hollow/L-shaped body.
+- `mc_add_prod_instances.py` / `mc_fix_gauge_offset.py` — insert the
+  Phase E bodies into Motion Check + Static Frame group. LESSON: with
+  nothing Fixed, the static group solves at a GAUGE OFFSET from modeled
+  coordinates ((0, +320, −62.5) mm in this assembly) — fresh instances
+  insert at modeled position and appear floating ~320 mm off. Fix order:
+  remove from group → occurrencetransforms to an existing static's
+  occurrence transform (sticks on unmated instances) → re-add to group →
+  verify park via matevalues. Mate-GROUP round-trip feature updates are
+  safe (no unit params); slider mates must still never be round-tripped.
 - `phase_e_production.py` — Phase E production pass (2026-07-03): journal
   trims for 2 mm coupling axial float, E-stop + panel hole, glass-door
   hinges/interlock, grounding studs, calibration assets, straggler

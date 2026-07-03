@@ -69,9 +69,14 @@ RFQ package updated: `docs/rfq/fl1-evt-fab-rfq.csv` +3 fab items
 
 ## 4. Remaining work to true production (not CAD-scriptable, tracked)
 
-1. **Motion Check assembly**: the 14 new bodies are not yet instanced in
-   the assembly — insert and add to the Static Frame mate group (30 min,
-   same API path as the freeze, or in the UI).
+1. ~~Motion Check assembly~~ **DONE (same session)**: all 14 bodies
+   instanced and added to the Static Frame mate group
+   (`mc_add_prod_instances.py`). Note: the assembly's static group solves
+   at a gauge offset of (0, +320, −62.5) mm from modeled coordinates, so
+   fresh instances land 320 mm away from the machine; `mc_fix_gauge_offset.py`
+   removes them from the group, moves them onto Base Frame's occurrence
+   transform, and re-adds them. Park verified unchanged
+   (X 0.020, Y 0.000, Z 0.075); render checkpoint clean.
 2. Ballnut-flange 0.849 mm watch item → DVT tolerance stack analysis.
 3. Fastener-level detail on load-path joints (counterbores + hardware)
    remains at EVT level per the freeze decision; full DFM/DFA at DVT.
