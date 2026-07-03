@@ -64,6 +64,12 @@ quota. The original document under the free account is a frozen archive.
   occurrence transform (sticks on unmated instances) → re-add to group →
   verify park via matevalues. Mate-GROUP round-trip feature updates are
   safe (no unit params); slider mates must still never be round-tripped.
+- `bringup_video.py` — first-board bring-up video from the Motion Check
+  assembly: matevalues choreography (4 test-point probe cycles + rack
+  visit) + camera fly-through via fixed pixelSize and viewMatrix
+  translation (t = −R·target; assembly targets need the gauge offset
+  added). Glass drops to opacity 110 for filming, restored after.
+  Resumable (skips existing frames); encode via ffmpeg.
 - `id_pass_2.py` — Fuse panel breaks: window/display shadow-gap recess
   rings (inner outline inset 1 mm into the opening so no cut wall lands
   on a scope-body face) + Z=0 body seam wrapping shells and rear.
