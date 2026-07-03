@@ -239,6 +239,20 @@ Pre-probe warp mapping feeds probe Z-planning; Class 3R contained, and
 the amber PMMA attenuates 405–450 nm — **the window is now a functional
 laser viewing guard, not just brand language.**
 
+## 3i. PROD-PASS-6: top-hinged canopy door (2026-07-03)
+
+Version **PROD-PASS-6** (`6f81c56854ba5793a53bf79a`), STEP
+`Part_Studio_1_v14.step`. Per design direction the door now opens
+UPWARD: the two concealed hinges moved from the left edge to the top
+corners (X ±300, behind the glass top edge, zero overlaps), renamed
+Door Hinge Top Left/Right. The side compression interlock latch stays —
+correct for a canopy leaf, and the bottom edge is the drawer aperture
+so a bottom latch would sit in the payload path. Gas-spring stays
+(Bansbach mini ×2) noted for DVT geometry; RFQ updated. Open-pose
+renders redone: amber visor at 80° with the drawer extended
+(fl1-open-hero.png, fl1-canopy-front.png); pose applied and restored
+via temporary transform features, closed park bbox-verified.
+
 ## 4. Remaining work to true production (not CAD-scriptable, tracked)
 
 1. ~~Motion Check assembly~~ **DONE (same session)**: all 14 bodies

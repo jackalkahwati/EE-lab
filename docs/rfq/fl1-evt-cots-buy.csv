@@ -61,7 +61,7 @@ item,vendor,part_number,qty,used_as
 60,ebm-papst,(fan hub),2,Exhaust Fan Hub Left; Exhaust Fan Hub Right
 61,ebm-papst,"4414 FNH (120 mm, 24 V)",2,Exhaust Fan 120mm Left; Exhaust Fan 120mm Right
 62,IDEC,XW1E-BV411MR,1,E-Stop Bezel; E-Stop Stem; E-Stop Button Cap
-63,Sugatsune,HES3D-90BL,2,Door Hinge Lower; Door Hinge Upper
+63,Sugatsune,HES3D-90BL (top-hung),2,Door Hinge Top Left; Door Hinge Top Right
 64,Omron,D4NS-4CF,1,Door Interlock Switch
 65,Omron,D4DS-K3,1,Door Interlock Striker
 66,Hardware,M5x12 ground stud DIN 46234,4,Grounding Stud Plinth Right; Grounding Stud Plinth Left; Grounding Stud Frame; Grounding Stud Rear Panel
@@ -73,3 +73,4 @@ item,vendor,part_number,qty,used_as
 72,Micro-Epsilon,scanCONTROL 3060BL (450 nm Class 3R),1,Laser Warp Scanner 450nm
 73,Hardware,tinned flat braid 10mm + lugs,1,Drawer Ground Braid
 74,igus,E2C/triflex ESD dissipative chain retrofit,1,X/Y drag chains + probe cable loop
+75,Bansbach,mini gas spring (canopy stay),2,Door leaf stay - geometry at DVT
