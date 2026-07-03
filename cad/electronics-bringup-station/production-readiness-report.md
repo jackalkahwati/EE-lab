@@ -432,6 +432,14 @@ Version **PROD-PASS-12** (`826ead9fc5151eaf9f447459`), STEP
   (ring + cross spokes, Qualtek FG-120 class) on the rear exterior —
   the last unmodeled D4 safety item. RFQ +1 line.
 
+### 3q addendum 3: seam wraps the corner fillets
+
+The Z=0 body seam was cut as straight segments on the flat faces and
+faded out around the R60 shell corner fillets. Fixed with four annular
+sector cuts (r 58.5–61.5 about the fillet centers (±445, ±400), quarter
+arcs, 3 mm × 1.5 mm) scoped to the shells — the seam now runs
+continuously around all four corners. Version PROD-PASS-14, STEP v23.
+
 ## 4. Remaining work to true production (not CAD-scriptable, tracked)
 
 1. ~~Motion Check assembly~~ **DONE (same session)**: all 14 bodies
