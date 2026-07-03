@@ -70,6 +70,11 @@ quota. The original document under the free account is a frozen archive.
   translation (t = −R·target; assembly targets need the gauge offset
   added). Glass drops to opacity 110 for filming, restored after.
   Resumable (skips existing frames); encode via ffmpeg.
+- CONFIG COMPOSITES: compositePart features resolve member queries at
+  their TREE POSITION — a mid-tree composite silently prunes ids of
+  bodies created after it (updates post OK but do not stick). Keep the
+  CFG state composites LAST in the tree; to add members, delete and
+  recreate them at the end with fresh ids, then verify membership.
 - `phase_h_esd_door.py` — ESD kit (chem-film fixture surfaces, drawer
   ground braid, wrist-strap jack, ionizer bar, ESD chains), powered
   door-exit drawer (fascia parts deleted; amber door EXTENDED down via

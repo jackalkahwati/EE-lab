@@ -407,6 +407,20 @@ Version **PROD-PASS-12** (`826ead9fc5151eaf9f447459`), STEP
   equipotential bonding, and the monitor makes a missing earth
   impossible to ignore.
 
+### 3q addendum: space-grey rails, open-state rails, composite fix
+
+- Rails re-finished **space grey anodize** (100,103,108) — quieter
+  against the black fascia, ties to the graphite top (RFQ updated).
+- **Open-state ghost rails** (4, makeCopy-rotated 105° about the hinge
+  axis) added so the OPEN reference shows the complete door.
+- **Composite gotcha found**: features resolve their queries at their
+  position in the regeneration order — the CFG composites sat mid-tree
+  (created before the rails), so membership updates referencing
+  later-created bodies were silently pruned. Both composites were
+  deleted and recreated at the END of the tree; membership verified
+  zero-missing: OPEN 42, CLOSED 45. Rule: keep configuration composites
+  last in the tree, recreate after adding member bodies.
+
 ## 4. Remaining work to true production (not CAD-scriptable, tracked)
 
 1. ~~Motion Check assembly~~ **DONE (same session)**: all 14 bodies
