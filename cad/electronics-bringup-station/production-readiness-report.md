@@ -334,6 +334,21 @@ anchor-to-bracket line at 105° open (Y −468, Z 452 — strut extends
 Hide/show together with the door REF. All three ghosts are
 BOM-excluded, audit-exempt Analysis bodies.
 
+## 3n. CFG-STATES-1: open/closed configuration bundles (2026-07-03)
+
+Version **CFG-STATES-1**. The studio now has two composite parts that
+act as one-click state toggles in the parts list (eye icon):
+
+- **CFG - OPEN STATE (REF)** — 38 ghost members: door leaf at 105°,
+  both extended struts, and the full 35-body drawer payload copied to
+  the extended position (Analysis-prefixed, BOM-excluded, translucent).
+- **CFG - CLOSED STATE** — 41 real members: door leaf, gas struts +
+  door brackets, sensor target, and the payload at home.
+
+Usage: hide CLOSED + show OPEN → machine fully open, drawer out,
+struts extended; the reverse → clean closed machine. Ghosts are
+audit-exempt; no real geometry changed (STEP v18 remains current).
+
 ## 4. Remaining work to true production (not CAD-scriptable, tracked)
 
 1. ~~Motion Check assembly~~ **DONE (same session)**: all 14 bodies
