@@ -323,6 +323,17 @@ floating stand-ins. Fixed:
   door TOP edge (sensor bracket under the glass frame top, target on
   the leaf below it) — overlap scan clean.
 
+### 3m addendum: open-state strut ghosts
+
+The open-position reference set was incomplete — the ghost door at 105°
+had no struts reaching it (the real struts model the CLOSED state, where
+they correctly seat against the leaf with anchors at both ends). Added
+**Analysis - Strut Extended L/R REF**: ghost rods drawn along the exact
+anchor-to-bracket line at 105° open (Y −468, Z 452 — strut extends
+230→268 mm, correct gas-spring behavior), ending on the ghost leaf.
+Hide/show together with the door REF. All three ghosts are
+BOM-excluded, audit-exempt Analysis bodies.
+
 ## 4. Remaining work to true production (not CAD-scriptable, tracked)
 
 1. ~~Motion Check assembly~~ **DONE (same session)**: all 14 bodies
