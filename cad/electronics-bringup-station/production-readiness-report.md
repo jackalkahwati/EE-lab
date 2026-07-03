@@ -369,6 +369,19 @@ threaded leveling system (McMaster 23015T74 intent made geometric):
   negative offset — the first stud build landed mirrored at +Z 307.
 - RFQ +2 lines (mounts, jam nuts).
 
+## 3p. LOGO-1: traced firstlight identity, laser-etched (2026-07-03)
+
+Version **LOGO-1**, STEP `Part_Studio_1_v20.step`. The supplied logo PNG
+(starburst mark, orange top dash, lowercase wordmark) was vector-traced
+(cv2 findContours + approxPolyDP → 21 contours, 268 segments) and
+reproduced as a REAL laser etch on the fascia bottom-left (170 mm wide,
+X −405..−235, above the accent strip): 0.3 mm REMOVE cut through the
+black powder coat with filterInnerLoops preserving letter counters,
+plus flush fill bodies for rendering — silver (exposed aluminum) with
+the starburst top dash paint-filled orange. The 14 block-glyph
+"FIRSTLIGHT FL-1" bodies were retired. Fills are BOM-excluded (process
+callout lives on the fascia RFQ line).
+
 ## 4. Remaining work to true production (not CAD-scriptable, tracked)
 
 1. ~~Motion Check assembly~~ **DONE (same session)**: all 14 bodies
