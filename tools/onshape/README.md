@@ -70,6 +70,13 @@ quota. The original document under the free account is a frozen archive.
   translation (t = −R·target; assembly targets need the gauge offset
   added). Glass drops to opacity 110 for filming, restored after.
   Resumable (skips existing frames); encode via ffmpeg.
+- `phase_h_esd_door.py` — ESD kit (chem-film fixture surfaces, drawer
+  ground braid, wrist-strap jack, ionizer bar, ESD chains), powered
+  door-exit drawer (fascia parts deleted; amber door EXTENDED down via
+  boolean ADD union into the glass — partId survives; igus drive axis),
+  and the 450 nm warp scanner (first placement hit the Z ballscrew at
+  (99,0) — always check the screw centerline before mounting on the
+  slide; fixed with a -65 mm Y transform).
 - `phase_g_drawer.py` / `phase_g2_drawer_fix.py` — fixture drawer + M5
   grid. LESSON: check the WHOLE travel path, not just the destination —
   v1 put a tray at Z 20..28 straight through the measurement-bay stack

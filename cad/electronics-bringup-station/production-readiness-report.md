@@ -204,6 +204,41 @@ calibration assets. With the locating pins this enables per-board
 3D-printed nest plates → any outline/panel within the plate becomes
 fixturable. RFQ updated (lines 62–68 + FIXP note).
 
+## 3h. PROD-PASS-5: ESD kit, powered door-exit drawer, warp laser (2026-07-03)
+
+Version **PROD-PASS-5** (`410245a964af6a9febb9b5ba`), STEP
+`Part_Studio_1_v13.step`.
+
+**Drawer, reworked to the door-exit concept** — fascia panel/handle/arms
+deleted; the **amber door extends down over the drawer exit** (boolean
+ADD into the glass body — partId preserved; stepped 750×360 + 576×64
+leaf, 2 mm reveals). Workflow: open window → **electric drive** slides
+the fixture out (igus drylin SAW + NEMA17 under the plate, torque-
+limited, enabled only door-open via the G9SE circuit) → load → drive in
+→ close window. Physics note kept honest: the internal frame pass-under
+remains — the frame front member (Z 0..80) and front X rail (Z 80..97.5)
+cross the exit path and lifting over them collides with the beam; none
+of it is visible externally.
+
+**ESD control (S20.20 / IEC 61340-5-1)**
+- Fixture plate + standoffs finish changed **anodize → chem-film**
+  (MIL-DTL-5541 Cl 3, conductive) — anodize was an insulator under the DUT
+- **Drawer ground braid** (plate → chassis, travel-rated service loop)
+- **Wrist-strap jack** (Desco, 1 MΩ) on the fascia at the loading position
+- **Ionizer bar** (SMC IZS31) on the camera bracket beside the IR camera
+  — neutralizes the PMMA window, chains, and DUT; extend coverage at DVT
+- Drag chains / cable loop → **igus ESD dissipative** PN swap
+- Printed grid nests specced carbon-filled dissipative (procedure note)
+- Machine self-check: DMM6500 + relay matrix can verify fixture-to-
+  chassis resistance (10⁶–10⁹ Ω window) as a calibration step
+
+**450 nm laser warp scanner** (Micro-Epsilon scanCONTROL class) on the
+Z slide, offset off the ballscrew centerline (first placement clashed
+with the Z screw — caught by the scan, moved −65 mm in Y, zero overlaps).
+Pre-probe warp mapping feeds probe Z-planning; Class 3R contained, and
+the amber PMMA attenuates 405–450 nm — **the window is now a functional
+laser viewing guard, not just brand language.**
+
 ## 4. Remaining work to true production (not CAD-scriptable, tracked)
 
 1. ~~Motion Check assembly~~ **DONE (same session)**: all 14 bodies

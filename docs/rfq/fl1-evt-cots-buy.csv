@@ -67,3 +67,9 @@ item,vendor,part_number,qty,used_as
 66,Hardware,M5x12 ground stud DIN 46234,4,Grounding Stud Plinth Right; Grounding Stud Plinth Left; Grounding Stud Frame; Grounding Stud Rear Panel
 67,Accuride,DZ9301-0450,2,Drawer Slide Left; Drawer Slide Right
 68,Southco,E5-10-505-50,1,Drawer Latch Block
+69,igus,drylin SAW-0630 + NEMA17 encoder,1,Drawer Drive Actuator; Drawer Drive Motor
+70,Desco,09863 wrist-strap jack (1 Mohm),1,Wrist Strap Jack Plate; Wrist Strap Jack
+71,SMC,IZS31-160 ionizer bar,1,Ionizer Bar
+72,Micro-Epsilon,scanCONTROL 3060BL (450 nm Class 3R),1,Laser Warp Scanner 450nm
+73,Hardware,tinned flat braid 10mm + lugs,1,Drawer Ground Braid
+74,igus,E2C/triflex ESD dissipative chain retrofit,1,X/Y drag chains + probe cable loop
