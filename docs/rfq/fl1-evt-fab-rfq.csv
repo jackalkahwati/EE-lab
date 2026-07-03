@@ -10,7 +10,7 @@ item,part_number,description,qty,material,process,envelope_mm,finish,drawing,ref
 9,EE-FAB-CLMP,Adjustable Clamp Front,4,Aluminum 6061-T6,CNC machining,100 x 20 x 10,Clear anodize,drawings/,Adjustable Clamp Front; Adjustable Clamp Left; Adjustable Clamp Rear; Adjustable Clamp Right
 10,EE-FAB-CRDL,Cartridge Cradle 1,3,Aluminum 6061-T6,CNC machining,30 x 30 x 24,Clear anodize,drawings/,Cartridge Cradle 1; Cartridge Cradle 2; Cartridge Cradle 3
 11,EE-FAB-DECK,Instrument Deck,1,Aluminum 5052 sheet,Sheet metal,670 x 570 x 3,Powder coat (RAL 9005 matte black int.),drawings/,Instrument Deck
-12,EE-FAB-DSPBZL,Touch Display Bezel,1,,CNC machining,250 x 155 x 2,—,drawings/,Touch Display Bezel
+12,EE-FAB-DSPBZL,Touch Display Bezel,1,Aluminum 6061-T6,CNC machining,370 x 220 x 2,Cosmetic Class A black,drawings/,Touch Display Bezel
 13,EE-FAB-DUTIF,DUT Interface Bulkhead,1,Aluminum 6061-T6,CNC machining,140 x 130 x 6,Clear anodize,drawings/,DUT Interface Bulkhead
 14,EE-FAB-EMB,Probe Head Logo Emblem,1,ABS / PC,SLA/SLS print,20 x 20 x 2,As-printed,model only,Probe Head Logo Emblem
 15,EE-FAB-FIXP,PCB Fixture Plate,1,Aluminum 6061-T6,CNC machining,520 x 420 x 18,Clear anodize,drawings/,PCB Fixture Plate

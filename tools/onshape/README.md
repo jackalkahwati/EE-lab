@@ -64,6 +64,13 @@ quota. The original document under the free account is a frozen archive.
   occurrence transform (sticks on unmated instances) → re-add to group →
   verify park via matevalues. Mate-GROUP round-trip feature updates are
   safe (no unit params); slider mates must still never be round-tripped.
+- `phase_f_front_panel.py` — Phase F front-panel rework: E-stop moved to
+  the fascia (black housing, red cap), display upsized to 15.6in, R-glyph
+  counter cut. LESSON: **deleting a feature regenerates downstream
+  deterministic partIds** — a transform built from partIds fetched before
+  the deletion lands state OK but resolves to NOTHING and moves nothing
+  (same for metadata posted to stale ids). Re-fetch list_parts after any
+  feature delete, and bbox-verify every transform actually moved things.
 - `phase_e_production.py` — Phase E production pass (2026-07-03): journal
   trims for 2 mm coupling axial float, E-stop + panel hole, glass-door
   hinges/interlock, grounding studs, calibration assets, straggler

@@ -67,6 +67,30 @@ RFQ package updated: `docs/rfq/fl1-evt-fab-rfq.csv` +3 fab items
   essentially centered and low (Z +155 with the machine spanning −302 to
   +482), which is favorable for bench stability.
 
+## 3b. Phase F front-panel rework (2026-07-03, same day — design feedback)
+
+Version **PROD-PASS-2** (`c32a72992ab0f82024124c7c`), STEP export
+`Part_Studio_1_v7.step`.
+
+- **E-stop relocated** from the right shell (Z +300) to the front fascia
+  beside the display cluster, center (X −60, Z −60); old shell hole
+  feature deleted (wall restored), new Ø22 hole cut through the fascia.
+  Housing (bezel + stem) black (22,22,25) to match the fascia; the
+  mushroom cap stays **red per ISO 13850** (a fully black E-stop is
+  non-compliant). Bodies moved by transform so partIds — and the Motion
+  Check instances — carried over untouched. Ergonomics note: the fascia
+  position is ~240 mm above the bench plane; the v4 review preferred
+  ~600 mm. Accepted per operator preference (front-and-center, adjacent
+  to the display the operator faces).
+- **Display upsized 10.1in → 15.6in** (1920×1080): bezel 370×220 at
+  X 28..398, Z −225..−5, glass 344×194 16:9, UI mock layers rebuilt to
+  match. Display bodies were never in the assembly, so delete + rebuild
+  was safe. RFQ updated (bezel EE-FAB-DSPBZL now 370×220, COTS line to
+  15.6in panel).
+- **Wordmark R fixed** — the R's bowl counter had solidified (the
+  enclosed sketch region extruded with the strokes). Counter cut through
+  Glyph 03; render-verified: "FIRSTLIGHT FL-1" reads correctly.
+
 ## 4. Remaining work to true production (not CAD-scriptable, tracked)
 
 1. ~~Motion Check assembly~~ **DONE (same session)**: all 14 bodies
