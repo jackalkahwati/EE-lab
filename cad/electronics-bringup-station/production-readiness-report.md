@@ -305,6 +305,24 @@ interlock became an **Omron D40A non-contact coded sensor pair** (same
 positions, metadata re-spec only), still wired into the G9SE loop.
 RFQ: +Southco latches, interlock lines updated.
 
+## 3m. PROD-PASS-10: struts actually connected to the leaf (2026-07-03)
+
+Version **PROD-PASS-10** (`392228f690e15f9474001856`), STEP
+`Part_Studio_1_v18.step`. Design-review catch: the gas struts were
+floating stand-ins. Fixed:
+
+- Struts reseated to lie against the leaf back face (Y −456..−446,
+  X ±362 — inboard of the frame columns and clear of the sensor), the
+  correct closed geometry for parallel-mounted canopy struts.
+- **Lower FIXED anchors** (ball-stud brackets bridging strut bottoms to
+  the frame side columns) and **upper DOOR-SIDE ball-stud brackets**
+  (bonded to the leaf, travel with it) modeled both sides —
+  EE-FAB-STRTBKT ×4, RFQ line 65.
+- The relocation exposed a real clash: the door sensor target sat in
+  the right strut's lane. The non-contact sensor pair moved to the
+  door TOP edge (sensor bracket under the glass frame top, target on
+  the leaf below it) — overlap scan clean.
+
 ## 4. Remaining work to true production (not CAD-scriptable, tracked)
 
 1. ~~Motion Check assembly~~ **DONE (same session)**: all 14 bodies
