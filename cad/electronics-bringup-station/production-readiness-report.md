@@ -253,6 +253,28 @@ renders redone: amber visor at 80° with the drawer extended
 (fl1-open-hero.png, fl1-canopy-front.png); pose applied and restored
 via temporary transform features, closed park bbox-verified.
 
+## 3j. PROD-PASS-7: full-width door, gas struts, 105° canopy (2026-07-03)
+
+Version **PROD-PASS-7** (`3d167d02ceea05f1352dd38e`), STEP
+`Part_Studio_1_v15.step`.
+
+- **Window notches removed** (the stepped-leaf seam): Glass Frame
+  Bottom deleted entirely — its Motion Check instance and Static Frame
+  group entry were removed FIRST, and an orphan lump from the earlier
+  aperture split was found by bbox and deleted with it. Sill trimmed to
+  the Z 0..16 base band + side columns. Amber leaf extended full width
+  (boolean ADD, X ±373, 2 mm reveals) — the window is now one clean
+  rectangle with a straight bottom edge at Z 16.
+- **Gas struts modeled** (Bansbach A1A1 class, Ø10×230 at (±385,
+  Y −430, Z 190..420) — positioned 5 mm clear of the interlock switch;
+  the natural Y −444 spot clashed): soft-open assist + damped
+  soft-close for the canopy. RFQ line 75 updated to the modeled parts.
+- **Open pose raised to 105°** — leaf tips past vertical over the roof,
+  full hand clearance at the opening; struts posed at 50° about their
+  lower anchors (rotation axis picks must be ON the circular rim edge,
+  not the center — center picks ERROR). Renders re-shot from low
+  angles; closed park restored and bbox-verified.
+
 ## 4. Remaining work to true production (not CAD-scriptable, tracked)
 
 1. ~~Motion Check assembly~~ **DONE (same session)**: all 14 bodies
