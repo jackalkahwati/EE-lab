@@ -62,3 +62,4 @@ item,part_number,description,qty,material,process,envelope_mm,finish,drawing,ref
 62,EE-FAB-DRWRAIL,Drawer Support Rail,2,Aluminum 6061-T6,CNC machining,420 x 16 x 10,Clear anodize,model only,Drawer Support Rail Left; Drawer Support Rail Right
 63,EE-FAB-DRWPOST,Drawer Rail Post,4,Aluminum 6061-T6,CNC machining,12 x 12 x 39,Clear anodize,model only,Drawer Post FL; Drawer Post FR; Drawer Post RL; Drawer Post RR
 65,EE-FAB-STRTBKT,Strut Anchor/Door Bracket,4,Aluminum 6061-T6,CNC machining,18 x 12 x 10,Black anodize,model only,Strut Lower Anchor Left; Strut Lower Anchor Right; Strut Door Bracket Left; Strut Door Bracket Right
+66,EE-FAB-DOORRAIL,Door Edge Rail (top/bottom x front/back),4,Aluminum 6063 extrusion,Extrusion cut + anodize,750 x 18 x 2,Clear anodize,model only,Door Edge Rail Bottom Front; Door Edge Rail Top Front; Door Edge Rail Bottom Back; Door Edge Rail Top Back

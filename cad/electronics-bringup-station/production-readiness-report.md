@@ -382,6 +382,31 @@ the starburst top dash paint-filled orange. The 14 block-glyph
 "FIRSTLIGHT FL-1" bodies were retired. Fills are BOM-excluded (process
 callout lives on the fascia RFQ line).
 
+## 3q. PROD-PASS-12: door edge rails + PE monitor (2026-07-03)
+
+Version **PROD-PASS-12** (`826ead9fc5151eaf9f447459`), STEP
+`Part_Studio_1_v21.step`. Form 4 review takeaways implemented:
+
+- **Aluminum door edge rails** (6063, clear anodize, 4 strips: top +
+  bottom × front + back faces of the leaf). Rationale — same as the
+  Form 4: stiffen the canopy's free bottom edge (750 mm span of 4 mm
+  PMMA), land hardware in metal instead of bonded-to-acrylic, straight
+  closing edge, edge protection, and the look. The door hardware was
+  re-landed accordingly: push-latch plungers now strike the bottom
+  rail, hinges/strut ball-stud brackets and the sensor target mount on
+  the top rail (+2 mm Y shift each, overlap-verified). Rails added to
+  the CFG - CLOSED composite so state toggling stays clean. Bottom
+  rail abuts the sill line at closed (door stop); the canopy sweeps
+  forward on opening.
+- **PE conductor monitor** (DOLD RN5897 class) on the DIN rail (moved
+  +30 mm after the first slot clashed with the Cable Trunk — 20 mm
+  clear now): continuously verifies protective-earth continuity at the
+  IEC inlet; a missing/failed building earth opens the guard circuit
+  and raises a UI warning. Answers the wood-table-on-carpet case: the
+  machine grounds via the cord PE, the wrist strap gives operator
+  equipotential bonding, and the monitor makes a missing earth
+  impossible to ignore.
+
 ## 4. Remaining work to true production (not CAD-scriptable, tracked)
 
 1. ~~Motion Check assembly~~ **DONE (same session)**: all 14 bodies
