@@ -72,16 +72,12 @@ RFQ package updated: `docs/rfq/fl1-evt-fab-rfq.csv` +3 fab items
 Version **PROD-PASS-2** (`c32a72992ab0f82024124c7c`), STEP export
 `Part_Studio_1_v7.step`.
 
-- **E-stop relocated** from the right shell (Z +300) to the front fascia
-  beside the display cluster, center (X −60, Z −60); old shell hole
-  feature deleted (wall restored), new Ø22 hole cut through the fascia.
-  Housing (bezel + stem) black (22,22,25) to match the fascia; the
-  mushroom cap stays **red per ISO 13850** (a fully black E-stop is
-  non-compliant). Bodies moved by transform so partIds — and the Motion
-  Check instances — carried over untouched. Ergonomics note: the fascia
-  position is ~240 mm above the bench plane; the v4 review preferred
-  ~600 mm. Accepted per operator preference (front-and-center, adjacent
-  to the display the operator faces).
+- **E-stop relocated** (superseded — see PROD-PASS-3 below) from the
+  right shell (Z +300) to the front fascia beside the display cluster;
+  housing (bezel + stem) black (22,22,25), mushroom cap **red per
+  ISO 13850** (a fully black E-stop is non-compliant). Bodies moved by
+  transform so partIds — and the Motion Check instances — carried over
+  untouched.
 - **Display upsized 10.1in → 15.6in** (1920×1080): bezel 370×220 at
   X 28..398, Z −225..−5, glass 344×194 16:9, UI mock layers rebuilt to
   match. Display bodies were never in the assembly, so delete + rebuild
@@ -90,6 +86,24 @@ Version **PROD-PASS-2** (`c32a72992ab0f82024124c7c`), STEP export
 - **Wordmark R fixed** — the R's bowl counter had solidified (the
   enclosed sketch region extruded with the strokes). Counter cut through
   Glyph 03; render-verified: "FIRSTLIGHT FL-1" reads correctly.
+
+## 3c. PROD-PASS-3: E-stop to the rear panel (2026-07-03, design direction)
+
+Version **PROD-PASS-3** (`aff7b7a2b28902d0b12100a5`), STEP
+`Part_Studio_1_v8.step`. E-stop moved to the rear panel upper-left,
+center (X −300, Z +300) — clear of the IEC/connector column, fans, vent
+field, DUT bulkhead, and screw rows. Front fascia hole feature deleted
+(fascia restored); new Ø22 hole through the rear panel. The bodies are
+Y-axis cylinders, so the front→rear mirror was done with per-body
+translations (partIds preserved; Motion Check instances followed).
+Colors unchanged (black housing, red cap).
+
+**Safety finding (open):** a single rear-mounted E-stop is not readily
+accessible from the operator position at the front (ISO 13850 §4.4 /
+IEC 60204-1). Accepted as design direction for now; recommendation:
+add a second E-stop head at the front (or a wireless/foot alternative)
+in the DVT safety-circuit workstream. Both heads wire in series into
+the same G9SE safety-relay loop.
 
 ## 4. Remaining work to true production (not CAD-scriptable, tracked)
 
