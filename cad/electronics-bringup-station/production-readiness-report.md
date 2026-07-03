@@ -105,6 +105,29 @@ add a second E-stop head at the front (or a wireless/foot alternative)
 in the DVT safety-circuit workstream. Both heads wire in series into
 the same G9SE safety-relay loop.
 
+## 3d. ID-PASS-1: Formlabs / Fuse 1+ design language (2026-07-03)
+
+Version **ID-PASS-1** (`6068c367ee405cb8efc69338`), STEP
+`Part_Studio_1_v9.step`. Appearance + fillets only — no body deletions,
+partIds and assembly instances untouched.
+
+- **Amber window** — front glass to transparent amber PMMA
+  (245,115,15 @ opacity 220, Formlabs signature) with **R60 corner
+  fillets** (Fuse-style rounded-square window). Fillets scoped via
+  qCreatedBy to the glass's creating feature because the frame edges
+  share the corner points.
+- **Graphite top slab** (52,54,58) wrapping the dark face over the top
+  like the Fuse 1+; shells stay warm silver; front already black.
+- **Formlabs-orange accents** (255,110,0): full-width accent light
+  strip, power LED bar + indicator dot, probe-head logo emblem. Glass
+  frames to near-black so the window floats in the dark face.
+- RFQ updated: amber PMMA + R60 note, graphite Class A top, black
+  frames.
+- Toolchain lesson: the front glass has been **hidden in the studio
+  view state** since the interior passes — part-studio `shadedviews`
+  silently omits it. Pass `showAllParts=true` when rendering, or every
+  glass appearance change looks like a no-op.
+
 ## 4. Remaining work to true production (not CAD-scriptable, tracked)
 
 1. ~~Motion Check assembly~~ **DONE (same session)**: all 14 bodies
