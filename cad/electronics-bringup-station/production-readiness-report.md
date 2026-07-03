@@ -275,6 +275,23 @@ Version **PROD-PASS-7** (`3d167d02ceea05f1352dd38e`), STEP
   not the center — center picks ERROR). Renders re-shot from low
   angles; closed park restored and bbox-verified.
 
+## 3k. PROD-PASS-8: gussets removed, open-position reference leaf (2026-07-03)
+
+Version **PROD-PASS-8**, STEP `Part_Studio_1_v16.step`.
+
+- **Corner gussets deleted** (all four; never assembly-instanced; RFQ
+  line removed). With the full-width leaf and the frame bottom gone,
+  the window is a clean square-cornered rectangle and the gussets had
+  nothing left to blend.
+- **"Analysis - Door Leaf Open 105 REF"** — a makeCopy rotation of the
+  door leaf about the top hinge axis, ghosted amber (opacity 70),
+  BOM-excluded, audit-exempt (Analysis prefix). Hide/show it in the UI
+  to see the canopy fully open alongside the closed door. Physical
+  note on the part: real stop is ~95° before the leaf hinge edge meets
+  the top slab; showing 105° assumes the DVT hinge offset.
+- STEP v16 includes the REF body (harmless for fab — RFQ governs, and
+  the part is marked ANALYSIS).
+
 ## 4. Remaining work to true production (not CAD-scriptable, tracked)
 
 1. ~~Motion Check assembly~~ **DONE (same session)**: all 14 bodies

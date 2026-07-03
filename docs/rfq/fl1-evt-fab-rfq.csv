@@ -59,6 +59,5 @@ item,part_number,description,qty,material,process,envelope_mm,finish,drawing,ref
 58,EE-CAL-FID,Calibration Fiducial Target,1,Aluminum 6061-T6,CNC machining,40 x 40 x 3,Clear anodize + printed target label,model only,Calibration Fiducial Target
 59,EE-CAL-TOP,Probe Touch-Off Pad,1,Steel alloy (hardened),CNC machining + harden,O16 x 3,Ground top face,model only,Probe Touch-Off Pad
 60,EE-CAL-FCP,Force Calibration Post,1,Stainless 303,CNC machining,O12 x 15,Passivate,model only,Force Calibration Post
-61,EE-FAB-GLZ black PMMA,Window Corner Gusset (TL/TR/BL/BR),4,PMMA (near-black),Laser/waterjet cut,60 x 60 x 6 R60 concave,Matte,model only,Window Corner Gusset TL; Window Corner Gusset TR; Window Corner Gusset BL; Window Corner Gusset BR
 62,EE-FAB-DRWRAIL,Drawer Support Rail,2,Aluminum 6061-T6,CNC machining,420 x 16 x 10,Clear anodize,model only,Drawer Support Rail Left; Drawer Support Rail Right
 63,EE-FAB-DRWPOST,Drawer Rail Post,4,Aluminum 6061-T6,CNC machining,12 x 12 x 39,Clear anodize,model only,Drawer Post FL; Drawer Post FR; Drawer Post RL; Drawer Post RR
