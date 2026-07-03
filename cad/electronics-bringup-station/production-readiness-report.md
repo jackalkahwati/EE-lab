@@ -292,6 +292,19 @@ Version **PROD-PASS-8**, STEP `Part_Studio_1_v16.step`.
 - STEP v16 includes the REF body (harmless for fab — RFQ governs, and
   the part is marked ANALYSIS).
 
+## 3l. PROD-PASS-9: push-to-open canopy (2026-07-03)
+
+Version **PROD-PASS-9**, STEP `Part_Studio_1_v17.step`. The canopy is
+now handle-free push-to-open: two Southco push-push touch latches
+behind the door's bottom corners (in the space the sill trim opened;
+plunger-to-sill true clearance 12 mm — the bbox flag is the L-shaped
+sill again). Press the leaf → latches release → the gas struts lift it
+(self-opening), damped soft-close, press to re-latch. Safety re-spec:
+a push door cannot use an operation-key guard lock, so the D4NS
+interlock became an **Omron D40A non-contact coded sensor pair** (same
+positions, metadata re-spec only), still wired into the G9SE loop.
+RFQ: +Southco latches, interlock lines updated.
+
 ## 4. Remaining work to true production (not CAD-scriptable, tracked)
 
 1. ~~Motion Check assembly~~ **DONE (same session)**: all 14 bodies

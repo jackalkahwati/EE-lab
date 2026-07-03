@@ -62,8 +62,8 @@ item,vendor,part_number,qty,used_as
 61,ebm-papst,"4414 FNH (120 mm, 24 V)",2,Exhaust Fan 120mm Left; Exhaust Fan 120mm Right
 62,IDEC,XW1E-BV411MR,1,E-Stop Bezel; E-Stop Stem; E-Stop Button Cap
 63,Sugatsune,HES3D-90BL (top-hung),2,Door Hinge Top Left; Door Hinge Top Right
-64,Omron,D4NS-4CF,1,Door Interlock Switch
-65,Omron,D4DS-K3,1,Door Interlock Striker
+64,Omron,D40A-1C5 non-contact safety sensor,1,Door Safety Sensor (non-contact)
+65,Omron,D40A-A1 coded target,1,Door Sensor Target
 66,Hardware,M5x12 ground stud DIN 46234,4,Grounding Stud Plinth Right; Grounding Stud Plinth Left; Grounding Stud Frame; Grounding Stud Rear Panel
 67,Accuride,DZ9301-0450,2,Drawer Slide Left; Drawer Slide Right
 68,Southco,E5-10-505-50,1,Drawer Latch Block
@@ -74,3 +74,4 @@ item,vendor,part_number,qty,used_as
 73,Hardware,tinned flat braid 10mm + lugs,1,Drawer Ground Braid
 74,igus,E2C/triflex ESD dissipative chain retrofit,1,X/Y drag chains + probe cable loop
 75,Bansbach,A1A1-40-060-150 gas spring + damper,2,Door Gas Strut Left; Door Gas Strut Right
+76,Southco,62-10-101-10 push-push touch latch,2,Push Latch Left; Push Latch Right (+plungers)
