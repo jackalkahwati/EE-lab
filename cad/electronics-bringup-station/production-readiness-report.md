@@ -128,6 +128,24 @@ partIds and assembly instances untouched.
   silently omits it. Pass `showAllParts=true` when rendering, or every
   glass appearance change looks like a no-op.
 
+## 3e. ID-PASS-2: panel breaks and shadow gaps (2026-07-03)
+
+Version **ID-PASS-2** (`d497d8a754a22e2f00ceac64`), STEP
+`Part_Studio_1_v10.step`. All scoped REMOVE cuts — no deletions,
+partIds/assembly untouched.
+
+- **Window shadow gap** — 6 mm wide, 2 mm deep rounded recess ring in
+  the glass-frame front faces around the amber window (inner outline
+  inset 1 mm into the opening to dodge the coincident-face ERROR mode).
+- **Display shadow gap** — same treatment around the 15.6in bezel, cut
+  into the fascia.
+- **Body seam** — 3 mm × 1.5 mm groove at Z = 0 (plinth line) wrapping
+  shell sides, shell front columns, and the full rear (shells + rear
+  trims + rear panel); the front center already breaks at the
+  fascia/sill joint. Reads as the Fuse-style body/base panel split.
+- Cosmetic machining features; drawings are MBD "per 3D model" so the
+  drawing set inherits them.
+
 ## 4. Remaining work to true production (not CAD-scriptable, tracked)
 
 1. ~~Motion Check assembly~~ **DONE (same session)**: all 14 bodies

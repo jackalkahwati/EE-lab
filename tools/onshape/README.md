@@ -64,6 +64,9 @@ quota. The original document under the free account is a frozen archive.
   occurrence transform (sticks on unmated instances) → re-add to group →
   verify park via matevalues. Mate-GROUP round-trip feature updates are
   safe (no unit params); slider mates must still never be round-tripped.
+- `id_pass_2.py` — Fuse panel breaks: window/display shadow-gap recess
+  rings (inner outline inset 1 mm into the opening so no cut wall lands
+  on a scope-body face) + Z=0 body seam wrapping shells and rear.
 - `id_pass_1.py` — Formlabs/Fuse ID language: amber R60 window, graphite
   top, orange accents. LESSONS: (1) the front glass is HIDDEN in the
   studio view state — part-studio shadedviews omits it unless
