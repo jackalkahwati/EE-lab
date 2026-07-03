@@ -349,6 +349,26 @@ Usage: hide CLOSED + show OPEN → machine fully open, drawer out,
 struts extended; the reverse → clean closed machine. Ghosts are
 audit-exempt; no real geometry changed (STEP v18 remains current).
 
+## 3o. PROD-PASS-11: real leveling feet (2026-07-03)
+
+Version **PROD-PASS-11**, STEP `Part_Studio_1_v19.step`. Review catch:
+the feet were Ø36 pucks butted against the pan — "glued on". Now a real
+threaded leveling system (McMaster 23015T74 intent made geometric):
+
+- **Load path corrected**: feet re-centered from the post *corner*
+  (±440, ±370) onto the post *centers* (±455, ±385) — post → stud →
+  foot; the 2 mm pan is clearance only.
+- **M10 studs** (Ø10×25) up through Ø11 pan clearance holes and Ø11
+  shell-corner clearance holes (the shells are solid at the corners —
+  the old corner-aware hollowing kept bosses there, found when the
+  studs measured 0.000 mm to the shell; now 0.5 mm clearance) into
+  Ø10×20 insert holes in the post bottoms (threaded insert at build).
+- **Jam nuts** (M10 DIN 439) between foot body and pan underside; feet
+  shown at mid-adjustment (+5 mm ride height), ±12 mm leveling range.
+- Toolchain lesson re-learned the hard way: add_extrude abs()'s a
+  negative offset — the first stud build landed mirrored at +Z 307.
+- RFQ +2 lines (mounts, jam nuts).
+
 ## 4. Remaining work to true production (not CAD-scriptable, tracked)
 
 1. ~~Motion Check assembly~~ **DONE (same session)**: all 14 bodies
