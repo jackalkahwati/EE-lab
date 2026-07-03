@@ -421,6 +421,17 @@ Version **PROD-PASS-12** (`826ead9fc5151eaf9f447459`), STEP
   zero-missing: OPEN 42, CLOSED 45. Rule: keep configuration composites
   last in the tree, recreate after adding member bodies.
 
+### 3q addendum 2: graphite rails + rear fan hardware
+
+- Rails re-finished to the BOX graphite (52,54,58 — same as the top
+  slab, per design direction; "space grey" was too light). Real +
+  ghost bodies updated; RFQ finish corrected.
+- Rear fans made real: 7-blade impellers unioned into each fan hub
+  (rear-side both-flags extrude — the plain-front helper landed INFO
+  in air first, deleted and rebuilt) and wire-form finger guards
+  (ring + cross spokes, Qualtek FG-120 class) on the rear exterior —
+  the last unmodeled D4 safety item. RFQ +1 line.
+
 ## 4. Remaining work to true production (not CAD-scriptable, tracked)
 
 1. ~~Motion Check assembly~~ **DONE (same session)**: all 14 bodies
