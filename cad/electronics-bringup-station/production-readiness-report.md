@@ -508,6 +508,22 @@ notch. CFG composites recreated at tree end afterward (mid-tree
 deletion recipe), membership verified zero-missing (42/45). Version
 PROD-PASS-16, STEP v26.
 
+## 3t. PROD-PASS-17: hollow base frame + DFM screen (2026-07-03)
+
+Version **PROD-PASS-17**, STEP `Part_Studio_1_v27.step`.
+
+- **Base frame hollowed** (review catch: solid 40×80 bar is not an
+  extrusion): twin lengthwise channels per member, 6 mm walls + mid
+  web — a real 4080-class 6063 profile. **20.21 → 12.45 kg** (−38%);
+  corners and rail-support junctions kept solid as joint closeouts;
+  channel boundaries held 2 mm clear of the drawer-tunnel faces
+  (coincident-face rule).
+- **DFM screen Rev A** (`docs/rfq/fl1-dfm-screen.md`) — honest answer
+  to "did we run DFM": no formal pass existed (deferred at freeze).
+  Now screened per fab part: 1 fixed today (frame), 5 flagged with DVT
+  fixes (base pan beads is the top ship-risk; tunnel chord; top slab
+  process; camera post section; vendor feature-level pass), rest clean.
+
 ## 4. Remaining work to true production (not CAD-scriptable, tracked)
 
 1. ~~Motion Check assembly~~ **DONE (same session)**: all 14 bodies
