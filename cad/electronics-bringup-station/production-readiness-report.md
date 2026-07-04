@@ -496,6 +496,18 @@ slot cuts per shell. Open areas comparable (intake ~92×92 mm² ≈ within
 face-velocity budget; note thermal re-check at DVT). RFQ shell line
 updated.
 
+### 3s addendum: seam tangent fix (PROD-PASS-16)
+
+Review catch: the straight seam runs over-reached past the corner
+fillet tangent points, so the parallel cuts bit variable-depth notches
+into the curved surface (on top of the correct arc grooves). Seam
+features deleted and rebuilt: straight runs clipped exactly to the
+tangents (sides Y ±400, front/rear X ±445), quarter-arc grooves on the
+curves between — one continuous uniform-depth line, no silhouette
+notch. CFG composites recreated at tree end afterward (mid-tree
+deletion recipe), membership verified zero-missing (42/45). Version
+PROD-PASS-16, STEP v26.
+
 ## 4. Remaining work to true production (not CAD-scriptable, tracked)
 
 1. ~~Motion Check assembly~~ **DONE (same session)**: all 14 bodies
