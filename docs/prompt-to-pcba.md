@@ -91,8 +91,8 @@ cd tools/flroute && cargo build --release
   (present + history pricing) plus a hard consolidation pass.
 - **Emission gate:** only DRC-clean nets are written to the SES. Zero
   copper defects is the contract, completion percentage is the metric to
-  push (current: 150/174 nets, 0 defects, ~35 s — vs freerouting's ~93%
-  with 7 defects in ~16 min).
+  push (current: 174/174 nets, 0 emission defects, ~44 s — vs
+  freerouting's ~93% with 7 defects in ~16 min).
 - Residue handling: skip zone-served nets (GND, coil rail — pours own
   them); remaining unrouted nets may go through a freerouting cleanup pass
   or manual completion, but every imported net still faces the Stage 4

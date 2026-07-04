@@ -17,7 +17,7 @@ import sys
 
 BOARD = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
-    "..", "elec", "layout", "rev-a", "rev-a.kicad_pcb")
+    "..", "elec", "layout", "rev-a-routed.kicad_pcb")
 EDGE_MM = 3.0
 HOLE_KEEPOUT_MM = 3.5
 CY_GAP_MM = 0.4

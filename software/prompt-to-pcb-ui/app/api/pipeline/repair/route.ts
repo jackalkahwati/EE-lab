@@ -6,7 +6,7 @@
  * only public/runs/<id>/ — never the shared reference or any other run.
  *
  * POST { runId, op }
- *   op = 'revalidate' | 'clearance' | 'placement' | 'stitch' | 'reroute' | 'diagnose'
+ *   op = 'revalidate' | 'clearance' | 'placement' | 'stitch' | 'stitch-plane' | 'reroute' | 'diagnose'
  * Returns { ok, op, before, after, status, log } (diagnose returns { diagnosis }).
  */
 import { spawn } from 'node:child_process'

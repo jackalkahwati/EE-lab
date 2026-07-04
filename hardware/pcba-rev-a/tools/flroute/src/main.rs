@@ -5,11 +5,15 @@
 //! `pcbnew.ImportSpecctraSES` accepts. Zone-served nets (GND / coil
 //! rail) are skipped — the pours own them, same as the freerouting flow.
 //!
-//! v1 pipeline: fanout escape stubs for fine-pitch pads -> PathFinder
-//! negotiated congestion (split track/ring/center model) -> hard
-//! consolidation ordered by pin-pocket tightness -> transactional
-//! rip-and-swap with iterative deepening -> emission gate with
-//! pad-shape-aware terminal snapping. 174/174 on Rev A (~170 s).
+//! v4 pipeline: fanout escape stubs for fine-pitch pads (8-way, exact
+//! main-field escape/orphan tests — visited-count shortcuts declared
+//! big sealed pockets "escapable" and starved walled pins of stubs) ->
+//! PathFinder negotiated congestion (split track/ring/center model) ->
+//! hard consolidation ordered by pin-pocket tightness -> transactional
+//! rip-and-swap with iterative deepening + a one-shot second-chance
+//! sweep (a pairwise-deadlocked net often routes directly once later
+//! swaps reshape the board) -> emission gate with pad-shape-aware
+//! terminal snapping. 174/174 on Rev A in ~44 s.
 //! Validated differentially against freerouting + KiCad DRC.
 
 use std::collections::{BinaryHeap, HashMap, HashSet};
@@ -839,13 +843,25 @@ fn main() {
             .cloned()
             .collect();
         seen.extend(q.iter().cloned());
+        // v4: EXACT escape test — a pin escapes iff its reachable free/own
+        // region touches the MAIN free-field component. The old visited>1500
+        // shortcut declared big sealed pockets "escapable" (same flaw the
+        // comment above attributes to radius tests), so walled pins in large
+        // pockets never got stubs and their nets failed after full-grid
+        // expansion (the nG failure).
         let mut escape = false;
         let mut visited = 0usize;
-        while let Some((x, y)) = q.pop_front() {
+        'bfs: while let Some((x, y)) = q.pop_front() {
             visited += 1;
-            if visited > 1500 {
-                escape = true; // live reachability: a large region is escapable
+            if visited > 60000 {
+                escape = true; // safety valve only; should never trigger
                 break;
+            }
+            if owner[idx(x, y, l0)] == 0
+                && comp_label[l0][y * gw + x] == comp_main[l0]
+            {
+                escape = true;
+                break 'bfs;
             }
             for (nx, ny) in [
                 (x.wrapping_sub(1), y),
@@ -868,7 +884,12 @@ fn main() {
         // try a straight stub, away from the component body first
         let (sx, sy, scnt) = comp_sum[comp];
         let (dx, dy) = (pcx - sx / scnt as f64, pcy - sy / scnt as f64);
-        let dirs: [(f64, f64); 4] = if dx.abs() >= dy.abs() {
+        // v4: 8-way escape — axis lines first (ordered away from the body),
+        // then diagonals ordered by alignment with the away direction. A
+        // walled corner pin often has only a diagonal DRC-legal lane; the
+        // exact-legality check below is bbox-conservative for diagonals so
+        // it can reject a legal diagonal but never admit an illegal one.
+        let axis: [(f64, f64); 4] = if dx.abs() >= dy.abs() {
             [
                 (dx.signum(), 0.0),
                 (0.0, dy.signum()),
@@ -883,6 +904,14 @@ fn main() {
                 (0.0, -dy.signum()),
             ]
         };
+        const D: f64 = std::f64::consts::FRAC_1_SQRT_2;
+        let mut diag: Vec<(f64, f64)> = vec![(D, D), (D, -D), (-D, D), (-D, -D)];
+        diag.sort_by(|a, b| {
+            let da = a.0 * dx + a.1 * dy;
+            let db = b.0 * dx + b.1 * dy;
+            db.partial_cmp(&da).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let dirs: Vec<(f64, f64)> = axis.iter().cloned().chain(diag).collect();
         let mut placed = false;
         'dirs: for (ux, uy) in dirs {
             for k in 2..=12usize {
@@ -1044,10 +1073,24 @@ fn main() {
                                 && (sy_lo - 1..=sy_hi + 1).contains(&(cy2 as isize))
                         });
                     }
+                    // v4: exact orphan test — same main-field criterion as the
+                    // walled test. The old svis>1500 shortcut let a corridor
+                    // seal a large pocket around a foreign pin and still pass.
+                    // NOTE: labels predate this candidate corridor, so a free
+                    // cell's main label is necessary-but-stale; cells claimed
+                    // by THIS corridor are already non-free in `owner`, and any
+                    // main-labeled free cell we can reach outside the corridor
+                    // is genuine.
                     let mut svis = 0usize;
                     while let Some((x, y)) = sq.pop_front() {
                         svis += 1;
-                        if svis > 1500 {
+                        if svis > 60000 {
+                            sescape = true; // safety valve
+                            break;
+                        }
+                        if owner[idx(x, y, sl0)] == 0
+                            && comp_label[sl0][y * gw + x] == comp_main[sl0]
+                        {
                             sescape = true;
                             break;
                         }
@@ -1258,6 +1301,11 @@ fn main() {
     }
     let mut txn: Option<Txn> = None;
     let mut txn_dead: HashSet<usize> = HashSet::new();
+    // v4: after every transactional swap has settled, dead candidates get one
+    // second-chance sweep — successful later swaps (rips + reroutes) reshape
+    // the board, and a net that deadlocked earlier (e.g. an A<->B pairwise
+    // swap that rolled back) often routes directly afterward.
+    let mut second_chance_used = false;
     let mut retried: HashMap<usize, usize> = HashMap::new();
     let mut best_conflicts = usize::MAX;
     let mut stall = 0usize;
@@ -1996,6 +2044,21 @@ fn main() {
             if !started {
                 if fixed_fji.is_some() {
                     // the deepened candidate died; rescan the rest next pass
+                    to_route = Vec::new();
+                    continue;
+                }
+                if !second_chance_used
+                    && txn.is_none()
+                    && txn_dead.iter().any(|&ji| routes[ji].is_none())
+                {
+                    second_chance_used = true;
+                    let revived: Vec<String> = txn_dead
+                        .iter()
+                        .filter(|&&ji| routes[ji].is_none())
+                        .map(|&ji| nets[jobs[ji].ni].name.clone())
+                        .collect();
+                    eprintln!("txn: second-chance sweep for {:?}", revived);
+                    txn_dead.clear();
                     to_route = Vec::new();
                     continue;
                 }
