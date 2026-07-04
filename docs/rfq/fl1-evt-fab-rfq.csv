@@ -48,7 +48,7 @@ item,part_number,description,qty,material,process,envelope_mm,finish,drawing,ref
 47,EE-FAB-POST,Enclosure Post FL,4,Aluminum 6063 extrusion,Cut extrusion,780 x 30 x 30,Clear anodize,model only,Enclosure Post FL; Enclosure Post FR; Enclosure Post RL; Enclosure Post RR
 48,EE-FAB-RACK,Cartridge Park Rack Base,1,Aluminum 6061-T6,CNC machining,160 x 40 x 8,Clear anodize,drawings/,Cartridge Park Rack Base
 49,EE-FAB-RPNL,Rear Matte Black Panel,1,Aluminum 5052 sheet,Sheet metal,810 x 752 x 4,Powder coat (RAL 9005 matte black int.),model only,Rear Matte Black Panel
-50,EE-FAB-SHL,Side Shell Left,2,Aluminum 5052 sheet,CNC (EVT) / molded (prod),920 x 782 x 70,Powder coat (RAL 9005 matte black int.),drawings/,Side Shell Left; Side Shell Right
+50,EE-FAB-SHL,Side Shell Left,2,Aluminum 5052 sheet,CNC (EVT) / molded (prod),920 x 782 x 70,Powder coat (RAL 9005 matte black int.) + stadium slot vent fields (25x4 @32/16 stagger, upper relief + lower intake),drawings/,Side Shell Left; Side Shell Right
 51,EE-FAB-STDF,Fixture Standoff FL,4,Aluminum 6061-T6,CNC machining,40 x 16 x 16,Clear anodize,drawings/,Fixture Standoff FL; Fixture Standoff FR; Fixture Standoff RL; Fixture Standoff RR
 52,EE-FAB-TOP,Top Slab,1,Aluminum 6061-T6,CNC machining,920 x 870 x 30,Cosmetic Class A graphite (powder coat),drawings/,Top Slab
 53,EE-FAB-TRAY,Equipment Tray,1,Aluminum 5052 sheet,Sheet metal,870 x 730 x 3,Powder coat (RAL 9005 matte black int.),model only,Equipment Tray

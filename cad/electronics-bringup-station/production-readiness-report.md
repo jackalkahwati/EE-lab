@@ -483,6 +483,19 @@ block-on-rail) and hollow-bbox noise.
 −20, rack visit at safe-Z +20) — the old video showed the pad
 plunging 10 mm through the board; the next render will be physical.
 
+## 3s. PROD-PASS-15: side vents to stadium slots (2026-07-03)
+
+Version **PROD-PASS-15**, STEP `Part_Studio_1_v25.step`. Design-language
+unification: the side shells had round-hole vent fields (upper chamber
+relief 132×Ø5; lower intake 200×Ø6 per side) while the rear uses
+stadium slots. Both side fields converted to the rear language:
+staggered 25×4 stadium slots (32 mm pitch, 16 mm rows) — 54 upper + 92
+lower per side. Method: union PLUGS over the round fields (exact wall
+span, no feature deletion → zero downstream partId churn), then scoped
+slot cuts per shell. Open areas comparable (intake ~92×92 mm² ≈ within
+face-velocity budget; note thermal re-check at DVT). RFQ shell line
+updated.
+
 ## 4. Remaining work to true production (not CAD-scriptable, tracked)
 
 1. ~~Motion Check assembly~~ **DONE (same session)**: all 14 bodies
