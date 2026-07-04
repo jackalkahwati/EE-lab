@@ -538,6 +538,22 @@ clean through the curve — the field now flows onto the corner with no
 step, like the original drilled holes did. Version PROD-PASS-18,
 STEP v28.
 
+## 3u. Promo video + DFM Rev B (2026-07-03)
+
+- **fl1-promo.mp4** — 153 frames @ 8 fps, 1280×720: logo push-in →
+  hero reveal → canopy opens (real hinge-axis rotation with rails +
+  sensor target) → drawer glides out and back → canopy closes →
+  interior probing run (assembly sliders, safe-limit choreography,
+  glass thinned) → rear fans spinning behind their guards (720° = net
+  zero) → finale pull-back. Studio motion via 112 incremental delta
+  transforms, net-zero and deleted after; ghosts dimmed to opacity 3
+  during filming and restored.
+- **DFM Rev B** (`docs/rfq/fl1-dfm-rev-b.md`) — computed screen (fill
+  ratio, thin-panel index, slenderness). Two fixes shipped: Glass
+  Frame Top re-specced PMMA → 6061 (62:1 beam carrying the door
+  hinges + strut loads), stale Glass Frame Bottom RFQ line removed.
+  Confirmed: base pan beads remain the top DVT ship-risk.
+
 ## 4. Remaining work to true production (not CAD-scriptable, tracked)
 
 1. ~~Motion Check assembly~~ **DONE (same session)**: all 14 bodies
