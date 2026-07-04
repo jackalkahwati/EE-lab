@@ -76,12 +76,13 @@ Parts flagged: 10 of 65.
 
 | Flag | Disposition |
 |---|---|
-| Base Pan t-idx 470 | CONFIRMED (Rev A #1) — beads or 2.5 mm at DVT, top ship-risk |
+| Base Pan t-idx 470 | **FIXED — two formed stiffening beads modeled** (X ±420 span, Y ±150, 3 mm) |
 | Glass Frame Top 62:1 slender | **FIXED — re-specced PMMA → 6061** (it carries the door hinges + strut loads since the canopy conversion); RFQ updated |
 | Glass Frame Bottom NOT IN MODEL | **FIXED — stale RFQ line removed** (part deleted in the full-width door pass) |
 | Side Shell 16% fill | Known: CNC acceptable for the EVT one-off, molded for production (Rev A) |
-| Equipment Tray t-idx 290 | Known borderline — flange or bead at DVT (Rev A) |
-| Rear Vent Baffle t-idx 320 | Accepted: internal, non-structural, no cosmetic surface; add one bend if it rattles |
+| Equipment Tray t-idx 290 | **FIXED — down-formed center bead modeled** (under-tray, clear of pan beads) |
+| Rear Vent Baffle t-idx 320 | **FIXED — 6 mm flange return added at the bottom edge** |
 | Enclosure Post "not extrudable (100% fill)" | Rule noise: 30×30 solid bar IS a standard extrusion; solid is preferred here (feet inserts thread into post bottoms) |
 | Trim/door-rail slenderness | Accepted: full-length bonded/backed strips, not free beams |
+| Camera posts (billet, 364 long) | **FIXED — hollowed 26×26 blind channels, solid ends** (0.93 kg each, ~40% lighter); RFQ to 40×40×7 box-extrusion intent |
 | Drawer Support Rail 26:1 | Accepted: supported by 4 posts along its length |

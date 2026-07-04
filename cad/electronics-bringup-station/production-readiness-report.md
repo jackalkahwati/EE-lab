@@ -554,6 +554,16 @@ STEP v28.
   hinges + strut loads), stale Glass Frame Bottom RFQ line removed.
   Confirmed: base pan beads remain the top DVT ship-risk.
 
+### 3u addendum: DFM fixes shipped (DFM-FIX-1)
+
+All geometry-actionable DFM flags closed: base pan **stiffening beads
+×2** (the top ship-risk, t-idx 470), equipment tray **down-formed
+center bead**, vent baffle **6 mm flange return**, camera posts
+**hollowed to box-profile intent** (0.93 kg each, ~40% lighter).
+Remaining DFM items are process decisions (top slab cast-vs-billet for
+production) and the vendor feature-level pass at DVT. Version
+DFM-FIX-1, STEP v29.
+
 ## 4. Remaining work to true production (not CAD-scriptable, tracked)
 
 1. ~~Motion Check assembly~~ **DONE (same session)**: all 14 bodies

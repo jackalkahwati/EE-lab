@@ -1,10 +1,10 @@
 item,part_number,description,qty,material,process,envelope_mm,finish,drawing,ref_parts
 1,EE-FAB-ARM,Probe Mount Arm,1,Aluminum 6061-T6,CNC machining,115 x 109 x 12,Clear anodize,drawings/,Probe Mount Arm
-2,EE-FAB-BAF,Rear Vent Baffle,1,Aluminum 5052 sheet,Sheet metal,320 x 100 x 1,Powder coat (RAL 9005 matte black int.),model only,Rear Vent Baffle
-3,EE-FAB-BPAN,Enclosure Base Pan,1,Aluminum 5052 sheet,Sheet metal,940 x 920 x 2,Powder coat (RAL 9005 matte black int.),drawings/,Enclosure Base Pan
+2,EE-FAB-BAF,Rear Vent Baffle,1,Aluminum 5052 sheet,Sheet metal + 6mm bottom flange return,320 x 100 x 1,Powder coat (RAL 9005 matte black int.),model only,Rear Vent Baffle
+3,EE-FAB-BPAN,Enclosure Base Pan,1,Aluminum 5052 sheet,Sheet metal + 2 formed stiffening beads,940 x 920 x 2,Powder coat (RAL 9005 matte black int.),drawings/,Enclosure Base Pan
 4,EE-FAB-CAM,Overhead Camera Mount Pad,1,Aluminum 6061-T6,CNC machining,60 x 20 x 16,Clear anodize,model only,Overhead Camera Mount Pad
 5,EE-FAB-CAM,Probe Camera Bezel,1,Aluminum 6061-T6,CNC machining,68 x 38 x 4,Clear anodize,model only,Probe Camera Bezel
-6,EE-FAB-CAMBKT,Camera Bracket Post Left,2,Aluminum 6061-T6,CNC machining,240 x 40 x 40,Clear anodize,drawings/,Camera Bracket Post Left; Camera Bracket Post Right
+6,EE-FAB-CAMBKT,Camera Bracket Post Left,2,Aluminum 6063 extrusion,40x40 box profile (hollowed; solid ends),240 x 40 x 40,Clear anodize,drawings/,Camera Bracket Post Left; Camera Bracket Post Right
 7,EE-FAB-CAMBKT,Overhead Camera Bracket Center,1,Aluminum 6061-T6,CNC machining,310 x 60 x 16,Clear anodize,drawings/,Overhead Camera Bracket Center
 8,EE-FAB-CAMBKT,Overhead Camera Bracket Beam,1,Aluminum 6061-T6,CNC machining,680 x 40 x 16,Clear anodize,drawings/,Overhead Camera Bracket Beam
 9,EE-FAB-CLMP,Adjustable Clamp Front,4,Aluminum 6061-T6,CNC machining,100 x 20 x 10,Clear anodize,drawings/,Adjustable Clamp Front; Adjustable Clamp Left; Adjustable Clamp Rear; Adjustable Clamp Right
@@ -50,7 +50,7 @@ item,part_number,description,qty,material,process,envelope_mm,finish,drawing,ref
 50,EE-FAB-SHL,Side Shell Left,2,Aluminum 5052 sheet,CNC (EVT) / molded (prod),920 x 782 x 70,Powder coat (RAL 9005 matte black int.) + stadium slot vent fields (25x4 @32/16 stagger, upper relief + lower intake),drawings/,Side Shell Left; Side Shell Right
 51,EE-FAB-STDF,Fixture Standoff FL,4,Aluminum 6061-T6,CNC machining,40 x 16 x 16,Clear anodize,drawings/,Fixture Standoff FL; Fixture Standoff FR; Fixture Standoff RL; Fixture Standoff RR
 52,EE-FAB-TOP,Top Slab,1,Aluminum 6061-T6,CNC machining,920 x 870 x 30,Cosmetic Class A graphite (powder coat),drawings/,Top Slab
-53,EE-FAB-TRAY,Equipment Tray,1,Aluminum 5052 sheet,Sheet metal,870 x 730 x 3,Powder coat (RAL 9005 matte black int.),model only,Equipment Tray
+53,EE-FAB-TRAY,Equipment Tray,1,Aluminum 5052 sheet,Sheet metal + down-formed center bead,870 x 730 x 3,Powder coat (RAL 9005 matte black int.),model only,Equipment Tray
 54,EE-FAB-TRIM,Trim - Front Filler L+R,2,Aluminum 5052 sheet,Sheet metal,452 x 40 x 8,Powder coat (RAL 9005 matte black int.),model only,Trim - Front Filler L+R
 55,EE-FAB-TRIM,Trim - Rear Filler Left,2,Aluminum 5052 sheet,Sheet metal,752 x 30 x 4,Powder coat (RAL 9005 matte black int.),model only,Trim - Rear Filler Left; Trim - Rear Filler Right
 56,EE-FAB-TRIM,Trim - Front Sill,1,Aluminum 5052 sheet,Sheet metal,790 x 60 x 8,Powder coat (RAL 9005 matte black int.),model only,Trim - Front Sill
