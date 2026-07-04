@@ -524,6 +524,20 @@ Version **PROD-PASS-17**, STEP `Part_Studio_1_v27.step`.
   fixes (base pan beads is the top ship-risk; tunnel chord; top slab
   process; camera post section; vendor feature-level pass), rest clean.
 
+### 3s addendum 2: slots punch through the corner curve (PROD-PASS-18)
+
+Review catch on the vent conversion: (1) the union PLUGS extended past
+the corner-fillet tangent, so the flat slab bulged outside the curved
+surface — the visible rectangular step/notch around the field's front
+edge; (2) the slot cut window (9 mm) didn't reach the wall where it
+curves inboard, so curve-zone slots were blind dents. Fixed: annular
+cleanup cut (r60–72 about the front fillet axes, full height) shaves
+the plug bulge back to the exact R60 surface, and the SAME slot
+sketches were re-driven with a 17 mm window so the first columns punch
+clean through the curve — the field now flows onto the corner with no
+step, like the original drilled holes did. Version PROD-PASS-18,
+STEP v28.
+
 ## 4. Remaining work to true production (not CAD-scriptable, tracked)
 
 1. ~~Motion Check assembly~~ **DONE (same session)**: all 14 bodies
