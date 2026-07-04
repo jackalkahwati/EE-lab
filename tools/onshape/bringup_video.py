@@ -94,21 +94,23 @@ def build_timeline():
     for tp in tps:
         for t in (0.35, 0.7, 1.0):                     # travel
             act1.append((ease(cur[0], tp[0], t), ease(cur[1], tp[1], t), 0))
-        act1 += [(tp[0], tp[1], -30), (tp[0], tp[1], -50),   # plunge/touch
-                 (tp[0], tp[1], -50), (tp[0], tp[1], -20)]   # dwell/retract
+        act1 += [(tp[0], tp[1], -12), (tp[0], tp[1], -20),   # plunge/touch
+                 (tp[0], tp[1], -20), (tp[0], tp[1], -8)]    # dwell/retract
+        # plunge limited to -20 (pogo contact -20.4, hard stop -26)
         cur = tp
     for t in (0.4, 0.8, 1.0):                          # to cartridge rack
-        act1.append((ease(cur[0], 160, t), ease(cur[1], -240, t), 0))
-    act1 += [(160, -240, -25), (160, -240, 0)]         # tool touch
-    for t in (0.4, 0.8, 1.0):                          # home
-        act1.append((ease(160, 0, t), ease(-240, 0, t), 0))
+        act1.append((ease(cur[0], 160, t), ease(cur[1], -240, t), 20))
+        # safe-Z +20 while crossing the front rail (dy < -140 rule)
+    act1 += [(160, -240, -18), (160, -240, 20)]        # tool touch
+    for t in (0.4, 0.8, 1.0):                          # home (safe-Z)
+        act1.append((ease(160, 0, t), ease(-240, 0, t), 20))
     act1.append((0, 0, 0))
     n1 = len(act1)
     for i, pose in enumerate(act1):
         frames.append(shot(pose, i / max(n1 - 1, 1)))
 
     # ---- Act 2: fly-through (pose held at a probing stance) --------------
-    hold = (150, 100, -40)
+    hold = (150, 100, -18)
     orbit = 16
     for i in range(orbit):
         t = i / (orbit - 1)
@@ -143,7 +145,7 @@ def build_timeline():
 
     for i in range(6):                                  # pull back to hero
         t = i / 5.0
-        frames.append(((ease(150, 0, t), ease(100, 0, t), ease(-40, 0, t)),
+        frames.append(((ease(150, 0, t), ease(100, 0, t), ease(-18, 0, t)),
                        cam(ease(-540, -392, t), ease(-8, -13, t),
                            lerp3(estop_t, CENTER, t),
                            ease(0.00055, 0.00145, t))))

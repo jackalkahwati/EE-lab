@@ -440,6 +440,49 @@ sector cuts (r 58.5–61.5 about the fillet centers (±445, ±400), quarter
 arcs, 3 mm × 1.5 mm) scoped to the shells — the seam now runs
 continuously around all four corners. Version PROD-PASS-14, STEP v23.
 
+## 3r. MOTION-SAFE-1: motion collision audit + fixes (2026-07-03)
+
+Version **MOTION-SAFE-1** (`b0a99f13734e09c934fbd8f9`), STEP
+`Part_Studio_1_v24.step`. Prompted by visible interpenetration in the
+bring-up video. New tool: `motion_collision_audit.py` — pose-grid sweep
+(25 mm steps over the full commanded travel) of the three moving groups
+vs all statics, zero API cost per pose.
+
+**Confirmed real defects, all fixed:**
+1. **Probe hang was unphysical** (evDistance-verified): the head housing
+   interpenetrated the fixture plate at neutral pose (0.000 mm), pogos
+   passed THROUGH the plate, tips dangled at Z 0 — 60 mm below the board
+   plane. Every prior audit missed it (park check covered only
+   "Axis-"-prefixed pairs). Fix: head bottom trimmed 40→88, cartridge
+   stack +50, pogos +80. Tips now park 20.4 mm above the board:
+   contact dz −20.4, +2–3 mm compliance.
+2. **No Z down protection** — full commanded plunge (−50) drove the
+   slide plate into every clamp/knob and the pad through the plate at
+   −42. Fix: **hard-stop collars on both Z rails at dz −26**
+   (EE-FAB-ZSTOP ×2, red) — head/dowels keep 2–4 mm to the plate at the
+   stop. Firmware soft limit −24.
+3. **Z tower vs overhead camera arm** — reachable collision across
+   dx −157..−40, dy ≥ −38 (motor top 384 vs arm at 304). Fix: overhead
+   assembly (beam, arm, cameras, IR, ionizer) **raised +124** with
+   post extensions to Z 444; camera bottom 388 clears the tower at any
+   XY. Lens focal-length re-selection noted for DVT (working distance
+   now ~328 mm).
+4. **X over-travel into the screw supports** — saddles hit BF12/BK12 at
+   dx ≤ −175 / ≥ +225 (EVT-vs-EVT was never swept-checked). All machine
+   functions fit X ∈ [−165, +215]; **X limit switches relocated** to
+   trip there.
+
+**Firmware motion-rule table (documented):** X [−165, +215];
+Y [−240, +180]; Z hard −26 / soft −24; probing plunge −22 max; safe-Z
+≥ +20 required when crossing dy < −140 (probe hang passes over the
+front X rail); full plunge only over the fixture/rack zones.
+Remaining audit rows are by-design containments (screw-through-nut,
+block-on-rail) and hollow-bbox noise.
+
+`bringup_video.py` choreography updated to the safe numbers (plunge
+−20, rack visit at safe-Z +20) — the old video showed the pad
+plunging 10 mm through the board; the next render will be physical.
+
 ## 4. Remaining work to true production (not CAD-scriptable, tracked)
 
 1. ~~Motion Check assembly~~ **DONE (same session)**: all 14 bodies

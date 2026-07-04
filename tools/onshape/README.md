@@ -70,6 +70,13 @@ quota. The original document under the free account is a frozen archive.
   translation (t = −R·target; assembly targets need the gauge offset
   added). Glass drops to opacity 110 for filming, restored after.
   Resumable (skips existing frames); encode via ffmpeg.
+- `motion_collision_audit.py` — pose-grid motion collision sweep (local
+  math, one bbox fetch). LESSON: the EVT park audit only checked
+  "Axis-"-prefixed pairs — the probe hang interpenetrated the fixture
+  plate for weeks (head 0.000 mm to plate, pogos through it). Sweep
+  moving groups across the full travel, and evDistance-confirm before
+  cutting. Fixes shipped: probe chain compressed, Z hard stops (dz -26),
+  overhead camera +124, X limits to [-165,+215].
 - CONFIG COMPOSITES: compositePart features resolve member queries at
   their TREE POSITION — a mid-tree composite silently prunes ids of
   bodies created after it (updates post OK but do not stick). Keep the
