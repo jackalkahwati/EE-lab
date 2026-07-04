@@ -17,8 +17,7 @@ item,part_number,description,qty,material,process,envelope_mm,finish,drawing,ref
 16,EE-FAB-FRM 4040,Base Frame,1,Aluminum 6063 extrusion,4080-class HOLLOW profile (6mm walls + web) + corner joints,740 x 640 x 80,Clear anodize,model only,Base Frame
 17,EE-FAB-FSC,Plinth Fascia,1,Aluminum 5052 sheet,Sheet metal,870 x 300 x 20,Powder coat (RAL 9005 matte black int.) + laser-etched firstlight logo (paint-filled orange dash),model only,Plinth Fascia
 18,EE-FAB-GLZ black PMMA,Glass Frame Side L+R,2,PMMA (near-black),Laser/waterjet cut,392 x 20 x 10,"Polished, smoked tint",model only,Glass Frame Side L+R
-19,EE-FAB-GLZ black PMMA,Glass Frame Top,1,PMMA (near-black),Laser/waterjet cut,750 x 12 x 10,"Polished, smoked tint",model only,Glass Frame Top
-20,EE-FAB-GLZ black PMMA,Glass Frame Bottom,1,PMMA (near-black),Laser/waterjet cut,750 x 20 x 10,"Polished, smoked tint",model only,Glass Frame Bottom
+19,EE-FAB-GLZTOP,Glass Frame Top (window header beam),1,Aluminum 6061-T6,CNC machining,750 x 12 x 10,Black anodize,model only,Glass Frame Top
 21,EE-FAB-GLZ amber PMMA,Front Smoked Glass v2 (stepped door leaf),1,PMMA (transparent amber; 405-450nm laser viewing guard),Laser/waterjet cut,750 x 424 x 4 stepped,"Polished, amber tint (Formlabs-style)",model only,Front Smoked Glass v2
 22,EE-FAB-JNL,Z Axis - Screw Journal,1,"Steel, alloy",CNC machining,38 x 8 x 8,Black oxide,model only,Z Axis - Screw Journal
 23,EE-FAB-JNL,Y Axis - Screw Journal,1,"Steel, alloy",CNC machining,40 x 8 x 8,Black oxide,model only,Y Axis - Screw Journal
