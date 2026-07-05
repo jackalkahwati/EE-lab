@@ -88,6 +88,29 @@ function useBoardGeometry() {
   }, [])
 }
 
+
+/** Minimal RealBoardJson from a run's own metrics, for rendering a real run's
+ *  per-run artwork before (or without) its full board.json loading. */
+function boardFromRun(run: Run): RealBoardJson {
+  const m = run.metrics.boardSize.match(/([\d.]+)\s*[x\u00d7]\s*([\d.]+)/i)
+  const wMm = m ? Number(m[1]) : 100
+  const hMm = m ? Number(m[2]) : 100
+  return {
+    source: run.id,
+    components: run.metrics.components ?? 0,
+    boardSize: { wMm, hMm },
+    layers: run.metrics.layers || 4,
+    variantNets: run.metrics.netsTotal ?? 0,
+    netsRouted: run.metrics.netsRouted ?? 0,
+    netsTotal: run.metrics.netsTotal ?? 0,
+    hpwlMm: run.metrics.hpwl ?? 0,
+    tracks: 0,
+    vias: 0,
+    bomTotal: 0,
+    drc: { violations: run.metrics.copperDefects ?? 0, unconnectedItems: 0 },
+  } as RealBoardJson
+}
+
 export function BoardCanvas({
   run,
   realBoard,
@@ -103,8 +126,14 @@ export function BoardCanvas({
   const [ratsnest, setRatsnest] = useState(true)
   const { relays, traces, rats } = useBoardGeometry()
 
-  if (run.real && realBoard) {
-    return <RealBoardCanvas run={run} board={realBoard} basePath={basePath} />
+  // Any run backed by its own artifact snapshot renders from basePath (its
+  // per-run SVGs/renders). If the full board object hasn't loaded yet, derive
+  // minimal metadata from the run's own metrics so we NEVER fall through to the
+  // synthetic seed grid (which was a leftover and always wrong for real runs).
+  if (run.real || run.runDir) {
+    const b: RealBoardJson =
+      realBoard ?? boardFromRun(run)
+    return <RealBoardCanvas run={run} board={b} basePath={basePath} />
   }
 
   const toggleLayer = (id: LayerId) => {

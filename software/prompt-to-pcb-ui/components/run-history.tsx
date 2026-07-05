@@ -2,7 +2,8 @@
 
 import { cn } from '@/lib/utils'
 import type { Run } from '@/lib/firstlight'
-import { PanelLeftClose, PanelLeftOpen, CircuitBoard, X } from 'lucide-react'
+import { PanelLeftClose, PanelLeftOpen, CircuitBoard, GitBranch, X } from 'lucide-react'
+import { ProfileMenu } from '@/components/profile-menu'
 
 function StatusPill({ status }: { status: Run['status'] }) {
   return (
@@ -111,8 +112,16 @@ export function RunHistory({
                 )}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="truncate text-xs font-medium text-foreground">
-                    {run.name}
+                  <span className="flex min-w-0 items-center gap-1 truncate text-xs font-medium text-foreground">
+                    {run.parentId && (
+                      <GitBranch
+                        className="size-3 shrink-0 text-primary"
+                        aria-label="Revision of an earlier run"
+                      />
+                    )}
+                    <span className="truncate" title={run.revNote ?? undefined}>
+                      {run.name}
+                    </span>
                   </span>
                   <div className="flex shrink-0 items-center gap-1">
                     <StatusPill status={run.status} />
@@ -131,14 +140,8 @@ export function RunHistory({
                     )}
                   </div>
                 </div>
-                <span className="font-mono text-[10px] text-muted-foreground">
+                <span className="font-mono text-[10px] text-muted-foreground" title={run.id}>
                   {run.timestamp}
-                </span>
-                <span
-                  className="truncate font-mono text-[10px] text-muted-foreground/70"
-                  title={run.id}
-                >
-                  id: {run.id}
                 </span>
                 <MiniProgress run={run} />
               </div>
@@ -146,10 +149,8 @@ export function RunHistory({
           ))}
         </ul>
       </nav>
-      <div className="border-t border-border px-3 py-2">
-        <p className="font-mono text-[10px] leading-relaxed text-muted-foreground">
-          firstlight v0.4.1 · gates enforced
-        </p>
+      <div className="border-t border-border px-2 py-2">
+        <ProfileMenu variant="sidebar" />
       </div>
     </aside>
   )

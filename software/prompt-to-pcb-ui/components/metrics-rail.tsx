@@ -141,16 +141,10 @@ export function MetricsRail({ run }: { run: Run }) {
       <div className="border-b border-border px-4 py-2.5">
         <h2 className="flex items-center gap-2 text-xs font-semibold tracking-wide text-foreground">
           <Activity className="size-3.5 text-primary" />
-          LIVE METRICS
+          METRICS
         </h2>
-        <p className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">
+        <p className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground" title={run.id}>
           {run.name}
-        </p>
-        <p
-          className="truncate font-mono text-[10px] text-muted-foreground/70"
-          title={run.id}
-        >
-          id: {run.id}
         </p>
       </div>
 
@@ -173,32 +167,6 @@ export function MetricsRail({ run }: { run: Run }) {
           <span className="text-xs text-muted-foreground">
             copper DRC defects
           </span>
-        </div>
-        <div className="mt-2 flex flex-col gap-1 font-mono text-[11px]">
-          <div className="flex justify-between text-foreground">
-            <span>flroute</span>
-            <span className="tabular-nums">
-              {routingDone ? `${run.metrics.routeTimeSec}s · 0 defects` : '—'}
-            </span>
-          </div>
-          <div className="flex justify-between text-muted-foreground/60">
-            <span>freerouting</span>
-            <span className="tabular-nums">16min · 7 defects</span>
-          </div>
-        </div>
-      </Section>
-
-      <Section title="HPWL PLACEMENT SCORE">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex flex-col">
-            <span className="font-mono text-xl font-semibold tabular-nums text-foreground">
-              {run.metrics.hpwl.toLocaleString()}
-            </span>
-            <span className="text-[11px] text-muted-foreground">
-              mm half-perimeter wirelength
-            </span>
-          </div>
-          <Sparkline values={run.metrics.hpwlHistory} />
         </div>
       </Section>
 
@@ -231,55 +199,6 @@ export function MetricsRail({ run }: { run: Run }) {
         </dl>
       </Section>
 
-      <Section title="ARTIFACTS">
-        {run.real ? (
-          <ul className="flex flex-col gap-1">
-            {realArtifacts(run.runDir).map((artifact) => (
-              <li key={artifact.name}>
-                <a
-                  href={artifact.href}
-                  download
-                  className="flex w-full items-center justify-between gap-2 rounded-sm border border-border bg-secondary px-2.5 py-1.5 font-mono text-[11px] text-foreground transition-colors hover:border-primary/40 hover:text-primary"
-                >
-                  <span className="flex items-center gap-2">
-                    <Download className="size-3" />
-                    {artifact.name}
-                  </span>
-                  <span className="text-muted-foreground">real</span>
-                </a>
-              </li>
-            ))}
-          </ul>
-        ) : (
-        <ul className="flex flex-col gap-1">
-          {ARTIFACTS.map((artifact) => {
-            const ready = run.status === 'PASSED'
-            return (
-              <li key={artifact.name}>
-                <button
-                  type="button"
-                  disabled={!ready}
-                  className={cn(
-                    'flex w-full items-center justify-between gap-2 rounded-sm border border-border px-2.5 py-1.5 font-mono text-[11px] transition-colors',
-                    ready
-                      ? 'bg-secondary text-foreground hover:border-primary/40 hover:text-primary'
-                      : 'bg-secondary/50 text-muted-foreground/50',
-                  )}
-                >
-                  <span className="flex items-center gap-2">
-                    <Download className="size-3" />
-                    {artifact.name}
-                  </span>
-                  <span className="tabular-nums text-muted-foreground">
-                    {ready ? artifact.size : 'gated'}
-                  </span>
-                </button>
-              </li>
-            )
-          })}
-        </ul>
-        )}
-      </Section>
     </aside>
   )
 }

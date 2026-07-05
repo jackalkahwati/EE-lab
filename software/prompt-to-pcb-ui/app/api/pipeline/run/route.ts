@@ -4,7 +4,7 @@
  *
  * - Never touches the working rev-a-routed.kicad_pcb (runs in a temp
  *   workspace; promoting a result back is an explicit manual step).
- * - Uses the existing flroute release binary — never rebuilds it.
+ * - Uses the existing flroute release binary, never rebuilds it.
  * - Gates are enforced: placement gate failure blocks routing/validation.
  * - Ends by running sync-board.sh against the run output so the UI's
  *   Board/BOM/Gates tabs refresh with the new real artifacts.
@@ -14,6 +14,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { callLLMText, extractRust } from '@/lib/llm'
+import { canRun, chargeCredits, creditsAvailable, creditsForRun, getUser, recordRun, sessionEmail } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 1800
@@ -42,6 +43,28 @@ type PipelineEvent =
 const globalState = globalThis as unknown as { __pipelineRunning?: boolean }
 
 export async function GET(req: Request) {
+  // Live pipeline execution needs the lab workstation (KiCad CLI, flroute
+  // binary, Python toolchain). On a cloud deploy those don't exist, fail
+  // clean instead of spawning into nothing.
+  if (!fs.existsSync(KCLI)) {
+    return new Response(
+      'Pipeline execution runs on the FirstLight lab workstation and is not available in this preview deployment. Browse existing runs, boards, and BOMs instead.',
+      { status: 503 },
+    )
+  }
+  // account + freemium quota: every run belongs to a signed-in user
+  const userEmail = sessionEmail(req)
+  if (!userEmail) {
+    return new Response('sign in required', { status: 401 })
+  }
+  const userRec = getUser(userEmail)
+  if (!userRec) return new Response('unknown account', { status: 401 })
+  if (!canRun(userRec)) {
+    return new Response(
+      `Out of credits (${creditsAvailable(userRec)} left). Upgrade to Pro or buy a credit pack to keep designing.`,
+      { status: 402 },
+    )
+  }
   if (globalState.__pipelineRunning) {
     return new Response('a pipeline run is already in progress', { status: 409 })
   }
@@ -52,6 +75,9 @@ export async function GET(req: Request) {
   // per-run artifact snapshot id (so each run keeps its OWN board/renders/data
   // instead of all runs sharing the latest write to public/board)
   const runId = (qp.get('runId') ?? '').replace(/[^a-zA-Z0-9_-]/g, '')
+  // rev lineage (revise flow): parent run id + one-line reason
+  const parentId = (qp.get('parent') ?? '').replace(/[^a-zA-Z0-9_-]/g, '')
+  const revNote = (qp.get('revNote') ?? '').slice(0, 300)
   // Layer-2 compose mode: the interview passes a base64 {blocks, boardClass}
   const composeMode = qp.get('compose') === '1'
   let composeSpec: { blocks: string[]; boardClass: string } | null = null
@@ -85,15 +111,19 @@ export async function GET(req: Request) {
   let child: ChildProcess | null = null
   let cancelled = false
 
-  // Full record of the run — every event in order — persisted on completion so
+  // Full record of the run, every event in order, persisted on completion so
   // the last iteration can be inspected later without re-running or screenshots.
   const startedAt = new Date().toISOString()
   const events: PipelineEvent[] = []
 
+  // count the run + attach ownership up front (a crashed run still consumed
+  // pipeline time; artifact filtering keys off this ownership record)
+  recordRun(userEmail, runId)
+
   const stream = new ReadableStream({
     async start(controller) {
       const send = (ev: PipelineEvent) => {
-        // this run's artifacts were written straight into public/runs/<id> — point
+        // this run's artifacts were written straight into public/runs/<id>, point
         // the client at that snapshot. No copy needed; the dir already holds only
         // this run's board (publish-to-shared happens after the report is written).
         if (ev.type === 'done' && runId) {
@@ -166,7 +196,7 @@ export async function GET(req: Request) {
         // ---- start this run's id-scoped output dir CLEAN. Every artifact below
         // is written straight into it, so a run only ever contains its own board.
         // A run that gate-fails before the render/validation stage leaves no
-        // board.json — loadRealBoard keys off that, so it honestly shows no board
+        // board.json, loadRealBoard keys off that, so it honestly shows no board
         // rather than inheriting another run's files. Wiping first also means a
         // re-run of the same id can't keep stale files from the prior attempt.
         if (runRoot) fs.rmSync(runRoot, { recursive: true, force: true })
@@ -194,6 +224,16 @@ export async function GET(req: Request) {
             send({ type: 'done', status: 'GATE FAILED', boardPath: variantBoard })
             return
           }
+          // carry the resolved-part manifest (compose writes <board>.devices.json)
+          // into the run's data dir so the BOM can name sourced ICs correctly.
+          try {
+            const devSrc = variantBoard.replace(/\.kicad_pcb$/, '.devices.json')
+            if (fs.existsSync(devSrc)) {
+              fs.copyFileSync(devSrc, path.join(pubData, 'devices.json'))
+            }
+          } catch {
+            /* BOM just falls back to the footprint heuristic */
+          }
           // coverage: surface which requested blocks the library could NOT build,
           // so an incomplete board never passes silently.
           const covMatch = comp.out.match(/^COMPOSE_COVERAGE:(.+)$/m)
@@ -211,7 +251,7 @@ export async function GET(req: Request) {
                 log('design', `coverage: every requested block built [${cov.mapped.join(', ')}]`, 'ok')
               }
             } catch {
-              /* coverage line unparseable — non-fatal */
+              /* coverage line unparseable, non-fatal */
             }
           }
           // sourced parts: real MPN/price/stock/verification for parts pulled
@@ -236,7 +276,7 @@ export async function GET(req: Request) {
               )
             }
           }
-          log('design', 'GATE design: blocks composed + wired — PASS', 'ok')
+          log('design', 'GATE design: blocks composed + wired, PASS', 'ok')
           send({ type: 'stage', id: 'design', state: 'passed' })
         } else {
           // FL-1 relay/probe matrix: AI interprets the prompt, ato build gate.
@@ -248,9 +288,9 @@ export async function GET(req: Request) {
           try {
             send({ type: 'design', spec: JSON.parse(fs.readFileSync(specPath, 'utf8')) })
           } catch {
-            log('design', 'design spec unreadable — continuing on FL-1 baseline', 'warn')
+            log('design', 'design spec unreadable, continuing on FL-1 baseline', 'warn')
           }
-          log('design', 'ato build — compiling .ato design-of-record…')
+          log('design', 'ato build, compiling .ato design-of-record…')
           const build = await exec('design', ATO, ['build'], { cwd: hwDir })
           if (!(build.code === 0 || build.out.includes('Build successful'))) {
             send({ type: 'stage', id: 'design', state: 'failed', failReason: 'ato build not GREEN' })
@@ -259,7 +299,7 @@ export async function GET(req: Request) {
             send({ type: 'done', status: 'GATE FAILED', boardPath: wsBoard })
             return
           }
-          log('design', 'GATE design: ato build GREEN — PASS', 'ok')
+          log('design', 'GATE design: ato build GREEN, PASS', 'ok')
           log('design', `gen_board: building the prompt's variant…`)
           const genV = await exec('design', KPY, [
             path.join(hwDir, 'scripts/gen_board.py'),
@@ -277,7 +317,7 @@ export async function GET(req: Request) {
 
         // ---- stage 2: placement gates on the variant -----------------------
         // gen_board already placed the variant (with fiducials + zones); gate
-        // it directly — no place_and_zone (that's the atopile placer).
+        // it directly, no place_and_zone (that's the atopile placer).
         send({ type: 'stage', id: 'placement', state: 'running' })
         const pscore = await exec('placement', KPY, [
           path.join(hwDir, 'scripts/placement_score.py'),
@@ -292,7 +332,7 @@ export async function GET(req: Request) {
           send({ type: 'done', status: 'GATE FAILED', boardPath: variantBoard })
           return
         }
-        log('placement', 'GATE placement (HPWL/overlap) — PASS', 'ok')
+        log('placement', 'GATE placement (HPWL/overlap), PASS', 'ok')
         const dfm = await exec('placement', KPY, [
           path.join(hwDir, 'scripts/dfm_check.py'),
           variantBoard,
@@ -306,7 +346,7 @@ export async function GET(req: Request) {
           send({ type: 'done', status: 'GATE FAILED', boardPath: variantBoard })
           return
         }
-        log('placement', 'GATE DFM (edge/hole/fiducial/courtyard) — PASS', 'ok')
+        log('placement', 'GATE DFM (edge/hole/fiducial/courtyard), PASS', 'ok')
         send({ type: 'stage', id: 'placement', state: 'passed' })
 
         // ---- stage 3: routing (flroute on the variant) ---------------------
@@ -376,7 +416,15 @@ export async function GET(req: Request) {
             `pcbnew.SaveBoard(${JSON.stringify(variantBoard)}, b)`,
         ])
         log('routing', 'zones filled (GND / coil-rail pours)')
-        log('routing', 'GATE emission: only DRC-clean nets shipped — PASS', 'ok')
+        // RF pass: controlled-impedance widths + GND via fence on RF nets
+        // (ANT, RF*, *_RF). IPC-2141 microstrip vs the 4-layer stackup.
+        const rf = await exec('routing', KPY, [
+          path.join(appDir, 'scripts/rf_pass.py'), variantBoard,
+        ])
+        const rfNets = rf.out.match(/^RF_NET .+$/gm) ?? []
+        for (const line of rfNets) log('routing', `RF pass: ${line.slice(7)} (50Ω microstrip target)`, 'ok')
+        if (!rfNets.length) log('routing', 'RF pass: no RF nets on this board')
+        log('routing', 'GATE emission: only DRC-clean nets shipped, PASS', 'ok')
         send({ type: 'stage', id: 'routing', state: 'passed' })
 
         // ---- stage 4: validation (kicad-cli, the neutral referee) -----------
@@ -392,7 +440,7 @@ export async function GET(req: Request) {
           const drc = JSON.parse(fs.readFileSync(drcPath, 'utf8'))
           const all = drc.violations ?? []
           // solder_mask_bridge on fine-pitch parts (mask slivers between adjacent
-          // pads/pour) is merged automatically by every fab — a manufacturing
+          // pads/pour) is merged automatically by every fab, a manufacturing
           // note, not a defect. Don't let it hard-fail the gate.
           const soft = all.filter((v: { type: string }) => v.type === 'solder_mask_bridge')
           const hard = all.filter((v: { type: string }) => v.type !== 'solder_mask_bridge')
@@ -401,11 +449,11 @@ export async function GET(req: Request) {
           // filled before DRC, so KiCad already credits zone connections; anything
           // still listed here is a real island (e.g. an SMD power pad with no via
           // to the plane). A board with missing connections is NOT fabricable, so
-          // these BLOCK the gate — previously they were only logged, which let
+          // these BLOCK the gate, previously they were only logged, which let
           // boards pass with a "zone-served" net whose pads weren't connected.
           unconnected = (drc.unconnected_items ?? []).length
           if (soft.length)
-            log('validation', `${soft.length} solder-mask-bridge note(s) — fab-merged on fine pitch, not blocking`, 'warn')
+            log('validation', `${soft.length} solder-mask-bridge note(s), fab-merged on fine pitch, not blocking`, 'warn')
           log(
             'validation',
             `kicad-cli pcb drc → ${hard.length} rule violations, ${unconnected} unconnected (missing connections)`,
@@ -414,15 +462,83 @@ export async function GET(req: Request) {
           if (unconnected > 0)
             log(
               'validation',
-              `${unconnected} pad(s) not connected to their net — board is electrically incomplete (not fabricable)`,
+              `${unconnected} pad(s) not connected to their net, board is electrically incomplete (not fabricable)`,
               'err',
             )
         } catch {
           log('validation', 'could not parse DRC report', 'err')
         }
+
+        // ---- auto-heal: unconnected items are mechanically closable ---------
+        // stitch_to_plane drops a via from each isolated power/gnd PAD into its
+        // plane; stitch_islands does the same for isolated outer-layer pour
+        // ISLANDS (the "Zone [GND] on F.Cu ↔ Zone [GND] on F.Cu" DRC case).
+        // Both refill zones; then re-DRC and gate on the healed numbers.
+        if (unconnected > 0) {
+          log('validation', `auto-heal: ${unconnected} missing connection(s), via-stitching pads and pour islands…`)
+          const sp = await exec('validation', KPY, [
+            path.join(appDir, 'scripts/stitch_to_plane.py'), variantBoard, drcPath,
+          ])
+          const nPads = sp.out.match(/^STITCHED (\d+)/m)?.[1] ?? '0'
+          const si = await exec('validation', KPY, [
+            path.join(appDir, 'scripts/stitch_islands.py'), variantBoard,
+          ])
+          const nIslands = si.out.match(/^STITCHED_ISLANDS (\d+)/m)?.[1] ?? '0'
+          log('validation', `auto-heal: ${nPads} plane via(s) + ${nIslands} island via(s) placed, zones refilled`)
+          await exec('validation', KCLI, [
+            'pcb', 'drc', '--format', 'json', '--severity-error',
+            '-o', drcPath, variantBoard,
+          ])
+          try {
+            const drc2 = JSON.parse(fs.readFileSync(drcPath, 'utf8'))
+            const hard2 = (drc2.violations ?? []).filter(
+              (v: { type: string }) => v.type !== 'solder_mask_bridge',
+            )
+            violations = hard2.length
+            unconnected = (drc2.unconnected_items ?? []).length
+            log(
+              'validation',
+              `re-DRC after heal → ${violations} rule violations, ${unconnected} unconnected`,
+              violations === 0 && unconnected === 0 ? 'ok' : 'err',
+            )
+          } catch {
+            log('validation', 'could not parse healed DRC report', 'err')
+          }
+          // phase 2: anything still open is a SIGNAL net (no plane to stitch
+          // to, e.g. a test-point stub the router dropped). Rip & re-route
+          // open nets on a fine grid, refill, re-DRC.
+          if (unconnected > 0) {
+            log('validation', `auto-heal phase 2: ${unconnected} open signal connection(s), local re-route…`)
+            await exec('validation', KPY, [
+              path.join(appDir, 'scripts/local_reroute.py'), variantBoard, drcPath,
+            ])
+            await exec('validation', KPY, [
+              path.join(appDir, 'scripts/fill_zones.py'), variantBoard,
+            ])
+            await exec('validation', KCLI, [
+              'pcb', 'drc', '--format', 'json', '--severity-error',
+              '-o', drcPath, variantBoard,
+            ])
+            try {
+              const drc3 = JSON.parse(fs.readFileSync(drcPath, 'utf8'))
+              const hard3 = (drc3.violations ?? []).filter(
+                (v: { type: string }) => v.type !== 'solder_mask_bridge',
+              )
+              violations = hard3.length
+              unconnected = (drc3.unconnected_items ?? []).length
+              log(
+                'validation',
+                `re-DRC after re-route → ${violations} rule violations, ${unconnected} unconnected`,
+                violations === 0 && unconnected === 0 ? 'ok' : 'err',
+              )
+            } catch {
+              log('validation', 'could not parse phase-2 DRC report', 'err')
+            }
+          }
+        }
         const drcPass = violations === 0 && unconnected === 0
 
-        // ---- sync: the routed variant IS the board — render it with copper --
+        // ---- sync: the routed variant IS the board, render it with copper --
         // One coherent board: renders (now with traces), layer SVGs, routing
         // stats and BOM all come from the routed variant.
         log('validation', 'rendering routed variant (board · BOM · stats reflect the prompt)…')
@@ -453,7 +569,7 @@ export async function GET(req: Request) {
           drcPath,
           vStats,
         ])
-        // .ato source for the Schematic/Code tab (also writes a ref bom.json —
+        // .ato source for the Schematic/Code tab (also writes a ref bom.json , 
         // variant_sync overwrites bom.json next so the variant BOM wins)
         await exec('validation', 'python3', [
           path.join(appDir, 'scripts/build_data.py'),
@@ -468,7 +584,27 @@ export async function GET(req: Request) {
           '--routing-json',
           vStats,
         ])
-        log('validation', 'board · BOM · renders · stats — all the prompt variant', 'ok')
+        log('validation', 'board · BOM · renders · stats, all the prompt variant', 'ok')
+
+        // live sourcing check (advisory, never a gate): annotate BOM lines with
+        // DigiKey stock/MPN. Graceful without creds, lines marked "unchecked".
+        const srcChk = await exec('validation', 'python3', [
+          path.join(appDir, 'scripts/source_check.py'),
+          path.join(pubData, 'bom.json'),
+        ])
+        const sourced = srcChk.out.match(/^SOURCED (\d+)\/(\d+)/m)
+        if (sourced)
+          log('validation', `sourcing: ${sourced[1]}/${sourced[2]} BOM lines verified against DigiKey`, 'ok')
+
+        // power budget (advisory): rail currents, regulator loss, battery life
+        const pwr = await exec('validation', 'python3', [
+          path.join(appDir, 'scripts/power_budget.py'),
+          path.join(pubData, 'bom.json'),
+          path.join(pubData, 'power-budget.json'),
+        ])
+        const pb = pwr.out.match(/^PWRBUDGET (\d+) (\d+)/m)
+        if (pb)
+          log('validation', `power budget: inlet ${pb[1]} mA worst / ${pb[2]} mA typical @5V (power-budget.json)`, 'ok')
 
         // ---- persist the editable board into the run dir so defects can be
         // repaired later WITHOUT re-running the whole pipeline (Phase 1 of
@@ -488,7 +624,7 @@ export async function GET(req: Request) {
 
         let fabZip: string | undefined
         if (drcPass) {
-          log('validation', 'GATE validation: DRC = 0 — PASS', 'ok')
+          log('validation', 'GATE validation: DRC = 0, PASS', 'ok')
           // ---- fab outputs: gerbers/drill/P&P/STEP/BOM -> zip --------------
           log('validation', 'generating fabrication package (gerbers, drill, P&P, STEP, BOM)…')
           const fabDir = path.join(ws, 'fab')
@@ -499,14 +635,33 @@ export async function GET(req: Request) {
             fabDir,
             bomCsv,
           ])
+          // ---- FL-1 test plan: probe map + limits, straight from the board.
+          // The artifact that makes every Compose board FL-1-ready.
+          const tpPath = path.join(pubData, 'fl1-testplan.json')
+          const tpGen = await exec('validation', KPY, [
+            path.join(appDir, 'scripts/gen_testplan.py'), variantBoard, tpPath,
+          ])
+          const tpCount = tpGen.out.match(/^TESTPLAN (\d+)/m)?.[1]
+          if (tpCount !== undefined)
+            log('validation', `FL-1 test plan: ${tpCount} probe points mapped with pass/fail limits → fl1-testplan.json`, 'ok')
+          else log('validation', 'FL-1 test plan generation incomplete', 'warn')
+
           const zipMatch = fab.out.match(/^FAB_ZIP:(.+)$/m)
           if (zipMatch && fs.existsSync(zipMatch[1].trim())) {
             const pubFab = path.join(appDir, 'public/fab')
             fs.mkdirSync(pubFab, { recursive: true })
             const dest = path.join(pubFab, 'fab-package.zip')
             fs.copyFileSync(zipMatch[1].trim(), dest)
+            // ship the FL-1 test plan inside the fab package
+            if (fs.existsSync(tpPath)) {
+              await exec('validation', 'python3', [
+                '-c',
+                `import zipfile; z=zipfile.ZipFile(${JSON.stringify(dest)},'a'); ` +
+                  `z.write(${JSON.stringify(tpPath)},'fl1-testplan.json'); z.close()`,
+              ])
+            }
             fabZip = '/fab/fab-package.zip'
-            log('validation', `fab package ready → ${fabZip}`, 'ok')
+            log('validation', `fab package ready (incl. FL-1 test plan) → ${fabZip}`, 'ok')
           } else {
             log('validation', 'fab package generation incomplete', 'warn')
           }
@@ -530,14 +685,14 @@ export async function GET(req: Request) {
         const failBoard = composeMode ? variantBoard : wsBoard
         // ---- gate: DRC must be clean before electrical/firmware stages -------
         if (!drcPass) {
-          log('validation', `GATE validation FAILED: ${violations} blocking violation(s), ${unconnected} unconnected pad(s) — stopping`, 'err')
+          log('validation', `GATE validation FAILED: ${violations} blocking violation(s), ${unconnected} unconnected pad(s), stopping`, 'err')
           send({ type: 'stage', id: 'erc', state: 'blocked' })
           send({ type: 'stage', id: 'firmware', state: 'blocked' })
           send({ type: 'done', status: 'GATE FAILED', boardPath: failBoard, fabZip })
           return
         }
 
-        // ---- stage 5: ERC — electrical rules the DRC can't see ----------------
+        // ---- stage 5: ERC, electrical rules the DRC can't see ----------------
         // DRC proves manufacturable + connected; ERC proves electrically sane
         // (I2C pull-ups, bus completeness, power/GND per IC, pin-net integrity).
         // Same gate philosophy as DRC: firmware doesn't run on an unsound board.
@@ -556,16 +711,16 @@ export async function GET(req: Request) {
         }
         const ercPass = ercErrors === 0
         if (!ercPass) {
-          log('erc', `GATE ERC FAILED: ${ercErrors} electrical error(s) — not proceeding to firmware`, 'err')
+          log('erc', `GATE ERC FAILED: ${ercErrors} electrical error(s), not proceeding to firmware`, 'err')
           send({ type: 'stage', id: 'erc', state: 'failed', failReason: `${ercErrors} ERC errors` })
           send({ type: 'stage', id: 'firmware', state: 'blocked' })
           send({ type: 'done', status: 'GATE FAILED', boardPath: failBoard, fabZip })
           return
         }
-        log('erc', 'GATE ERC: 0 errors — board electrically sane — PASS', 'ok')
+        log('erc', 'GATE ERC: 0 errors, board electrically sane, PASS', 'ok')
         send({ type: 'stage', id: 'erc', state: 'passed' })
 
-        // ---- stage 6: firmware — netlist-derived BSP + HAL + self-test -------
+        // ---- stage 6: firmware, netlist-derived BSP + HAL + self-test -------
         // Reached only when DRC and ERC are both clean.
         send({ type: 'stage', id: 'firmware', state: 'running' })
         let fwZip: string | undefined
@@ -589,14 +744,14 @@ export async function GET(req: Request) {
           })
           const fwOk = fwBuild.code === 0 || fwBuild.out.includes('Finished')
           if (fwOk) {
-            log('firmware', 'GATE firmware: cargo build GREEN — PASS', 'ok')
+            log('firmware', 'GATE firmware: cargo build GREEN, PASS', 'ok')
 
             // ---- application firmware: frontier model writes the control loop --
             // The deterministic crate above is the correct-by-construction BSP +
             // HAL. Here the frontier model writes the *application* logic against
             // it (a real control loop), gated by cargo build with one self-repair
             // pass. Best-effort: if it can't be made to compile, the crate still
-            // ships with the verified BSP/HAL — the app layer is just omitted.
+            // ships with the verified BSP/HAL, the app layer is just omitted.
             try {
               const srcDir = path.join(fwDir, 'src')
               const libPath = path.join(srcDir, 'lib.rs')
@@ -609,12 +764,12 @@ export async function GET(req: Request) {
                 .join('\n\n')
               const sys =
                 'You are an expert embedded Rust engineer writing no_std firmware. ' +
-                'Output ONLY the Rust source of one module file — no prose, no markdown fences.'
+                'Output ONLY the Rust source of one module file, no prose, no markdown fences.'
               const ask =
                 `Target: RP2040 (thumbv6m-none-eabi), no_std, embedded-hal 1.0 only ` +
                 `(NO concrete HAL crate, NO runtime, NO new dependencies).\n` +
                 `Board: ${composeMode ? composeSpec?.boardClass : 'FL-1 relay/probe matrix'}.\n\n` +
-                `The crate already provides these modules — use them, do not redefine them:\n\n` +
+                `The crate already provides these modules, use them, do not redefine them:\n\n` +
                 `${apiDump}\n\n` +
                 `Write src/app.rs: a generic application controller that drives this board ` +
                 `using the modules above. Rules:\n` +
@@ -625,11 +780,11 @@ export async function GET(req: Request) {
                 `I2C: embedded_hal::i2c::I2c, PWM: embedded_hal::pwm::SetDutyCycle, D: embedded_hal::delay::DelayNs, ` +
                 `R: embedded_io::Read, S: embedded_io::Read + embedded_io::Write.\n` +
                 `- new(...), init(&mut self) that probes/brings up each present peripheral, and control_step(&mut self) ` +
-                `running ONE realistic iteration that fits THIS board's peripherals — derive the behavior from what ` +
+                `running ONE realistic iteration that fits THIS board's peripherals, derive the behavior from what ` +
                 `exists, do not assume motors or a radio. Examples by peripheral: GNSS -> read a fix sentence; ` +
                 `cellular modem -> send the latest reading via an AT command; IMU -> read accel; motors -> apply a ` +
                 `throttle with failsafe-disarm. Use only the modules above and only their real public functions.\n` +
-                `- No main, no #[entry], no panic handler — this is a library module. It MUST compile. Return only src/app.rs.`
+                `- No main, no #[entry], no panic handler, this is a library module. It MUST compile. Return only src/app.rs.`
 
               log('firmware', 'app firmware: frontier model writing the control loop…')
               let appOk = false
@@ -649,16 +804,16 @@ export async function GET(req: Request) {
                 appOk = ab.code === 0 || ab.out.includes('Finished')
                 lastErr = ab.out
                 if (appOk)
-                  log('firmware', `GATE app firmware: ${provider} control loop compiles — PASS`, 'ok')
+                  log('firmware', `GATE app firmware: ${provider} control loop compiles, PASS`, 'ok')
                 else if (attempt === 0)
-                  log('firmware', 'app firmware: draft failed to compile — self-repair pass…', 'warn')
+                  log('firmware', 'app firmware: draft failed to compile, self-repair pass…', 'warn')
               }
               if (!appOk) {
                 // revert: ship the verified BSP/HAL crate without the app layer
                 fs.rmSync(path.join(srcDir, 'app.rs'), { force: true })
                 fs.writeFileSync(libPath, libOrig)
                 await exec('firmware', CARGO, ['build', '--release'], { cwd: fwDir })
-                log('firmware', 'app firmware: did not compile after repair — shipping BSP/HAL only', 'warn')
+                log('firmware', 'app firmware: did not compile after repair, shipping BSP/HAL only', 'warn')
               }
             } catch (e) {
               log('firmware', `app firmware skipped: ${String(e)}`, 'warn')
@@ -699,7 +854,7 @@ export async function GET(req: Request) {
           // write the report INTO this run's own data dir (fixes the prior
           // off-by-one where the report landed in shared data and got snapshotted
           // by the NEXT run). NOTE: we deliberately do NOT publish to the shared
-          // public/{data,board} — that location is the stable FL-1 reference board
+          // public/{data,board}, that location is the stable FL-1 reference board
           // shown as the default "live board". Each run is served from its OWN
           // /runs/<id> snapshot (via runDir + /api/runs), so publishing here only
           // corrupted the reference. The run dir is the single source of truth.
@@ -709,8 +864,21 @@ export async function GET(req: Request) {
             mode: composeMode ? 'compose' : 'matrix',
             prompt,
             composeSpec,
+            parentId,
+            revNote,
             events,
           })
+          // charge credits by the finished board's complexity (nets + parts).
+          // Read the just-written board.json; fall back to 1 credit if absent.
+          try {
+            const bj = JSON.parse(
+              fs.readFileSync(path.join(pubData, 'board.json'), 'utf8'),
+            )
+            const cost = creditsForRun(bj.netsTotal ?? bj.netsRouted ?? 0, bj.components ?? 0)
+            chargeCredits(userEmail, cost)
+          } catch {
+            chargeCredits(userEmail, 1)
+          }
         } catch {
           /* never let report writing break the response */
         }
@@ -753,6 +921,8 @@ function writeRunReport(
     mode: string
     prompt: string
     composeSpec: { blocks: string[]; boardClass: string } | null
+    parentId?: string
+    revNote?: string
     events: PipelineEvent[]
   },
 ) {
@@ -809,6 +979,8 @@ function writeRunReport(
     mode: rec.mode,
     prompt: rec.prompt,
     composeSpec: rec.composeSpec,
+    parentId: rec.parentId || null,
+    revNote: rec.revNote || null,
     status: error ? 'ERROR' : done?.status ?? 'INCOMPLETE',
     error,
     coverage,
@@ -837,7 +1009,7 @@ function writeRunReport(
   const md: string[] = []
   const partial = coverage && coverage.dropped.length > 0
   md.push(
-    `# Last run — ${report.status}` +
+    `# Last run, ${report.status}` +
       (partial ? ` ⚠ partial coverage (${coverage!.dropped.length} block(s) unbuilt)` : ''),
   )
   md.push('')
@@ -859,7 +1031,7 @@ function writeRunReport(
     for (const p of sourced) {
       const v = String(p.verified).startsWith('verified') ? '✓ verified' : `⚠ ${p.verified}`
       md.push(
-        `- **${p.ref}** ${p.mpn} (${p.manufacturer}) — $${p.price} · ${p.stock} in stock · ${p.footprint} · ${v}`,
+        `- **${p.ref}** ${p.mpn} (${p.manufacturer}), $${p.price} · ${p.stock} in stock · ${p.footprint} · ${v}`,
       )
     }
     md.push('')
@@ -867,7 +1039,7 @@ function writeRunReport(
   md.push('## Stages')
   for (const id of STAGE_ORDER) {
     if (!stages[id]) continue
-    const fr = stages[id].failReason ? ` — ${stages[id].failReason}` : ''
+    const fr = stages[id].failReason ? `, ${stages[id].failReason}` : ''
     md.push(`- ${icon(stages[id].state)} **${id}** (${stages[id].state})${fr}`)
   }
   md.push('')
@@ -886,7 +1058,7 @@ function writeRunReport(
   }
   if (report.drc) {
     md.push('')
-    md.push(`## DRC — ${report.drc.violations.length} violations, ${report.drc.unconnected} unconnected`)
+    md.push(`## DRC, ${report.drc.violations.length} violations, ${report.drc.unconnected} unconnected`)
     for (const v of report.drc.violations.slice(0, 20)) {
       md.push(`- ${v.type}: ${(v.description ?? '').slice(0, 90)}`)
     }

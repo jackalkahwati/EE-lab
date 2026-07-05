@@ -71,8 +71,45 @@ for net, sx, sy in sites:
     if key in seen:
         continue
     seen.add(key)
+
+    # a through-via crosses every layer: make sure the spot is clear of
+    # other-net copper on ALL layers (inner tracks routed under a pad were
+    # hitting 0.01mm clearance). Try the pad centre, then 4 small offsets that
+    # still overlap the pad copper; skip the pad if nothing is clear.
+    def _seg_dist(px, py, t):
+        sx, sy = t.GetStart().x, t.GetStart().y
+        ex, ey = t.GetEnd().x, t.GetEnd().y
+        dx, dy = ex - sx, ey - sy
+        L2 = dx * dx + dy * dy
+        if L2 == 0:
+            return ((px - sx) ** 2 + (py - sy) ** 2) ** 0.5
+        u = max(0.0, min(1.0, ((px - sx) * dx + (py - sy) * dy) / L2))
+        cx, cy = sx + u * dx, sy + u * dy
+        return ((px - cx) ** 2 + (py - cy) ** 2) ** 0.5
+
+    def _blocked(px, py):
+        # TRUE geometric distance to other-net copper. A bbox test false-blocks
+        # everything near a long diagonal track, which left probe pads unstitched.
+        for t in b.GetTracks():
+            if t.GetNetCode() == nc:
+                continue
+            half = (t.GetWidth() if t.GetClass() == "PCB_TRACK" else t.GetWidth()) // 2
+            need = via_d // 2 + half + pcbnew.FromMM(0.22)
+            if _seg_dist(px, py, t) < need:
+                return True
+        return False
+
+    off = pcbnew.FromMM(0.4)
+    spot = None
+    for dx, dy in ((0, 0), (off, 0), (-off, 0), (0, off), (0, -off)):
+        if not _blocked(pos.x + dx, pos.y + dy):
+            spot = pcbnew.VECTOR2I(pos.x + dx, pos.y + dy)
+            break
+    if spot is None:
+        print("skip %s: no clear via spot at pad" % net)
+        continue
     via = pcbnew.PCB_VIA(b)
-    via.SetPosition(pos)
+    via.SetPosition(spot)
     via.SetViaType(pcbnew.VIATYPE_THROUGH)
     via.SetLayerPair(pcbnew.F_Cu, pcbnew.B_Cu)
     via.SetWidth(int(via_d))

@@ -3,14 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import {
-  SEED_RUNS,
   STAGE_DEFS,
   STAGE_PREFIX,
   type Run,
   type StageId,
   type StageState,
 } from '@/lib/firstlight'
-import { loadRealBoard, REAL_RUN_ID, type RealBoard } from '@/lib/real-board'
+import { loadRealBoard, type RealBoard } from '@/lib/real-board'
 import { RunHistory } from '@/components/run-history'
 import { PromptComposer } from '@/components/prompt-composer'
 import { PipelineTracker } from '@/components/pipeline-tracker'
@@ -22,8 +21,12 @@ import { MetricsRail } from '@/components/metrics-rail'
 import { OrderPanel } from '@/components/order-panel'
 import { ErrorBoundary } from '@/components/error-boundary'
 import { InterviewPanel } from '@/components/interview-panel'
+import { WelcomeHero } from '@/components/welcome-hero'
+import { ReviewPanel } from '@/components/review-panel'
+import { ReviseDialog } from '@/components/revise-dialog'
+import { FL1Loop } from '@/components/fl1-loop'
 
-const TABS = ['Board', 'Schematic / Code', 'BOM', 'Gates & Logs', 'Order'] as const
+const TABS = ['Board', 'Code', 'BOM', 'Checks', 'Review', 'FL-1', 'Order'] as const
 type Tab = (typeof TABS)[number]
 
 interface PipelineEvent {
@@ -43,8 +46,8 @@ interface PipelineEvent {
 }
 
 export default function FirstLightPage() {
-  const [runs, setRuns] = useState<Run[]>([SEED_RUNS[1], SEED_RUNS[0]])
-  const [selectedId, setSelectedId] = useState(SEED_RUNS[0].id)
+  const [runs, setRuns] = useState<Run[]>([])
+  const [selectedId, setSelectedId] = useState('')
   const [collapsed, setCollapsed] = useState(false)
   const [tab, setTab] = useState<Tab>('Board')
   const [liveRunId, setLiveRunId] = useState<string | null>(null)
@@ -54,20 +57,32 @@ export default function FirstLightPage() {
   const [fabZip, setFabZip] = useState<string | null>(null)
   const [fwZip, setFwZip] = useState<string | null>(null)
   const [interviewRequest, setInterviewRequest] = useState<string | null>(null)
+  const [showWelcome, setShowWelcome] = useState(false)
+  const [reviseRequest, setReviseRequest] = useState<string | null>(null)
   const esRef = useRef<EventSource | null>(null)
   const stageStartRef = useRef<Record<string, number>>({})
   const currentStageRef = useRef<string | null>(null)
 
   // restore persisted runs on mount (client-only, avoids hydration mismatch).
   // Only restore runs WITHOUT a runDir: disk-backed runs (those with a runDir)
-  // are authoritative from /api/runs below — restoring them from localStorage is
+  // are authoritative from /api/runs below, restoring them from localStorage is
   // exactly what resurrected stale runs pointing at deleted snapshot dirs, which
   // then rendered the wrong (shared-fallback) board under their unique id.
   useEffect(() => {
+    // deep link from the marketing site: /?prompt=<board description>
+    const qp = new URLSearchParams(window.location.search)
+    const deepPrompt = qp.get('prompt')
+    if (deepPrompt) {
+      window.history.replaceState({}, '', '/')
+      localStorage.setItem('fl-welcomed', '1')
+      setInterviewRequest(deepPrompt)
+    } else if (localStorage.getItem('fl-welcomed') !== '1') setShowWelcome(true)
     try {
       const saved = JSON.parse(localStorage.getItem('fl-runs') || 'null')
       if (Array.isArray(saved) && saved.length) {
-        const transient = saved.filter((r: Run) => !r.runDir)
+        const transient = saved.filter(
+          (r: Run) => !r.runDir && /^run-\d{13}-\w+$/.test(r.id),
+        )
         if (transient.length)
           setRuns(
             transient.map((r: Run) =>
@@ -103,7 +118,7 @@ export default function FirstLightPage() {
     }
   }, [])
 
-  // persist runs (skip while a run is live — its partial state is transient)
+  // persist runs (skip while a run is live, its partial state is transient)
   useEffect(() => {
     if (liveRunId) return
     try {
@@ -113,28 +128,14 @@ export default function FirstLightPage() {
     }
   }, [runs, liveRunId])
 
-  // load the real board (synced from KiCad by scripts/sync-board.sh)
-  useEffect(() => {
-    let cancelled = false
-    loadRealBoard().then((data) => {
-      if (!data || cancelled) return
-      setRealBoard(data)
-      setRuns((prev) =>
-        prev.some((r) => r.id === REAL_RUN_ID) ? prev : [data.run, ...prev],
-      )
-      setSelectedId(REAL_RUN_ID)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [])
 
   const selectedRun = runs.find((r) => r.id === selectedId) ?? runs[0]
+
   const selectedRunDir = selectedRun?.runDir
   const selectedReal = selectedRun?.real
   // Single source of truth: only treat the loaded board as the selected run's
   // when it was loaded from THIS run's snapshot. Until the new run's snapshot
-  // finishes loading, `real` is null — so we never render one run's board, BOM,
+  // finishes loading, `real` is null, so we never render one run's board, BOM,
   // metrics or artifacts under a different run.
   const real =
     realBoard && realBoard.base === (selectedRunDir ?? '') ? realBoard : null
@@ -160,6 +161,7 @@ export default function FirstLightPage() {
     (
       prompt: string,
       compose?: { blocks: string[]; boardClass: string },
+      rev?: { parentId: string; revNote: string },
     ) => {
       // unique per run: timestamp + random suffix so two runs started in the same
       // millisecond can never collide on an id (and thus never share a run dir).
@@ -169,6 +171,8 @@ export default function FirstLightPage() {
         name: compose
           ? `${compose.boardClass} ${new Date().toTimeString().slice(0, 5)}`
           : `FL-1 pipeline run ${new Date().toTimeString().slice(0, 5)}`,
+        parentId: rev?.parentId,
+        revNote: rev?.revNote,
         timestamp: new Date().toISOString().slice(0, 16).replace('T', ' '),
         status: 'RUNNING',
         prompt,
@@ -177,7 +181,7 @@ export default function FirstLightPage() {
           state: 'pending' as StageState,
           elapsedMs: 0,
         })),
-        // a brand-new run starts with neutral metrics — never seeded from the
+        // a brand-new run starts with neutral metrics, never seeded from the
         // previously selected board. Its real numbers arrive from its OWN
         // snapshot when the pipeline finishes (metrics: data.run.metrics).
         metrics: {
@@ -188,7 +192,7 @@ export default function FirstLightPage() {
           hpwlHistory: [],
           components: 0,
           bomLines: 0,
-          boardSize: '—',
+          boardSize: ', ',
           layers: 0,
           routeTimeSec: 0,
         },
@@ -214,6 +218,9 @@ export default function FirstLightPage() {
         setRuns((prev) => prev.map((r) => (r.id === id ? fn(r) : r)))
 
       let url = `/api/pipeline/run?prompt=${encodeURIComponent(prompt)}&runId=${encodeURIComponent(id)}`
+      if (rev) {
+        url += `&parent=${encodeURIComponent(rev.parentId)}&revNote=${encodeURIComponent(rev.revNote)}`
+      }
       if (compose) {
         const json = JSON.stringify({
           blocks: compose.blocks,
@@ -321,7 +328,7 @@ export default function FirstLightPage() {
                   {
                     stage: 'design',
                     prefix: 'err',
-                    text: 'pipeline stream lost — the runner needs the local dev server with KiCad + flroute installed',
+                    text: 'pipeline stream lost, the runner needs the local dev server with KiCad + flroute installed',
                     level: 'err',
                   },
                 ],
@@ -362,6 +369,13 @@ export default function FirstLightPage() {
   // close the stream if the page unmounts mid-run
   useEffect(() => () => esRef.current?.close(), [])
 
+  if (!selectedRun) {
+    return (
+      <main className="flex h-dvh items-center justify-center bg-background text-sm text-muted-foreground">
+        Loading your workspace…
+      </main>
+    )
+  }
   return (
     <main className="relative flex h-dvh overflow-hidden bg-background text-foreground">
       <RunHistory
@@ -379,19 +393,24 @@ export default function FirstLightPage() {
             <h1 className="text-sm font-semibold tracking-tight text-foreground">
               FirstLight
             </h1>
-            <span className="font-mono text-[10px] tracking-wide text-muted-foreground">
-              {'PROMPT → PCBA + FIRMWARE'}
-            </span>
+            <button
+              type="button"
+              onClick={() => setShowWelcome(true)}
+              className="text-[11px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+            >
+              How it works
+            </button>
+            {selectedRun.runDir && liveRunId === null && (
+              <button
+                type="button"
+                onClick={() => setReviseRequest('')}
+                className="rounded-sm border border-primary/50 px-2 py-0.5 text-[11px] font-medium text-primary hover:bg-primary/10"
+              >
+                Revise board
+              </button>
+            )}
           </div>
           <div className="flex items-center gap-3">
-            {designSpec && (
-              <span
-                className="font-mono text-[10px] text-primary"
-                title={String(designSpec.rationale ?? '')}
-              >
-                {`SPEC · ${designSpec.probes ?? '?'}P · ${designSpec.group_lanes ?? '?'}G+${designSpec.probe_lanes ?? '?'}P lanes · ${designSpec.vin ?? ''}`}
-              </span>
-            )}
             {fabZip && (
               <a
                 href={fabZip}
@@ -410,9 +429,6 @@ export default function FirstLightPage() {
                 ↓ Firmware (.zip)
               </a>
             )}
-            <span className="font-mono text-[10px] text-muted-foreground">
-              {selectedRun.name} · {selectedRun.timestamp}
-            </span>
           </div>
         </header>
 
@@ -452,25 +468,26 @@ export default function FirstLightPage() {
             <ErrorBoundary key={tab} label={`The ${tab} panel`}>
             {tab === 'Board' && (
               <BoardCanvas
+                key={selectedRun.id}
                 run={selectedRun}
                 realBoard={isReal ? real?.board : null}
                 basePath={boardBase}
               />
             )}
-            {tab === 'Schematic / Code' && (
+            {tab === 'Code' && (
               <CodeViewer
                 key={isReal ? 'real' : 'seed'}
                 files={isReal ? real?.ato : null}
               />
             )}
             {tab === 'BOM' && <BomTable lines={isReal ? real?.bom : null} />}
-            {tab === 'Gates & Logs' && (
+            {tab === 'Checks' && (
               <GatesLogs
                 run={selectedRun}
                 reports={isReal ? real?.reports : null}
                 runDir={selectedRunDir}
                 onRefresh={() => {
-                  // a repair rewrote this run's artifacts — reload its board and
+                  // a repair rewrote this run's artifacts, reload its board and
                   // refresh statuses/metrics from disk without changing selection
                   loadRealBoard(selectedRunDir ?? '').then((d) => d && setRealBoard(d))
                   fetch('/api/runs')
@@ -486,6 +503,15 @@ export default function FirstLightPage() {
                     })
                     .catch(() => {})
                 }}
+              />
+            )}
+            {tab === 'Review' && (
+              <ReviewPanel runId={selectedRun.runDir ? selectedRun.id : null} />
+            )}
+            {tab === 'FL-1' && (
+              <FL1Loop
+                runId={selectedRun.runDir ? selectedRun.id : null}
+                onRevise={(eco) => setReviseRequest(eco)}
               />
             )}
             {tab === 'Order' && (
@@ -518,6 +544,34 @@ export default function FirstLightPage() {
       <MetricsRail
         run={isReal && real ? { ...selectedRun, metrics: real.run.metrics } : selectedRun}
       />
+
+      {reviseRequest !== null && selectedRun.runDir && (
+        <ReviseDialog
+          runId={selectedRun.id}
+          runName={selectedRun.name}
+          currentBlocks={null}
+          initialRequest={reviseRequest || undefined}
+          onLaunch={(prompt, compose, rev) => {
+            setReviseRequest(null)
+            handleGenerate(prompt, compose, rev)
+          }}
+          onClose={() => setReviseRequest(null)}
+        />
+      )}
+
+      {showWelcome && !interviewRequest && (
+        <WelcomeHero
+          onStart={(p) => {
+            localStorage.setItem('fl-welcomed', '1')
+            setShowWelcome(false)
+            setInterviewRequest(p || 'design a custom board')
+          }}
+          onExplore={() => {
+            localStorage.setItem('fl-welcomed', '1')
+            setShowWelcome(false)
+          }}
+        />
+      )}
 
       {interviewRequest && (
         <InterviewPanel

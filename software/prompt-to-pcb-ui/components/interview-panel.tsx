@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
+import { LLMSettings, llmHeaders } from '@/components/llm-settings'
 import {
   MessagesSquare,
   X,
@@ -61,7 +62,7 @@ export function InterviewPanel({
       try {
         const r = await fetch('/api/interview', {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: { 'content-type': 'application/json', ...llmHeaders() },
           body: JSON.stringify({ request, answers: acc }),
         })
         const data = await r.json()
@@ -107,6 +108,8 @@ export function InterviewPanel({
               </span>
             )}
           </div>
+          <div className="flex items-center gap-1">
+          <LLMSettings />
           <button
             type="button"
             onClick={onClose}
@@ -115,6 +118,7 @@ export function InterviewPanel({
           >
             <X className="size-4" />
           </button>
+          </div>
         </header>
 
         <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto p-4">

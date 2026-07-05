@@ -33,7 +33,14 @@ sys.path.insert(0, _SCRIPTS)
 CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "parts_cache.json")
 
 # a known-good fallback part per interface (KiCad symbol path, no network needed)
-FALLBACK = {"i2c_sensor": "LM75B"}
+FALLBACK = {
+    "i2c_sensor": "LM75B",
+    "i2c_device": "24LC256",
+    "spi_device": "TMC5160",
+    "stepper_driver": "TMC2209",
+    "can_transceiver": "SN65HVD230",
+    "current_sense": "INA228",
+}
 
 # routability of common package families parsed from a DigiKey description
 # coarse, easy-to-route leaded packages (>= ~1mm pitch)

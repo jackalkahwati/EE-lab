@@ -82,12 +82,30 @@ def main():
     b = pcbnew.LoadBoard(VARIANT)
     fps = list(b.GetFootprints())
 
+    # resolved-part manifest: ref -> real device name (from compose's
+    # sourced_ic / datasheet resolution). Overrides the footprint-family
+    # heuristic so a resolved CAN transceiver isn't labeled "Regulator SOIC-8".
+    sourced = {}
+    try:
+        dev = json.load(open(os.path.join(OUT, "devices.json")))
+        for d in dev:
+            nm = d.get("name") or d.get("mpn") or d.get("desc")
+            if d.get("ref") and nm:
+                sourced[d["ref"]] = nm
+    except Exception:
+        pass
+
     # census by footprint family; parts not in the FL-1 family (e.g. a composed
     # board's LoRa module, U.FL, caps) fall back to a generic group keyed by a
     # cleaned footprint name, so EVERY board gets a BOM.
     counts = {}      # family idx -> [refs]
     generic = {}     # cleaned footprint name -> [refs]
+    sourced_lines = {}  # real name -> [refs]
     for fp in fps:
+        ref = fp.GetReference()
+        if ref in sourced:
+            sourced_lines.setdefault(sourced[ref], []).append(ref)
+            continue
         lib = str(fp.GetFPID().GetLibItemName())
         matched = False
         for i, fam in enumerate(FAMILY):
@@ -126,6 +144,8 @@ def main():
     for i, refs in sorted(counts.items()):
         _key, name, kw, price = FAMILY[i]
         add_line(refs, name, kw, price)
+    for name, refs in sorted(sourced_lines.items()):
+        add_line(refs, name, name, 0.60)  # resolved IC, real name + MPN keyword
     for name, refs in sorted(generic.items()):
         # rough catalog price by class: modules/connectors > ICs > passives
         s = name.lower()

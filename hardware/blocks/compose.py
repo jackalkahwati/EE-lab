@@ -133,6 +133,15 @@ def res(ref, x, y, a, b, nets):
                  {"1": a, "2": b}, nets)
 
 
+def tp(ref, x, y, net, nets):
+    """FL-1 dedicated probe pad (1.5mm). NOTE: the default test plan probes
+    existing component pads directly (FL-1's gantry needs no dedicated pads,
+    and TP stubs proved a routing burden) — use this only for nets with no
+    probeable pad, e.g. buried mid-signals."""
+    return place("TestPoint", "TestPoint_Pad_1.5x1.5mm", ref, x, y, 0,
+                 {"1": net}, nets)
+
+
 # ---- BLOCKS -----------------------------------------------------------------
 # Each returns (footprint_text, width_mm, height_mm) placed at its top-left (x,y)
 # and binds its interface to the shared net names passed in `n`.
@@ -160,6 +169,8 @@ def block_mcu_pico(x, y, n, nets):
         "1": "uart_gps_tx", "2": "uart_gps_rx",          # UART0 -> GNSS
         "19": "uart_cell_tx", "20": "uart_cell_rx",      # UART1 -> cellular modem
         "21": "cell_pwrkey", "22": "cell_rst",           # modem power control
+        "24": "can_txd", "25": "can_rxd",                # CAN comms head
+        "26": "step", "27": "dir", "29": "en",           # stepper motion controller
     }
     pmap = {"40": "+5V", "39": "+5V", "38": "GND", "36": "+3V3"}
     for pin, key in opt.items():
@@ -247,7 +258,11 @@ def block_lora_rfm95(x, y, n, nets):
 def block_antenna_ufl(x, y, n, nets):
     b = place("Connector_Coaxial", "U.FL_Hirose_U.FL-R-SMT-1_Vertical",
               "J2", x + 3, y + 4, 0, {"1": n["ant"], "2": "GND"}, nets)
-    return b, 6, 8
+    # ESD protection at the antenna port: ultra-low-capacitance TVS (0402,
+    # RCLAMP0502B class) shunting the RF line to GND right at the connector.
+    b += place("Diode_SMD", "D_0402_1005Metric", "D_ANT", x + 3, y + 9, 0,
+               {"1": n["ant"], "2": "GND"}, nets)
+    return b, 6, 12
 
 
 def block_gnss(x, y, n, nets):
@@ -296,13 +311,139 @@ def block_tempsensor(x, y, n, nets):
         raise RuntimeError("tempsensor source failed: " + r["error"])
     b = place(r["lib"], r["footprint"], "U6", x + 6, y + 6, 0, r["pmap"], nets)
     b += cap("C9", x + 6, y + 14, "+3V3", "GND", nets)  # decoupling per power pin
-    _DEVICES.append({"ref": "U6", "type": "i2c_tempsensor", "mpn": r.get("mpn")})
+    _DEVICES.append({"ref": "U6", "type": "i2c_tempsensor", "mpn": r.get("mpn"), "name": r.get("mpn") or r.get("symbol") or "I2C temperature sensor"})
     print("SOURCED:" + json.dumps({
         "ref": "U6", "mpn": r.get("mpn"), "manufacturer": r.get("manufacturer"),
         "price": r.get("price"), "stock": r.get("stock"),
         "footprint": r["lib"] + ":" + r["footprint"],
         "verified": r.get("verified"), "via": r.get("source")}))
     return b, 16, 20
+
+
+def block_sourced_sensor(x, y, n, nets, desc, key):
+    """ANY I2C sensor by plain-language description — pressure, humidity, light,
+    ToF, gas, magnetometer, ... source_part finds a real in-stock part on
+    DigiKey, reads its datasheet for pinout + package, and resolves a verified
+    footprint. The block library no longer bounds what sensors a board can
+    carry; the datasheet does."""
+    r = source_part.source(desc, "i2c_sensor", {
+        "power": "+3V3", "gnd": "GND",
+        "i2c_scl": n["i2c_scl"], "i2c_sda": n["i2c_sda"],
+        "int": key.upper() + "_INT"})
+    if "error" in r:
+        raise RuntimeError("sensor source failed (%s): %s" % (desc, r["error"]))
+    b = place(r["lib"], r["footprint"], "U6", x + 6, y + 6, 0, r["pmap"], nets)
+    b += cap("C9", x + 6, y + 14, "+3V3", "GND", nets)
+    _DEVICES.append({"ref": "U6", "type": "i2c_sensor", "desc": desc,
+                     "mpn": r.get("mpn"), "name": r.get("mpn") or r.get("symbol") or desc})
+    print("SOURCED:" + json.dumps({
+        "ref": "U6", "desc": desc, "mpn": r.get("mpn"),
+        "manufacturer": r.get("manufacturer"),
+        "price": r.get("price"), "stock": r.get("stock"),
+        "footprint": r["lib"] + ":" + r["footprint"],
+        "verified": r.get("verified"), "via": r.get("source")}))
+    return b, 16, 20
+
+
+def sourced_ic(desc, interface, netmap, ref, x, y, rot, nets):
+    """Block-layer core: resolve ANY IC via a generalized contract
+    (spi_device, stepper_driver, can_transceiver, current_sense, ...), place it,
+    and report it. The caller supplies netmap (contract net-key -> board net)
+    and adds board-level support (decoupling, connectors, termination, sense
+    resistors) around it. Returns (body, resolved_dict). Raises on resolve
+    failure so an unbuildable board never silently ships."""
+    r = source_part.source(desc, interface, netmap)
+    if "error" in r:
+        raise RuntimeError("%s source failed (%s/%s): %s"
+                           % (ref, desc, interface, r["error"]))
+    b = place(r["lib"], r["footprint"], ref, x, y, rot, r["pmap"], nets)
+    name = r.get("mpn") or r.get("symbol") or desc
+    _DEVICES.append({"ref": ref, "type": interface, "desc": desc,
+                     "mpn": r.get("mpn"), "name": name})
+    print("SOURCED:" + json.dumps({
+        "ref": ref, "desc": desc, "interface": interface, "mpn": r.get("mpn"),
+        "manufacturer": r.get("manufacturer"), "price": r.get("price"),
+        "stock": r.get("stock"), "footprint": r["lib"] + ":" + r["footprint"],
+        "verified": r.get("verified"), "via": r.get("source")}))
+    return b, r
+
+
+def block_comms_can(x, y, n, nets):
+    """CAN communications head: an MCU-driven CAN transceiver on a bus header.
+    The transceiver is RESOLVED from the can_transceiver contract (SN65HVD230
+    class), not hardcoded. TXD/RXD come from the shared MCU nets; CANH/CANL go
+    to a 3-pin bus header with 120-ohm termination. First board built on the
+    generalized part-resolution + block layer."""
+    b, r = sourced_ic("CAN bus transceiver 3.3V", "can_transceiver", {
+        "power": "+3V3", "gnd": "GND",
+        "can_txd": n["can_txd"], "can_rxd": n["can_rxd"],
+        "canh": "CANH", "canl": "CANL"}, "U7", x + 6, y + 7, 0, nets)
+    b += cap("C20", x + 6, y + 14, "+3V3", "GND", nets)      # transceiver decoupling
+    b += res("R20", x + 13, y + 10, "CANH", "CANL", nets)    # 120-ohm bus termination
+    b += place("Connector_PinHeader_2.54mm", "PinHeader_1x03_P2.54mm_Vertical",
+               "J7", x + 13, y + 16, 0, {"1": "CANH", "2": "CANL", "3": "GND"}, nets)
+    return b, 20, 26
+
+
+def block_motion_controller(x, y, n, nets):
+    """Stepper motion controller: MCU-driven stepper driver (TMC2209 class),
+    resolved from the stepper_driver contract, with its part-specific support
+    (charge-pump caps, RDSon sense to GND, 5V-out and rail decoupling), a motor
+    power inlet, and a 4-pin bipolar motor output. STEP/DIR/EN come from the
+    shared MCU nets. First board that carries a resolved IC's non-trivial
+    support circuit, not just its bus interface."""
+    # motor power inlet (VMOTOR / GND) — separate from the +5V logic rail
+    b = place("Connector_PinHeader_2.54mm", "PinHeader_1x02_P2.54mm_Vertical",
+              "J8", x + 4, y + 8, 90, {"1": "VMOTOR", "2": "GND"}, nets)
+    b += cap("C21", x + 4, y + 16, "VMOTOR", "GND", nets)   # motor supply bulk
+    # the driver, resolved + placed, with every support-pin net named
+    b2, r = sourced_ic("TMC2209 stepper motor driver", "stepper_driver", {
+        "power": "+3V3", "gnd": "GND", "vmotor": "VMOTOR",
+        "step": n["step"], "dir": n["dir"], "en": n["en"],
+        "motor_a1": "M_A1", "motor_a2": "M_A2",
+        "motor_b1": "M_B1", "motor_b2": "M_B2",
+        "cp_out": "CP_OUT", "cp_in": "CP_IN", "vcp": "VCP", "reg_out": "REG_5V",
+    }, "U8", x + 14, y + 10, 0, nets)
+    b += b2
+    b += cap("C22", x + 22, y + 8, "CP_OUT", "CP_IN", nets)    # charge-pump flying cap
+    b += cap("C23", x + 22, y + 14, "VCP", "VMOTOR", nets)     # charge-pump reservoir
+    b += cap("C24", x + 22, y + 20, "REG_5V", "GND", nets)     # 5VOUT internal-reg decoupling
+    b += cap("C25", x + 14, y + 20, "+3V3", "GND", nets)       # VCC_IO decoupling
+    # 4-pin bipolar motor output (coil A, coil B)
+    b += place("Connector_PinHeader_2.54mm", "PinHeader_1x04_P2.54mm_Vertical",
+               "J9", x + 30, y + 12, 0,
+               {"1": "M_A1", "2": "M_A2", "3": "M_B1", "4": "M_B2"}, nets)
+    return b, 40, 30
+
+
+def block_dc_measure(x, y, n, nets):
+    """Instrument DC-measurement front-end: an I2C current/power monitor
+    (INA228 class) sensing across a shunt in the bus path. Resolved from the
+    current_sense contract; the shunt is the sense element, IN/OUT terminals
+    carry the measured rail. First instrument-board building block (FL-1 B-9),
+    on a leaded package that routes cleanly where a leadless QFN does not."""
+    b, r = sourced_ic("INA228 current power monitor", "current_sense", {
+        "power": "+3V3", "gnd": "GND",
+        "i2c_scl": n["i2c_scl"], "i2c_sda": n["i2c_sda"],
+        "shunt_hi": "VIN_BUS", "shunt_lo": "VOUT_LOAD"}, "U8", x + 15, y + 9, 0, nets)
+    b += cap("C21", x + 15, y + 16, "+3V3", "GND", nets)          # decoupling
+    b += res("R21", x + 15, y + 3, "VIN_BUS", "VOUT_LOAD", nets)  # sense shunt (the element)
+    # bus in (from supply) and bus out (to load); current is measured across R21
+    b += place("Connector_PinHeader_2.54mm", "PinHeader_1x02_P2.54mm_Vertical",
+               "J8", x + 4, y + 9, 90, {"1": "VIN_BUS", "2": "GND"}, nets)
+    b += place("Connector_PinHeader_2.54mm", "PinHeader_1x02_P2.54mm_Vertical",
+               "J9", x + 26, y + 9, 90, {"1": "VOUT_LOAD", "2": "GND"}, nets)
+    return b, 32, 28
+
+
+# free-text sensor detector for blocks no fixed key matched — these SOURCE a
+# real part instead of being dropped
+SENSOR_PAT = re.compile(
+    r"pressure|baro|humidity|hygro|moisture|lux|ambient light|light sensor|als\b|"
+    r"proximity|tof|time.of.flight|distance sensor|color sensor|uv\b|co2|voc|"
+    r"air quality|gas sensor|magnetometer|compass|hall\b|current sens|power monitor|"
+    r"sht\d|bme\d|bmp\d|opt3|veml|apds|vl53|tsl2|ccs811|sgp\d|ina2\d|\bsensor\b",
+    re.IGNORECASE)
 
 
 BLOCK_TABLE = {
@@ -316,6 +457,9 @@ BLOCK_TABLE = {
     "gnss": block_gnss,
     "cellular": block_cellular,
     "tempsensor": block_tempsensor,
+    "comms": block_comms_can,
+    "motion": block_motion_controller,
+    "instrument": block_dc_measure,
 }
 
 
@@ -356,6 +500,15 @@ def _block_keys(s):
         add("imu")
     if any(k in s for k in ("motor", "esc", "actuator", "servo", "propeller", "prop ")):
         add("motors")
+    if any(k in s for k in ("can bus", "can comms", "canbus", "comms head",
+                            "communications head", "can transceiver")):
+        add("comms")
+    if any(k in s for k in ("stepper", "motion controller", "stepper driver",
+                            "tmc2209", "tmc5160", "step/dir")):
+        add("motion")
+    if any(k in s for k in ("current sense", "current monitor", "dc measure",
+                            "power monitor", "ina228", "instrument", "shunt")):
+        add("instrument")
     if "usbc" not in out and any(k in s for k in ("power", "regulator", "battery", "vin",
                                                   "5v", "3v3", "charg", "ldo", "buck",
                                                   "usb power", "usb-c power")):
@@ -368,11 +521,14 @@ def classify(blocks):
     (mapped_keys, dropped_blocks): dropped = requested blocks with NO buildable
     function, so the caller can report exactly what was and was NOT built. A
     compound block contributes every function it mentions (see _block_keys)."""
-    seen, uniq, dropped = set(), [], []
+    seen, uniq, dropped, sensor_reqs = set(), [], [], []
     for b in blocks:
         ks = _block_keys(b)
         if not ks:
-            dropped.append(b)
+            if SENSOR_PAT.search(b):
+                sensor_reqs.append(b)
+            else:
+                dropped.append(b)
         for k in ks:
             if k not in seen:
                 seen.add(k)
@@ -393,7 +549,7 @@ def classify(blocks):
     elif "antenna" in seen and "radio" not in seen:
         uniq.remove("antenna")
         seen.discard("antenna")
-    return uniq, dropped
+    return uniq, dropped, sensor_reqs
 
 
 def gzone(net, layer, x0, y0, x1, y1, nets):
@@ -420,9 +576,11 @@ LAYERS = '''  (layers
 # radio + antenna land on the right edge (best RF practice). Rows wrap if a band
 # grows past the width budget, so the layout scales as blocks are added.
 ROW = {"power": 0, "usbc": 0, "mcu": 0, "imu": 0, "radio": 0, "antenna": 0,
-       "gnss": 0, "cellular": 0, "tempsensor": 0, "motors": 1}
+       "gnss": 0, "cellular": 0, "tempsensor": 0, "comms": 0, "motion": 1,
+       "instrument": 0, "motors": 1}
 COL = {"power": 0, "usbc": 0, "mcu": 2, "imu": 3, "tempsensor": 3, "gnss": 4,
-       "radio": 5, "cellular": 6, "antenna": 9, "motors": 1}
+       "radio": 5, "cellular": 6, "comms": 7, "antenna": 9, "motors": 1,
+       "motion": 3, "instrument": 4}
 ROW_BUDGET = 170.0  # mm — wrap a band wider than this
 
 
@@ -454,7 +612,11 @@ def _unique_refs(body):
 def compose(spec, blocks, out_path):
     nets = Nets()
     _DEVICES[:] = []  # reset the per-board device manifest
-    keys, dropped = classify(blocks)
+    keys, dropped, sensor_reqs = classify(blocks)
+    dyn = {}
+    for i, desc in enumerate(sensor_reqs):
+        dyn["gsensor%d" % i] = desc
+    keys = keys + sorted(dyn)
 
     # shared interface nets — allocated only for the buses that are actually
     # used, so the MCU and netlist carry no dangling stubs.
@@ -463,7 +625,7 @@ def compose(spec, blocks, out_path):
         n.update({"spi_sck": "SPI_SCK", "spi_mosi": "SPI_MOSI", "spi_miso": "SPI_MISO",
                   "spi_cs": "LORA_NSS", "ctrl_rst": "LORA_RST", "ctrl_irq": "LORA_DIO0",
                   "ant": "ANT"})
-    if "imu" in keys or "tempsensor" in keys:        # shared I2C bus
+    if "imu" in keys or "tempsensor" in keys or "instrument" in keys or dyn:  # shared I2C bus
         n.update({"i2c_sda": "I2C_SDA", "i2c_scl": "I2C_SCL"})
     if "imu" in keys:
         n["imu_int"] = "IMU_INT"
@@ -471,6 +633,10 @@ def compose(spec, blocks, out_path):
         n.update({"mot1": "MOTOR1", "mot2": "MOTOR2", "mot3": "MOTOR3", "mot4": "MOTOR4"})
     if "gnss" in keys:
         n.update({"uart_gps_tx": "GPS_TX", "uart_gps_rx": "GPS_RX"})
+    if "comms" in keys:
+        n.update({"can_txd": "CAN_TXD", "can_rxd": "CAN_RXD"})
+    if "motion" in keys:
+        n.update({"step": "STEP", "dir": "DIR", "en": "MOT_EN"})
     if "cellular" in keys:
         n.update({"uart_cell_tx": "CELL_TX", "uart_cell_rx": "CELL_RX",
                   "cell_pwrkey": "CELL_PWRKEY", "cell_rst": "CELL_RST"})
@@ -492,14 +658,18 @@ def compose(spec, blocks, out_path):
         x = X0 + MARGIN
         rowh = 0
         for k in rkeys:
-            txt, w, h = BLOCK_TABLE[k](x, ytop, n, nets)
+            def build(bx, by, kk=k):
+                if kk in dyn:
+                    return block_sourced_sensor(bx, by, n, nets, dyn[kk], kk)
+                return BLOCK_TABLE[kk](bx, by, n, nets)
+            txt, w, h = build(x, ytop)
             # wrap to a new sub-row if this band overflows the width budget
             if x > X0 + MARGIN and (x + w - X0) > ROW_BUDGET:
                 maxright = max(maxright, x - GAP)  # capture this sub-row's reach
                 x = X0 + MARGIN
                 ytop += rowh + ROWGAP
                 rowh = 0
-                txt, w, h = BLOCK_TABLE[k](x, ytop, n, nets)
+                txt, w, h = build(x, ytop)
             body += txt
             x += w + GAP
             rowh = max(rowh, h)
@@ -565,7 +735,9 @@ def compose(spec, blocks, out_path):
     # coverage: what the spec asked for vs. what the library could build. The
     # pipeline surfaces `dropped` loudly so an incomplete board never reads as a
     # silent clean pass.
-    print("COMPOSE_COVERAGE:" + json.dumps({"mapped": keys, "dropped": dropped}))
+    mapped_out = [k for k in keys if k not in dyn] + \
+        ["sensor:" + dyn[k] for k in keys if k in dyn]
+    print("COMPOSE_COVERAGE:" + json.dumps({"mapped": mapped_out, "dropped": dropped}))
 
 
 def main():

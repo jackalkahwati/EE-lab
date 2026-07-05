@@ -1,13 +1,14 @@
 /**
  * Lists the real runs that exist on disk under public/runs/<id>, so the UI can
  * show every past board (each with its OWN id + artifacts) instead of only the
- * in-memory seed runs. Each entry is built from that run's own snapshot —
+ * in-memory seed runs. Each entry is built from that run's own snapshot , 
  * board.json (geometry/DRC) + last-run.json (prompt/status) + bom.json (line
- * count) — so a run can only ever describe its own board.
+ * count), so a run can only ever describe its own board.
  */
 import fs from 'node:fs'
 import path from 'node:path'
 import type { Run, StageId, StageState, RunStatus } from '@/lib/firstlight'
+import { getUser, sessionEmail } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,7 +23,20 @@ function readJson(p: string): Record<string, unknown> | unknown[] | null {
   }
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  // per-account history: a signed-in user sees their own runs plus the
+  // unowned demo/showcase runs; runs owned by OTHER accounts stay private.
+  const email = sessionEmail(req)
+  const mine = new Set(email ? (getUser(email)?.runIds ?? []) : [])
+  const owned = new Set<string>()
+  try {
+    const store = JSON.parse(
+      fs.readFileSync(path.join(process.cwd(), 'data/users.json'), 'utf8'),
+    ) as Record<string, { runIds?: string[] }>
+    for (const u of Object.values(store)) for (const r of u.runIds ?? []) owned.add(r)
+  } catch {
+    /* no accounts yet, everything is demo */
+  }
   const runsDir = path.join(process.cwd(), 'public/runs')
   let ids: string[] = []
   try {
@@ -36,9 +50,11 @@ export async function GET() {
 
   const runs: Run[] = []
   for (const id of ids) {
+    // visibility: unowned dirs are shared demos; owned dirs only for the owner
+    if (owned.has(id) && !mine.has(id)) continue
     const dataDir = path.join(runsDir, id, 'data')
     const board = readJson(path.join(dataDir, 'board.json')) as Record<string, any> | null
-    // a run that never produced a board.json never built a board — skip it rather
+    // a run that never produced a board.json never built a board, skip it rather
     // than show a phantom entry with no board behind it.
     if (!board) continue
     const lr = (readJson(path.join(dataDir, 'last-run.json')) as Record<string, any>) ?? {}
@@ -46,7 +62,7 @@ export async function GET() {
     const bomLines = Array.isArray(bom) ? bom.length : 0
 
     const drcPass = (board.drc?.violations ?? 0) === 0
-    // unconnected pads (missing connections) make a board not fabricable — they
+    // unconnected pads (missing connections) make a board not fabricable, they
     // fail the gate even when a zone "serves" the net (see extract_stats.py).
     const connected = (board.drc?.unconnectedItems ?? 0) === 0
     const placePass =
@@ -84,10 +100,10 @@ export async function GET() {
     const lrRunId = String(lr.runId || '')
     const lrIsThisRun = !lrRunId || lrRunId === id
     let name: string
-    if (src.includes('dut-power')) name = 'FL-1 DUT Power + Fast-Trip — Rev A'
-    else if (src.includes('rev-a-routed')) name = 'FL-1 Rev A — live board'
+    if (src.includes('dut-power')) name = 'FL-1 DUT Power + Fast-Trip, Rev A'
+    else if (src.includes('rev-a-routed')) name = 'FL-1 Rev A, live board'
     else if (lrIsThisRun) name = String(lr.composeSpec?.boardClass || lr.prompt || id)
-    else name = id // report belongs to another run — don't borrow its name
+    else name = id // report belongs to another run, don't borrow its name
     const prompt = lrIsThisRun ? String(lr.prompt || name) : name
     runs.push({
       id,
@@ -99,6 +115,8 @@ export async function GET() {
       prompt,
       real: true,
       runDir: `/runs/${id}`,
+      parentId: (lrIsThisRun && lr.parentId) ? String(lr.parentId) : undefined,
+      revNote: (lrIsThisRun && lr.revNote) ? String(lr.revNote) : undefined,
       stages,
       metrics: {
         netsRouted: board.netsRouted ?? 0,
@@ -110,7 +128,7 @@ export async function GET() {
         bomLines,
         boardSize: board.boardSize
           ? `${Math.round(board.boardSize.wMm)} × ${Math.round(board.boardSize.hMm)} mm`
-          : '—',
+          : ', ',
         layers: board.layers ?? 0,
         routeTimeSec: 0,
       },

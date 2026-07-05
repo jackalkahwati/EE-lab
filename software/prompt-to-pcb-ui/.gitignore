@@ -23,3 +23,4 @@ public/data/last-run.md
 
 # per-run artifact snapshots (regenerated each run)
 public/runs/
+data/

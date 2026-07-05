@@ -94,10 +94,10 @@ export function BomTable({ lines }: { lines?: BomLine[] | null }) {
                   {line.qty}
                 </td>
                 <td className="px-3 py-1.5 text-right font-mono tabular-nums text-muted-foreground">
-                  {line.unitPrice > 0 ? line.unitPrice.toFixed(3) : '—'}
+                  {line.unitPrice > 0 ? line.unitPrice.toFixed(3) : ', '}
                 </td>
                 <td className="px-3 py-1.5 text-right font-mono tabular-nums text-foreground">
-                  {lineTotal(line) > 0 ? lineTotal(line).toFixed(2) : '—'}
+                  {lineTotal(line) > 0 ? lineTotal(line).toFixed(2) : ', '}
                 </td>
               </tr>
             ))}

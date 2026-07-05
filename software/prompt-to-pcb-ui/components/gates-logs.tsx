@@ -43,7 +43,7 @@ type RepairOp =
 function opForRule(rule: string): { op: RepairOp; label: string } | null {
   const r = rule.toLowerCase()
   // unconnected pads are almost always SMD power/gnd pins with no via to their
-  // plane — stitch_to_plane fixes that directly (reroute is the signal-net path).
+  // plane, stitch_to_plane fixes that directly (reroute is the signal-net path).
   if (r.includes('unconnected'))
     return { op: 'stitch-plane', label: 'Fix: stitch pads to plane' }
   if (r.includes('drc violations')) return { op: 'clearance', label: 'Fix: repair clearance' }
@@ -96,7 +96,7 @@ export function GatesLogs({
         const a = data.after
         setResult(
           `${op}: violations ${b.violations}→${a.violations}, ` +
-            `unconnected ${b.unconnected}→${a.unconnected} — ${data.status}`,
+            `unconnected ${b.unconnected}→${a.unconnected}, ${data.status}`,
         )
         onRefresh?.()
       }
@@ -142,7 +142,7 @@ export function GatesLogs({
           <span className="size-2 rounded-full bg-primary/60" />
           <span className="size-2 rounded-full bg-success/60" />
           <span className="ml-1 font-mono text-[10px] text-muted-foreground">
-            firstlight — pipeline.log
+            firstlight, pipeline.log
           </span>
         </div>
         <div
@@ -176,7 +176,7 @@ export function GatesLogs({
 
       {/* gate report cards */}
       <div className="flex w-full flex-col gap-3 lg:w-80 lg:shrink-0">
-        {/* incremental-repair toolbar — fix defects without re-running the pipeline */}
+        {/* incremental-repair toolbar, fix defects without re-running the pipeline */}
         {canRepair && (
           <div className="flex flex-col gap-2 rounded-sm border border-border bg-card p-2.5">
             <div className="flex items-center gap-2">
@@ -273,7 +273,7 @@ export function GatesLogs({
                       />
                     )}
                     <span className="text-foreground/80">
-                      {check.rule} —{' '}
+                      {check.rule} , {' '}
                       <span
                         className={
                           check.pass ? 'text-success' : 'text-destructive'
@@ -317,7 +317,7 @@ export function GatesLogs({
                   reports
                     .flatMap((r) => r.checks)
                     .find((c) => !c.pass)?.rule ?? 'see report'
-                } — ${
+                }, ${
                   reports
                     .flatMap((r) => r.checks)
                     .find((c) => !c.pass)?.measured ?? ''

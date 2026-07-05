@@ -25,15 +25,107 @@ FP_DIR = "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints"
 # ---- interface contracts ----------------------------------------------------
 # role -> (pin-name aliases, net-key, cardinality, required). The net-key is
 # resolved against the `nets` dict the caller passes (so the same contract wires
-# into whatever the board calls its I2C bus). Power/gnd/addr take many pins.
+# into whatever the board calls its bus). Power/gnd resolve to the rail nets;
+# every other net-key is looked up in the caller's `nets` dict, so the block
+# that instantiates a part supplies e.g. nets["spi_sck"], nets["vmotor"].
+#
+# Aliases are matched after _norm() (uppercase, strip everything but [A-Z0-9+]),
+# so "~{EN}" matches "EN", "V_{DD}" matches "VDD", "Vin+" matches "VIN+".
+#
+# Cardinality: "one" binds the first matching pin then stops; "multi" binds
+# every matching pin (power/gnd rails, multi-pin ground pads, address straps).
+# Support passives specific to a part (charge-pump caps, sense resistors,
+# decoupling) are the instantiating BLOCK's job, not the contract's — the
+# contract only defines how the part talks to the rest of the board.
+
+# shared alias sets
+_PWR = ["+VS", "VS", "VDD", "VCC", "VDDIO", "VLOGIC", "V+", "AVDD", "DVDD",
+        "VBAT", "VCCIO", "VIO", "AVCC", "DVCC", "VDDA", "VDDD", "VIN2"]
+_GND = ["GND", "VSS", "AGND", "DGND", "EP", "PAD", "GND1", "EPAD", "PGND",
+        "GNDA", "GNDD", "VSSA", "VSSD"]
+
 CONTRACTS = {
+    # ---- I2C ----------------------------------------------------------------
     "i2c_sensor": [
-        ("power", ["+VS", "VS", "VDD", "VCC", "VDDIO", "VLOGIC", "V+", "AVDD", "DVDD", "VBAT"], "power", "multi", True),
-        ("gnd", ["GND", "VSS", "AGND", "DGND", "EP", "PAD", "GND1", "EPAD"], "gnd", "multi", True),
+        ("power", _PWR, "power", "multi", True),
+        ("gnd", _GND, "gnd", "multi", True),
         ("scl", ["SCL", "SCLK", "SCLSPC", "SCK"], "i2c_scl", "one", True),
         ("sda", ["SDA", "SDI", "SDASDI", "SDIO"], "i2c_sda", "one", True),
         ("int", ["INT", "INT1", "DRDY", "OS", "ALERT", "IRQ"], "int", "one", False),
         ("addr", ["A0", "A1", "A2", "AD0", "ADDR", "ADD", "SDO"], "gnd", "multi", False),
+    ],
+    # Generic I2C peripheral (EEPROM, GPIO expander, RTC, sensor). RESET ties
+    # high, WP ties low, address straps tie low, by default.
+    "i2c_device": [
+        ("power", _PWR, "power", "multi", True),
+        ("gnd", _GND, "gnd", "multi", True),
+        ("scl", ["SCL", "SCK", "SCLK"], "i2c_scl", "one", True),
+        ("sda", ["SDA", "SDIO", "SDI"], "i2c_sda", "one", True),
+        ("addr", ["A0", "A1", "A2", "AD0", "AD1", "ADDR"], "gnd", "multi", False),
+        ("int", ["INT", "INTA", "INTB", "ALERT", "DRDY", "IRQ"], "int", "multi", False),
+        ("reset", ["RESET", "RST", "MR"], "power", "one", False),
+        ("wp", ["WP"], "gnd", "one", False),
+    ],
+    # ---- SPI ----------------------------------------------------------------
+    # Generic SPI peripheral (ADC, driver-config, flash, DAC).
+    "spi_device": [
+        ("power", _PWR, "power", "multi", True),
+        ("gnd", _GND, "gnd", "multi", True),
+        ("sck", ["SCK", "SCLK", "SPC"], "spi_sck", "one", True),
+        ("mosi", ["MOSI", "SDI", "DIN", "SI"], "spi_mosi", "one", True),
+        ("miso", ["MISO", "SDO", "DOUT", "SO"], "spi_miso", "one", False),
+        ("cs", ["CS", "NSS", "SS", "CSB", "CSN"], "spi_cs", "one", True),
+        ("int", ["INT", "DRDY", "IRQ", "ALERT"], "int", "one", False),
+        ("reset", ["RESET", "RST"], "power", "one", False),
+    ],
+    # ---- Stepper driver (TMC / DRV / A4988 class) --------------------------
+    "stepper_driver": [
+        ("power_motor", ["VS", "VM", "VMOT", "VBB", "VMOTOR", "VPWR"], "vmotor", "multi", True),
+        ("power_io", ["VCC_IO", "VCCIO", "VIO", "VDD", "VCC", "VIN2"], "power", "multi", True),
+        ("gnd", _GND, "gnd", "multi", True),
+        ("step", ["STEP", "STP"], "step", "one", True),
+        ("dir", ["DIR"], "dir", "one", True),
+        ("en", ["EN", "ENN", "ENABLE", "ENABLEN"], "en", "one", False),
+        ("motor_a1", ["OA1", "A1", "M1A", "AOUT1", "OUT1A", "MA1"], "motor_a1", "one", True),
+        ("motor_a2", ["OA2", "A2", "M2A", "AOUT2", "OUT2A", "MA2"], "motor_a2", "one", True),
+        ("motor_b1", ["OB1", "B1", "M1B", "BOUT1", "OUT1B", "MB1"], "motor_b1", "one", True),
+        ("motor_b2", ["OB2", "B2", "M2B", "BOUT2", "OUT2B", "MB2"], "motor_b2", "one", True),
+        ("cp_out", ["CPO"], "cp_out", "one", False),          # charge pump +
+        ("cp_in", ["CPI"], "cp_in", "one", False),            # charge pump -
+        ("vcp", ["VCP", "CP"], "vcp", "one", False),          # charge pump reservoir
+        ("reg_out", ["5VOUT", "VDDOUT", "VCCOUT"], "reg_out", "one", False),
+        ("sense_a", ["BRA", "SRA", "SNSA"], "gnd", "one", False),   # RDSon sense -> GND
+        ("sense_b", ["BRB", "SRB", "SNSB"], "gnd", "one", False),
+    ],
+    # ---- CAN transceiver (SN65HVD / MCP2551 class) -------------------------
+    "can_transceiver": [
+        ("power", ["VCC", "VDD"], "power", "multi", True),
+        ("gnd", ["GND", "VSS"], "gnd", "multi", True),
+        ("txd", ["D", "TXD", "TX", "CTX"], "can_txd", "one", True),
+        ("rxd", ["R", "RXD", "RX", "CRX"], "can_rxd", "one", True),
+        ("canh", ["CANH"], "canh", "one", True),
+        ("canl", ["CANL"], "canl", "one", True),
+        ("slope", ["RS", "STB", "STBY", "S", "MODE"], "gnd", "one", False),
+    ],
+    # ---- Current / power monitor (INA class, I2C) --------------------------
+    "current_sense": [
+        ("power", ["VS", "VDD", "VCC"], "power", "multi", True),
+        ("gnd", ["GND", "VSS"], "gnd", "multi", True),
+        ("scl", ["SCL"], "i2c_scl", "one", True),
+        ("sda", ["SDA"], "i2c_sda", "one", True),
+        ("shunt_hi", ["VIN+", "IN+", "VINP", "SENSE+"], "shunt_hi", "one", True),
+        ("shunt_lo", ["VIN-", "IN-", "VINN", "SENSE-"], "shunt_lo", "one", True),
+        ("vbus", ["VBUS"], "shunt_lo", "one", False),
+        ("alert", ["ALERT"], "int", "one", False),
+        ("addr", ["A0", "A1"], "gnd", "multi", False),
+    ],
+    # ---- Adjustable / LDO regulator ----------------------------------------
+    "regulator": [
+        ("vin", ["VIN", "IN", "V+", "VI"], "vin", "multi", True),
+        ("vout", ["VOUT", "OUT", "VO"], "vout", "multi", True),
+        ("gnd", _GND, "gnd", "multi", True),
+        ("en", ["EN", "SHDN", "ENABLE"], "en", "one", False),
+        ("adj", ["ADJ", "FB", "SET", "VSENSE", "SENSE"], "adj", "one", False),
     ],
 }
 
@@ -98,6 +190,17 @@ def _norm(s):
     return re.sub(r"[^A-Z0-9+]", "", s.upper())
 
 
+def _pin_tokens(nm):
+    """Normalized tokens of a pin name, splitting multiplexed pins on '/'.
+    'SCK/CFG2' -> {'SCK','CFG2'}, so an SPI 'sck' alias binds a configurable
+    driver's shared SPI/config pin. Also keeps the whole normalized name."""
+    parts = re.split(r"[/]", nm)
+    toks = {_norm(p) for p in parts if p.strip()}
+    toks.add(_norm(nm))
+    toks.discard("")
+    return toks
+
+
 def bind(pins, interface, nets):
     """Bind a part's pins to the interface contract. Returns
     (pmap {number: netname}, report dict). Power/gnd resolve to the rail nets;
@@ -110,7 +213,7 @@ def bind(pins, interface, nets):
         for num, nm in pins:
             if num in used:
                 continue
-            if _norm(nm) in naliases:
+            if _pin_tokens(nm) & naliases:
                 net = rail.get(netkey) or nets.get(netkey)
                 if not net:
                     continue
@@ -257,12 +360,56 @@ def resolve(query, interface, nets):
             "power_pins": rep["bound"].get("power", []), "report": rep}
 
 
+# a superset of net-keys any contract might ask for, so the self-test can bind
+# every archetype without a per-part net map.
+_TEST_NETS = {
+    "power": "+3V3", "gnd": "GND",
+    "i2c_scl": "I2C_SCL", "i2c_sda": "I2C_SDA", "int": "IRQ",
+    "spi_sck": "SPI_SCK", "spi_mosi": "SPI_MOSI", "spi_miso": "SPI_MISO", "spi_cs": "SPI_CS",
+    "vmotor": "+24V", "step": "STEP", "dir": "DIR", "en": "MOT_EN",
+    "motor_a1": "M_A1", "motor_a2": "M_A2", "motor_b1": "M_B1", "motor_b2": "M_B2",
+    "can_txd": "CAN_TXD", "can_rxd": "CAN_RXD", "canh": "CANH", "canl": "CANL",
+    "shunt_hi": "SHUNT_HI", "shunt_lo": "SHUNT_LO",
+    "vin": "+24V", "vout": "+5V", "adj": "REG_ADJ",
+}
+
+# self-test matrix: (query, interface) covering the new archetypes against real
+# KiCad symbols. Run `resolve_part.py --selftest`.
+_SELFTEST = [
+    ("LM75B", "i2c_sensor"),
+    ("24LC256", "i2c_device"),
+    ("MCP23017", "i2c_device"),
+    ("INA228", "current_sense"),
+    ("TMC2209", "stepper_driver"),
+    ("TMC5160", "spi_device"),
+    ("SN65HVD230", "can_transceiver"),
+]
+
+
+def _print_resolution(query, interface, r):
+    if "error" in r:
+        print("  FAIL %-12s %-16s : %s" % (query, interface, r["error"]))
+        return False
+    print("  OK   %-12s %-16s -> %s:%s" % (query, interface, r["lib"], r["footprint"]))
+    bound = r["report"]["bound"]
+    print("       roles:", ", ".join(sorted(bound)))
+    return True
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--selftest":
+        print("part-resolution self-test (%d archetypes):" % len(_SELFTEST))
+        ok = 0
+        for query, interface in _SELFTEST:
+            r = resolve(query, interface, _TEST_NETS)
+            if _print_resolution(query, interface, r):
+                ok += 1
+        print("%d/%d resolved" % (ok, len(_SELFTEST)))
+        sys.exit(0 if ok == len(_SELFTEST) else 1)
+
     query = sys.argv[1] if len(sys.argv) > 1 else "LM75B"
     interface = sys.argv[2] if len(sys.argv) > 2 else "i2c_sensor"
-    nets = {"power": "+3V3", "gnd": "GND", "i2c_scl": "I2C_SCL",
-            "i2c_sda": "I2C_SDA", "int": "SENSOR_INT"}
-    r = resolve(query, interface, nets)
+    r = resolve(query, interface, _TEST_NETS)
     if "error" in r:
         print("RESOLVE ERROR:", r["error"])
         if "report" in r:

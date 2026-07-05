@@ -3,7 +3,7 @@
  * whole pipeline. Loads that run's persisted variant.kicad_pcb (written by the
  * run route), applies ONE targeted fix, refills zones, re-runs DRC, and rewrites
  * the run's own artifacts (board.json / bom.json / drc.json / renders). Touches
- * only public/runs/<id>/ — never the shared reference or any other run.
+ * only public/runs/<id>/, never the shared reference or any other run.
  *
  * POST { runId, op }
  *   op = 'revalidate' | 'clearance' | 'placement' | 'stitch' | 'stitch-plane' | 'reroute' | 'diagnose'
@@ -34,7 +34,7 @@ type Op = (typeof OPS)[number]
 const globalState = globalThis as unknown as { __pipelineRunning?: boolean }
 
 /** spawn a step, collect output, resolve {code,out}. KiCad swig scripts may
- *  segfault at teardown AFTER a clean save, so we never fail on exit code —
+ *  segfault at teardown AFTER a clean save, so we never fail on exit code , 
  *  success is judged by the re-DRC delta, not the process code. */
 function sh(cmd: string, args: string[], cwd?: string): Promise<{ code: number; out: string }> {
   return new Promise((resolve) => {
@@ -48,6 +48,13 @@ function sh(cmd: string, args: string[], cwd?: string): Promise<{ code: number; 
 }
 
 export async function POST(req: Request) {
+  // Repairs re-run KiCad/Python locally, lab workstation only.
+  if (!fs.existsSync(KCLI)) {
+    return Response.json(
+      { error: 'Repair operations run on the FirstLight lab workstation and are not available in this preview deployment.' },
+      { status: 503 },
+    )
+  }
   let body: { runId?: string; op?: string }
   try {
     body = await req.json()
@@ -79,7 +86,7 @@ export async function POST(req: Request) {
       return Response.json(
         {
           error:
-            'no editable board for this run — it predates board persistence. Re-run it once to enable repair.',
+            'no editable board for this run, it predates board persistence. Re-run it once to enable repair.',
         },
         { status: 404 },
       )
@@ -105,7 +112,7 @@ export async function POST(req: Request) {
         const bj = JSON.parse(fs.readFileSync(path.join(pubData, 'board.json'), 'utf8'))
         nets = Array.isArray(bj.unroutedNets) ? bj.unroutedNets : []
       } catch {
-        /* no board.json — leave nets empty */
+        /* no board.json, leave nets empty */
       }
       if (nets.length === 0)
         return Response.json({ ok: true, op, before, diagnosis: 'No open nets to diagnose.', log })
@@ -129,6 +136,10 @@ export async function POST(req: Request) {
       const r = await sh(KPY, [script('stitch_to_plane.py'), board, drcPath])
       const m = r.out.match(/STITCHED (\d+)/)
       if (m) log.push(`placed ${m[1]} plane via(s)`)
+      log.push('stitch_islands: via-stitching isolated pour islands to their plane…')
+      const ri = await sh(KPY, [script('stitch_islands.py'), board])
+      const mi = ri.out.match(/STITCHED_ISLANDS (\d+)/)
+      if (mi) log.push(`placed ${mi[1]} island via(s)`)
     } else if (op === 'reroute') {
       log.push('local_reroute: ripping & re-routing open nets on a fine grid (with vias)…')
       await sh(KPY, [script('local_reroute.py'), board, drcPath])
@@ -172,10 +183,40 @@ export async function POST(req: Request) {
     }
 
     const after = readDrc()
-    const status = after.violations === 0 && after.unconnected === 0 ? 'PASSED' : 'GATE FAILED'
+    let status = after.violations === 0 && after.unconnected === 0 ? 'PASSED' : 'GATE FAILED'
+
+    // a repair that turns the board clean must update the run's RECORD too , 
+    // otherwise last-run.json keeps reporting the pre-repair failure forever.
+    // ERC was blocked when validation failed, so run it for real now.
+    if (status === 'PASSED') {
+      const erc = await sh(KPY, [script('erc_check.py'), board])
+      const ercOk = erc.code === 0 || /ERC[ _]?OK|0 errors/i.test(erc.out)
+      if (!ercOk) {
+        status = 'GATE FAILED'
+        log.push('ERC still failing after repair, run stays GATE FAILED')
+      }
+      try {
+        const lrPath = path.join(runRoot, 'data/last-run.json')
+        const lr = JSON.parse(fs.readFileSync(lrPath, 'utf8'))
+        lr.status = status
+        lr.repairedAt = new Date().toISOString()
+        lr.stages = lr.stages ?? {}
+        lr.stages.validation = { state: status === 'PASSED' ? 'passed' : 'failed' }
+        lr.stages.erc = { state: ercOk ? 'passed' : 'failed' }
+        if (status === 'PASSED' && lr.stages.firmware?.state === 'blocked') {
+          // firmware never ran for this board, leave it blocked, but that's
+          // not a gate failure once electrical checks pass
+          lr.stages.firmware = { state: 'blocked' }
+        }
+        fs.writeFileSync(lrPath, JSON.stringify(lr, null, 2))
+        log.push(`run report updated → ${status} (validation ${lr.stages.validation.state}, erc ${lr.stages.erc.state})`)
+      } catch {
+        log.push('could not update last-run.json (report may show stale status)')
+      }
+    }
     log.push(
       `done: violations ${before.violations}→${after.violations}, ` +
-        `unconnected ${before.unconnected}→${after.unconnected} — ${status}`,
+        `unconnected ${before.unconnected}→${after.unconnected}, ${status}`,
     )
     return Response.json({ ok: true, op, before, after, status, log })
   } catch (err) {

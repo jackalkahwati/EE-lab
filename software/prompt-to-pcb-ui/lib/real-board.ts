@@ -1,6 +1,6 @@
 /**
  * Loader for real KiCad board artifacts synced into public/ by
- * scripts/sync-board.sh. Everything here reflects the actual saved board —
+ * scripts/sync-board.sh. Everything here reflects the actual saved board , 
  * numbers come from pcbnew + the kicad-cli DRC referee, never invented.
  */
 import type {
@@ -74,7 +74,7 @@ function buildRun(b: RealBoardJson): Run {
   const logs: LogLine[] = [
     { stage: 'design', prefix: 'ato', text: `real board: ${b.source.split('/').slice(-1)[0]}` },
     { stage: 'design', prefix: 'ato', text: `netlist: ${b.netsTotal} nets, ${b.components} components`, level: 'ok' },
-    { stage: 'design', prefix: 'ato', text: 'GATE design: BUILD GREEN — PASS', level: 'ok' },
+    { stage: 'design', prefix: 'ato', text: 'GATE design: BUILD GREEN, PASS', level: 'ok' },
     { stage: 'placement', prefix: 'place', text: `courtyard sweep: ${b.placement.overlaps} overlaps, ${b.placement.offBoard.length} off-board`, level: placementPass ? 'ok' : 'err' },
     { stage: 'placement', prefix: 'place', text: `HPWL = ${b.hpwlMm.toLocaleString()} mm` },
     { stage: 'placement', prefix: 'place', text: `GATE placement: ${placementPass ? 'PASS' : 'FAIL'}`, level: placementPass ? 'ok' : 'err' },
@@ -85,8 +85,8 @@ function buildRun(b: RealBoardJson): Run {
       prefix: 'route',
       text:
         b.drc.unconnectedItems === 0
-          ? 'GATE emission: every pad connected to its net — PASS'
-          : `GATE emission: ${b.drc.unconnectedItems} pad(s) not connected to their net — FAIL`,
+          ? 'GATE emission: every pad connected to its net, PASS'
+          : `GATE emission: ${b.drc.unconnectedItems} pad(s) not connected to their net, FAIL`,
       level: b.drc.unconnectedItems === 0 ? 'ok' : 'err',
     },
     { stage: 'validation', prefix: 'drc', text: `kicad-cli pcb drc (${b.drc.kicadVersion}) → ${b.drc.violations} violations, ${b.drc.unconnectedItems} unconnected items`, level: drcPass ? 'ok' : 'err' },
@@ -96,16 +96,16 @@ function buildRun(b: RealBoardJson): Run {
       text: `${v.type}: ${v.description}`,
       level: 'err',
     })),
-    { stage: 'validation', prefix: 'drc', text: `GATE validation: DRC = ${b.drc.violations} — ${drcPass ? 'PASS' : 'FAIL'}`, level: drcPass ? 'ok' : 'err' },
+    { stage: 'validation', prefix: 'drc', text: `GATE validation: DRC = ${b.drc.violations}, ${drcPass ? 'PASS' : 'FAIL'}`, level: drcPass ? 'ok' : 'err' },
   ]
 
   return {
     id: REAL_RUN_ID,
-    name: 'FL-1 Rev A — live board',
+    name: 'FL-1 Rev A, live board',
     timestamp: b.drc.date || 'synced from KiCad',
     status: passed ? 'PASSED' : 'GATE FAILED',
     prompt:
-      '8x11 relay probe matrix, 4-layer, Pico 2 control, USB-C, 24V input — real rev-a-routed.kicad_pcb',
+      '8x11 relay probe matrix, 4-layer, Pico 2 control, USB-C, 24V input, real rev-a-routed.kicad_pcb',
     real: true,
     stages: [
       { id: 'design', state: 'passed', elapsedMs: 0 },

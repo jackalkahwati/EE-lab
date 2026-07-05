@@ -4,10 +4,8 @@ import { useState } from 'react'
 import { MessagesSquare } from 'lucide-react'
 
 const EXAMPLES = [
-  '8-probe relay matrix, scope + DMM, RP2040, 24V',
-  'compact 4-probe matrix, scope and DMM only, 12V',
-  '6-probe, scope + logic analyzer + DAQ lanes, 24V',
-  'tiny 2-probe continuity tester, 5V',
+  'LoRa GNSS asset tracker, USB-C',
+  '8-probe relay test matrix, RP2040, 24V',
 ]
 
 export function PromptComposer({
@@ -59,7 +57,7 @@ export function PromptComposer({
       )}
       <div className="flex items-center justify-between">
         <span className="font-mono text-[10px] text-muted-foreground">
-          ⌘↵ · the interview gathers a complete spec, then generates
+          opens the design interview · ⌘↵
         </span>
         <button
           type="button"
@@ -69,7 +67,7 @@ export function PromptComposer({
           title="Describe any board; the interview asks follow-ups until it has enough to build"
         >
           <MessagesSquare className="size-3.5" />
-          {disabled ? 'Pipeline running…' : 'Design Board'}
+          {disabled ? 'Pipeline running…' : 'Start design interview'}
         </button>
       </div>
     </div>

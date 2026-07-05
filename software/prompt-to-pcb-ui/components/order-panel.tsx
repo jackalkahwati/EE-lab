@@ -7,7 +7,7 @@ import { Download, ShoppingCart, CircuitBoard, Cpu, Boxes } from 'lucide-react'
 const QUANTITIES = [5, 10, 25, 50, 100] as const
 
 /** Algorithmic PCB-fab quote (JLCPCB-style): board area × layer factor × qty
- *  discount + tooling. Reference model — a live fab API would replace it. */
+ *  discount + tooling. Reference model, a live fab API would replace it. */
 function pcbQuote(wMm: number, hMm: number, layers: number, qty: number) {
   const areaCm2 = (wMm / 10) * (hMm / 10)
   const layerMult = layers >= 6 ? 2.6 : layers >= 4 ? 1.7 : 1.0
@@ -204,7 +204,7 @@ export function OrderPanel({
         <p className="mt-2 font-mono text-[10px] leading-relaxed text-muted-foreground">
           Quote is a reference estimate (PCB area × layers × qty). Live pricing
           and one-click checkout connect a fab account (JLCPCB / PCBWay) + payment
-          — gerbers, BOM and pick-and-place are already generated and attached.
+         , gerbers, BOM and pick-and-place are already generated and attached.
         </p>
       </div>
     </div>
