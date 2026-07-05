@@ -400,3 +400,28 @@ routes 100% clean:
 relay matrix (B-4).** This confirms the breadth thesis — coarse-part FL-1 boards
 route cleanly today; the fine-pitch boards (motion, DC-measure) wait on the
 scoped fanout rework.
+
+---
+
+## Geometry-based stitch heal — 2026-07-06 (done)
+
+Reworked `stitch_to_plane.py` from DRC-report-driven to **geometry-driven**: it
+now iterates every footprint pad and stitches a via into any power/gnd SMD pad
+(outer layer, net has a plane zone) that lacks a same-net via — decided from
+geometry alone, no DRC report. Idempotent (skips already-stitched pads), refills
+zones, and the pipeline runs it **unconditionally** (a 0-unconnected first DRC
+can still hide via-less pads via KiCad's false "zone-served" credit).
+
+Verified no regression: comms 0/0, relay matrix 0/0 (STITCHED 6), DC-measure 0
+unconnected. On DC-measure the geometry check found **13 of 14** zone-net SMD
+pads via-connected and correctly flagged the **1** that is not (U8.7 GND on the
+0.5mm-pitch INA228) — a pad DRC credits as connected but that physically has no
+via. The 0.6mm via can't clear its neighbour, so it's skipped: exactly the
+fine-pitch case Fix A (finer via class) addresses.
+
+**Why this matters:** the heal is now robust to design-rule / via-class changes,
+which is what broke the earlier Fix A attempt (DRC-driven stitch under-stitched
+when the project relaxed min-via). With geometry-based selection, a Fix A retry
+(0.4mm via on the fine-pitch pad + the proven `.kicad_pro` min-via relaxation)
+can be layered on cleanly without the under-stitching regression. flroute
+regression harness unaffected (it never runs the stitch heal): still 174/174.

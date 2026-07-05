@@ -469,13 +469,17 @@ export async function GET(req: Request) {
           log('validation', 'could not parse DRC report', 'err')
         }
 
-        // ---- auto-heal: unconnected items are mechanically closable ---------
-        // stitch_to_plane drops a via from each isolated power/gnd PAD into its
-        // plane; stitch_islands does the same for isolated outer-layer pour
-        // ISLANDS (the "Zone [GND] on F.Cu ↔ Zone [GND] on F.Cu" DRC case).
-        // Both refill zones; then re-DRC and gate on the healed numbers.
-        if (unconnected > 0) {
-          log('validation', `auto-heal: ${unconnected} missing connection(s), via-stitching pads and pour islands…`)
+        // ---- auto-heal: GEOMETRY-based via stitching (always run) -----------
+        // stitch_to_plane drops a via from EVERY power/gnd SMD pad that lacks
+        // one into its plane — decided from geometry, not the DRC report, so it
+        // is robust to design-rule / via-class changes AND to KiCad's false
+        // "zone-served" credit (a pad the DRC calls connected but that has no
+        // physical via). stitch_islands does the same for isolated outer-layer
+        // pour ISLANDS. Both refill zones; then re-DRC and gate on the healed
+        // numbers. Runs unconditionally because a 0-unconnected first DRC can
+        // still hide via-less pads.
+        {
+          log('validation', 'auto-heal: geometry via-stitch of power/gnd pads + pour islands…')
           const sp = await exec('validation', KPY, [
             path.join(appDir, 'scripts/stitch_to_plane.py'), variantBoard, drcPath,
           ])
