@@ -40,6 +40,8 @@ FALLBACK = {
     "stepper_driver": "TMC2209",
     "can_transceiver": "SN65HVD230",
     "current_sense": "INA228",
+    "shift_register": "74HC595",
+    "darlington_array": "ULN2803A",
 }
 
 # routability of common package families parsed from a DigiKey description

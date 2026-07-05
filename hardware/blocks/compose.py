@@ -436,6 +436,46 @@ def block_dc_measure(x, y, n, nets):
     return b, 32, 28
 
 
+def block_relay_matrix(x, y, n, nets):
+    """FL-1 relay / instrument-routing matrix (B-4) — Compose's native domain,
+    built entirely from the block layer on coarse resolved parts. An MCU shifts a
+    select word into a 74HC595, a ULN2803 buffers those bits to relay coils, and
+    each DPDT relay multiplexes a probe point onto the shared instrument bus.
+    All SOIC/through-hole (>=1.27mm), so it routes clean."""
+    # 74HC595: SPI serial in -> 8 parallel select lines
+    b, _ = sourced_ic("74HC595 8-bit shift register", "shift_register", {
+        "power": "+5V", "gnd": "GND",
+        "sr_ser": n["spi_mosi"], "sr_srclk": n["spi_sck"], "sr_rclk": n["spi_cs"],
+        "sr_q0": "SR_Q0", "sr_q1": "SR_Q1", "sr_q2": "SR_Q2", "sr_q3": "SR_Q3"},
+        "U7", x + 8, y + 10, 0, nets)
+    b += cap("C20", x + 8, y + 18, "+5V", "GND", nets)
+    # ULN2803: buffer the select bits to relay-coil sinks (COM -> +5V flyback)
+    b2, _ = sourced_ic("ULN2803 octal darlington driver", "darlington_array", {
+        "gnd": "GND", "drv_com": "+5V",
+        "drv_in0": "SR_Q0", "drv_in1": "SR_Q1", "drv_in2": "SR_Q2", "drv_in3": "SR_Q3",
+        "drv_out0": "COIL0", "drv_out1": "COIL1", "drv_out2": "COIL2", "drv_out3": "COIL3"},
+        "U8", x + 26, y + 10, 0, nets)
+    b += b2
+    # 4 DPDT signal relays (Omron G6K, compact SMD): coil pin 8->+5V, pin 1->
+    # driver sink; pole 1 COM(3)->instrument bus, NO(4)->its probe; pole 2 COM(6)
+    # /NO(5)->the Kelvin-sense bus + same probe. Energise a relay to route that
+    # probe onto the shared instrument bus.
+    for i in range(4):
+        rx = x + 10 + i * 15
+        b += place("Relay_SMD", "Relay_DPDT_Omron_G6K-2F-Y", "K%d" % (i + 1),
+                   rx, y + 36, 0, {
+                       "8": "+5V", "1": "COIL%d" % i,
+                       "3": "INSTR_BUS", "4": "PROBE%d" % i,
+                       "6": "INSTR_BUS2", "5": "PROBE%d" % i}, nets)
+    # instrument bus (2-wire Kelvin) + 4-probe input connector, below the relays
+    b += place("Connector_PinHeader_2.54mm", "PinHeader_1x02_P2.54mm_Vertical",
+               "J7", x + 4, y + 52, 0, {"1": "INSTR_BUS", "2": "INSTR_BUS2"}, nets)
+    b += place("Connector_PinHeader_2.54mm", "PinHeader_1x04_P2.54mm_Vertical",
+               "J9", x + 20, y + 52, 0,
+               {"1": "PROBE0", "2": "PROBE1", "3": "PROBE2", "4": "PROBE3"}, nets)
+    return b, 78, 62
+
+
 # free-text sensor detector for blocks no fixed key matched — these SOURCE a
 # real part instead of being dropped
 SENSOR_PAT = re.compile(
@@ -460,6 +500,7 @@ BLOCK_TABLE = {
     "comms": block_comms_can,
     "motion": block_motion_controller,
     "instrument": block_dc_measure,
+    "relaymatrix": block_relay_matrix,
 }
 
 
@@ -509,6 +550,9 @@ def _block_keys(s):
     if any(k in s for k in ("current sense", "current monitor", "dc measure",
                             "power monitor", "ina228", "instrument", "shunt")):
         add("instrument")
+    if any(k in s for k in ("relay matrix", "relay bank", "instrument matrix",
+                            "probe matrix", "switch matrix", "relay")):
+        add("relaymatrix")
     if "usbc" not in out and any(k in s for k in ("power", "regulator", "battery", "vin",
                                                   "5v", "3v3", "charg", "ldo", "buck",
                                                   "usb power", "usb-c power")):
@@ -577,10 +621,10 @@ LAYERS = '''  (layers
 # grows past the width budget, so the layout scales as blocks are added.
 ROW = {"power": 0, "usbc": 0, "mcu": 0, "imu": 0, "radio": 0, "antenna": 0,
        "gnss": 0, "cellular": 0, "tempsensor": 0, "comms": 0, "motion": 1,
-       "instrument": 0, "motors": 1}
+       "instrument": 0, "relaymatrix": 1, "motors": 1}
 COL = {"power": 0, "usbc": 0, "mcu": 2, "imu": 3, "tempsensor": 3, "gnss": 4,
        "radio": 5, "cellular": 6, "comms": 7, "antenna": 9, "motors": 1,
-       "motion": 3, "instrument": 4}
+       "motion": 3, "instrument": 4, "relaymatrix": 1}
 ROW_BUDGET = 170.0  # mm — wrap a band wider than this
 
 
@@ -635,6 +679,8 @@ def compose(spec, blocks, out_path):
         n.update({"uart_gps_tx": "GPS_TX", "uart_gps_rx": "GPS_RX"})
     if "comms" in keys:
         n.update({"can_txd": "CAN_TXD", "can_rxd": "CAN_RXD"})
+    if "relaymatrix" in keys and "spi_sck" not in n:
+        n.update({"spi_sck": "SPI_SCK", "spi_mosi": "SPI_MOSI", "spi_cs": "SR_LATCH"})
     if "motion" in keys:
         n.update({"step": "STEP", "dir": "DIR", "en": "MOT_EN"})
     if "cellular" in keys:

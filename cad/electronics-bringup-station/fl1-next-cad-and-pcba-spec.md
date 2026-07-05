@@ -274,3 +274,129 @@ the #1 Compose router priority.
 - **Comms head (B-8): done** — real, DRC-clean FL-1 board off the new layer.
 - **Motion (B-7) / DC-measure (B-9): correct designs, blocked on fanout routing.**
   They become fab-clean the moment the router escapes fine-pitch pads properly.
+
+---
+
+## Fanout routing investigation — 2026-07-05 (root-caused, not yet fixed)
+
+Goal: make the fine-pitch boards (motion TMC2209 VQFN, DC-measure INA228 TSSOP)
+DRC-clean. Baseline confirmed first: flroute regression harness **174/174 in 47s**.
+
+**Four experiments, all reverted, each ruling out a heal-level fix:**
+1. Global pad-aware via blocking → regressed the comms board (skipped a needed via).
+2. "Never worse" fine-pitch escape (escape outward, fall back to via-in-pad) →
+   comms protected (0/0) but escaped vias landed in the zone antipad gap and
+   **lost the plane connection** (more unconnected).
+3. Zone-verified escape (`HitTestFilledArea` requires the escaped via to sit on
+   the pour) → comms stayed 0/0, but on cramped 0.5mm parts there is **no
+   on-plane spot to escape to** — the pour is carved back around the pads — so
+   nothing changed.
+4. Finer via class (shrink stitch vias to 0.4/0.2) → the board **min-via (0.5mm)
+   lives in the KiCad project file, not the bare .kicad_pcb**, so `pcbnew` can't
+   persist a relaxed value and `kicad-cli` DRC still enforces 0.5mm.
+
+**Root cause (definitive):** via-in-pad on a 0.5mm-pitch part needs a via
+≤0.44mm to clear the neighbour pad (0.13mm fab clearance), but the board's
+minimum via is 0.5mm, and the plane pour is carved back around fine-pitch pads
+so there is no nearby on-plane spot to escape to. **This is not a heal-level
+problem.** The stitch heal physically cannot place a clean plane connection on a
+0.5mm-pitch pad under the current via rules.
+
+**The two real fixes (either works; both are scoped multi-part changes):**
+- **A — finer via class threaded through the pipeline.** compose emits a
+  `.kicad_pro` (or the DRC step carries design settings) that relaxes min-via to
+  0.35mm / 0.2mm drill for fine-pitch boards; the stitch heal uses a 0.4/0.2 via
+  for fine-pitch pads; zones refilled before DRC. Declares the board a finer fab
+  class (a real, correct decision for 0.5mm-pitch work).
+- **B — flroute fanout for power/gnd.** Route fine-pitch power/gnd pads with an
+  escape stub to an open-area via during routing (flroute already does fanout
+  escape for signal pads — extend it to the zone-served rails) so no via-in-pad
+  stitch is needed.
+
+**State:** baseline restored (stitch heal unchanged, comms head still PASSES
+0/0, regression 174/174). The fine-pitch boards remain correct-netlist,
+blocked-on-DRC. Fix A is the smaller lift and the recommended next step.
+
+### Refinement: the .kicad_pro relaxation works, but there are TWO failure sources
+
+Fifth experiment (a `.kicad_pro` sidecar, which experiment 4 never actually
+tried) confirmed a **working building block for Fix A**: writing
+`{"board":{"design_settings":{"rules":{"min_via_diameter":0.35,
+"min_through_hole_diameter":0.2}}}}` next to the board makes `kicad-cli` DRC
+accept 0.4mm vias — **no "via too small" violations appear.** So the min-via
+relaxation is real and pipeline-deliverable.
+
+But it also showed the fine-pitch DRC failures split into **two independent
+sources**, and the via class only addresses one:
+1. **Stitch vias** near a neighbour pad → fixed by the finer via class
+   (shrink the fine-pitch stitch via to 0.4/0.2 under the relaxed min). Needs
+   the via-detection tightened (the neighbour-proximity test under-selected).
+2. **flroute-routed tracks** running inside a fine-pitch pad's clearance
+   (`Track [VIN_BUS]` vs `Pad [VOUT_LOAD]`) → **not a via problem**; flroute
+   must route those rails with the pad clearance the fine-pitch class demands.
+   This is Fix B and is required in addition to Fix A.
+
+**Net:** a fab-clean fine-pitch board needs BOTH the finer via class (compose
+emits the `.kicad_pro` + stitch uses small vias, detection tuned) AND flroute
+honouring fine-pitch pad clearance while routing. Each is a scoped task; the
+`.kicad_pro` mechanism is proven, so Fix A is the tractable half to build first.
+
+---
+
+## Fanout Fix A attempt — 2026-07-06 (mechanism validated, integration reverted)
+
+Built Fix A end-to-end: compose emits a complete `.kicad_pro` (finer via class,
+min-via 0.35 / drill 0.2) for fine-pitch boards, the stitch heal uses a 0.4/0.2
+via for fine-pitch pads, and the pipeline hides the `.kicad_pro` for the
+stitch-driving DRC then restores it for the gate.
+
+**Mechanism validated:** on DC-measure the 0.5mm-pitch stitch-via clearance
+violations **cleared (3 → 1)** — the remaining 1 is the separate flroute-track
+issue (Fix B). So a finer via class does make via-in-pad legal on 0.5mm pitch,
+as intended, and the `.kicad_pro` min-via relaxation is confirmed to work through
+kicad-cli.
+
+**Integration destabilised the shared heal — reverted.** The stitch heal is
+DRC-driven: it stitches only pads the intermediate DRC reports as unconnected
+(the "false routed via zone" case). Introducing the finer via class + the
+post-stitch zone refill shifted KiCad's zone-connection **crediting**, so
+power/gnd pads that used to be credited (or reported for stitching) no longer
+were — DC-measure ended with 5 unconnected, and even the **coarse comms board
+regressed** (3 unconnected) despite taking none of the fine-pitch paths. That
+last part means the perturbation reaches beyond the fine-pitch code, so it is not
+safe. All three changes (compose.py, stitch_to_plane.py, route.ts) reverted;
+comms confirmed back to **0/0**.
+
+**What the real fix now needs (clearer than before):** the stitch heal must
+stitch by **geometry** — every power/gnd SMD pad sitting over its plane without a
+via — instead of by DRC report, so it is robust to zone-crediting changes. Then
+the finer via class can be applied without the DRC-driven flow under-stitching.
+That is a focused rework of `stitch_to_plane.py`'s site selection, plus the
+finer via class (proven), plus Fix B (flroute pad clearance) for the routed-track
+violations. Baseline remains protected: comms head PASSES 0/0, regression 174/174.
+
+---
+
+## Breadth — 2026-07-06: relay/instrument matrix (B-4) built and PASSES
+
+After setting fanout aside, built the FL-1 relay matrix (B-4) — Compose's native
+domain — entirely on the block layer with **coarse resolved parts**, and it
+routes 100% clean:
+
+- Two new contracts: `shift_register` (74HC595, SOIC-16) and `darlington_array`
+  (ULN2803, SOIC-18W), both resolved + fallback-sourced.
+- `block_relay_matrix`: MCU → 74HC595 (SPI shift) → ULN2803 (coil driver) → 4
+  Omron G6K DPDT signal relays multiplexing probe points onto a shared 2-wire
+  Kelvin instrument bus, with probe + bus connectors.
+- **Full pipeline: 18/18 routed, 0 DRC, 0 unconnected, 0 ERC — PASSED.**
+  Netlist verified: `SR_Q0 U7.15→U8.1`, `COIL0 K1.1→U8.18`,
+  `INSTR_BUS J7.1→K1.3,K2.3,K3.3,K4.3`, `PROBE0→K1.4,K1.5`.
+- Fixed a false ERC error: the SPI-completeness check demanded MISO, but
+  write-only SPI devices (shift registers, DACs, LED drivers) legitimately have
+  none. MISO is now optional; only a genuinely broken bus (clock without data,
+  or data without clock) errors.
+
+**Tier-1 boards that now PASS clean off the block layer: comms head (CAN) and
+relay matrix (B-4).** This confirms the breadth thesis — coarse-part FL-1 boards
+route cleanly today; the fine-pitch boards (motion, DC-measure) wait on the
+scoped fanout rework.

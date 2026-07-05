@@ -77,10 +77,13 @@ def check(net_pads, fp_nets, fp_npads, devices):
         if (a in nets) != (c in nets):
             errors.append("%s bus incomplete: has %s but not the other line"
                           % (name, a if a in nets else c))
-    spi = [n for n in ("SPI_SCK", "SPI_MOSI", "SPI_MISO") if n in nets]
-    if spi and len(spi) < 3:
-        errors.append("SPI bus incomplete: missing %s"
-                      % ", ".join(n for n in ("SPI_SCK", "SPI_MOSI", "SPI_MISO") if n not in nets))
+    # SPI needs a clock plus at least one data line. MISO is OPTIONAL: shift
+    # registers (74HC595), DACs, and LED drivers are write-only, no read-back.
+    # Flag only a genuinely broken bus (data without a clock, or a lone clock).
+    if ("SPI_MOSI" in nets or "SPI_MISO" in nets) and "SPI_SCK" not in nets:
+        errors.append("SPI bus incomplete: data line present but no SPI_SCK clock")
+    if "SPI_SCK" in nets and "SPI_MOSI" not in nets and "SPI_MISO" not in nets:
+        errors.append("SPI bus incomplete: SPI_SCK present but no data line")
 
     # 3. I2C pull-ups (unless a module provides them)
     def has_pullup(signal):

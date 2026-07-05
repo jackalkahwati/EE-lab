@@ -119,6 +119,33 @@ CONTRACTS = {
         ("alert", ["ALERT"], "int", "one", False),
         ("addr", ["A0", "A1"], "gnd", "multi", False),
     ],
+    # ---- Shift register (74HC595 class): SPI-ish serial in -> parallel out ---
+    "shift_register": [
+        ("power", ["VCC", "VDD"], "power", "multi", True),
+        ("gnd", ["GND", "VSS"], "gnd", "multi", True),
+        ("ser", ["SER", "DS", "SI", "A", "SDI"], "sr_ser", "one", True),
+        ("srclk", ["SRCLK", "SHCP", "SCK", "SCLK"], "sr_srclk", "one", True),
+        ("rclk", ["RCLK", "STCP", "LATCH", "RCK"], "sr_rclk", "one", True),
+        ("oe", ["OE", "G"], "gnd", "one", False),          # output enable -> GND (on)
+        ("srclr", ["SRCLR", "MR", "SCLR"], "power", "one", False),  # clear -> VCC (off)
+        ("q0", ["QA", "Q0"], "sr_q0", "one", False),
+        ("q1", ["QB", "Q1"], "sr_q1", "one", False),
+        ("q2", ["QC", "Q2"], "sr_q2", "one", False),
+        ("q3", ["QD", "Q3"], "sr_q3", "one", False),
+    ],
+    # ---- Darlington array (ULN2803 class): logic in -> relay-coil sink out --
+    "darlington_array": [
+        ("gnd", ["GND", "E", "VSS"], "gnd", "multi", True),
+        ("com", ["COM", "CD", "K"], "drv_com", "one", False),   # flyback common
+        ("in0", ["I1", "1B", "IN1"], "drv_in0", "one", True),
+        ("in1", ["I2", "2B", "IN2"], "drv_in1", "one", False),
+        ("in2", ["I3", "3B", "IN3"], "drv_in2", "one", False),
+        ("in3", ["I4", "4B", "IN4"], "drv_in3", "one", False),
+        ("out0", ["O1", "1C", "OUT1"], "drv_out0", "one", True),
+        ("out1", ["O2", "2C", "OUT2"], "drv_out1", "one", False),
+        ("out2", ["O3", "3C", "OUT3"], "drv_out2", "one", False),
+        ("out3", ["O4", "4C", "OUT4"], "drv_out3", "one", False),
+    ],
     # ---- Adjustable / LDO regulator ----------------------------------------
     "regulator": [
         ("vin", ["VIN", "IN", "V+", "VI"], "vin", "multi", True),
