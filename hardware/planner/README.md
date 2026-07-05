@@ -194,3 +194,38 @@ nets, unsupported features, per-net classification).
 widened, PASSED 0/0 (gates not weakened). Comms → CANH/CANL classified as `can`,
 PASSED 0/0. flroute integration is honestly scaffolded (post-route widening);
 full per-net-class routing in flroute is future work.
+
+## Manufacturability layer (order-ready PCBA package)
+
+The step that takes Compose from "electrically clean routed board" to
+"order-ready PCBA". Every successful board now emits a full assembly package.
+
+**gen_assembly.py** (after validation) reads the real KiCad board + sidecars
+(devices.json = ref→MPN, bom.json = LCSC-matched BOM, recovery.json = subs) and
+writes, all from REAL data:
+- `pick_and_place.csv` — ref, value, footprint, MPN, X/Y (real KiCad coords),
+  rotation, side, package, placement (SMT / **DNP** for fiducials/test points).
+  Never an invented placement.
+- `bom.csv` — assembly BOM: refs, qty, value, manufacturer, MPN, distributor PN
+  (LCSC), footprint, package, sourcing status, confidence, substitution status.
+- `sourcing-report.json` — per-line match (exact / equivalent / fallback /
+  missing) + whether LIVE sourcing was available. HONEST: live DigiKey returned
+  no data, so lines are labelled fallback/estimate — supplier data is never faked.
+- `substitutions.json` — the recovery-loop substitutions (marked NOT footprint
+  drop-in, since a recovery sub changes the part).
+- `assembly-readiness.json` / `.md` — ready?, missing / DNP / fine-pitch /
+  hand-solder-risk / substituted parts, sourcing confidence, house notes.
+
+**build_pcba_zip.py** assembles `pcba-package.zip`: gerbers, drill, STEP,
+renders, the enriched pick-and-place + assembly BOM, sourcing report, assembly
+readiness (json+md), substitutions, constraints, and the FL-1 Validation Package.
+
+**UI:** an `Assembly` tab shows readiness, placement counts, honest sourcing
+state, hand-solder risk, substitutions, the BOM sourcing table, and a
+download-PCBA-package button.
+
+**Honesty:** no faked supplier data, no invented placements, no silent
+substitutions, recovery subs are never marked footprint drop-in. Live sourcing is
+attempted and, when unavailable, clearly reported as fallback mode. Verified:
+golden hub → 24 placed + 7 DNP, 2 fine-pitch, 1 substitution, 29-file package,
+board PASSES. Next technical phase: arbitrary MCU + flexible pin allocation.

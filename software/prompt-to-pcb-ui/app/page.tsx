@@ -21,6 +21,7 @@ import { MetricsRail } from '@/components/metrics-rail'
 import { OrderPanel } from '@/components/order-panel'
 import { RecoveryPanel } from '@/components/recovery-panel'
 import { ConstraintsPanel } from '@/components/constraints-panel'
+import { AssemblyPanel } from '@/components/assembly-panel'
 import { FL1ValidationView } from '@/components/fl1-validation-view'
 import { BuildStatus } from '@/components/build-status'
 import { ErrorBoundary } from '@/components/error-boundary'
@@ -30,7 +31,7 @@ import { ReviewPanel } from '@/components/review-panel'
 import { ReviseDialog } from '@/components/revise-dialog'
 import { FL1Loop } from '@/components/fl1-loop'
 
-const TABS = ['Board', 'Code', 'BOM', 'Checks', 'Constraints', 'Recovery', 'Review', 'FL-1', 'Order'] as const
+const TABS = ['Board', 'Code', 'BOM', 'Checks', 'Constraints', 'Recovery', 'Assembly', 'Review', 'FL-1', 'Order'] as const
 type Tab = (typeof TABS)[number]
 
 interface PipelineEvent {
@@ -519,6 +520,9 @@ export default function FirstLightPage() {
             )}
             {tab === 'Recovery' && (
               <RecoveryPanel runId={selectedRun.runDir ? selectedRun.id : null} />
+            )}
+            {tab === 'Assembly' && (
+              <AssemblyPanel runId={selectedRun.runDir ? selectedRun.id : null} fabZip={fabZip} />
             )}
             {tab === 'Review' && (
               <ReviewPanel runId={selectedRun.runDir ? selectedRun.id : null} />

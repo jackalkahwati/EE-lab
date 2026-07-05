@@ -788,30 +788,42 @@ export async function GET(req: Request) {
             log('validation', `FL-1 Validation Package: ${vpCount}-step test sequence + probes, currents, timing, bus protocols, programming, calibration → fl1-validation.json`, 'ok')
           else log('validation', 'FL-1 Validation Package generation incomplete', 'warn')
 
+          // ---- Manufacturability layer: pick-and-place (real KiCad coords) +
+          // assembly BOM + honest sourcing report + assembly readiness. Makes
+          // the board an ORDER-READY PCBA, not just a routed PCB.
+          const asm = await exec('validation', KPY, [
+            path.join(appDir, 'scripts/gen_assembly.py'),
+            variantBoard,
+            pubData,
+            path.join(pubData, 'devices.json'),
+            path.join(pubData, 'bom.json'),
+            path.join(pubData, 'recovery.json'),
+          ])
+          const am = asm.out.match(/^ASSEMBLY placed=(\d+) dnp=(\d+) fine_pitch=(\d+) ready=(\w+) subs=(\d+)/m)
+          if (am)
+            log('validation', `assembly package: ${am[1]} placed + ${am[2]} DNP, ${am[3]} fine-pitch, ${am[5]} substitution(s), ready=${am[4]} → pick_and_place.csv, bom.csv, sourcing-report.json, assembly-readiness.json`, am[4] === 'True' ? 'ok' : 'warn')
+          else log('validation', 'assembly package generation incomplete', 'warn')
+          log('validation', 'sourcing: live supplier data unavailable — parts labelled fallback/estimate (no faked sourcing)', 'warn')
+
           const zipMatch = fab.out.match(/^FAB_ZIP:(.+)$/m)
           if (zipMatch && fs.existsSync(zipMatch[1].trim())) {
             const pubFab = path.join(appDir, 'public/fab')
             fs.mkdirSync(pubFab, { recursive: true })
-            const dest = path.join(pubFab, 'fab-package.zip')
-            fs.copyFileSync(zipMatch[1].trim(), dest)
-            // ship the FL-1 test plan + Validation Package inside the fab package
-            const extras = [
-              [tpPath, 'fl1-testplan.json'],
-              [vpPath, 'fl1-validation.json'],
-            ].filter(([p]) => fs.existsSync(p))
-            if (extras.length) {
-              const writes = extras
-                .map(([p, name]) => `z.write(${JSON.stringify(p)},${JSON.stringify(name)})`)
-                .join('; ')
-              await exec('validation', 'python3', [
-                '-c',
-                `import zipfile; z=zipfile.ZipFile(${JSON.stringify(dest)},'a'); ${writes}; z.close()`,
-              ])
-            }
-            fabZip = '/fab/fab-package.zip'
-            log('validation', `fab package ready (incl. FL-1 Validation Package) → ${fabZip}`, 'ok')
+            // Order-ready PCBA package: fab outputs (gerbers/drill/STEP/renders)
+            // + enriched pick-and-place & assembly BOM + sourcing report +
+            // assembly readiness + substitutions + FL-1 Validation Package.
+            const dest = path.join(pubFab, 'pcba-package.zip')
+            const pcba = await exec('validation', 'python3', [
+              path.join(appDir, 'scripts/build_pcba_zip.py'),
+              fabDir,
+              pubData,
+              dest,
+            ])
+            const pm = pcba.out.match(/^PCBA_ZIP:.*\((\d+) files\)/m)
+            fabZip = '/fab/pcba-package.zip'
+            log('validation', `PCBA package ready (${pm ? pm[1] : '?'} files: gerbers, drill, STEP, pick-and-place, assembly BOM, sourcing report, assembly readiness, FL-1 package) → ${fabZip}`, 'ok')
           } else {
-            log('validation', 'fab package generation incomplete', 'warn')
+            log('validation', 'PCBA package generation incomplete', 'warn')
           }
           send({ type: 'stage', id: 'validation', state: 'passed' })
         } else {
