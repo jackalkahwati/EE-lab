@@ -99,3 +99,28 @@ connector + non-plane +5V routing is the specific remaining limit.
 the fine-pitch STITCH-via violations everywhere (DC-measure: 3 → 1 violation, 0
 unconnected; the last one is the flroute-track issue = Fix B, a router change).
 Coarse boards (comms, relay) still PASS 0/0 — no regression.
+
+## Recovery-loop closure — fine-pitch connector routing substitution
+
+The closed loop, end to end: when the demo's fine-pitch USB-C receptacle blocks
+routing (VBUS on the non-plane +5V rail), the recovery loop substitutes a coarse
+supported power connector (2-pin 5mm screw terminal, `MX126-5.0-02P`), preserving
+the 5V-power intent and producing a buildable board. `recovery.py:
+recover_fine_pitch_connector` + a planner step that detects the fine-pitch USB-C
+receptacle when the goal is "USB-C power".
+
+Reported in full (never silent, criterion 3): original = USB-C power input;
+blocker = fine-pitch USB-C cannot route in the current UCS synth path; preserved
+= 5V input / board bring-up / FL-1 validation / manufacturable board; lost =
+USB-C receptacle / cable compatibility / USB-C behavior; approval = required for
+product, allowed for demo; status = GENERATED_WITH_SUBST. The report is written
+to `<board>.recovery.json` in the run artifacts. **This is NOT USB-C support** —
+USB-C stays on the roadmap; this is a buildable fallback that preserves intent.
+
+**Recovered demo result (full pass):** RP2040 hub with the coarse connector +
+BME280 + INA219 + W25Q + MAX3485 + 74HC595 — **16/16 nets routed, 0 DRC, 0
+unconnected, ERC PASS**, fab package + firmware + **FL-1 Validation Package**
+(I2C + SPI buses, 5 probe points, 6-step functional test, expected currents) all
+generated. Geometry stitch runs; gates NOT weakened. Coarse boards (comms, relay)
+still PASS 0/0 — no regression. The fine-pitch stitch threshold widened to 0.8mm
+so 0.65mm-pitch LGA parts (BME280) stitch cleanly under the finer via class.

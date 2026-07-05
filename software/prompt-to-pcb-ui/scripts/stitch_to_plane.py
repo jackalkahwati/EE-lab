@@ -70,15 +70,16 @@ def _blocked(px, py, nc, vd):
 
 
 def _fine_pitch(fp, pos):
-    """True if this footprint has another pad within 0.6mm of `pos` — i.e. a
-    0.5mm-pitch part where the default 0.6mm via would clip the neighbour. Such
-    pads take a finer 0.4/0.2 via (the board ships a matching finer-via-class
-    .kicad_pro). Coarse pads keep the default via, so nothing regresses."""
+    """True if this footprint has another pad within 0.8mm of `pos` — i.e. a
+    fine-pitch part (0.5-0.65mm LGA/QFN/WSON) where the default 0.6mm via would
+    clip the neighbour. Such pads take a finer 0.4/0.2 via (the board ships a
+    matching finer-via-class .kicad_pro). Coarse parts (>=1.0mm-pitch SOIC,
+    passives, relays) keep the default via, so nothing regresses."""
     for pad in fp.Pads():
         pp = pad.GetPosition()
         if (pp.x == pos.x and pp.y == pos.y):
             continue
-        if (pp.x - pos.x) ** 2 + (pp.y - pos.y) ** 2 < pcbnew.FromMM(0.6) ** 2:
+        if (pp.x - pos.x) ** 2 + (pp.y - pos.y) ** 2 < pcbnew.FromMM(0.8) ** 2:
             return True
     return False
 

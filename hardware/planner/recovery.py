@@ -79,6 +79,47 @@ def recover(blocked, intended_caps, lib):
     }
 
 
+def recover_fine_pitch_connector(usb_spec, lib):
+    """ROUTING-blocker recovery: the current UCS synth path cannot cleanly route a
+    fine-pitch USB-C receptacle (its VBUS pads feed the non-plane +5V rail). When
+    the intent is just '5V/USB-C power', substitute a coarse supported power
+    connector so the board becomes manufacturable — preserving the power intent,
+    explicitly losing the USB-C physical interface. This is NOT USB-C support; it
+    is a buildable fallback, reported in full and flagged for approval."""
+    coarse = None
+    for _mpn, s in sorted(lib.items()):
+        if s.get("category", "").startswith("connector.power") \
+                and s.get("support_status") == "supported":
+            coarse = s
+            break
+    if not coarse:
+        return {"recovered": False, "original_request": "USB-C power input",
+                "blocker": "no coarse power connector available", "proposed": None,
+                "capabilities_preserved": [], "capabilities_lost": ["USB-C power input"],
+                "requires_approval": True, "confidence": 0.0}
+    return {
+        "original_request": "USB-C power input",
+        "blocker": "fine-pitch USB-C connector cannot route cleanly in the current "
+                   "UCS synth path (VBUS feeds the non-plane +5V rail)",
+        "substitution_type": "interface_substitution",
+        "recovered": True,
+        "proposed": coarse["mpn"],
+        "proposed_spec": coarse,
+        "replaces": usb_spec.get("mpn"),
+        "capabilities_preserved": ["5V power input", "board bring-up power-on",
+                                   "FL-1 validation capability", "manufacturable demo board"],
+        "capabilities_lost": ["USB-C receptacle mechanical interface",
+                              "USB-C cable compatibility", "USB-C-specific behavior"],
+        "requires_approval": True,
+        "approval_note": "required for product design; allowed for demo / recovery proof",
+        "confidence": 0.9,
+        "status": "GENERATED_WITH_SUBST",
+        "note": "USB-C receptacle -> coarse 5V power connector (%s) to preserve the "
+                "5V power intent and produce a routable, manufacturable board; "
+                "USB-C support remains on the roadmap" % coarse["mpn"],
+    }
+
+
 def recover_interface(iface, intended, lib):
     """Recover an unsupported INTERFACE (e.g. Ethernet) to a supported one,
     preserving the 'network/comms' intent at reduced capability."""

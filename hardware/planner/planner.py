@@ -15,11 +15,11 @@ result keys:
 """
 from intent import parse_intent
 from resolver import (resolve_part_request, resolve_capability, part_capabilities)
-from recovery import recover, recover_interface
+from recovery import recover, recover_interface, recover_fine_pitch_connector
 from seeds import build_seeds
 
 
-def run(prompt):
+def run(prompt, recover_routing=True):
     di = parse_intent(prompt)
     lib = build_seeds()
     seed_mpns = set(lib)
@@ -87,6 +87,28 @@ def run(prompt):
                            "preserved": rec.get("capabilities_preserved"),
                            "lost": rec.get("capabilities_lost"),
                            "requires_approval": rec.get("requires_approval")})
+
+    # ---- routing-capability recovery: fine-pitch USB-C power connector ------
+    # The current UCS synth path can't route a fine-pitch USB-C receptacle (VBUS
+    # feeds the non-plane +5V rail). When the intent is just 5V/USB-C power,
+    # substitute a coarse supported power connector so the board is buildable —
+    # reported in full, flagged for approval. USB-C stays on the roadmap.
+    if recover_routing:
+        usb = next((s for s in final_design
+                    if s.get("category", "").startswith("connector.usb")
+                    and "USB_C_Receptacle" in (s.get("kicad_footprint") or "")), None)
+        if usb and (di["power"].get("source") == "usb_c"
+                    or "usb-c" in di["product_goal"].lower()):
+            rec = recover_fine_pitch_connector(usb, lib)
+            recovery_report.append(rec)
+            if rec["recovered"]:
+                final_design[:] = [s for s in final_design if s["mpn"] != usb["mpn"]]
+                add_to_design(rec["proposed_spec"])
+                honest[:] = [h for h in honest if h.get("mpn") != usb["mpn"]]
+                honest.append({"request": "USB-C power input", "outcome": "substituted",
+                               "mpn": rec["proposed"],
+                               "preserved": rec["capabilities_preserved"],
+                               "lost": rec["capabilities_lost"], "requires_approval": True})
 
     # ---- MCU (a Compose block, not a UCS part) ------------------------------
     if di["mcu"]["family"]:

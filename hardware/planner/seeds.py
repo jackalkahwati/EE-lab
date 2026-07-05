@@ -177,6 +177,18 @@ def build_seeds():
         category="connector.battery", manufacturer="JST")
     jst["interfaces"] = [{"type": "battery", "signals": {"vbat": "VBAT"}}]
     lib["S2B-PH-K-S"] = jst
+    # coarse 5V power input (2-pin 5mm screw terminal) — the supported fallback
+    # the recovery loop substitutes for a fine-pitch USB-C receptacle. vcc_min
+    # 5.0 routes its power pin to +5V; a 5mm-pitch terminal routes trivially.
+    term = ingest.from_pin_table(
+        "MX126-5.0-02P", [("1", "VIN", "power_in"), ("2", "GND", "ground")],
+        kicad_symbol="Connector:Screw_Terminal_01x02",
+        kicad_footprint="TerminalBlock:TerminalBlock_MaiXu_MX126-5.0-02P_1x02_P5.00mm",
+        category="connector.power_5v", manufacturer="MaiXu")
+    term["power"]["vcc_min"] = 5.0
+    term["interfaces"] = [{"type": "power_in", "signals": {"vin": "VIN", "gnd": "GND"}}]
+    term["description"] = "2-pin 5V screw-terminal power input"
+    lib["MX126-5.0-02P"] = term
     return lib
 
 

@@ -210,7 +210,7 @@ def synth(design, out_path):
     # power pins) so the +5V rail — which is not plane-served — routes a short
     # hop instead of across the board from a fine-pitch connector.
     specs = sorted(specs, key=lambda s: 0 if s.get("category", "").startswith(
-        ("connector.usb", "power")) else 1)
+        ("connector.usb", "connector.power", "power")) else 1)
     placed, dropped, refn, cs_i = [], [], 2, 0
     for spec in specs:
         fp = spec.get("kicad_footprint")
