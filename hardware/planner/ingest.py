@@ -1,0 +1,344 @@
+"""Component Ingestion Engine — normalise any source into a Universal Component
+Spec (UCS).
+
+Real, implemented sources:
+  - from_kicad_symbol : a KiCad library symbol (+ footprint resolution). The
+                        workhorse: pins come straight from the library (authoritative),
+                        interface + support circuit are inferred and marked as such.
+  - from_spec         : an existing UCS dict (re-validated).
+  - from_block        : an existing Compose block (wrapped as supported).
+  - from_pin_table    : a manual user-provided pin table.
+
+Honestly stubbed (NOT faked) — these return a PARTIAL spec with low confidence,
+provenance recorded, and clear missing_fields, so nothing pretends a datasheet
+was really parsed:
+  - from_datasheet    : PDF/URL AI extraction (Phase 4) — not implemented.
+  - from_mpn          : MPN -> distributor lookup — not implemented.
+  - from_distributor  : DigiKey/Mouser/LCSC result — not implemented.
+
+Every field carries provenance + confidence so the resolver/reviewer can see
+exactly what is trusted and what is inferred or assumed.
+"""
+import os
+import re
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "blocks"))
+import resolve_part  # noqa: E402  KiCad symbol/footprint parsing + normalisation
+
+from component_spec import UCS_VERSION, finalize  # noqa: E402
+
+_FP_DIR = resolve_part.FP_DIR
+
+
+def _footprint_pad_names(lib_fp, name):
+    """Pad names declared in a KiCad footprint. Read directly (the shared helper
+    mis-parses some libraries); empty set means 'could not read' -> don't
+    penalise, rather than falsely flag every pin as pad-less."""
+    path = os.path.join(_FP_DIR, lib_fp + ".pretty", name + ".kicad_mod")
+    try:
+        text = open(path).read()
+    except OSError:
+        return set()
+    return set(re.findall(r'\(pad\s+"([^"]+)"', text))
+
+
+# ---- pin electrical-type inference from the pin name ------------------------
+def _etype(name):
+    n = resolve_part._norm(name)
+    if n in ("GND", "VSS", "AGND", "DGND", "VSSA", "VSSD", "EP", "PAD", "PGND"):
+        return "ground"
+    if n in ("VCC", "VDD", "VBAT", "VIN", "VS", "VDDIO", "VLOGIC", "AVDD", "DVDD",
+             "AVCC", "DVCC", "VDDA", "VDDD", "VBUS", "V+", "VCCIO", "5VOUT",
+             "VM", "VMOT", "VMOTOR", "VBB", "VPWR", "VINT", "VP", "VDDA1", "VREG"):
+        return "power_in"
+    if n in ("VOUT", "VO", "3V3", "1V8"):
+        return "power_out"
+    if n in ("NC",):
+        return "no_connect"
+    if any(k in n for k in ("SCL", "SDA", "SCK", "MOSI", "MISO", "TX", "RX",
+                            "CANH", "CANL", "DP", "DM", "IO", "GPIO", "GP")):
+        return "bidirectional"
+    if n.startswith(("A", "AIN", "AN")) and n[-1:].isdigit():
+        return "analog_in"
+    return "unspecified"
+
+
+# ---- interface inference (Phase 7) ------------------------------------------
+def _has(names, *aliases):
+    norm = {resolve_part._norm(x) for x in names}
+    tokset = set()
+    for x in names:
+        tokset |= resolve_part._pin_tokens(x)
+    want = {resolve_part._norm(a) for a in aliases}
+    return bool((norm | tokset) & want)
+
+
+def infer_interfaces(pin_names, category=""):
+    """Infer the electrical interfaces a part speaks from its pin names. Returns
+    a list of interface dicts. Crucially, an SPI part with a data-in but NO
+    data-out is reported as write-only (shift registers, DACs, LED drivers)."""
+    ifaces = []
+    n = list(pin_names)
+    if _has(n, "SCL", "SCLK_I2C") and _has(n, "SDA"):
+        ifaces.append({"type": "i2c", "signals": {"scl": "SCL", "sda": "SDA"}})
+    # SPI clock; data-in (to the device); data-out (from the device). QH'/cascade
+    # pins are NOT read-back — a shift register with SER+SRCLK is WRITE-ONLY.
+    has_sck = _has(n, "SCK", "SCLK", "SRCLK", "SPC", "CLK")
+    has_mosi = _has(n, "MOSI", "SDI", "SI", "DIN", "SER", "DI")
+    has_miso = _has(n, "MISO", "SDO", "SO", "DOUT", "DO")
+    if has_sck and (has_mosi or has_miso):
+        if has_mosi and not has_miso:
+            ifaces.append({"type": "spi_write_only",
+                           "signals": {"sck": "SCK", "mosi": "SER/DI"}})
+        else:
+            ifaces.append({"type": "spi",
+                           "signals": {"sck": "SCK", "mosi": "SDI/DI", "miso": "SDO/DO"}})
+    if _has(n, "CANH") and _has(n, "CANL"):
+        ifaces.append({"type": "can", "signals": {"canh": "CANH", "canl": "CANL"}})
+    if _has(n, "A") and _has(n, "B") and _has(n, "RO", "DE", "RE"):
+        ifaces.append({"type": "rs485", "signals": {"a": "A", "b": "B",
+                       "ro": "RO", "di": "DI", "de": "DE", "re": "RE"}})
+    elif _has(n, "TX", "TXD") and _has(n, "RX", "RXD"):
+        ifaces.append({"type": "uart", "signals": {"tx": "TX", "rx": "RX"}})
+    if _has(n, "DP", "D+") and _has(n, "DM", "D-"):
+        ifaces.append({"type": "usb", "signals": {"dp": "D+", "dm": "D-"}})
+    if _has(n, "STEP") and _has(n, "DIR"):
+        ifaces.append({"type": "motor_output", "signals": {"step": "STEP", "dir": "DIR"}})
+    elif _has(n, "AOUT1", "BOUT1", "AOUT2", "OUT1", "OUTA", "OA1", "M1A"):
+        # H-bridge / motor driver outputs (DRV8833 class)
+        ifaces.append({"type": "motor_output", "signals": {}})
+    # a part with only power+ground+passive pins is a power/analog device
+    if not ifaces:
+        if any(_etype(x) == "power_out" for x in n):
+            ifaces.append({"type": "power_out", "signals": {}})
+        elif "regulator" in category.lower() or "charger" in category.lower():
+            ifaces.append({"type": "power_out", "signals": {}})
+        else:
+            ifaces.append({"type": "gpio", "signals": {}})
+    return ifaces
+
+
+# ---- KiCad-symbol ingestion (the real workhorse) ----------------------------
+def from_kicad_symbol(symbol_query, mpn=None, category="", manufacturer="",
+                      overrides=None):
+    """Ingest a KiCad library symbol into a UCS. Pins are authoritative (from the
+    library); interface, support circuit, and electrical limits are inferred or
+    left for overrides, each marked with its provenance + confidence."""
+    info = resolve_part.symbol_info(symbol_query)
+    if not info:
+        return _stub(mpn or symbol_query, category,
+                     "no KiCad symbol found for '%s'" % symbol_query,
+                     source="kicad_library")
+    sym_name = info["name"]
+    # find which library file holds it (symbol_info returns just the name)
+    f, _n, _t = resolve_part._find_symbol_file(symbol_query)
+    lib = f[:-len(".kicad_sym")] if f else None
+    kicad_symbol = "%s:%s" % (lib, sym_name) if lib else None
+
+    pins = [{"number": num, "name": nm, "etype": _etype(nm)}
+            for num, nm in info["pins"]]
+    pin_names = [nm for _num, nm in info["pins"]]
+    power_pins = [p["number"] for p in pins if p["etype"] == "power_in"]
+    gnd_pins = [p["number"] for p in pins if p["etype"] == "ground"]
+
+    lib_fp, fp = resolve_part.pick_footprint(info["fp_filters"])
+    kicad_fp = "%s:%s" % (lib_fp, fp) if fp else None
+
+    # Phase 5 symbol<->footprint validation: the footprint MUST have a pad for
+    # every symbol pin number, or some pins would silently never get a net.
+    # A mismatch downgrades footprint confidence and is recorded, never hidden.
+    fp_pad_ok = True
+    fp_confidence = 0.9 if fp else 0.0
+    missing_pads = []
+    if fp:
+        fp_pads = _footprint_pad_names(lib_fp, fp)
+        if fp_pads:  # only validate when the pads were actually readable
+            # exclude the exposed/thermal pad, which is often un-numbered on the
+            # symbol; validate the real signal pins have a land.
+            pin_nums = {num for num, nm in info["pins"]
+                        if resolve_part._norm(nm) not in ("EP", "PAD", "NC")}
+            missing_pads = [n for n in pin_nums if n not in fp_pads]
+            if missing_pads:
+                fp_pad_ok = False
+                fp_confidence = 0.5  # partial: pins without a pad on the chosen land
+
+    ifaces = infer_interfaces(pin_names, category)
+
+    # generic support circuit: one decoupling cap per power pin (always safe).
+    decoupling = [{"value": "100nF", "from": "VCC", "to": "GND",
+                   "note": "per power pin"} for _ in power_pins]
+
+    spec = {
+        "ucs_version": UCS_VERSION,
+        "mpn": mpn or sym_name,
+        "manufacturer": manufacturer,
+        "aliases": [sym_name] if mpn and sym_name != mpn else [],
+        "category": category or "uncategorized",
+        "description": "",
+        "package": fp.split("_")[0] if fp else "",
+        "kicad_symbol": kicad_symbol,
+        "kicad_footprint": kicad_fp,
+        "pins": pins,
+        "power": {"pins": {"power": power_pins, "ground": gnd_pins},
+                  "vcc_min": None, "vcc_max": None, "vcc_typ": None,
+                  "i_typ_ma": None, "i_max_ma": None},
+        "abs_max": {}, "recommended": {},
+        "interfaces": ifaces,
+        "support_circuit": {"decoupling": decoupling, "pullups": [], "pulldowns": [],
+                            "crystals": [], "reset_config": [], "other_passives": []},
+        "programming": {},
+        "reference_circuit": None,
+        "constraints": {"layout": [], "routing": [], "thermal": [], "rf": []},
+        "firmware": {}, "fl1_validation": {},
+        "sourcing": {},
+        "provenance": {
+            "mpn": "user" if mpn else "kicad_library",
+            "pins": "kicad_library",
+            "kicad_symbol": "kicad_library",
+            "kicad_footprint": "kicad_library",
+            "power.pins.power": "ai_inference",
+            "power.pins.ground": "ai_inference",
+            "interfaces": "ai_inference",
+            "support_circuit.decoupling": "default_assumption",
+        },
+        "confidence": {
+            "pins": 1.0, "kicad_symbol": 1.0,
+            "kicad_footprint": fp_confidence,
+            "power.pins.power": 0.9 if power_pins else 0.3,
+            "power.pins.ground": 0.9 if gnd_pins else 0.3,
+            "interfaces": 0.8 if ifaces else 0.4,
+        },
+        "missing_fields": [],
+        "unsupported_fields": [],
+    }
+    if not fp:
+        spec["missing_fields"].append("kicad_footprint")
+    elif not fp_pad_ok:
+        spec["unsupported_fields"].append(
+            "kicad_footprint: pads missing for pins %s" % missing_pads)
+    if not power_pins:
+        spec["missing_fields"].append("power.pins.power")
+
+    if overrides:
+        _deep_merge(spec, overrides)
+    return finalize(spec)
+
+
+def _deep_merge(base, over):
+    for k, v in over.items():
+        if isinstance(v, dict) and isinstance(base.get(k), dict):
+            _deep_merge(base[k], v)
+        else:
+            base[k] = v
+    return base
+
+
+def from_spec(spec):
+    """Re-validate an existing UCS dict."""
+    return finalize(dict(spec))
+
+
+def from_block(block_name, interfaces=None, category="block"):
+    """Wrap an existing Compose block as a UCS. Blocks are already known-good
+    (they place + route today), so this is a supported spec with block provenance
+    — even though it has no pin-level detail here (the block owns that)."""
+    spec = {
+        "ucs_version": UCS_VERSION, "mpn": block_name, "manufacturer": "",
+        "category": category, "description": "Compose block",
+        "kicad_symbol": "compose:block/%s" % block_name,
+        "kicad_footprint": "compose:block/%s" % block_name,
+        "pins": [{"number": "block", "name": block_name, "etype": "unspecified"}],
+        "power": {"pins": {"power": ["block"], "ground": ["block"]}},
+        "interfaces": interfaces or [{"type": "gpio", "signals": {}}],
+        "provenance": {"mpn": "compose_block", "pins": "compose_block",
+                       "kicad_symbol": "compose_block", "kicad_footprint": "compose_block",
+                       "power.pins.power": "compose_block", "power.pins.ground": "compose_block",
+                       "interfaces": "compose_block"},
+        "confidence": {"pins": 1.0, "kicad_symbol": 1.0, "kicad_footprint": 1.0,
+                       "power.pins.power": 1.0, "power.pins.ground": 1.0, "interfaces": 1.0},
+        "missing_fields": [], "unsupported_fields": [],
+        "_is_block": True,
+    }
+    return finalize(spec)
+
+
+def from_pin_table(mpn, rows, kicad_symbol=None, kicad_footprint=None,
+                   category="", manufacturer=""):
+    """Ingest a manual pin table: rows = [(number, name, etype?), ...]."""
+    pins = []
+    for r in rows:
+        num, name = str(r[0]), r[1]
+        et = r[2] if len(r) > 2 else _etype(name)
+        pins.append({"number": num, "name": name, "etype": et})
+    power_pins = [p["number"] for p in pins if p["etype"] == "power_in"]
+    gnd_pins = [p["number"] for p in pins if p["etype"] == "ground"]
+    spec = {
+        "ucs_version": UCS_VERSION, "mpn": mpn, "manufacturer": manufacturer,
+        "category": category or "uncategorized",
+        "kicad_symbol": kicad_symbol, "kicad_footprint": kicad_footprint,
+        "pins": pins,
+        "power": {"pins": {"power": power_pins, "ground": gnd_pins}},
+        "interfaces": infer_interfaces([p["name"] for p in pins], category),
+        "provenance": {"mpn": "user", "pins": "user",
+                       "kicad_symbol": "user" if kicad_symbol else "default_assumption",
+                       "kicad_footprint": "user" if kicad_footprint else "default_assumption",
+                       "power.pins.power": "user", "power.pins.ground": "user",
+                       "interfaces": "ai_inference"},
+        "confidence": {"pins": 1.0,
+                       "kicad_symbol": 1.0 if kicad_symbol else 0.0,
+                       "kicad_footprint": 1.0 if kicad_footprint else 0.0,
+                       "power.pins.power": 1.0, "power.pins.ground": 1.0,
+                       "interfaces": 0.7},
+        "missing_fields": [f for f, v in (("kicad_symbol", kicad_symbol),
+                           ("kicad_footprint", kicad_footprint)) if not v],
+        "unsupported_fields": [],
+    }
+    return finalize(spec)
+
+
+# ---- honestly-stubbed sources (not implemented — never faked) ---------------
+def _stub(mpn, category, reason, source="ai_inference"):
+    """A partial, low-confidence placeholder for a source that is not yet
+    implemented. It is HONEST: no pins, low confidence, clear missing_fields,
+    so the resolver treats it as unsupported/partial rather than trusting it."""
+    return finalize({
+        "ucs_version": UCS_VERSION, "mpn": mpn, "manufacturer": "",
+        "category": category or "uncategorized",
+        "description": "STUB: " + reason,
+        "kicad_symbol": None, "kicad_footprint": None,
+        "pins": [], "power": {"pins": {"power": [], "ground": []}},
+        "interfaces": [],
+        "provenance": {"mpn": source},
+        "confidence": {"mpn": 0.3},
+        "missing_fields": ["pins", "kicad_symbol", "kicad_footprint", "interfaces"],
+        "unsupported_fields": [],
+        "_stub_reason": reason,
+    })
+
+
+def from_datasheet(path_or_url, mpn="", category=""):
+    """Phase 4 — datasheet PDF/URL AI extraction. NOT IMPLEMENTED. Returns an
+    honest stub rather than fabricating a pin table."""
+    return _stub(mpn or "unknown", category,
+                 "datasheet extraction not implemented (Phase 4); provide a "
+                 "KiCad symbol or a manual pin table instead",
+                 source="datasheet")
+
+
+def from_mpn(mpn, category=""):
+    """MPN -> distributor/library lookup. Tries the KiCad library by MPN first
+    (real), else an honest stub."""
+    if resolve_part.symbol_info(mpn):
+        return from_kicad_symbol(mpn, mpn=mpn, category=category)
+    return _stub(mpn, category,
+                 "no KiCad symbol for MPN and distributor ingestion not "
+                 "implemented (Phase 3 distributor path)",
+                 source="distributor_api")
+
+
+def from_distributor(url, mpn="", category=""):
+    """DigiKey/Mouser/LCSC result. NOT IMPLEMENTED — honest stub."""
+    return _stub(mpn or "unknown", category,
+                 "distributor ingestion not implemented; use MPN or KiCad symbol",
+                 source="distributor_api")
