@@ -19,6 +19,9 @@ import { BomTable } from '@/components/bom-table'
 import { GatesLogs } from '@/components/gates-logs'
 import { MetricsRail } from '@/components/metrics-rail'
 import { OrderPanel } from '@/components/order-panel'
+import { RecoveryPanel } from '@/components/recovery-panel'
+import { FL1ValidationView } from '@/components/fl1-validation-view'
+import { BuildStatus } from '@/components/build-status'
 import { ErrorBoundary } from '@/components/error-boundary'
 import { InterviewPanel } from '@/components/interview-panel'
 import { WelcomeHero } from '@/components/welcome-hero'
@@ -26,7 +29,7 @@ import { ReviewPanel } from '@/components/review-panel'
 import { ReviseDialog } from '@/components/revise-dialog'
 import { FL1Loop } from '@/components/fl1-loop'
 
-const TABS = ['Board', 'Code', 'BOM', 'Checks', 'Review', 'FL-1', 'Order'] as const
+const TABS = ['Board', 'Code', 'BOM', 'Checks', 'Recovery', 'Review', 'FL-1', 'Order'] as const
 type Tab = (typeof TABS)[number]
 
 interface PipelineEvent {
@@ -444,7 +447,7 @@ export default function FirstLightPage() {
           <div
             role="tablist"
             aria-label="Run viewport"
-            className="flex border-b border-border"
+            className="flex items-center border-b border-border"
           >
             {TABS.map((t) => (
               <button
@@ -463,6 +466,11 @@ export default function FirstLightPage() {
                 {t}
               </button>
             ))}
+            {selectedRun.runDir && (
+              <div className="ml-auto pr-3">
+                <BuildStatus runId={selectedRun.id} status={selectedRun.status} />
+              </div>
+            )}
           </div>
           <div className="min-h-0 flex-1">
             <ErrorBoundary key={tab} label={`The ${tab} panel`}>
@@ -505,14 +513,22 @@ export default function FirstLightPage() {
                 }}
               />
             )}
+            {tab === 'Recovery' && (
+              <RecoveryPanel runId={selectedRun.runDir ? selectedRun.id : null} />
+            )}
             {tab === 'Review' && (
               <ReviewPanel runId={selectedRun.runDir ? selectedRun.id : null} />
             )}
             {tab === 'FL-1' && (
-              <FL1Loop
-                runId={selectedRun.runDir ? selectedRun.id : null}
-                onRevise={(eco) => setReviseRequest(eco)}
-              />
+              <div className="flex h-full flex-col overflow-y-auto">
+                <FL1ValidationView runId={selectedRun.runDir ? selectedRun.id : null} />
+                <div className="border-t border-border">
+                  <FL1Loop
+                    runId={selectedRun.runDir ? selectedRun.id : null}
+                    onRevise={(eco) => setReviseRequest(eco)}
+                  />
+                </div>
+              </div>
             )}
             {tab === 'Order' && (
               <OrderPanel

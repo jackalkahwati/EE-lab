@@ -101,6 +101,14 @@ if "STEP" in nets and "DIR" in nets:
         "protocol": "one pulse per microstep on STEP, level on DIR, active-low enable",
         "devices": _dev_list(["stepper_driver"]),
     })
+if "RS485_A" in nets and "RS485_B" in nets:
+    bus_protocols.append({
+        "bus": "RS485", "signals": ["RS485_A", "RS485_B"],
+        "logic": ["RS485_DI", "RS485_RO", "RS485_DE"],
+        "speed": "up to 115.2 kbaud (half-duplex; confirm network)",
+        "termination": "120 ohm across A/B (present on-board)",
+        "devices": _dev_list(["rs485"]),
+    })
 
 # ---- firmware programming: driven by the MCU on the board ---------------------
 has_mcu = any(d.get("type") == "mcu" for d in devices)
@@ -190,11 +198,38 @@ functional_tests = [
      "pass_if": "every measured point within its pass/fail limits"},
 ]
 
+# ---- required FL-1 tools + manual/unsupported tests (derived, not invented) --
+_tools = set()
+for m in measurements:
+    t = m.get("type")
+    _tools.add({"dc_voltage": "DMM / rail probe", "continuity": "continuity meter",
+                "digital_activity": "logic analyzer / bus host",
+                "current": "current probe"}.get(t, "DMM"))
+for bp in bus_protocols:
+    _tools.add("%s host" % bp["bus"].split(" ")[0])
+if firmware_programming:
+    _tools.add(firmware_programming["interface"].split(" or ")[0].strip() + " programmer")
+required_tools = sorted(_tools)
+
+# tests FL-1's base can't run automatically — they need an external fixture or a
+# capability pack. Surfaced honestly so the operator knows what stays manual.
+manual_tests = []
+for bp in bus_protocols:
+    b = bp["bus"]
+    if b == "RS485" or b == "CAN":
+        manual_tests.append({"test": "%s bus loopback / link" % b,
+                             "reason": "needs a second node or a bus fixture; FL-1 base cannot self-loop"})
+    if b.startswith(("GPS", "CELL")):
+        manual_tests.append({"test": "%s radio link" % b,
+                             "reason": "needs live signal / RF pack"})
+
 package = {
     "version": 1,
     "generator": "firstlight-compose",
     "spec": "FL-1 Validation Package — the executable bring-up + test spec",
     "board": tp.get("board", {}),
+    "required_fl1_tools": required_tools,
+    "manual_or_unsupported_tests": manual_tests,
     "identification": {
         "fiducials": fiducials,
         "outline_mm": tp.get("board", {}),
