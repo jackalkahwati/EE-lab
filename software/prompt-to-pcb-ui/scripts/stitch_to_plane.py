@@ -56,15 +56,29 @@ def _seg_dist(px, py, t):
     return ((px - cx) ** 2 + (py - cy) ** 2) ** 0.5
 
 
-def _blocked(px, py, nc):
+def _blocked(px, py, nc, vd):
     # TRUE geometric distance to other-net copper. A bbox test false-blocks
     # everything near a long diagonal track, which left probe pads unstitched.
     for t in b.GetTracks():
         if t.GetNetCode() == nc:
             continue
         half = t.GetWidth() // 2
-        need = via_d // 2 + half + pcbnew.FromMM(0.22)
+        need = vd // 2 + half + pcbnew.FromMM(0.22)
         if _seg_dist(px, py, t) < need:
+            return True
+    return False
+
+
+def _fine_pitch(fp, pos):
+    """True if this footprint has another pad within 0.6mm of `pos` — i.e. a
+    0.5mm-pitch part where the default 0.6mm via would clip the neighbour. Such
+    pads take a finer 0.4/0.2 via (the board ships a matching finer-via-class
+    .kicad_pro). Coarse pads keep the default via, so nothing regresses."""
+    for pad in fp.Pads():
+        pp = pad.GetPosition()
+        if (pp.x == pos.x and pp.y == pos.y):
+            continue
+        if (pp.x - pos.x) ** 2 + (pp.y - pos.y) ** 2 < pcbnew.FromMM(0.6) ** 2:
             return True
     return False
 
@@ -95,12 +109,19 @@ for fp in b.GetFootprints():
                for vx, vy in vias_by_net.get(nc, [])):
             continue
 
+        # fine-pitch pads take a smaller via so via-in-pad clears the neighbour
+        # (legal under the board's finer-via-class .kicad_pro); coarse pads keep
+        # the default via, byte-identical to before.
+        if _fine_pitch(fp, pos):
+            vd, vk = pcbnew.FromMM(0.4), pcbnew.FromMM(0.2)
+        else:
+            vd, vk = via_d, via_k
         # drop the via at the pad centre, nudging to the first spot clear of
         # other-net copper on all layers.
         off = pcbnew.FromMM(0.4)
         spot = None
         for dx, dy in ((0, 0), (off, 0), (-off, 0), (0, off), (0, -off)):
-            if not _blocked(pos.x + dx, pos.y + dy, nc):
+            if not _blocked(pos.x + dx, pos.y + dy, nc, vd):
                 spot = pcbnew.VECTOR2I(pos.x + dx, pos.y + dy)
                 break
         if spot is None:
@@ -110,8 +131,8 @@ for fp in b.GetFootprints():
         via.SetPosition(spot)
         via.SetViaType(pcbnew.VIATYPE_THROUGH)
         via.SetLayerPair(pcbnew.F_Cu, pcbnew.B_Cu)
-        via.SetWidth(int(via_d))
-        via.SetDrill(int(via_k))
+        via.SetWidth(int(vd))
+        via.SetDrill(int(vk))
         via.SetNetCode(nc)
         b.Add(via)
         vias_by_net.setdefault(nc, []).append((spot.x, spot.y))

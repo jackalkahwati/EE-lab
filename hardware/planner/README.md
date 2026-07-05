@@ -64,3 +64,38 @@ gas/voc dropped, approval required).
   capability sets `requires_approval`.
 - The existing compose pipeline (blocks, flroute, DRC/ERC, geometry stitch, FL-1
   validation) is untouched and stable.
+
+## Phase 11 — board synthesis from UCS (synth.py): WORKING BRIDGE
+
+`synth.py` converts a UCS design into a real KiCad board and hands it to the
+EXISTING pipeline (flroute, DRC/ERC, geometry stitch, fab, firmware, FL-1). Wired
+into `route.ts` as `synth=1&design=<base64>` — emits the same board contract as
+`compose.py`, so everything downstream is unchanged.
+
+**What it does (all from the components' OWN validated pins, never guessed):**
+- RP2040/Pico MCU anchor; UCS parts wired to power / GND / I2C / SPI /
+  write-only SPI / UART / RS485 / GPIO by their UCS `interface.signals`.
+- power_in pins → rail, ground → GND, bus signals → shared meaningful nets
+  (I2C_SDA/SCL, SPI_SCK/MOSI/MISO, per-device CS, RS485_A/B, DEBUG_TX/RX).
+- support passives from the UCS (decoupling per power pin, config-pin pulls,
+  shunts, RS485 termination); I2C bus pull-ups; test points on rails + buses.
+- layout intelligence: power connector placed next to the MCU power pins.
+- recovery/substitution report preserved next to the board (`.recovery.json`).
+
+**Demo** ("RP2040 industrial sensor hub…USB-C, BME280, INA219, W25Q, MAX3485,
+74HC595…"): produces a real 7-component board (37 footprints), **17/18 nets
+routed**, with EVERY bus wired correctly — verified: BME280 + INA219 share I2C
+with pull-ups; W25Q (full SPI) + 74HC595 (write-only SPI) share SPI with their
+own selects; power/GND from UCS pins; decoupling + test points added.
+
+**Honest blocker (criterion 13):** the **USB-C receptacle** is a fine-pitch
+connector whose 4 VBUS pads feed the **+5V rail, which is not plane-served**, so
+it must route across the board — flroute leaves 1 net + a few fine-pitch pads
+open. The board GATE-FAILS honestly on real DRC (gates NOT weakened). A coarse
+power connector in place of the USB-C receptacle routes clean; the fine-pitch
+connector + non-plane +5V routing is the specific remaining limit.
+
+**Fanout bonus:** the finer-via-class (`.kicad_pro`) + geometry stitch now clears
+the fine-pitch STITCH-via violations everywhere (DC-measure: 3 → 1 violation, 0
+unconnected; the last one is the flroute-track issue = Fix B, a router change).
+Coarse boards (comms, relay) still PASS 0/0 — no regression.

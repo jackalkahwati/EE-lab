@@ -90,6 +90,23 @@ export async function GET(req: Request) {
       composeSpec = null
     }
   }
+  // Phase-11 UCS synth mode: the planner passes a base64 design
+  // {final_design:[UCS...], intent, recovery_report}. synth.py emits the SAME
+  // board contract as compose.py, so everything downstream is unchanged.
+  const synthMode = qp.get('synth') === '1'
+  let synthDesign: Record<string, unknown> | null = null
+  if (synthMode) {
+    try {
+      synthDesign = JSON.parse(
+        Buffer.from(decodeURIComponent(qp.get('design') ?? ''), 'base64').toString('utf8'),
+      )
+    } catch {
+      synthDesign = null
+    }
+  }
+  // Both compose and synth produce a self-contained variant board (vs. the rev-a
+  // baseline), so downstream board-path + firmware decisions treat them alike.
+  const boardMode = composeMode || synthMode
   const appDir = process.cwd()
   const hwDir = path.resolve(appDir, '../../hardware/pcba-rev-a')
   const flroute = path.join(hwDir, 'tools/flroute/target/release/flroute')
@@ -277,6 +294,55 @@ export async function GET(req: Request) {
             }
           }
           log('design', 'GATE design: blocks composed + wired, PASS', 'ok')
+          send({ type: 'stage', id: 'design', state: 'passed' })
+        } else if (synthMode && synthDesign) {
+          // Phase 11: synthesize the board from the UCS design (planner output).
+          // synth.py emits the SAME contract as compose.py, so the rest of the
+          // pipeline (route/DRC/stitch/fab/firmware/FL-1) is unchanged.
+          const parts = (synthDesign.final_design as unknown[])?.length ?? 0
+          log('design', `synthesizing board from ${parts} Universal Component Specs…`)
+          const designPath = path.join(ws, 'ucs_design.json')
+          fs.writeFileSync(designPath, JSON.stringify(synthDesign))
+          const comp = await exec('design', KPY, [
+            path.resolve(hwDir, '../../hardware/planner/synth.py'),
+            designPath,
+            variantBoard,
+          ])
+          if (!comp.out.includes('COMPOSE:')) {
+            send({ type: 'stage', id: 'design', state: 'failed', failReason: 'UCS synth failed' })
+            for (const s of ['placement', 'routing', 'validation', 'erc', 'firmware'] as const)
+              send({ type: 'stage', id: s, state: 'blocked' })
+            send({ type: 'done', status: 'GATE FAILED', boardPath: variantBoard })
+            return
+          }
+          // carry the device manifest + the recovery/substitution report (P11 #13)
+          for (const [suffix, dst] of [
+            ['.devices.json', 'devices.json'],
+            ['.recovery.json', 'recovery.json'],
+          ] as const) {
+            try {
+              const src = variantBoard.replace(/\.kicad_pcb$/, suffix)
+              if (fs.existsSync(src)) fs.copyFileSync(src, path.join(pubData, dst))
+            } catch {
+              /* non-fatal */
+            }
+          }
+          const covMatch = comp.out.match(/^COMPOSE_COVERAGE:(.+)$/m)
+          if (covMatch) {
+            try {
+              const cov = JSON.parse(covMatch[1]) as { mapped: string[]; dropped: unknown[] }
+              send({ type: 'coverage', mapped: cov.mapped, dropped: cov.dropped as string[] })
+              if (cov.dropped.length)
+                log('design', `⚠ UCS synth dropped (honest): ${JSON.stringify(cov.dropped)}`, 'warn')
+              else
+                log('design', `synth: every UCS component instantiated [${cov.mapped.join(', ')}]`, 'ok')
+            } catch {
+              /* non-fatal */
+            }
+          }
+          const notes = comp.out.match(/^SYNTH_NOTES:(.+)$/m)
+          if (notes) log('design', `synth notes: ${notes[1]}`, 'warn')
+          log('design', 'GATE design: UCS design synthesized + wired, PASS', 'ok')
           send({ type: 'stage', id: 'design', state: 'passed' })
         } else {
           // FL-1 relay/probe matrix: AI interprets the prompt, ato build gate.
@@ -711,7 +777,7 @@ export async function GET(req: Request) {
           ? 'PASSED'
           : 'GATE FAILED'
 
-        const failBoard = composeMode ? variantBoard : wsBoard
+        const failBoard = boardMode ? variantBoard : wsBoard
         // ---- gate: DRC must be clean before electrical/firmware stages -------
         if (!drcPass) {
           log('validation', `GATE validation FAILED: ${violations} blocking violation(s), ${unconnected} unconnected pad(s), stopping`, 'err')
@@ -757,8 +823,8 @@ export async function GET(req: Request) {
         // Relay boards get the crosspoint/coil HAL; composed boards get a generic
         // BSP + per-peripheral HAL (LoRa/IMU/motors) traced from the netlist.
         // Either way the hard gate is the same: `cargo build` for the RP2040.
-        const fwGen = composeMode ? 'scripts/gen_firmware_compose.py' : 'scripts/gen_firmware.py'
-        log('firmware', `${composeMode ? 'composed BSP + peripheral HAL' : 'relay-matrix HAL'} from netlist…`)
+        const fwGen = boardMode ? 'scripts/gen_firmware_compose.py' : 'scripts/gen_firmware.py'
+        log('firmware', `${boardMode ? 'composed BSP + peripheral HAL' : 'relay-matrix HAL'} from netlist…`)
         const gen = await exec('firmware', KPY, [
           path.join(appDir, fwGen),
           variantBoard,
@@ -870,7 +936,7 @@ export async function GET(req: Request) {
         send({
           type: 'done',
           status: validationStatus,
-          boardPath: composeMode ? variantBoard : wsBoard,
+          boardPath: boardMode ? variantBoard : wsBoard,
           fabZip,
           fwZip,
         })
@@ -890,7 +956,7 @@ export async function GET(req: Request) {
           writeRunReport(appDir, pubData, runId, {
             startedAt,
             finishedAt: new Date().toISOString(),
-            mode: composeMode ? 'compose' : 'matrix',
+            mode: synthMode ? 'synth' : composeMode ? 'compose' : 'matrix',
             prompt,
             composeSpec,
             parentId,

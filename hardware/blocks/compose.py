@@ -764,13 +764,26 @@ def compose(spec, blocks, out_path):
         r"P0\.[1-7]\d*mm|QFN|DFN|WSON|USON|VSSOP|VQFN|UQFN|UFQFPN|BGA|"
         r"LGA|SON_|USB_C_Receptacle", p)
     if fine_pitch:
-        dru = os.path.splitext(out_path)[0] + ".kicad_dru"
-        open(dru, "w").write(
+        base = os.path.splitext(out_path)[0]
+        open(base + ".kicad_dru", "w").write(
             "(version 1)\n"
             "# Fine-pitch parts make this a 6-mil fab class; 0.13mm (5-mil) copper\n"
             "# clearance is supported by every standard 2-layer fab.\n"
             '(rule "fab_6mil"\n'
             "  (constraint clearance (min 0.13mm)))\n")
+        # finer via class so the geometry stitch's 0.4/0.2 via on a fine-pitch pad
+        # is legal; net-class defaults match the board so plane zones still connect.
+        open(base + ".kicad_pro", "w").write(json.dumps({
+            "board": {"design_settings": {"rules": {
+                "min_clearance": 0.0, "min_hole_clearance": 0.2, "min_hole_to_hole": 0.2,
+                "min_microvia_diameter": 0.2, "min_microvia_drill": 0.1,
+                "min_through_hole_diameter": 0.2, "min_via_annular_width": 0.05,
+                "min_via_diameter": 0.35}}},
+            "net_settings": {"classes": [{"name": "Default", "clearance": 0.2,
+                "track_width": 0.2, "via_diameter": 0.6, "via_drill": 0.3,
+                "microvia_diameter": 0.3, "microvia_drill": 0.1,
+                "diff_pair_gap": 0.25, "diff_pair_width": 0.2, "priority": 2147483647}]},
+            "meta": {"filename": os.path.basename(base) + ".kicad_pro", "version": 3}}))
 
     # device manifest sidecar — firmware reads this to drive the actual parts
     open(os.path.splitext(out_path)[0] + ".devices.json", "w").write(json.dumps(_DEVICES))

@@ -18,6 +18,8 @@ import ingest
 SEEDS = [
     ("74HC595", "74HC595", "Texas Instruments", "logic.shift_register", {
         "description": "8-bit serial-in, parallel-out shift register (write-only SPI)",
+        "interfaces": [{"type": "spi_write_only",
+                        "signals": {"sck": "SRCLK", "mosi": "SER", "latch": "RCLK"}}],
         "power": {"vcc_min": 2.0, "vcc_max": 6.0, "vcc_typ": 3.3, "i_max_ma": 70.0},
         "support_circuit": {
             "pulldowns": [{"pin": "OE", "to": "GND", "note": "output enable, active low"}],
