@@ -650,22 +650,47 @@ export async function GET(req: Request) {
             log('validation', `FL-1 test plan: ${tpCount} probe points mapped with pass/fail limits → fl1-testplan.json`, 'ok')
           else log('validation', 'FL-1 test plan generation incomplete', 'warn')
 
+          // ---- FL-1 Validation Package: the executable bring-up + test spec.
+          // Composes the test plan + device manifest + power budget into the one
+          // package FL-1 runs: probe map, power sequence, expected currents,
+          // timing, firmware programming, bus protocols, functional tests, and
+          // calibration.
+          const vpPath = path.join(pubData, 'fl1-validation.json')
+          const vpGen = await exec('validation', KPY, [
+            path.join(appDir, 'scripts/gen_validation.py'),
+            variantBoard,
+            tpPath,
+            path.join(pubData, 'devices.json'),
+            path.join(pubData, 'power-budget.json'),
+            vpPath,
+          ])
+          const vpCount = vpGen.out.match(/^VALIDATION (\d+)/m)?.[1]
+          if (vpCount !== undefined)
+            log('validation', `FL-1 Validation Package: ${vpCount}-step test sequence + probes, currents, timing, bus protocols, programming, calibration → fl1-validation.json`, 'ok')
+          else log('validation', 'FL-1 Validation Package generation incomplete', 'warn')
+
           const zipMatch = fab.out.match(/^FAB_ZIP:(.+)$/m)
           if (zipMatch && fs.existsSync(zipMatch[1].trim())) {
             const pubFab = path.join(appDir, 'public/fab')
             fs.mkdirSync(pubFab, { recursive: true })
             const dest = path.join(pubFab, 'fab-package.zip')
             fs.copyFileSync(zipMatch[1].trim(), dest)
-            // ship the FL-1 test plan inside the fab package
-            if (fs.existsSync(tpPath)) {
+            // ship the FL-1 test plan + Validation Package inside the fab package
+            const extras = [
+              [tpPath, 'fl1-testplan.json'],
+              [vpPath, 'fl1-validation.json'],
+            ].filter(([p]) => fs.existsSync(p))
+            if (extras.length) {
+              const writes = extras
+                .map(([p, name]) => `z.write(${JSON.stringify(p)},${JSON.stringify(name)})`)
+                .join('; ')
               await exec('validation', 'python3', [
                 '-c',
-                `import zipfile; z=zipfile.ZipFile(${JSON.stringify(dest)},'a'); ` +
-                  `z.write(${JSON.stringify(tpPath)},'fl1-testplan.json'); z.close()`,
+                `import zipfile; z=zipfile.ZipFile(${JSON.stringify(dest)},'a'); ${writes}; z.close()`,
               ])
             }
             fabZip = '/fab/fab-package.zip'
-            log('validation', `fab package ready (incl. FL-1 test plan) → ${fabZip}`, 'ok')
+            log('validation', `fab package ready (incl. FL-1 Validation Package) → ${fabZip}`, 'ok')
           } else {
             log('validation', 'fab package generation incomplete', 'warn')
           }

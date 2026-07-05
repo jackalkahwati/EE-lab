@@ -425,3 +425,32 @@ when the project relaxed min-via). With geometry-based selection, a Fix A retry
 (0.4mm via on the fine-pitch pad + the proven `.kicad_pro` min-via relaxation)
 can be layered on cleanly without the under-stitching regression. flroute
 regression harness unaffected (it never runs the stitch heal): still 174/174.
+
+---
+
+## FL-1 Validation Package artifact — 2026-07-06 (done)
+
+Compose now emits a new artifact beyond gerbers/BOM/STEP/firmware: the
+**FL-1 Validation Package** (`fl1-validation.json`) — the executable bring-up +
+test spec FL-1 runs. `scripts/gen_validation.py` composes the test plan + device
+manifest + power budget (no invented data — every entry traces to a real net,
+pad, or part) into one package containing exactly the requested sections:
+
+- **probe_map** — probe locations + test-point map (net → pad + XY + size)
+- **power_sequence** — pre-power short screen, power-up steps, **expected
+  currents** (per rail, from the power budget, with over-current trip),
+  **timing requirements** (rail rise, sequencing, reset width, bus periods)
+- **measurements** — **expected voltages** + **pass/fail limits** per point
+- **firmware_programming** — target, interface (SWD/UF2), program + verify steps
+- **bus_protocols** — every bus auto-detected from the nets + manifest, with
+  signals, speed, and the devices on it (SPI write-only + 74HC595 for the relay
+  matrix; CAN 500kbps + 120R term + SN65HVD230 for the comms head)
+- **functional_tests** — the ordered 6-step sequence (short screen → power-up →
+  quiescent current → firmware → bus discovery → measurements) with pass_if
+- **calibration** — gantry XY (against fiducials), probe force/Z-zero, DMM
+  reference check
+
+Wired into the pipeline after the test plan; shipped inside `fab-package.zip`
+next to `fl1-testplan.json`. Verified end-to-end on the relay matrix (PASSED,
+package present + zipped) and the comms head (CAN bus correctly characterized).
+This makes the closed loop literal: **Compose emits the spec; FL-1 executes it.**
