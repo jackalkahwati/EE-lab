@@ -20,6 +20,7 @@ import { GatesLogs } from '@/components/gates-logs'
 import { MetricsRail } from '@/components/metrics-rail'
 import { OrderPanel } from '@/components/order-panel'
 import { RecoveryPanel } from '@/components/recovery-panel'
+import { ConstraintsPanel } from '@/components/constraints-panel'
 import { FL1ValidationView } from '@/components/fl1-validation-view'
 import { BuildStatus } from '@/components/build-status'
 import { ErrorBoundary } from '@/components/error-boundary'
@@ -29,7 +30,7 @@ import { ReviewPanel } from '@/components/review-panel'
 import { ReviseDialog } from '@/components/revise-dialog'
 import { FL1Loop } from '@/components/fl1-loop'
 
-const TABS = ['Board', 'Code', 'BOM', 'Checks', 'Recovery', 'Review', 'FL-1', 'Order'] as const
+const TABS = ['Board', 'Code', 'BOM', 'Checks', 'Constraints', 'Recovery', 'Review', 'FL-1', 'Order'] as const
 type Tab = (typeof TABS)[number]
 
 interface PipelineEvent {
@@ -512,6 +513,9 @@ export default function FirstLightPage() {
                     .catch(() => {})
                 }}
               />
+            )}
+            {tab === 'Constraints' && (
+              <ConstraintsPanel runId={selectedRun.runDir ? selectedRun.id : null} />
             )}
             {tab === 'Recovery' && (
               <RecoveryPanel runId={selectedRun.runDir ? selectedRun.id : null} />

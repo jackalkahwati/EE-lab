@@ -124,3 +124,73 @@ unconnected, ERC PASS**, fab package + firmware + **FL-1 Validation Package**
 generated. Geometry stitch runs; gates NOT weakened. Coarse boards (comms, relay)
 still PASS 0/0 — no regression. The fine-pitch stitch threshold widened to 0.8mm
 so 0.65mm-pitch LGA parts (BME280) stitch cleanly under the finer via class.
+
+## Golden demo + regression suite (demo_and_regression.py)
+
+The closed-loop win, frozen and locked down. `demo_and_regression.py` runs cases
+through the REAL pipeline and checks routed nets / DRC / unconnected / ERC /
+recovery + FL-1 presence.
+
+    python3 demo_and_regression.py golden       # the industrial sensor hub demo
+    python3 demo_and_regression.py regression   # all 5 regression cases
+    python3 demo_and_regression.py <case>       # one case
+
+**Golden demo** — the canonical proof point, saved as run `golden-sensor-hub`:
+Compose generated a manufacturable RP2040 industrial sensor hub, recovered from
+the unsupported fine-pitch USB-C routing case by substituting a coarse 5V screw
+terminal (reported, approval-flagged), and produced a **DRC-clean board (16/18
+routed, 0 DRC, 0 unconnected, ERC pass)** with fab package, firmware, and an
+**FL-1 executable Validation Package**. Visible in the UI: Recovery tab, amber
+"Generated with substitution" badge, FL-1 Validation Package view.
+
+**Regression cases (each asserts a recorded outcome):**
+1. `comms` (block) — PASSED 0/0.
+2. `relay` (block) — PASSED 0/0.
+3. `dc-measure` (block) — known state: 0 unconnected, ≤1 hard violation (the
+   flroute track-clearance issue = Fix B; stitch vias cleared by the finer via
+   class + geometry stitch).
+4. `ucs-hub-recovery` (UCS synth + recovery) — PASSED 0/0 with recovery.json +
+   FL-1 Validation Package present.
+5. `ucs-hub-strict` (UCS synth, recovery disabled) — must FAIL HONESTLY (the
+   fine-pitch USB-C blocks routing); never a silent clean pass.
+
+This locks both the existing block pipeline and the new UCS recovery loop so
+future work can't quietly break the win. Gates stay strict; the strict-USB-C
+case exists precisely to prove we never fake a pass.
+
+## Constraint Manager v1 (constraints.py)
+
+The layer between design intent / component specs and routing. It classifies
+every net and applies per-class electrical rules — the step that turns "I placed
+and routed" into "I understood each net's requirement and treated it accordingly."
+
+**Net classes (v1):** gnd, power_input, power_rail, motor_output (high-current),
+i2c (needs pull-up), spi / spi_clock, uart, rs485, can, rf, reset_debug, clock,
+analog, test_point, digital_signal. Each net gets a class + a reason.
+
+**Rules per class:** trace width (power/high-current wider than signal),
+clearance, routing priority, plane/short-direct hints, and honesty flags
+(controlled / diff-pair-preferred / RF / analog / high-current).
+
+**HONEST unsupported (v1 refuses, never fakes):** USB high-speed (USB_D+/D-) and
+Ethernet differential pairs are detected and marked unsupported — required
+constraint (90/100 ohm diff pair + length match + stackup/PHY) and a fallback are
+reported. v1 does NOT attempt DDR / PCIe / USB-HS / Ethernet / MIPI / dense BGA.
+
+**Pipeline integration (real, not cosmetic):**
+- `apply_constraints.py` (after placement, before routing): builds the model,
+  writes `<board>.constraints.json` (run artifact), and merges per-class KiCad
+  net-settings into the `.kicad_pro` so KiCad DRC + the design carry the classes.
+- `widen_power.py` (after routing): flroute routes at one global width, so this
+  widens power / high-current tracks to their class width **only where the copper
+  still clears neighbours** — a real board effect with zero new DRC violations.
+- Honest reporting: the pipeline log + UI show constraints generated, classes
+  applied, high-risk nets, and unsupported features with fallbacks.
+
+**UI:** a `Constraints` tab renders the model (per-class rules table, high-risk
+nets, unsupported features, per-net classification).
+
+**Verified:** golden sensor hub → 20 nets in 9 classes, 29/32 power tracks
+widened, PASSED 0/0 (gates not weakened). Comms → CANH/CANL classified as `can`,
+PASSED 0/0. flroute integration is honestly scaffolded (post-route widening);
+full per-net-class routing in flroute is future work.

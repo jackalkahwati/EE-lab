@@ -415,6 +415,41 @@ export async function GET(req: Request) {
         log('placement', 'GATE DFM (edge/hole/fiducial/courtyard), PASS', 'ok')
         send({ type: 'stage', id: 'placement', state: 'passed' })
 
+        // ---- Constraint Manager v1 -----------------------------------------
+        // Classify every net (power / digital / I2C / SPI / UART / RS485 / CAN /
+        // RF / analog / motor / clock …), emit per-class KiCad net-settings into
+        // the .kicad_pro, write the constraint model, and surface the HONEST
+        // unsupported list (USB-HS / Ethernet differential/impedance nets). Runs
+        // before routing so the classes are part of the design.
+        const cons = await exec('placement', KPY, [
+          path.join(appDir, 'scripts/apply_constraints.py'),
+          variantBoard,
+        ])
+        const cm = cons.out.match(/^CONSTRAINTS (\d+) (\d+) (\d+)/m)
+        if (cm)
+          log('placement', `constraints: ${cm[1]} nets in ${cm[2]} classes, ${cm[3]} unsupported feature-net(s)`, cm[3] === '0' ? 'ok' : 'warn')
+        try {
+          const cSrc = variantBoard.replace(/\.kicad_pcb$/, '.constraints.json')
+          if (fs.existsSync(cSrc)) fs.copyFileSync(cSrc, path.join(pubData, 'constraints.json'))
+        } catch {
+          /* constraint model just won't show in the UI */
+        }
+        const crm = cons.out.match(/^CONSTRAINT_REPORT:(.+)$/m)
+        if (crm) {
+          try {
+            const cr = JSON.parse(crm[1]) as {
+              unsupported?: { feature: string; fallback: string }[]
+              high_risk?: string[]
+            }
+            if (cr.unsupported?.length)
+              log('placement', `⚠ unsupported (honest): ${cr.unsupported.map((u) => `${u.feature} → fallback ${u.fallback}`).join('; ')}`, 'warn')
+            if (cr.high_risk?.length)
+              log('placement', `high-risk nets (verify by hand): ${cr.high_risk.join(', ')}`, 'warn')
+          } catch {
+            /* report line unparseable, non-fatal */
+          }
+        }
+
         // ---- stage 3: routing (flroute on the variant) ---------------------
         send({ type: 'stage', id: 'routing', state: 'running' })
         const dsn = path.join(ws, 'variant.dsn')
@@ -474,6 +509,24 @@ export async function GET(req: Request) {
             : 'pad-entry stitching did not complete',
           stitched !== undefined ? 'ok' : 'warn',
         )
+
+        // ---- apply per-class trace widths (Constraint Manager v1) -----------
+        // flroute routes at one width; widen power / high-current tracks to
+        // their class width where the copper still clears neighbours. Real
+        // board effect, zero new DRC violations (skips where it can't fit).
+        try {
+          const cPath = variantBoard.replace(/\.kicad_pcb$/, '.constraints.json')
+          if (fs.existsSync(cPath)) {
+            const wp = await exec('routing', KPY, [
+              path.join(appDir, 'scripts/widen_power.py'), variantBoard, cPath,
+            ])
+            const wm = wp.out.match(/^WIDENED (\d+) of (\d+)[^(]*\((\d+)/m)
+            if (wm)
+              log('routing', `per-class widths: widened ${wm[1]}/${wm[2]} power tracks (${wm[3]} clearance-limited)`, 'ok')
+          }
+        } catch {
+          /* widths are an enhancement; routed board is already valid */
+        }
         // fill the GND / coil-rail zones so plane pads connect via the pour
         await exec('routing', KPY, [
           '-c',
