@@ -40,6 +40,7 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
       'fl1-manufacturing-capability-report', 'cal-board-attempt', 'shared-bus-report',
       'fine-pitch-escape-model', 'fl1-build-readiness-dashboard', 'combined-signoff-report',
       'fl1-curated-reference-library', 'fl1-validation-readiness-dashboard', 'demo-validation-runs',
+      'fl1-instrument-core-v1',
     ]
     Promise.all(
       files.map((f) =>
@@ -111,6 +112,39 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
           {d['cal-board-attempt'].blocker && (
             <p className="mt-1 text-[10px] text-destructive">
               blocker: {d['cal-board-attempt'].blocker}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* FL-1 Instrument Core v1 (Phase 15) — the buildable core */}
+      {d['fl1-instrument-core-v1']?.boards?.length > 0 && (
+        <div className="rounded-md border border-emerald-500/40 bg-emerald-500/5 p-3">
+          <p className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold text-emerald-500">
+            <Cpu className="size-3.5" /> FL-1 Instrument Core v1 —{' '}
+            {d['fl1-instrument-core-v1'].core_status} ({d['fl1-instrument-core-v1'].board_count} boards)
+          </p>
+          <div className="space-y-1">
+            {d['fl1-instrument-core-v1'].boards.map((b: any, i: number) => (
+              <div key={i} className="flex items-center gap-2 text-[10px]">
+                <span className="text-foreground">{b.name}</span>
+                <span className="rounded-sm border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-emerald-500">
+                  {b.build_result.build_recommendation}
+                </span>
+                <span className="font-mono text-[9px] text-muted-foreground">
+                  {b.build_result.routed} · {b.build_result.drc_violations} DRC · {b.role}
+                </span>
+              </div>
+            ))}
+          </div>
+          <p className="mt-1 text-[9px] text-muted-foreground">
+            All core boards route clean (0 DRC) and are ready to fabricate. Adapters are
+            future_internal_board (mock-validatable now, physical after fab).
+          </p>
+          {d['fl1-instrument-core-v1'].excluded_from_core?.length > 0 && (
+            <p className="mt-1 text-[10px] text-destructive">
+              excluded: {d['fl1-instrument-core-v1'].excluded_from_core[0].board} —{' '}
+              {d['fl1-instrument-core-v1'].excluded_from_core[0].reason}
             </p>
           )}
         </div>

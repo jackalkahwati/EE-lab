@@ -618,3 +618,57 @@ Regression: validation 28/28; benchmark+signoff 29/29, fine-pitch 10/10, shared-
 11/11, high-speed 8/8, ingest 6/6, fl1boards 12/12, frontend 24/24 unchanged. Phase 13
 build/signoff verdicts untouched. No fake physical measurement, no fake calibration/
 traceability, no weakened DRC/ERC/benchmark/signoff gates.
+
+## Phase 15: FL-1 Instrument Core v1
+
+The first REAL FL-1 instrument boards — the genuinely buildable, coarse-part core,
+assembled into one instrument system. Every core board was routed clean through the
+FULL pipeline (0 DRC, 0 unconnected, PASSED); nothing is faked into the core.
+
+- fl1_core.py: assembles the three buildable core boards from their REAL pipeline
+  build results:
+    - FL-1 Controller / Backplane v1  (7/7 nets, 0 DRC)  — bus master + power + trigger
+    - FL-1 Digital Bring-up v1        (5/5 nets, 0 DRC)  — digital IO + bus bring-up
+    - FL-1 Relay / Probe Matrix v1    (20/20 nets, 0 DRC) — signal routing / probe matrix
+  Defines roles, the FL-1 instrument-bus interconnect (controller master + device
+  boards on a shared I2C backplane bus, Phase 12.5-validated), and the 13 instrument
+  capabilities the core provides (route_channel, read/write_digital, set_power, ...).
+- Honest boundaries: the core is DESIGNED + verified, NOT yet fabricated — adapters are
+  future_internal_board (physically_available=False), mock-validatable now, physical
+  after fab + COTS. The core is HONEST about its gap: precise measurement / calibration
+  is NOT in v1 (needs the Calibration/Reference + DMM-lite boards, currently
+  do_not_build / needs_ingestion, or an external COTS DMM).
+- The Calibration/Reference board is EXCLUDED from the core — it stays do_not_build
+  (blocked_by_grid_resolution). No do_not_build board is in the core.
+- gen_fl1_core.py: emits fl1-instrument-core-v1 + core validation runs (3 mock
+  bring-up demos, all simulated_pass / simulated_evidence). UI shows the core (build
+  status per board + the excluded do_not_build board).
+
+Regression: fl1-core 12/12; validation 28/28, benchmark+signoff 29/29, fine-pitch
+10/10, shared-bus 11/11, high-speed 8/8, ingest 6/6, fl1boards 12/12, fl1-cal 8/8,
+frontend 24/24 unchanged. No faked board, no weakened gate.
+
+### Phase 15 build policy + first order batch
+
+- build_policy.py: the Phase 15 gate. Consumes Phase 13/14 evidence and decides, per
+  board: allowed_to_attempt / allowed_to_generate_order_package / allowed_to_mark_
+  ready_to_order / validate_with_mock|cots|internal / required_human_review, the
+  package type (architecture / design_attempt / order_ready_pcba / mock/cots/internal
+  validation), and the order recommendation (order_5_pcba / order_3_pcba_review_
+  required / architecture_only / design_attempt_only / do_not_order / unsupported).
+  Also order_pack_validation() (Gerbers/drill/STEP generated at order time; BOM/P&P/
+  assembly/sourcing checked present) and adapter_mapping().
+- Batch 1 decisions (honest, evidence-driven): the 3 core boards -> order_ready_pcba_
+  package, order_3_pcba_review_required (first-article human review); calibration_
+  reference -> do_not_order (design_attempt_package, blocked_by_grid_resolution);
+  scope_lite -> unsupported (architecture_package); power/dmm/external/stimulus/logic
+  -> design_attempt_only (needs_ingestion). A do_not_build board NEVER yields an order
+  package, even if it routes.
+- gen_phase15.py emits phase15-build-policy-report, phase15-package-policy,
+  phase15-board-readiness-dashboard, manufacturing-order-pack-validation,
+  phase15-adapter-mapping, phase15-demo-validation-runs. UI shows the build batch
+  (order-ready green + review flag, held boards red with exact blockers).
+
+Regression: phase15 21/21; fl1-core 12/12, validation 28/28, benchmark+signoff 29/29,
+fine-pitch 10/10, shared-bus 11/11, high-speed 8/8, ingest 6/6, fl1boards 12/12,
+fl1-cal 8/8, board 5/5, frontend 24/24. Only evidence-safe boards get an order package.
