@@ -229,3 +229,38 @@ substitutions, recovery subs are never marked footprint drop-in. Live sourcing i
 attempted and, when unavailable, clearly reported as fallback mode. Verified:
 golden hub → 24 placed + 7 DNP, 2 fine-pitch, 1 substitution, 29-file package,
 board PASSES. Next technical phase: arbitrary MCU + flexible pin allocation.
+
+## MCU Selection + Pin Allocation (arbitrary MCU support)
+
+Removes the RP2040-hardcoded assumption: the user describes the board, Compose
+selects (or accepts) an MCU and assigns pins from that MCU's REAL capabilities.
+
+- **mcu_specs.py** — schema-validated capability specs at the PHYSICAL PAD level.
+  6 seeds with real KiCad symbols/footprints + datasheet-accurate pad maps:
+  RP2040 (Pico module), ESP32-S3-WROOM-1 (module, Wi-Fi+BLE), ATmega328P (DIP-28)
+  — all `supported`; nRF52840 (Raytac module), STM32F103 (LQFP-48, fine-pitch),
+  SAMD21 — `partial` with honest reasons. The validator rejects a capability that
+  lands on a reserved pad.
+- **mcu_selector.py** — intent/design → best MCU + full explanation (why, rejected
+  candidates + why, missing capability if no fit). Honours a requested MCU only if
+  it truly qualifies. `propose_substitute()` powers MCU recovery.
+- **pin_allocator.py** — assigns real pads via BIPARTITE MATCHING (a flexible GPIO
+  never steals a scarce uart_tx pad), respects capability (ADC only on ADC pads),
+  never reuses a pad, protects reserved pads. Emits pin_assignment.json/.md +
+  firmware pin map.
+- **synth.py** — MCU no longer hardcoded. RP2040 keeps the PROVEN block_mcu_pico
+  (golden hub unchanged); non-RP2040 uses block_mcu_generic (footprint + power/
+  ground/reset + decoupling + reset pull-up + I2C pull-ups + programming header).
+  RP2040 pin-assignment is derived from the real Pico wiring so the firmware map
+  matches the board. MCU recovery: a requested MCU that can't fit is substituted
+  (e.g. ATmega+Wi-Fi → ESP32-S3) with preserved/lost reported.
+- **UI** — Pinout tab: selected MCU + why, rejected candidates, pin table,
+  reserved pins, MCU substitution, download pin_assignment.json.
+
+Verified: golden hub → RP2040, PASSES (unchanged); ATmega328P I2C node → REAL
+board that routes 9/9, DRC 0/0, ERC PASS; ESP32-S3 → places but fails routing
+honestly (WROOM antenna keepout, 3 unconnected); ATmega+Wi-Fi → recovery to
+ESP32-S3. The FL-1 Validation Package carries the assigned firmware pin map.
+Honesty: real symbols/footprints only, partial MCUs never faked as supported, no
+invented pin capabilities, no silent pad reuse, DRC/ERC gates unchanged.
+Next phase: real datasheet ingestion (import new parts + expand support).

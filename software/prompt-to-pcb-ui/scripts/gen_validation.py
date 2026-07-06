@@ -110,20 +110,32 @@ if "RS485_A" in nets and "RS485_B" in nets:
         "devices": _dev_list(["rs485"]),
     })
 
-# ---- firmware programming: driven by the MCU on the board ---------------------
+# ---- firmware programming: driven by the ACTUAL MCU + its pin assignment -------
 has_mcu = any(d.get("type") == "mcu" for d in devices)
+# the pin-assignment artifact sits next to the board (synth wrote it)
+pin_assign = _load(board_path.rsplit(".kicad_pcb", 1)[0] + ".pin-assignment.json", None)
 firmware_programming = None
 if has_mcu:
+    mcu_name = (pin_assign or {}).get("selection", {}).get("selected") or "RP2040"
+    fw_map = (pin_assign or {}).get("firmware_pin_map", {})
+    iface = "SWD (2-wire)"
+    if mcu_name == "RP2040":
+        iface = "SWD (2-wire) or USB UF2 mass-storage bootloader"
+    elif mcu_name == "ATmega328P":
+        iface = "ISP (6-pin header: SCK/MOSI/MISO/RESET) or UART bootloader"
+    elif mcu_name == "ESP32-S3":
+        iface = "UART bootloader (hold IO0 low on reset) or USB-JTAG"
     firmware_programming = {
-        "target": "RP2040 (Pico class)",
-        "interface": "SWD (2-wire) or USB UF2 mass-storage bootloader",
+        "target": mcu_name,
+        "interface": iface,
+        # the REAL firmware pin map from the allocator — FL-1 flashes + probes
+        # exactly these pads (criterion: FL-1 uses the assigned pins)
+        "firmware_pin_map": fw_map,
         "steps": [
-            {"step": 1, "action": "probe SWDIO/SWCLK (or hold BOOTSEL and enumerate "
-                                  "USB) to enter programming mode"},
-            {"step": 2, "action": "erase + write the firmware image "
-                                  "(firmware.uf2 in the firmware package)"},
-            {"step": 3, "action": "reset and read back the boot signature to confirm "
-                                  "the image is running"},
+            {"step": 1, "action": "enter programming mode via %s" % iface},
+            {"step": 2, "action": "erase + write the firmware image from the "
+                                  "firmware package"},
+            {"step": 3, "action": "reset and confirm the boot signature / heartbeat"},
         ],
         "verify": "boot signature / heartbeat on the self-test image",
         "recovery": "re-enter bootloader and reflash on verify failure",

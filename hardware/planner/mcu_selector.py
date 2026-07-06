@@ -71,6 +71,40 @@ def requirements_from_design(intent, specs):
     }
 
 
+def propose_substitute(decision):
+    """When a requested MCU cannot meet the design, propose the best QUALIFYING
+    MCU as a substitute and report preserved / lost capabilities honestly.
+    Returns None if nothing qualifies (a true dead-end for the recovery loop)."""
+    req = dict(decision["requirements"])
+    req["requested_mcu"] = None
+    d2 = select_mcu(req)
+    if not d2.get("selected"):
+        return None
+    sub = MCU_SEEDS[d2["selected"]]
+    reqd = MCU_SEEDS.get(decision.get("requested"), {})
+    preserved = ["every required interface", "board bring-up + programming"]
+    if req.get("wireless"):
+        preserved.append("+".join(req["wireless"]).upper() + " radio")
+    lost = []
+    for feat, key in (("USB", "has_usb"), ("CAN", "has_can"), ("low-power", "low_power")):
+        if reqd.get(key) and not sub.get(key):
+            lost.append(feat + " (present on the requested part, not the substitute)")
+    if reqd and reqd.get("family") != sub.get("family"):
+        lost.append("firmware target changes: %s -> %s"
+                    % (reqd.get("firmware_target", "?"), sub.get("firmware_target")))
+    return {
+        "requested_mcu": decision.get("requested"),
+        "blocker": decision["blocker"],
+        "substituted_mcu": d2["selected"],
+        "substituted_mpn": sub["mpn"],
+        "preserved": preserved,
+        "lost": lost or ["nothing material — the substitute is a superset for this design"],
+        "requires_approval": True,
+        "approval_note": "MCU changed from the requested part; review firmware target + footprint before production",
+        "status": d2["status"],
+    }
+
+
 def _capable_count(spec, cap):
     return len(spec.get("capable", {}).get(cap, []))
 

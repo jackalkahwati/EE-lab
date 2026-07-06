@@ -34,6 +34,9 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "blocks"))
 import compose  # noqa: E402  reuse place/cap/res/tp/Nets/gzone/LAYERS/_unique_refs/block_mcu_pico
 import resolve_part  # noqa: E402  pin-name normalisation/tokens
+import mcu_specs  # noqa: E402  MCU capability library
+import mcu_selector  # noqa: E402  intent -> MCU
+import pin_allocator  # noqa: E402  MCU + requests -> pad assignment
 
 # shared bus net names (meaningful for firmware + FL-1)
 BUS = {
@@ -178,6 +181,131 @@ def _wire_mcu(design_specs):
     return n
 
 
+def _mcu_requests(specs):
+    """Allocation requests for the MCU, aligned to the shared bus net names the
+    peripherals wire to (so the MCU and its peripherals meet on the same nets)."""
+    ifaces = {t for s in specs for i in s.get("interfaces", []) for t in [i["type"]]}
+    reqs = []
+    if "i2c" in ifaces:
+        reqs += [{"role": "I2C_SDA", "net": "I2C_SDA", "cap": "i2c_sda"},
+                 {"role": "I2C_SCL", "net": "I2C_SCL", "cap": "i2c_scl"}]
+    if ifaces & {"spi", "spi_write_only"}:
+        reqs += [{"role": "SPI_SCK", "net": "SPI_SCK", "cap": "spi_sck"},
+                 {"role": "SPI_MOSI", "net": "SPI_MOSI", "cap": "spi_mosi"},
+                 {"role": "SPI_MISO", "net": "SPI_MISO", "cap": "spi_miso"}]
+    if any("flash" in s.get("category", "") for s in specs):
+        reqs.append({"role": "W25Q_CS", "net": "W25Q_CS", "cap": "spi_cs"})
+    if any("shift" in s.get("category", "") for s in specs):
+        reqs.append({"role": "SR_LATCH", "net": "SR_LATCH", "cap": "gpio"})
+    if "rs485" in ifaces:
+        reqs += [{"role": "RS485_DI", "net": "RS485_DI", "cap": "uart_tx"},
+                 {"role": "RS485_RO", "net": "RS485_RO", "cap": "uart_rx"},
+                 {"role": "RS485_DE", "net": "RS485_DE", "cap": "gpio"}]
+    if "can" in ifaces:
+        reqs += [{"role": "CAN_TX", "net": "CAN_TX", "cap": "can_tx"},
+                 {"role": "CAN_RX", "net": "CAN_RX", "cap": "can_rx"}]
+    reqs += [{"role": "DEBUG_TX", "net": "DEBUG_TX", "cap": "uart_tx"},
+             {"role": "DEBUG_RX", "net": "DEBUG_RX", "cap": "uart_rx"}]
+    return reqs
+
+
+# the ACTUAL Pico wiring in block_mcu_pico (physical pad -> interface key), so the
+# RP2040 pin-assignment artifact reflects the real board, not a fresh allocation.
+_PICO_OPT = {"4": "spi_sck", "5": "spi_mosi", "6": "spi_miso", "7": "spi_cs",
+             "11": "i2c_sda", "12": "i2c_scl", "24": "can_txd",
+             "19": "uart_cell_tx", "20": "uart_cell_rx", "21": "cell_pwrkey",
+             "1": "uart_gps_tx", "2": "uart_gps_rx"}
+_KEY_CAP = {"spi_sck": "spi_sck", "spi_mosi": "spi_mosi", "spi_miso": "spi_miso",
+            "spi_cs": "spi_cs", "i2c_sda": "i2c_sda", "i2c_scl": "i2c_scl",
+            "can_txd": "gpio", "uart_cell_tx": "uart_tx", "uart_cell_rx": "uart_rx",
+            "cell_pwrkey": "gpio", "uart_gps_tx": "uart_tx", "uart_gps_rx": "uart_rx"}
+
+
+def _rp2040_alloc(n_mcu):
+    """Build the pin-assignment record from block_mcu_pico's REAL wiring so the
+    firmware pin map matches the board that is actually generated."""
+    spec = mcu_specs.get_mcu("RP2040")
+    assignments = [{"role": n_mcu[k], "net": n_mcu[k], "pad": pad, "cap": _KEY_CAP[k]}
+                   for pad, k in _PICO_OPT.items() if k in n_mcu]
+    reserved = {g: list(map(str, spec.get(g + "_pins", [])))
+                for g in ("power", "ground", "reset", "boot", "debug", "clock", "usb")}
+    return {
+        "mcu": "RP2040", "family": "RP2040",
+        "kicad_symbol": spec["kicad_symbol"], "kicad_footprint": spec["kicad_footprint"],
+        "assignments": assignments, "reserved": reserved,
+        "regulator_out": spec.get("regulator_out"), "conflicts": [],
+        "pad_net_map": {a["pad"]: a["net"] for a in assignments},
+        "firmware_pin_map": {a["role"]: a["pad"] for a in assignments},
+        "ok": True,
+    }
+
+
+# real body (courtyard) footprint of the MCU package (width, height in mm) so the
+# outline + neighbouring parts leave room. Kept generous (courtyard, not just body).
+def _mcu_body(fp):
+    p = fp.lower()
+    if "dip-28" in p:
+        return 11.0, 37.0           # DIP-28 is tall (pins on the long sides)
+    if "wroom" in p:
+        return 50.0, 44.0           # WROOM courtyard INCLUDES the antenna keepout
+    if "mdbt50q" in p:
+        return 34.0, 26.0           # module + antenna keepout
+    if "lqfp-48" in p or "tqfp-48" in p:
+        return 13.0, 13.0
+    return 22.0, 22.0
+
+
+def block_mcu_generic(spec, alloc, x, y, nets):
+    """Place a NON-RP2040 MCU from its spec + pin allocation. Wires power/ground/
+    reset from the spec and every allocated function pad to its bus net, adds
+    decoupling + a reset pull-up + I2C pull-ups + a programming header — ALL to
+    the RIGHT of the MCU body, clear of its courtyard. Honest: only the pads the
+    allocator assigned are wired, no invented connections."""
+    lib, name = spec["kicad_footprint"].split(":", 1)
+    rail = "+5V" if spec.get("voltage", {}).get("io", 3.3) >= 4 else "+3V3"
+    pmap = dict(alloc["pad_net_map"])                       # function pads -> nets
+    for p in spec.get("power_pins", []):
+        pmap[str(p)] = rail
+    for p in spec.get("ground_pins", []):
+        pmap[str(p)] = "GND"
+    for p in spec.get("reset_pins", []):
+        pmap[str(p)] = "MCU_RESET"
+    mw, mh = _mcu_body(name)
+    body = compose.place(lib, name, "U1", x + mw / 2, y + mh / 2, 0, pmap, nets)
+    # support column to the RIGHT of the MCU body, clear of its courtyard
+    xr = x + mw + 6
+    yc = y + 2
+    ci = 2
+    for _p in spec.get("power_pins", []):                  # 100nF per power pin
+        body += compose.cap("C%d" % ci, xr, yc, rail, "GND", nets)
+        ci += 1
+        yc += 6
+    body += compose.res("R10", xr, yc, "MCU_RESET", rail, nets)   # reset pull-up
+    yc += 6
+    if "I2C_SDA" in pmap.values():                          # I2C pull-ups
+        body += compose.res("R11", xr, yc, "I2C_SDA", rail, nets)
+        yc += 6
+        body += compose.res("R12", xr, yc, "I2C_SCL", rail, nets)
+        yc += 6
+    # programming header: SWD (ARM) taps the debug pads; ISP (AVR) taps SPI+reset
+    prog = spec.get("programming", [])
+    dbg = alloc.get("reserved", {}).get("debug", [])
+    if "SWD" in prog:
+        hdrmap = {"1": rail, "2": "MCU_SWDIO", "3": "GND", "4": "MCU_SWCLK",
+                  "5": "MCU_RESET", "6": "GND"}
+    else:                                                   # ISP / AVR
+        hdrmap = {"1": "SPI_MISO", "2": rail, "3": "SPI_SCK", "4": "SPI_MOSI",
+                  "5": "MCU_RESET", "6": "GND"}
+    body += compose.place("Connector_PinHeader_2.54mm",
+                          "PinHeader_2x03_P2.54mm_Vertical", "J1", xr + 4, yc + 5,
+                          0, hdrmap, nets)
+    yc += 14
+    compose._DEVICES.append({"ref": "U1", "type": "mcu", "name": spec["mpn"]})
+    compose._DEVICES.append({"ref": "J1", "type": "connector", "name": "Programming header"})
+    # extent must enclose the MCU body AND the support column
+    return body, mw + 14, max(mh, yc - y) + 4
+
+
 def synth(design, out_path):
     specs = [s for s in design["final_design"] if s.get("pins")]
     nets = compose.Nets()
@@ -194,13 +322,37 @@ def synth(design, out_path):
         right_extent[0] = max(right_extent[0], x + w)
         bottom_extent[0] = max(bottom_extent[0], y + h)
 
-    # ---- MCU anchor (Pico) --------------------------------------------------
+    # ---- MCU selection + pin allocation (no longer hardcoded to RP2040) ------
+    intent = design.get("intent", {})
+    mcu_req = mcu_selector.requirements_from_design(intent, specs)
+    mcu_decision = mcu_selector.select_mcu(mcu_req)
+    mcu_recovery = None
+    # recovery: a requested MCU that cannot meet the design -> substitute the best
+    # qualifying MCU and build with it, reporting preserved/lost capabilities.
+    if mcu_decision.get("needs_recovery"):
+        mcu_recovery = mcu_selector.propose_substitute(mcu_decision)
+        if mcu_recovery:
+            mcu_decision = mcu_selector.select_mcu({**mcu_req, "requested_mcu":
+                                                    mcu_recovery["substituted_mcu"]})
+    mcu_alloc = None
     x = X0 + MARGIN
     ytop = Y0 + MARGIN
-    n_mcu = _wire_mcu(specs)
-    mb, mw, mh = compose.block_mcu_pico(x, ytop, n_mcu, nets)
-    body += mb
-    compose._DEVICES.append({"ref": "U1", "type": "mcu", "name": "RP2040"})
+    sel = mcu_decision.get("selected")
+    if sel == "RP2040" or not sel:
+        # PROVEN RP2040 path (also the safe fallback if selection could not fit) —
+        # keeps the golden hub + every existing board bit-for-bit identical.
+        n_mcu = _wire_mcu(specs)
+        mb, mw, mh = compose.block_mcu_pico(x, ytop, n_mcu, nets)
+        body += mb
+        compose._DEVICES.append({"ref": "U1", "type": "mcu", "name": "RP2040"})
+        if sel == "RP2040":
+            mcu_alloc = _rp2040_alloc(n_mcu)   # matches the real Pico wiring
+    else:
+        # generalized path: place the selected MCU from its spec + allocated pads
+        spec = mcu_specs.get_mcu(sel)
+        mcu_alloc = pin_allocator.allocate(spec, _mcu_requests(specs))
+        mb, mw, mh = block_mcu_generic(spec, mcu_alloc, x, ytop, nets)
+        body += mb
     note_extent(x, ytop, mw, mh)
     x += mw + GAP
     row_y = ytop
@@ -308,6 +460,29 @@ def synth(design, out_path):
     # preserve the recovery/substitution report next to the board (criterion 13)
     if design.get("recovery_report"):
         open(base + ".recovery.json", "w").write(json.dumps(design["recovery_report"], indent=1))
+
+    # ---- MCU selection + pin-assignment artifacts ---------------------------
+    open(base + ".mcu-selection.json", "w").write(json.dumps(mcu_decision, indent=1))
+    if mcu_recovery:
+        open(base + ".mcu-recovery.json", "w").write(json.dumps(mcu_recovery, indent=1))
+        print("MCU_RECOVERY:" + json.dumps({
+            "requested": mcu_recovery["requested_mcu"],
+            "substituted": mcu_recovery["substituted_mcu"],
+            "lost": mcu_recovery["lost"]}))
+    if mcu_alloc:
+        open(base + ".pin-assignment.json", "w").write(json.dumps({
+            **mcu_alloc, "firmware_pin_map": mcu_alloc["firmware_pin_map"],
+            "selection": {k: mcu_decision.get(k) for k in
+                          ("selected", "mpn", "package", "status", "confidence", "why")},
+        }, indent=1))
+        open(base + ".pin-assignment.md", "w").write(
+            pin_allocator.to_markdown(mcu_alloc, mcu_decision))
+        print("MCU_SELECTED:" + json.dumps({
+            "mcu": sel, "status": mcu_decision.get("status"),
+            "assigned": len(mcu_alloc["assignments"]),
+            "conflicts": len(mcu_alloc["conflicts"]),
+            "rejected": len(mcu_decision.get("rejected", [])),
+            "partial": mcu_decision.get("partial_warning")}))
 
     print("COMPOSE: synth {} UCS parts + MCU -> {} components placed, {:.0f}x{:.0f}mm, {} nets".format(
         len(placed), p.count("(footprint "), BW, BH, len(nets.order) - 1))

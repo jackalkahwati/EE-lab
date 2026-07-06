@@ -316,13 +316,32 @@ export async function GET(req: Request) {
             return
           }
           // carry the device manifest + the recovery/substitution report (P11 #13)
+          // + the MCU selection & pin-assignment artifacts (MCU engine)
           for (const [suffix, dst] of [
             ['.devices.json', 'devices.json'],
             ['.recovery.json', 'recovery.json'],
+            ['.mcu-selection.json', 'mcu-selection.json'],
+            ['.mcu-recovery.json', 'mcu-recovery.json'],
+            ['.pin-assignment.json', 'pin-assignment.json'],
+            ['.pin-assignment.md', 'pin-assignment.md'],
           ] as const) {
             try {
               const src = variantBoard.replace(/\.kicad_pcb$/, suffix)
               if (fs.existsSync(src)) fs.copyFileSync(src, path.join(pubData, dst))
+            } catch {
+              /* non-fatal */
+            }
+          }
+          const mcuMatch = comp.out.match(/^MCU_SELECTED:(.+)$/m)
+          if (mcuMatch) {
+            try {
+              const mc = JSON.parse(mcuMatch[1]) as {
+                mcu: string; status: string; assigned: number; conflicts: number
+                rejected: number; partial: string | null
+              }
+              log('design', `MCU: selected ${mc.mcu} (${mc.status}) — ${mc.assigned} pins allocated, ${mc.conflicts} conflicts, ${mc.rejected} candidate(s) rejected`, mc.conflicts === 0 ? 'ok' : 'warn')
+              if (mc.partial)
+                log('design', `⚠ ${mc.mcu} is a partial MCU: ${mc.partial}`, 'warn')
             } catch {
               /* non-fatal */
             }
