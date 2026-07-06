@@ -425,3 +425,33 @@ board-house controlled-Z stackup). The checker independently REJECTS a 0.434mm
 mismatch (failed_constraints). High-speed regression 8/8. No fake diff-pair
 routing, no impedance guarantee, no weakened gates. (Honest v1 scope: the demo
 pair spacing is header-pitch; tighter coupled geometry is future work.)
+
+## FL-1-Directed Compute / RF / Exotic Boards v1 (Phase 12)
+
+The honest PLANNING + READINESS layer aimed only at the real FL-1 internal
+instrument boards — never generic compute/RF, never a faked capability.
+
+- **fl1_boards.py** — a 13-class exotic board taxonomy, a 10-board FL-1 family
+  architecture map with a readiness ranking, a shared FL-1 instrument bus v1
+  (marked NOT final), and honest starter-readiness reports for RF/50Ω, scope-lite,
+  stimulus, logic-capture, and FPGA/module-carrier, plus a manufacturing-capability
+  match and a reference-pattern-readiness map. Emits all as .json + .md.
+- **The honesty is the point:** scope-lite -> `unsupported` (no oscilloscope-class
+  bandwidth/ENOB/sample-rate claimed); stimulus -> `needs_reference` (no funcgen-
+  class quality); logic -> `needs_simulation` (no LA-class timing); FPGA carrier
+  flags DDR/PCIe/MIPI/BGA-fanout/hs-memory as unsupported; RF/50Ω is an ESTIMATE
+  (no S-params / tuning / guaranteed impedance). Every board carries exact blockers.
+- **Readiness ranking (from ACTUAL capability):** controller / digital-bringup ->
+  ready_to_attempt; relay -> pattern_backed; power-monitor / calibration / DMM /
+  external-interface -> buildable_with_review; stimulus -> needs_reference; logic
+  -> needs_simulation; scope-lite -> unsupported.
+- **Demo:** the FL-1 Calibration / Reference board (proven ADS1115 measurement/
+  calibration path) attempts + PASSES 0/0 (5/5 routed), with the board-ID EEPROM +
+  precision reference honestly flagged as blockers needing clean ingestion.
+- **UI:** an FL-1 Instrument Readiness view (Learn group) — family readiness, bus,
+  pattern readiness, starter statuses, mfg capability, exact blockers, downloads.
+
+FL-1 regression 12/12; frontend regression 24/24; board regression 5/5 (planning
+layer only, pipeline untouched). No fake compute/RF/exotic/DDR/PCIe/MIPI/BGA/scope/
+funcgen/LA/manufacturing claims anywhere. Next: benchmarks -> simulation/signoff ->
+instrument adapters, building toward FL-1 Instrument Core v1.

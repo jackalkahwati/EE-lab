@@ -36,8 +36,9 @@ import { ReviseDialog } from '@/components/revise-dialog'
 import { FL1Loop } from '@/components/fl1-loop'
 import { RunOverview } from '@/components/run-overview'
 import { ArtifactExplorer } from '@/components/artifact-explorer'
+import { FL1ReadinessPanel } from '@/components/fl1-readiness-panel'
 
-const TABS = ['Overview', 'Board', 'Code', 'Pinout', 'Constraints', 'Advanced', 'BOM', 'Assembly', 'Order', 'Checks', 'FL-1', 'Recovery', 'Review', 'Ingest', 'Patterns', 'Artifacts'] as const
+const TABS = ['Overview', 'Board', 'Code', 'Pinout', 'Constraints', 'Advanced', 'BOM', 'Assembly', 'Order', 'Checks', 'FL-1', 'Recovery', 'Review', 'Ingest', 'Patterns', 'FL-1 Ready', 'Artifacts'] as const
 type Tab = (typeof TABS)[number]
 
 // Grouped workspace navigation — replaces the single overflowing tab row.
@@ -47,7 +48,7 @@ const GROUPS: { name: string; views: Tab[] }[] = [
   { name: 'Design', views: ['Board', 'Code', 'Pinout', 'Constraints', 'Advanced'] },
   { name: 'Build', views: ['BOM', 'Assembly', 'Order'] },
   { name: 'Validate', views: ['Checks', 'FL-1', 'Recovery', 'Review'] },
-  { name: 'Learn', views: ['Ingest', 'Patterns'] },
+  { name: 'Learn', views: ['Ingest', 'Patterns', 'FL-1 Ready'] },
   { name: 'Artifacts', views: ['Artifacts'] },
 ]
 // Future phases — shown as disabled/not_generated so the roadmap is honest and
@@ -621,6 +622,9 @@ export default function FirstLightPage() {
             )}
             {tab === 'Ingest' && <IngestPanel />}
             {tab === 'Patterns' && <PatternsPanel />}
+            {tab === 'FL-1 Ready' && (
+              <FL1ReadinessPanel runId={selectedRun.runDir ? selectedRun.id : null} />
+            )}
             {tab === 'Recovery' && (
               <RecoveryPanel runId={selectedRun.runDir ? selectedRun.id : null} />
             )}
