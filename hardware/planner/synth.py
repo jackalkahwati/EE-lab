@@ -320,8 +320,31 @@ def synth(design, out_path):
     hgap = float(hints.get("extra_gap", 0))
     hrot = hints.get("components", {})     # {ref_or_mpn: {"rotate": deg}}
 
-    X0, Y0, MARGIN, GAP = 30.0, 30.0, 10.0 + hmargin, 8.0 + hgap
-    COLW, ROWH, WRAP = 24.0, 34.0 + hgap, 190.0 + hmargin * 2  # cell, row, wrap
+    # A learned/recovery board_margin is ROUTING ROOM, not a border expansion —
+    # applying it blindly turned sparse 2-chip boards into huge empty slabs. Scale
+    # it by fine-pitch density (fine-pitch escapes are what actually need the room)
+    # and apply it as component SPACING, keeping the outline border tight so the
+    # board hugs its parts. (Fixes the Phase-8 board_margin over-application.)
+    _FINE = re.compile(r"P0\.[1-6]\d*mm|QFN|DFN|WSON|USON|VSSOP|LGA|TSSOP|USB_C_Receptacle", re.I)
+    _fine_n = sum(1 for s in specs if _FINE.search(s.get("kicad_footprint", "")))
+    _density = min(1.0, (len(specs) + _fine_n * 2) / 6.0)
+    # A learned/recovery board_margin is applied CONTEXTUALLY, not universally:
+    #  - a FINE-PITCH board genuinely needs the escape room the recovery loop found
+    #    (it may legitimately be larger), so it gets the full margin;
+    #  - a sparse NON-fine-pitch board gets it scaled down by density, so it never
+    #    becomes a huge empty slab. The sizing report explains every margin.
+    _applied = round(hmargin * (1.0 if _fine_n else _density), 1)
+    _margin_source = hints.get("_source", "pattern" if hmargin else "default")
+    _sizing = {"requested_board_margin_mm": hmargin, "applied_margin_mm": _applied,
+               "components": len(specs), "fine_pitch_parts": _fine_n,
+               "density_estimate": round(_density, 2), "margin_source": _margin_source,
+               "margin_reason": ("fine-pitch escape room (recovery-discovered) — larger "
+                                 "board is expected" if _fine_n
+                                 else "low density, no fine-pitch — margin scaled down "
+                                 "so the board is not an oversized slab")}
+
+    X0, Y0, MARGIN, GAP = 30.0, 30.0, 10.0 + _applied, 8.0 + hgap
+    COLW, ROWH, WRAP = 24.0, 34.0 + hgap, 190.0 + _applied * 2
     body = ""
     # running extents of everything placed, so the outline always encloses it
     right_extent = [X0 + MARGIN]
@@ -500,6 +523,11 @@ def synth(design, out_path):
         len(placed), p.count("(footprint "), BW, BH, len(nets.order) - 1))
     print("COMPOSE_COVERAGE:" + json.dumps({"mapped": ["mcu"] + placed,
           "dropped": [d for d in dropped if not d.get("partial")]}))
+    _sizing["board_size_mm"] = [BW, BH]
+    _sizing["component_span_mm"] = [round(right_extent[0] - X0 - MARGIN, 1),
+                                    round(bottom_extent[0] - Y0 - MARGIN, 1)]
+    open(base + ".board-sizing.json", "w").write(json.dumps(_sizing, indent=1))
+    print("SIZING:" + json.dumps(_sizing))
     for d in compose._DEVICES:
         print("SOURCED:" + json.dumps({"ref": d["ref"], "name": d.get("name"),
               "type": d["type"], "via": "ucs_synth"}))

@@ -143,7 +143,21 @@ def from_kicad_symbol(symbol_query, mpn=None, category="", manufacturer="",
     power_pins = [p["number"] for p in pins if p["etype"] == "power_in"]
     gnd_pins = [p["number"] for p in pins if p["etype"] == "ground"]
 
-    lib_fp, fp = resolve_part.pick_footprint(info["fp_filters"])
+    # 3-terminal reference/regulator (IN/OUT/GND): the bare "IN"/"OUT" pins don't
+    # match the generic power aliases, so reclassify them from context — IN is the
+    # supply, OUT is the reference/regulated output.
+    if not power_pins and gnd_pins:
+        norm = {resolve_part._norm(p["name"]): p for p in pins}
+        supply = norm.get("IN") or norm.get("VIN") or norm.get("V+") or norm.get("IN+")
+        out = norm.get("OUT") or norm.get("VOUT") or norm.get("OUT+")
+        if supply and out:
+            supply["etype"] = "power_in"
+            out["etype"] = "power_out"
+            power_pins = [supply["number"]]
+
+    # pass the symbol pin count so the footprint pad count MUST match — a 5-pin
+    # part never lands on a 3-pad SOT-23 (the bug that rejected the EEPROM).
+    lib_fp, fp = resolve_part.pick_footprint(info["fp_filters"], npins=len(info["pins"]))
     kicad_fp = "%s:%s" % (lib_fp, fp) if fp else None
 
     # Phase 5 symbol<->footprint validation: the footprint MUST have a pad for

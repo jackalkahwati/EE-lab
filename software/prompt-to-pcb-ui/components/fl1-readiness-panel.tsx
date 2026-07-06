@@ -37,7 +37,7 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
       'fl1-reference-pattern-readiness', 'fl1-rf-50ohm-interface-report',
       'fl1-scope-lite-starter-report', 'fl1-stimulus-starter-report',
       'fl1-logic-capture-starter-report', 'fl1-fpga-module-carrier-report',
-      'fl1-manufacturing-capability-report',
+      'fl1-manufacturing-capability-report', 'cal-board-attempt',
     ]
     Promise.all(
       files.map((f) =>
@@ -81,6 +81,38 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
           <Download className="size-3" /> architecture JSON
         </a>
       </div>
+
+      {/* real cal-board attempt (Phase 12 fix) — distinguishes the REAL cal board
+          from the ADS1115 measurement front-end; honest outcome + exact blocker */}
+      {d['cal-board-attempt'] && (
+        <div
+          className={`rounded-md border p-3 ${
+            d['cal-board-attempt'].outcome === 'A_pass'
+              ? 'border-emerald-500/40 bg-emerald-500/5'
+              : 'border-amber-500/40 bg-amber-500/5'
+          }`}
+        >
+          <p className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold text-amber-500">
+            <AlertTriangle className="size-3.5" /> {d['cal-board-attempt'].board} —{' '}
+            {d['cal-board-attempt'].outcome === 'A_pass' ? 'passed' : 'honest fail (Outcome B)'}
+          </p>
+          <p className="text-muted-foreground">{d['cal-board-attempt'].note}</p>
+          <div className="mt-1 font-mono text-[10px] text-muted-foreground">
+            required parts:{' '}
+            {Object.entries(d['cal-board-attempt'].required_parts_present ?? {})
+              .map(([k, v]) => `${k}=${v ? '✓' : '✗'}`)
+              .join(' ')}{' '}
+            · divider={d['cal-board-attempt'].divider_present ? '✓' : '✗'} · nodes{' '}
+            {(d['cal-board-attempt'].reference_nodes ?? []).join('/')} · routed{' '}
+            {d['cal-board-attempt'].routed} · DRC {d['cal-board-attempt'].drc_violations}
+          </div>
+          {d['cal-board-attempt'].blocker && (
+            <p className="mt-1 text-[10px] text-destructive">
+              blocker: {d['cal-board-attempt'].blocker}
+            </p>
+          )}
+        </div>
+      )}
 
       {/* board family readiness ranking */}
       <div>

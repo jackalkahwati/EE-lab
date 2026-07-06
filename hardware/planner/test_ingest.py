@@ -25,18 +25,28 @@ check("7 ADS1115 -> valid UCS",
       and spec["support_status"] == "needs_review",
       "pins=%d iface=%s status=%s" % (len(spec["pins"]), rep["interfaces"], spec["support_status"]))
 
-# 8. symbol/footprint mismatch is caught (MCP4725 6-pin symbol vs SOT-23 3-pad)
+# 8. the footprint-pick fix: a multi-pin part now lands on a matching-pad footprint
+#    (MCP4725 6-pin -> SOT-23-6, not the old 3-pad SOT-23), and validates clean.
 _s, r = ingest.ingest_part("MCP4725", kicad_symbol="MCP4725xxx-xCH", category="dac")
-check("8 footprint/pin mismatch caught",
-      any("pad" in e.lower() or "mismatch" in e.lower() for e in r["validation_errors"]),
-      "errors=%s" % r["validation_errors"][:1])
+check("8 footprint pad count matches pin count (fix)",
+      "SOT-23-6" in (_s["kicad_footprint"] or "") and not r["validation_errors"],
+      "fp=%s errors=%s" % (_s["kicad_footprint"], r["validation_errors"][:1]))
 
-# 9. a part missing a required pin (no power) -> not usable (unsupported/needs_review)
+# 8b. the mismatch DETECTION still works when a footprint genuinely lacks pads —
+#     force a 3-pad SOT-23 onto the 6-pin symbol and it must be caught.
+_sm = ingest.from_kicad_symbol("MCP4725xxx-xCH", mpn="MCP4725", category="dac",
+                               overrides={"kicad_footprint": "Package_TO_SOT_SMD:SOT-23"})
+_val = ingest.validate_component(_sm)
+check("8b footprint/pin mismatch still detected on a bad footprint",
+      any("pad" in e.lower() or "mismatch" in e.lower() for e in _val["errors"]),
+      "errors=%s" % _val["errors"][:1])
+
+# 9. a part with a real power pin resolves it (REF3025 IN reclassified as power) —
+#    the 3-terminal reference power inference fix.
 _s2, r2 = ingest.ingest_part("REF3025", kicad_symbol="REF3025", category="voltage_reference")
-check("9 missing power pin -> not supported",
-      _s2["support_status"] in ("unsupported", "needs_review")
-      and any("power" in e.lower() for e in r2["validation_errors"] + r2["warnings"]),
-      "status=%s" % _s2["support_status"])
+check("9 3-terminal reference gets a power pin (fix)",
+      _s2["support_status"] != "unsupported" and _s2["power"]["pins"]["power"],
+      "status=%s power=%s" % (_s2["support_status"], _s2["power"]["pins"]["power"]))
 
 # 10. an approved ingested part is usable by synthesis (in the library, partial+)
 approved = ingest_library.approve(spec, "partial")

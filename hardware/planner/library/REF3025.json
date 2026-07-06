@@ -1,0 +1,113 @@
+{
+ "ucs_version": "1.0",
+ "mpn": "REF3025",
+ "manufacturer": "Texas Instruments",
+ "aliases": [],
+ "category": "voltage_reference",
+ "description": "",
+ "package": "SOT-23",
+ "kicad_symbol": "Reference_Voltage:REF3025",
+ "kicad_footprint": "Package_TO_SOT_SMD:SOT-23",
+ "pins": [
+  {
+   "number": "1",
+   "name": "IN",
+   "etype": "power_in"
+  },
+  {
+   "number": "2",
+   "name": "OUT",
+   "etype": "power_out"
+  },
+  {
+   "number": "3",
+   "name": "GND",
+   "etype": "ground"
+  }
+ ],
+ "power": {
+  "pins": {
+   "power": [
+    "1"
+   ],
+   "ground": [
+    "3"
+   ]
+  },
+  "vcc_min": null,
+  "vcc_max": null,
+  "vcc_typ": null,
+  "i_typ_ma": null,
+  "i_max_ma": null
+ },
+ "abs_max": {},
+ "recommended": {},
+ "interfaces": [
+  {
+   "type": "gpio",
+   "signals": {}
+  }
+ ],
+ "support_circuit": {
+  "decoupling": [
+   {
+    "value": "100nF",
+    "from": "VCC",
+    "to": "GND",
+    "note": "per power pin"
+   }
+  ],
+  "pullups": [],
+  "pulldowns": [],
+  "crystals": [],
+  "reset_config": [],
+  "other_passives": []
+ },
+ "programming": {},
+ "reference_circuit": null,
+ "constraints": {
+  "layout": [],
+  "routing": [],
+  "thermal": [],
+  "rf": []
+ },
+ "firmware": {},
+ "fl1_validation": {},
+ "sourcing": {},
+ "provenance": {
+  "mpn": "user",
+  "pins": "kicad_library",
+  "kicad_symbol": "kicad_library",
+  "kicad_footprint": "kicad_library",
+  "power.pins.power": "ai_inference",
+  "power.pins.ground": "ai_inference",
+  "interfaces": "ai_inference",
+  "support_circuit.decoupling": "default_assumption"
+ },
+ "confidence": {
+  "pins": 1.0,
+  "kicad_symbol": 1.0,
+  "kicad_footprint": 0.9,
+  "power.pins.power": 0.9,
+  "power.pins.ground": 0.9,
+  "interfaces": 0.8
+ },
+ "missing_fields": [
+  "datasheet (not provided)"
+ ],
+ "unsupported_fields": [],
+ "support_status": "partial",
+ "_status_reasons": [],
+ "datasheet_evidence": {
+  "_available": false
+ },
+ "user_notes": "FL-1 precision 2.5V reference",
+ "ingest_sources": [
+  "kicad_symbol"
+ ],
+ "approval": {
+  "by": "user",
+  "status": "partial",
+  "note": ""
+ }
+}

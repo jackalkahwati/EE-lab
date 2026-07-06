@@ -284,8 +284,29 @@ def _glob_to_re(g):
     return re.compile("^" + re.escape(g).replace(r"\*", ".*").replace(r"\?", ".") + "$", re.I)
 
 
-def pick_footprint(fp_filters):
-    """Choose the most routable footprint matching the symbol's fp_filters."""
+def _fp_pincount(name):
+    """Pin/pad count encoded in a footprint name (SOT-23-5 -> 5, SOIC-8 -> 8,
+    TSSOP-10 -> 10, DIP-28 -> 28, SOT-23 -> 3). None if it can't be read."""
+    up = name.upper()
+    m = re.match(r"SOT-?23-?(\d+)?", up)
+    if m:
+        return int(m.group(1)) if m.group(1) else 3
+    if re.match(r"SOT-?363", up):
+        return 6
+    if re.match(r"SOT-?353", up):
+        return 5
+    m = re.match(r"SC-?70-?(\d+)", up)
+    if m:
+        return int(m.group(1))
+    m = re.match(r"(?:H?TSSOP|V?SSOP|MSOP|SOIC|SOP|SO|DIP|QFN|DFN|WSON|USON|LGA"
+                 r"|LQFP|TQFP|V?QFN|U?QFN|BGA|SON)-?(\d+)", up)
+    return int(m.group(1)) if m else None
+
+
+def pick_footprint(fp_filters, npins=None):
+    """Choose the most routable footprint matching the symbol's fp_filters. When
+    `npins` (the symbol's pin count) is given, STRONGLY prefer a footprint whose
+    pad count matches — a 5-pin part must not land on a 3-pad SOT-23."""
     idx = _fp_index()
     globs = [g for g in re.split(r"\s+", fp_filters.strip()) if g]
     best = None  # (score, lib, name)
@@ -301,10 +322,12 @@ def pick_footprint(fp_filters):
                 if key.replace("_", "") in flat:
                     rank = r
                     break
-            # within a package family, prefer the simplest variant (no exposed
-            # pad / thermal vias / mask tweaks) and the shorter name.
             penalty = sum(5 for bad in ("1EP", "THERMALVIAS", "MASK") if bad in flat)
-            score = rank * 1000 + penalty * 100 + len(name)
+            # pad-count match dominates every other preference (allow +1 for an
+            # un-numbered exposed pad the symbol counts but the name doesn't)
+            padn = _fp_pincount(name)
+            mismatch = 0 if (npins is None or padn is None) else abs(padn - npins)
+            score = mismatch * 10_000_000 + rank * 1000 + penalty * 100 + len(name)
             if best is None or score < best[0]:
                 best = (score, lib, name)
     return (best[1], best[2]) if best else (None, None)

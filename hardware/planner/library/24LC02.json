@@ -1,0 +1,141 @@
+{
+ "ucs_version": "1.0",
+ "mpn": "24LC02",
+ "manufacturer": "Microchip",
+ "aliases": [],
+ "category": "memory.eeprom",
+ "description": "",
+ "package": "SOIC-8",
+ "kicad_symbol": "Memory_EEPROM:24LC02",
+ "kicad_footprint": "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm",
+ "pins": [
+  {
+   "number": "1",
+   "name": "A0",
+   "etype": "analog_in"
+  },
+  {
+   "number": "2",
+   "name": "A1",
+   "etype": "analog_in"
+  },
+  {
+   "number": "3",
+   "name": "A2",
+   "etype": "analog_in"
+  },
+  {
+   "number": "4",
+   "name": "GND",
+   "etype": "ground"
+  },
+  {
+   "number": "5",
+   "name": "SDA",
+   "etype": "bidirectional"
+  },
+  {
+   "number": "6",
+   "name": "SCL",
+   "etype": "bidirectional"
+  },
+  {
+   "number": "7",
+   "name": "WP",
+   "etype": "unspecified"
+  },
+  {
+   "number": "8",
+   "name": "VCC",
+   "etype": "power_in"
+  }
+ ],
+ "power": {
+  "pins": {
+   "power": [
+    "8"
+   ],
+   "ground": [
+    "4"
+   ]
+  },
+  "vcc_min": null,
+  "vcc_max": null,
+  "vcc_typ": null,
+  "i_typ_ma": null,
+  "i_max_ma": null
+ },
+ "abs_max": {},
+ "recommended": {},
+ "interfaces": [
+  {
+   "type": "i2c",
+   "signals": {
+    "scl": "SCL",
+    "sda": "SDA"
+   }
+  }
+ ],
+ "support_circuit": {
+  "decoupling": [
+   {
+    "value": "100nF",
+    "from": "VCC",
+    "to": "GND",
+    "note": "per power pin"
+   }
+  ],
+  "pullups": [],
+  "pulldowns": [],
+  "crystals": [],
+  "reset_config": [],
+  "other_passives": []
+ },
+ "programming": {},
+ "reference_circuit": null,
+ "constraints": {
+  "layout": [],
+  "routing": [],
+  "thermal": [],
+  "rf": []
+ },
+ "firmware": {},
+ "fl1_validation": {},
+ "sourcing": {},
+ "provenance": {
+  "mpn": "user",
+  "pins": "kicad_library",
+  "kicad_symbol": "kicad_library",
+  "kicad_footprint": "kicad_library",
+  "power.pins.power": "ai_inference",
+  "power.pins.ground": "ai_inference",
+  "interfaces": "ai_inference",
+  "support_circuit.decoupling": "default_assumption"
+ },
+ "confidence": {
+  "pins": 1.0,
+  "kicad_symbol": 1.0,
+  "kicad_footprint": 0.9,
+  "power.pins.power": 0.9,
+  "power.pins.ground": 0.9,
+  "interfaces": 0.8
+ },
+ "missing_fields": [
+  "datasheet (not provided)"
+ ],
+ "unsupported_fields": [],
+ "support_status": "partial",
+ "_status_reasons": [],
+ "datasheet_evidence": {
+  "_available": false
+ },
+ "user_notes": "FL-1 board-ID EEPROM (I2C)",
+ "ingest_sources": [
+  "kicad_symbol"
+ ],
+ "approval": {
+  "by": "user",
+  "status": "partial",
+  "note": ""
+ }
+}

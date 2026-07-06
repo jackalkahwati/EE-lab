@@ -455,3 +455,31 @@ FL-1 regression 12/12; frontend regression 24/24; board regression 5/5 (planning
 layer only, pipeline untouched). No fake compute/RF/exotic/DDR/PCIe/MIPI/BGA/scope/
 funcgen/LA/manufacturing claims anywhere. Next: benchmarks -> simulation/signoff ->
 instrument adapters, building toward FL-1 Instrument Core v1.
+
+## Fix: FL-1 calibration demo + board-margin scaling (Phase 12 correction)
+
+Caught that DRC/ERC-clean is NOT the same as satisfying the named intent — a board
+with only RP2040 + ADS1115 + pull-ups is a measurement front-end, not a
+calibration/reference board. Corrected without weakening any gate:
+
+- **Ingestion footprint bug fixed** (resolve_part.pick_footprint): now matches the
+  footprint pad count to the symbol pin count — a 5-pin part no longer lands on a
+  3-pad SOT-23 (24AA02 -> SOT-23-5, MCP4725 -> SOT-23-6, 24LC02 -> SOIC-8). The
+  mismatch DETECTION still fires on a genuinely wrong footprint.
+- **3-terminal reference power inference fixed** (ingest): IN/OUT/GND references
+  (REF3025) now get a power pin. The precision reference + I2C EEPROM now ingest.
+- **Board-margin over-application fixed** (synth): a learned/recovery board_margin
+  is applied CONTEXTUALLY — a fine-pitch board gets the full escape room it needs
+  (legitimately larger, and the sizing report says so), a sparse non-fine-pitch
+  board scales it down so it never becomes a huge slab. Emits a board-sizing report
+  (requested / applied margin, density, fine-pitch count, source, reason).
+- **Mislabeled demo renamed** to "ADS1115 measurement front-end"; a REAL FL-1
+  Calibration/Reference board is attempted (gen_cal_board.py): precision reference +
+  RCAL1/RCAL2 divider -> REF_DIV + ADS1115 reading REF_OUT & REF_DIV + 24LC02
+  board-ID EEPROM + FL-1 bus + labeled test points. Honest Outcome B — all required
+  parts present, 0 DRC, routes 4/5, blocked on the multi-drop I2C bus (needs Phase-8
+  fanout). Not a fake pass, not a mislabel.
+
+Regressions: fl1-cal-fix 8/8, ingest 6/6 (updated to the fixed behavior), all other
+unit suites green, frontend 24/24, board 5/5. The standard now: a board is not
+"passed" just because DRC/ERC is clean — it must also match the named intent.

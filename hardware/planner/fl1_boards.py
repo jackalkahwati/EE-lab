@@ -134,8 +134,12 @@ BOARD_FAMILY = [
     ("controller_backplane_fixture_io", "Digital bring-up board", "ready_to_attempt",
      ["MCU", "SWD/JTAG header", "UART/I2C/SPI", "test points"], []),
     ("calibration_reference", "Calibration / reference board", "buildable_with_review",
-     ["precision voltage reference", "resistor divider/ladder", "ADS1115 ADC", "board-ID EEPROM"],
-     ["reference part needs ingestion", "metrology traceability external"]),
+     ["REF3025 precision reference (ingested)", "RCAL1/RCAL2 resistor divider -> REF_DIV",
+      "ADS1115 ADC reading REF_OUT + REF_DIV", "24LC02 board-ID EEPROM (ingested)",
+      "FL-1 instrument bus", "labeled test points"],
+     ["real board attempted: all required parts present, 0 DRC, routes 4/5 — the "
+      "multi-drop I2C bus does not fully close with flroute (needs tighter multi-drop "
+      "routing / Phase-8 fanout)", "metrology traceability external"]),
     ("dmm_lite_measurement", "DMM-lite measurement board", "buildable_with_review",
      ["ADS1115/INA228", "voltage reference", "analog mux", "input protection"],
      ["6.5-digit precision not claimed", "analog mux needs ingestion"]),
