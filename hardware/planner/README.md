@@ -512,3 +512,33 @@ routes multi-pin nets as a spanning tree) but placement + fine-pitch escape.
 
 Regression: shared-bus 11/11, ingest 6/6, fl1-cal 8/8, high-speed 8/8 (USB pair
 still routes), board 5/5. No DRC/ERC weakening; the router is never bypassed.
+
+## Phase 13 first-gate closeout (Gate A/B/C) — fine-pitch escape truth
+
+Recorded as a standalone result BEFORE the benchmark/signoff layer (D-F). This gate
+proved the physical escape truth for the FL-1 Calibration/Reference board; it is not
+to be reinterpreted by the later benchmark/signoff work — that work CONSUMES this as
+evidence.
+
+1. Fine-pitch escape model exists (fine_pitch_escape.py).
+2. ADS1115 is correctly classified as dense_escape.
+3. The real FL-1 Calibration/Reference board was attempted (via synth).
+4. All 7 logical nets route.
+5. No nets were dropped.
+6. DRC was not weakened.
+7. Result is escaped_but_drc_failed.
+8. Exact blocker is blocked_by_grid_resolution.
+9. Board is correctly marked do_not_build.
+10. Required future capability: finer-grid fanout or via-in-pad (both unimplemented).
+
+Significance: Compose now distinguishes LOGICAL connectivity (7/7 nets route) from
+PHYSICAL manufacturable routing (DRC-clean escape) — the difference between a demo and
+a real board-engineering system.
+
+Next (Phase 13 D-F, fresh): build the benchmark/signoff layer AROUND this evidence.
+The build-readiness verdict for the cal board must read: architecture mostly complete,
+logical routing 7/7, shared bus connected, fine-pitch escape failed, DRC failed
+(shorts), recommendation do_not_build, exact blocker blocked_by_grid_resolution,
+required next capability finer-grid fanout or via-in-pad. The task is NOT "make the cal
+board pass" — it already did its job by exposing the real limitation. D-F must give
+every FL-1 board that same honest verdict.
