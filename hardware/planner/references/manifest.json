@@ -1,0 +1,86 @@
+{
+ "version": 1,
+ "references": [
+  {
+   "name": "FirstLight golden sensor hub (Compose-generated)",
+   "source_type": "firstlight_generated",
+   "trust_level": "high",
+   "license_status": "permissive_reuse",
+   "allowed_use": "direct_reuse",
+   "url": null,
+   "manufacturer": null,
+   "document_title": null,
+   "revision": null,
+   "date": null,
+   "local_files": [
+    "../../software/prompt-to-pcb-ui/public/runs/golden-sensor-hub"
+   ],
+   "notes": "Compose's own validated RP2040 sensor hub \u2014 reusable FL pattern",
+   "status": "registered"
+  },
+  {
+   "name": "FirstLight ADS1115 measurement front-end (Compose-recovered)",
+   "source_type": "firstlight_generated",
+   "trust_level": "high",
+   "license_status": "permissive_reuse",
+   "allowed_use": "direct_reuse",
+   "url": null,
+   "manufacturer": null,
+   "document_title": null,
+   "revision": null,
+   "date": null,
+   "local_files": [
+    "../../software/prompt-to-pcb-ui/public/runs/fl1meas-rec2-a3"
+   ],
+   "notes": "Recovered fine-pitch board that passes 0/0 \u2014 reusable FL pattern",
+   "status": "registered"
+  },
+  {
+   "name": "ADS1115 ingested UCS component",
+   "source_type": "ingested_ucs",
+   "trust_level": "high",
+   "license_status": "permissive_reuse",
+   "allowed_use": "direct_reuse",
+   "url": null,
+   "manufacturer": null,
+   "document_title": null,
+   "revision": null,
+   "date": null,
+   "local_files": [
+    "library/ADS1115IDGS.json"
+   ],
+   "notes": "approved partial UCS \u2014 component-usage reference",
+   "status": "registered"
+  },
+  {
+   "name": "ADS1115 evaluation board (ADS1115EVM)",
+   "source_type": "manufacturer_eval_board",
+   "trust_level": "high",
+   "license_status": "manufacturer_reference_only",
+   "allowed_use": "reference_only",
+   "url": null,
+   "manufacturer": "Texas Instruments",
+   "document_title": null,
+   "revision": null,
+   "date": null,
+   "local_files": [],
+   "notes": "PLACEHOLDER \u2014 drop the EVM package into references/eval_boards/ and set url/revision/license before ingestion",
+   "status": "needs_reference"
+  },
+  {
+   "name": "TI precision-ADC layout app note",
+   "source_type": "app_note",
+   "trust_level": "high",
+   "license_status": "manufacturer_reference_only",
+   "allowed_use": "reference_only",
+   "url": null,
+   "manufacturer": "Texas Instruments",
+   "document_title": null,
+   "revision": null,
+   "date": null,
+   "local_files": [],
+   "notes": "PLACEHOLDER \u2014 reference_only; add the PDF + URL when curated",
+   "status": "needs_reference"
+  }
+ ]
+}

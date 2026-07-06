@@ -1,0 +1,112 @@
+{
+ "pattern_version": "1.0",
+ "name": "precision ADC measurement channel",
+ "category": "precision_adc_channel",
+ "source_type": "firstlight_generated",
+ "source_files": [
+  "../../software/prompt-to-pcb-ui/public/runs/fl1meas-rec2-a3"
+ ],
+ "license_status": "permissive_reuse",
+ "allowed_use": "direct_reuse",
+ "direct_reuse_allowed": true,
+ "purpose": "reusable precision_adc_channel block proven on a passing FirstLight board",
+ "topology": "3 IC(s) + 0 support passives on rails +3V3, +5V, GND",
+ "components": [
+  {
+   "ref": "U1",
+   "role": "mcu",
+   "mpn": null,
+   "required": true,
+   "zone": "adapt_allowed",
+   "footprint": null
+  },
+  {
+   "ref": "U1",
+   "role": "mcu",
+   "mpn": "RP2040",
+   "required": true,
+   "zone": "adapt_allowed",
+   "footprint": null
+  },
+  {
+   "ref": "U2",
+   "role": "adc",
+   "mpn": "ADS1115IDGS",
+   "required": true,
+   "zone": "preserve_exactly",
+   "footprint": "TSSOP-10_3x3mm_P0.5mm"
+  }
+ ],
+ "required_components": [
+  "U1",
+  "U1",
+  "U2"
+ ],
+ "optional_components": [],
+ "required_passives": [],
+ "interface_pins": [
+  "I2C"
+ ],
+ "power": {
+  "rails": [
+   "+3V3",
+   "+5V",
+   "GND"
+  ]
+ },
+ "layout_constraints": [
+  {
+   "rule": "analog_isolation",
+   "detail": "keep the analog front-end away from switching nodes",
+   "provenance": "firstlight_practice",
+   "confidence": 0.5
+  }
+ ],
+ "routing_constraints": [
+  {
+   "rule": "net_classes",
+   "classes": {
+    "power_rail": 1,
+    "power_input": 1,
+    "uart": 2,
+    "gnd": 1,
+    "i2c": 2,
+    "spi": 2
+   }
+  }
+ ],
+ "grounding": "",
+ "keepout": [],
+ "thermal": "",
+ "firmware_hooks": [],
+ "test_points": [],
+ "calibration": "",
+ "expected_performance": "matches the source board (passed strict DRC/ERC)",
+ "known_limitations": [
+  "geometry beyond decoupling adjacency not extracted"
+ ],
+ "known_failure_modes": [],
+ "manufacturing_complexity": "unknown",
+ "validation_procedure": "reuse the FL-1 Validation Package generated for this board",
+ "adaptation_zones": {},
+ "provenance": {
+  "source": "firstlight_generated_board",
+  "run_dir": "fl1meas-rec2-a3",
+  "components": "devices.json",
+  "nets": "board/constraints"
+ },
+ "confidence": {
+  "components": 0.9,
+  "interfaces": 0.8,
+  "layout": 0.7,
+  "geometry": 0.3
+ },
+ "support_status": "reusable_with_review",
+ "unknowns": [
+  "exact component-to-component spacing",
+  "copper pour geometry"
+ ],
+ "status_reasons": [
+  "permissive license but contains high-risk parts (ADC/ref/opamp/feedback) \u2014 review before reuse"
+ ]
+}

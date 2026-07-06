@@ -1,0 +1,57 @@
+{
+ "pattern_version": "1.0",
+ "name": "SPI interface block",
+ "category": "spi_interface",
+ "source_type": "component_contract",
+ "source_files": [],
+ "license_status": "permissive_reuse",
+ "allowed_use": "direct_reuse",
+ "direct_reuse_allowed": true,
+ "purpose": "FirstLight component contract topology for spi_device",
+ "topology": "spi_device",
+ "components": [
+  {
+   "role": "spi_device",
+   "required": true,
+   "zone": "adapt_allowed"
+  }
+ ],
+ "required_components": [],
+ "optional_components": [],
+ "required_passives": [
+  {
+   "role": "decoupling",
+   "value": "100nF",
+   "reason": "per power pin"
+  }
+ ],
+ "interface_pins": [],
+ "power": {},
+ "layout_constraints": [],
+ "routing_constraints": [],
+ "grounding": "",
+ "keepout": [],
+ "thermal": "",
+ "firmware_hooks": [],
+ "test_points": [],
+ "calibration": "",
+ "expected_performance": "",
+ "known_limitations": [],
+ "known_failure_modes": [],
+ "manufacturing_complexity": "unknown",
+ "validation_procedure": "",
+ "adaptation_zones": {},
+ "provenance": {
+  "source": "firstlight_component_contract",
+  "contract": "spi_device"
+ },
+ "confidence": {
+  "components": 0.85,
+  "topology": 0.8
+ },
+ "support_status": "reusable",
+ "unknowns": [],
+ "status_reasons": [
+  "permissive license + strong evidence"
+ ]
+}

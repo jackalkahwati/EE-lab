@@ -1,0 +1,44 @@
+{
+ "pattern_version": "1.0",
+ "name": "eFuse / load switch channel",
+ "category": "efuse_load_switch",
+ "source_type": "firstlight_generated",
+ "source_files": [],
+ "license_status": "unknown_needs_review",
+ "allowed_use": "needs_review",
+ "direct_reuse_allowed": false,
+ "purpose": "target FL-1 instrument pattern \u2014 no curated reference yet",
+ "topology": "",
+ "components": [],
+ "required_components": [],
+ "optional_components": [],
+ "required_passives": [],
+ "interface_pins": [],
+ "power": {},
+ "layout_constraints": [],
+ "routing_constraints": [],
+ "grounding": "",
+ "keepout": [],
+ "thermal": "",
+ "firmware_hooks": [],
+ "test_points": [],
+ "calibration": "",
+ "expected_performance": "",
+ "known_limitations": [],
+ "known_failure_modes": [],
+ "manufacturing_complexity": "unknown",
+ "validation_procedure": "",
+ "adaptation_zones": {},
+ "provenance": {
+  "source": "needs_reference"
+ },
+ "confidence": {},
+ "support_status": "needs_review",
+ "unknowns": [
+  "everything \u2014 drop a curated reference into references/ and register it"
+ ],
+ "status_reasons": [
+  "needs_reference: no source design ingested yet"
+ ],
+ "needs_reference": true
+}
