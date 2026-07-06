@@ -264,3 +264,34 @@ ESP32-S3. The FL-1 Validation Package carries the assigned firmware pin map.
 Honesty: real symbols/footprints only, partial MCUs never faked as supported, no
 invented pin capabilities, no silent pad reuse, DRC/ERC gates unchanged.
 Next phase: real datasheet ingestion (import new parts + expand support).
+
+## Datasheet-to-UCS Ingestion v1 (import new parts)
+
+Moves Compose from a manually-curated part universe to importing a new real part
+into a validated UCS — with provenance, confidence, and human review.
+
+- **ingest_datasheet.py** — REAL pdftotext extraction of supply voltage, package,
+  decoupling, abs-max presence. Every field carries source + page + confidence +
+  method + needs_review; not-found stays UNKNOWN (never guessed). No PDF -> all
+  datasheet fields honestly unknown.
+- **ingest.py** — `ingest_part()` fuses KiCad symbol (real pins/pads, the
+  backbone) + optional datasheet + manual pin table + distributor into a
+  candidate UCS with per-field provenance/confidence. `validate_component()`
+  checks pad-vs-pin count, power/ground presence, package match, high-speed
+  guard; mismatches -> unsupported/needs_review. `build_ingest_report()` is the
+  human-review artifact. Fresh ingestion is NEVER auto-'supported'.
+- **ingest_library.py** — approved-component library; `approve()` refuses
+  'supported' while unsupported_fields remain. Only supported/partial are usable
+  in synthesis.
+- **ingest_cli.py** — `python3 ingest_cli.py <mpn> --symbol S [--datasheet PDF]
+  [--approve partial]` -> UCS + ingest-report.json/.md, optional save to library.
+- **UI** — Ingest tab: library list + part identity, symbol/footprint match,
+  interfaces, support status, pin table (real KiCad electrical types), confidence
+  /provenance, download UCS JSON.
+
+Verified: ADS1115 / INA228 / TMUX1108 -> valid UCS (needs_review). Validation
+CAUGHT honest mismatches: MCP4725 footprint/pin package mismatch, REF3025 missing
+power pin. ADS1115 approved (partial) + used in an FL-1 measurement front-end
+(RP2040 + ingested ADS1115): routes 5/5, 1 honest fine-pitch clearance violation
+on the TSSOP-10 I2C escape (the future fine-pitch phase). Ingest regression 5/5.
+Next phase: general recovery loop, then fine-pitch/fanout improvements.
