@@ -9,7 +9,90 @@
  */
 
 import { useEffect, useState } from 'react'
-import { GitBranch, ArrowRight, Check, X, AlertTriangle } from 'lucide-react'
+import { GitBranch, ArrowRight, Check, X, AlertTriangle, Wrench, Download } from 'lucide-react'
+
+const LOOP_STYLE: Record<string, string> = {
+  passed_without_recovery: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500',
+  recovered_and_passed: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500',
+  recovered_with_substitution: 'border-amber-500/40 bg-amber-500/10 text-amber-500',
+  failed_honestly: 'border-destructive/40 bg-destructive/10 text-destructive',
+  unsupported: 'border-destructive/40 bg-destructive/10 text-destructive',
+  needs_human_review: 'border-amber-500/40 bg-amber-500/10 text-amber-500',
+}
+
+function RecoveryLoop({ runId }: { runId: string }) {
+  const [loop, setLoop] = useState<any | null>(null)
+  useEffect(() => {
+    let off = false
+    fetch(`/runs/${runId}/data/recovery-loop.json`, { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => !off && setLoop(d))
+      .catch(() => {})
+    return () => {
+      off = true
+    }
+  }, [runId])
+  if (!loop) return null
+  return (
+    <div className="mb-4 rounded-md border border-border bg-card p-4">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <Wrench className="size-4 text-primary" />
+        <span className="text-sm font-semibold text-foreground">Recovery loop</span>
+        <span
+          className={`rounded-sm border px-1.5 py-0.5 font-mono text-[10px] ${
+            LOOP_STYLE[loop.final_status] ?? 'border-border text-muted-foreground'
+          }`}
+        >
+          {loop.final_status}
+        </span>
+        <span className="font-mono text-[10px] text-muted-foreground">
+          {loop.attempts?.length ?? 1} attempt(s)
+        </span>
+        <a
+          href={`/runs/${runId}/data/recovery-loop.json`}
+          download
+          className="ml-auto inline-flex items-center gap-1 rounded-sm border border-primary/40 bg-primary/10 px-2 py-1 text-[10px] text-primary hover:bg-primary/20"
+        >
+          <Download className="size-3" /> recovery-report.json
+        </a>
+      </div>
+      <div className="mb-2 font-mono text-[10px] text-muted-foreground">
+        initial: {loop.initial_result?.status}, {loop.initial_result?.violations} viol,{' '}
+        {loop.initial_result?.unconnected} unconn → final: {loop.final_result?.status},{' '}
+        {loop.final_result?.violations} viol, {loop.final_result?.unconnected} unconn
+      </div>
+      {loop.design_changes?.length > 0 && (
+        <div className="mb-2">
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-primary">
+            Attempted fixes
+          </p>
+          <ul className="space-y-0.5">
+            {loop.design_changes.map((c: any, i: number) => (
+              <li key={i} className="text-xs text-muted-foreground">
+                <span className="font-mono text-foreground">{c.strategy}</span> — {c.change}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {loop.blocker && (
+        <p className="mb-1 flex items-start gap-1.5 text-xs text-muted-foreground">
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-destructive" />
+          <span>
+            <span className="font-semibold text-foreground">Honest blocker: </span>
+            {loop.blocker}
+          </span>
+        </p>
+      )}
+      {loop.phase8_capability_required && (
+        <p className="rounded-sm border border-amber-500/40 bg-amber-500/5 p-2 text-xs text-amber-500">
+          Requires the Phase-8 capability: <strong>{loop.phase8_capability_required}</strong>. Placement
+          recovery could not resolve it without that router work.
+        </p>
+      )}
+    </div>
+  )
+}
 
 interface Recovery {
   original_request?: string
@@ -60,19 +143,23 @@ export function RecoveryPanel({ runId }: { runId: string | null }) {
   const subs = (recs ?? []).filter((r) => r.recovered !== false && r.proposed)
   if (subs.length === 0) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
-        <Check className="size-6 text-success" />
-        <p className="text-sm font-semibold text-foreground">No substitutions</p>
-        <p className="max-w-sm text-xs text-muted-foreground">
-          Every requested part and capability was built as specified — the design
-          matches the request with no recovery needed.
-        </p>
+      <div className="h-full overflow-y-auto p-4">
+        <RecoveryLoop runId={runId} />
+        <div className="flex flex-col items-center justify-center gap-2 p-8 text-center">
+          <Check className="size-6 text-success" />
+          <p className="text-sm font-semibold text-foreground">No component substitutions</p>
+          <p className="max-w-sm text-xs text-muted-foreground">
+            Every requested part was built as specified. Any board-level repairs are
+            shown in the recovery loop above.
+          </p>
+        </div>
       </div>
     )
   }
 
   return (
     <div className="h-full overflow-y-auto p-4">
+      <RecoveryLoop runId={runId} />
       <div className="mb-4 flex items-center gap-2">
         <GitBranch className="size-4 text-primary" />
         <span className="text-sm font-semibold text-foreground">

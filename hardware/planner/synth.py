@@ -311,8 +311,17 @@ def synth(design, out_path):
     nets = compose.Nets()
     compose._DEVICES[:] = []
 
-    X0, Y0, MARGIN, GAP = 30.0, 30.0, 10.0, 8.0
-    COLW, ROWH, WRAP = 24.0, 34.0, 190.0   # per-part cell, row height, wrap width
+    # recovery hints (Phase 7): the recovery loop re-runs synth with these to try
+    # to fix a failed board — a bigger board / more spacing gives the router room,
+    # a rotation changes a part's pin-escape geometry. Honest: hints only change
+    # placement, never silently drop or swap parts.
+    hints = design.get("recovery_hints", {})
+    hmargin = float(hints.get("board_margin", 0))
+    hgap = float(hints.get("extra_gap", 0))
+    hrot = hints.get("components", {})     # {ref_or_mpn: {"rotate": deg}}
+
+    X0, Y0, MARGIN, GAP = 30.0, 30.0, 10.0 + hmargin, 8.0 + hgap
+    COLW, ROWH, WRAP = 24.0, 34.0 + hgap, 190.0 + hmargin * 2  # cell, row, wrap
     body = ""
     # running extents of everything placed, so the outline always encloses it
     right_extent = [X0 + MARGIN]
@@ -383,15 +392,18 @@ def synth(design, out_path):
             row_y = bottom_extent[0] + GAP
         ref = "U%d" % refn
         refn += 1
+        # recovery hint: a per-component rotation (keyed by ref or MPN)
+        rot = float(hrot.get(ref, hrot.get(spec["mpn"], {})).get("rotate", 0))
         try:
-            body += compose.place(lib, name, ref, x, row_y, 0, nm, nets)
+            body += compose.place(lib, name, ref, x, row_y, rot, nm, nets)
         except Exception as e:
             dropped.append({"mpn": spec["mpn"], "reason": "footprint place failed: %s" % e})
             continue
         body += _support(spec, pulls, refn * 3, x, row_y + 14, nets)
         note_extent(x, row_y)
         compose._DEVICES.append({"ref": ref, "type": spec.get("category", "part").split(".")[-1],
-                                 "name": spec["mpn"], "wired": wired, "unmatched": unmatched})
+                                 "name": spec["mpn"], "footprint": name,
+                                 "wired": wired, "unmatched": unmatched})
         placed.append(spec["mpn"])
         if unmatched:
             dropped.append({"mpn": spec["mpn"], "reason": "unmatched bus pins: %s (placed anyway)"

@@ -295,3 +295,36 @@ power pin. ADS1115 approved (partial) + used in an FL-1 measurement front-end
 (RP2040 + ingested ADS1115): routes 5/5, 1 honest fine-pitch clearance violation
 on the TSSOP-10 I2C escape (the future fine-pitch phase). Ingest regression 5/5.
 Next phase: general recovery loop, then fine-pitch/fanout improvements.
+
+## General Recovery Loop v1 (diagnose → repair → retry → explain)
+
+Moves Compose from "try once, then fail or apply a known substitution" to
+"try, diagnose, repair, retry, and explain" — WITHOUT ever faking a pass.
+
+- **failure_taxonomy.py** — classifies real board failures (fine_pitch_escape,
+  clearance, unconnected, keepout_placement, erc, footprint_mismatch,
+  pin_allocation, mcu_unfit, high_speed_unsupported, component_unsupported,
+  sourcing) into structured records (affected component/net/footprint, severity,
+  auto-recovery-allowed, human-approval, evidence, explanation).
+- **recovery_strategies.py** — strategy library (increase_spacing, rotate,
+  move_to_edge, enlarge_board, alternate_footprint, substitute_component/mcu,
+  rerun_allocator, add_passive, mark_unsupported) with applicable-failures,
+  preconditions, effect, risks, preserves-function, approval. `rank()` orders
+  cheapest/safest auto first, terminal mark_unsupported last; fine-pitch/keepout
+  map to their Phase-8 capability.
+- **recovery_loop.py** — orchestrator: attempt → classify → apply ONE auto
+  strategy → regenerate → re-run STRICT gates → **compare-and-revert**. A
+  strategy that makes the board worse is never kept; the report names the BEST
+  attempt's honest blocker. A run is only `recovered_and_passed` if the
+  regenerated board independently passes (status PASSED, 0 viol, 0 unconn).
+- synth recovery_hints: board_margin (enlarge), extra_gap (spacing), per-part
+  rotate — placement only, never drops or swaps a component.
+- **UI** — Recovery tab shows the loop: final status, initial→final, attempted
+  fixes (kept + tried-not-kept), honest blocker, Phase-8 recommendation, download.
+
+Proof: the ADS1115 measurement front-end (previously an honest fine-pitch
+partial) was RECOVERED — a0 baseline (1 viol) → a1 increase_spacing (2 viol,
+reverted) → a2 rotate (29 viol from a short, reverted) → a3 enlarge_board (0 viol,
+PASSED). Independently confirmed PASSED 0/0. Recovery regression 6/6; board
+regression 5/5 unchanged. Next: Phase 8 advanced routing (fine-pitch/fanout,
+keepout-aware placement, differential pairs / USB / Ethernet).
