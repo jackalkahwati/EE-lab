@@ -1,0 +1,151 @@
+{
+ "ucs_version": "1.0",
+ "mpn": "ADS1115IDGS",
+ "manufacturer": "Texas Instruments",
+ "aliases": [],
+ "category": "adc.precision",
+ "description": "",
+ "package": "TSSOP-10",
+ "kicad_symbol": "Analog_ADC:ADS1115IDGS",
+ "kicad_footprint": "Package_SO:TSSOP-10_3x3mm_P0.5mm",
+ "pins": [
+  {
+   "number": "1",
+   "name": "ADDR",
+   "etype": "unspecified"
+  },
+  {
+   "number": "2",
+   "name": "ALERT/RDY",
+   "etype": "unspecified"
+  },
+  {
+   "number": "3",
+   "name": "GND",
+   "etype": "ground"
+  },
+  {
+   "number": "4",
+   "name": "AIN0",
+   "etype": "analog_in"
+  },
+  {
+   "number": "5",
+   "name": "AIN1",
+   "etype": "analog_in"
+  },
+  {
+   "number": "6",
+   "name": "AIN2",
+   "etype": "analog_in"
+  },
+  {
+   "number": "7",
+   "name": "AIN3",
+   "etype": "analog_in"
+  },
+  {
+   "number": "8",
+   "name": "VDD",
+   "etype": "power_in"
+  },
+  {
+   "number": "9",
+   "name": "SDA",
+   "etype": "bidirectional"
+  },
+  {
+   "number": "10",
+   "name": "SCL",
+   "etype": "bidirectional"
+  }
+ ],
+ "power": {
+  "pins": {
+   "power": [
+    "8"
+   ],
+   "ground": [
+    "3"
+   ]
+  },
+  "vcc_min": null,
+  "vcc_max": null,
+  "vcc_typ": null,
+  "i_typ_ma": null,
+  "i_max_ma": null
+ },
+ "abs_max": {},
+ "recommended": {},
+ "interfaces": [
+  {
+   "type": "i2c",
+   "signals": {
+    "scl": "SCL",
+    "sda": "SDA"
+   }
+  }
+ ],
+ "support_circuit": {
+  "decoupling": [
+   {
+    "value": "100nF",
+    "from": "VCC",
+    "to": "GND",
+    "note": "per power pin"
+   }
+  ],
+  "pullups": [],
+  "pulldowns": [],
+  "crystals": [],
+  "reset_config": [],
+  "other_passives": []
+ },
+ "programming": {},
+ "reference_circuit": null,
+ "constraints": {
+  "layout": [],
+  "routing": [],
+  "thermal": [],
+  "rf": []
+ },
+ "firmware": {},
+ "fl1_validation": {},
+ "sourcing": {},
+ "provenance": {
+  "mpn": "user",
+  "pins": "kicad_library",
+  "kicad_symbol": "kicad_library",
+  "kicad_footprint": "kicad_library",
+  "power.pins.power": "ai_inference",
+  "power.pins.ground": "ai_inference",
+  "interfaces": "ai_inference",
+  "support_circuit.decoupling": "default_assumption"
+ },
+ "confidence": {
+  "pins": 1.0,
+  "kicad_symbol": 1.0,
+  "kicad_footprint": 0.9,
+  "power.pins.power": 0.9,
+  "power.pins.ground": 0.9,
+  "interfaces": 0.8
+ },
+ "missing_fields": [
+  "datasheet (not provided)"
+ ],
+ "unsupported_fields": [],
+ "support_status": "partial",
+ "_status_reasons": [],
+ "datasheet_evidence": {
+  "_available": false
+ },
+ "user_notes": "FL-1 DMM-lite front-end ADC, 16-bit, I2C",
+ "ingest_sources": [
+  "kicad_symbol"
+ ],
+ "approval": {
+  "by": "user",
+  "status": "partial",
+  "note": ""
+ }
+}

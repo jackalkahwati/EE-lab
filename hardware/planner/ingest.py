@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import resolve_part  # noqa: E402  KiCad symbol/footprint parsing + normalisation
 
 from component_spec import UCS_VERSION, finalize  # noqa: E402
+import ingest_datasheet  # noqa: E402  real pdftotext datasheet extraction
 
 _FP_DIR = resolve_part.FP_DIR
 
@@ -318,12 +319,190 @@ def _stub(mpn, category, reason, source="ai_inference"):
 
 
 def from_datasheet(path_or_url, mpn="", category=""):
-    """Phase 4 — datasheet PDF/URL AI extraction. NOT IMPLEMENTED. Returns an
-    honest stub rather than fabricating a pin table."""
-    return _stub(mpn or "unknown", category,
-                 "datasheet extraction not implemented (Phase 4); provide a "
-                 "KiCad symbol or a manual pin table instead",
+    """Datasheet-only ingestion. pdftotext extracts a few fields (voltage,
+    package, decoupling) but NEVER a full pin table — that needs a KiCad symbol or
+    a manual pin table, so this returns an honest stub enriched with whatever the
+    datasheet yielded. The pin table is still marked missing."""
+    ds = ingest_datasheet.extract(path_or_url)
+    spec = _stub(mpn or "unknown", category,
+                 "datasheet alone cannot yield a reliable pin table — provide a "
+                 "KiCad symbol or manual pin table; datasheet fields attached below",
                  source="datasheet")
+    _apply_datasheet(spec, ds)
+    return spec
+
+
+# ---- Phase 4: symbol/footprint validation -----------------------------------
+def validate_component(spec):
+    """Structural + assembly validation of a candidate UCS. Returns
+    {errors, warnings, ok}. Errors -> unsupported; warnings -> needs_review."""
+    errors, warnings = [], []
+    pins = spec.get("pins", [])
+    if not pins:
+        errors.append("no pins (symbol/pin-table missing)")
+    fp = spec.get("kicad_footprint")
+    if fp and ":" in fp:
+        lib, name = fp.split(":", 1)
+        pads = _footprint_pad_names(lib, name)
+        if pads:
+            signal = {p["number"] for p in pins
+                      if resolve_part._norm(p["name"]) not in ("EP", "PAD", "NC")}
+            missing = sorted(n for n in signal if n not in pads)
+            if missing:
+                errors.append("footprint has no pad for pins %s (they would never "
+                              "get a net)" % missing)
+            # a footprint with FEWER pads than signal pins is a package mismatch
+            if len(pads) < len(signal):
+                errors.append("footprint pad count (%d) < signal pin count (%d) — "
+                              "package mismatch" % (len(pads), len(signal)))
+        else:
+            warnings.append("footprint pads unreadable — pad/pin match unverified")
+    else:
+        warnings.append("no KiCad footprint resolved (not assembly-ready)")
+    if not spec.get("power", {}).get("pins", {}).get("power"):
+        errors.append("no power pin identified")
+    if not spec.get("power", {}).get("pins", {}).get("ground"):
+        warnings.append("no ground pin identified")
+    # honest high-speed guard (Phase 5): flag routing we do not support
+    hs = [i for i in spec.get("interfaces", [])
+          if (i.get("type") if isinstance(i, dict) else i) in
+          ("usb_hs", "ethernet", "mipi", "pcie", "ddr")]
+    if hs:
+        warnings.append("requires high-speed routing (%s) unsupported by the "
+                        "current router" % ", ".join(str(x) for x in hs))
+    return {"errors": errors, "warnings": warnings, "ok": len(errors) == 0}
+
+
+def _apply_datasheet(spec, ds):
+    """Merge real datasheet-extracted fields into the spec with provenance +
+    confidence. Never overwrites a higher-confidence KiCad-derived field."""
+    spec.setdefault("datasheet_evidence", ds)
+    if not ds.get("_available"):
+        spec.setdefault("missing_fields", []).append("datasheet (not provided)")
+        return spec
+    prov = spec.setdefault("provenance", {})
+    conf = spec.setdefault("confidence", {})
+    v = ds.get("voltage")
+    if v and spec.get("power", {}).get("vcc_min") is None:
+        spec["power"]["vcc_min"] = v["value"]["vcc_min"]
+        spec["power"]["vcc_max"] = v["value"]["vcc_max"]
+        prov["power.vcc_min"] = "datasheet:p%s" % v["page"]
+        conf["power.vcc_min"] = v["confidence"]
+    if ds.get("abs_max_present"):
+        spec.setdefault("unsupported_fields", []).append(
+            "abs_max: datasheet has an Absolute Maximum section — enter limits by hand")
+    if ds.get("decoupling"):
+        spec.setdefault("support_circuit", {}).setdefault("decoupling", [])
+        prov["support_circuit.decoupling"] = "datasheet:p%s" % ds["decoupling"]["page"]
+    return spec
+
+
+# ---- Phase 1-7: the ingestion orchestrator ----------------------------------
+def ingest_part(mpn, kicad_symbol=None, kicad_footprint=None, pin_table=None,
+                datasheet=None, distributor=None, category="", manufacturer="",
+                notes=""):
+    """Fuse every available evidence source into a candidate UCS + a review
+    record. NEVER returns 'supported' — fresh ingestion is 'needs_review' at best
+    until a human approves; validation errors make it 'unsupported'."""
+    used = []
+    if kicad_symbol or resolve_part.symbol_info(mpn):
+        spec = from_kicad_symbol(kicad_symbol or mpn, mpn=mpn, category=category,
+                                 manufacturer=manufacturer)
+        used.append("kicad_symbol")
+    elif pin_table:
+        spec = from_pin_table(mpn, pin_table, kicad_symbol=kicad_symbol,
+                              kicad_footprint=kicad_footprint, category=category)
+        used.append("pin_table")
+    else:
+        spec = _stub(mpn, category, "no KiCad symbol or pin table provided")
+    if kicad_footprint and not spec.get("kicad_footprint"):
+        spec["kicad_footprint"] = kicad_footprint
+        spec.setdefault("provenance", {})["kicad_footprint"] = "user"
+        used.append("footprint_override")
+    ds = ingest_datasheet.extract(datasheet) if datasheet else {"_available": False}
+    _apply_datasheet(spec, ds)
+    if ds.get("_available"):
+        used.append("datasheet")
+    if distributor:
+        spec.setdefault("sourcing", {}).update(distributor)
+        spec.setdefault("provenance", {})["sourcing"] = "distributor"
+        used.append("distributor")
+    if notes:
+        spec["user_notes"] = notes
+
+    validation = validate_component(spec)
+    # fresh ingestion status: never auto-'supported'
+    if not validation["ok"]:
+        status = "unsupported"
+    else:
+        status = "needs_review"     # a human must approve before use
+    spec["support_status"] = status
+    spec["ingest_sources"] = used
+    report = build_ingest_report(spec, ds, validation, used)
+    return spec, report
+
+
+def build_ingest_report(spec, ds, validation, used):
+    """The human-review artifact (Phase 7)."""
+    review_fields = []
+    conf = spec.get("confidence", {})
+    for field, c in conf.items():
+        if c < 0.6:
+            review_fields.append({"field": field, "confidence": c,
+                                  "provenance": spec.get("provenance", {}).get(field, "?")})
+    unknowns = list(spec.get("missing_fields", []))
+    return {
+        "version": 1,
+        "mpn": spec.get("mpn"),
+        "category": spec.get("category"),
+        "support_status": spec.get("support_status"),
+        "sources_used": used,
+        "datasheet_available": ds.get("_available", False),
+        "identity": {"manufacturer": spec.get("manufacturer"),
+                     "package": spec.get("package"),
+                     "kicad_symbol": spec.get("kicad_symbol"),
+                     "kicad_footprint": spec.get("kicad_footprint"),
+                     "pin_count": len(spec.get("pins", []))},
+        "interfaces": [i.get("type") if isinstance(i, dict) else i
+                       for i in spec.get("interfaces", [])],
+        "validation_errors": validation["errors"],
+        "warnings": validation["warnings"],
+        "unknowns": unknowns,
+        "fields_needing_review": review_fields,
+        "requires_human_approval": True,
+    }
+
+
+def report_markdown(report, spec):
+    md = ["# Ingest Review — %s\n" % report["mpn"],
+          "**Status:** %s  ·  sources: %s  ·  datasheet: %s\n"
+          % (report["support_status"], ", ".join(report["sources_used"]) or "none",
+             "yes" if report["datasheet_available"] else "no (fields unknown)")]
+    idy = report["identity"]
+    md.append("- Manufacturer: %s  ·  Package: %s  ·  Pins: %s"
+              % (idy["manufacturer"] or "?", idy["package"] or "?", idy["pin_count"]))
+    md.append("- Symbol: `%s`" % idy["kicad_symbol"])
+    md.append("- Footprint: `%s`" % idy["kicad_footprint"])
+    md.append("- Interfaces: %s\n" % (", ".join(report["interfaces"]) or "none inferred"))
+    if report["validation_errors"]:
+        md.append("### Validation errors (block use)")
+        for e in report["validation_errors"]:
+            md.append("- " + e)
+        md.append("")
+    if report["warnings"]:
+        md.append("### Warnings\n" + "\n".join("- " + w for w in report["warnings"]) + "\n")
+    if report["fields_needing_review"]:
+        md.append("### Fields needing review (low confidence)")
+        for f in report["fields_needing_review"]:
+            md.append("- `%s` (confidence %.2f, from %s)"
+                      % (f["field"], f["confidence"], f["provenance"]))
+        md.append("")
+    md.append("### Pin table")
+    md.append("| Pad | Name | Type |")
+    md.append("|---|---|---|")
+    for p in spec.get("pins", []):
+        md.append("| %s | %s | %s |" % (p["number"], p["name"], p.get("etype", "?")))
+    return "\n".join(md) + "\n"
 
 
 def from_mpn(mpn, category=""):
