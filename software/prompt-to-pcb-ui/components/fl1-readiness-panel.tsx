@@ -38,6 +38,7 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
       'fl1-scope-lite-starter-report', 'fl1-stimulus-starter-report',
       'fl1-logic-capture-starter-report', 'fl1-fpga-module-carrier-report',
       'fl1-manufacturing-capability-report', 'cal-board-attempt', 'shared-bus-report',
+      'fine-pitch-escape-model',
     ]
     Promise.all(
       files.map((f) =>
@@ -111,6 +112,43 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
               blocker: {d['cal-board-attempt'].blocker}
             </p>
           )}
+        </div>
+      )}
+
+      {/* fine-pitch escape model (Phase 13) — the real physical gate */}
+      {d['fine-pitch-escape-model']?.components?.length > 0 && (
+        <div>
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-primary">
+            Fine-pitch escape ({d['fine-pitch-escape-model'].fine_pitch_component_count} · grid{' '}
+            {d['fine-pitch-escape-model'].grid_pitch_mm}mm)
+          </p>
+          <div className="space-y-1">
+            {d['fine-pitch-escape-model'].components.map((c: any, i: number) => (
+              <div key={i} className="rounded-md border border-border px-3 py-1.5">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-foreground">{c.mpn}</span>
+                  <span className="rounded-sm border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                    {c.package} {c.pin_pitch_mm}mm
+                  </span>
+                  <span
+                    className={`rounded-sm border px-1.5 py-0.5 text-[10px] ${
+                      c.expected_difficulty === 'unsupported_escape'
+                        ? 'border-destructive/40 bg-destructive/10 text-destructive'
+                        : c.expected_difficulty === 'dense_escape'
+                          ? 'border-amber-500/40 bg-amber-500/10 text-amber-500'
+                          : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500'
+                    }`}
+                  >
+                    {c.expected_difficulty}
+                  </span>
+                  <span className="ml-auto font-mono text-[9px] text-muted-foreground">
+                    {c.escape_count} escapes
+                  </span>
+                </div>
+                {c.blocker && <p className="mt-0.5 text-[10px] text-destructive">{c.blocker}</p>}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
