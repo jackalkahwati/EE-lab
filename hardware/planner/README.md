@@ -364,3 +364,35 @@ verified (manufacturer eval board -> reference_only, no direct reuse); pattern
 regression 7/7; board regression 5/5 unchanged. Next: Phase 9 advanced embedded
 routing (fine-pitch/fanout, keepout-aware placement, diff pairs, USB/Ethernet) —
 now with proven layout patterns to preserve.
+
+## Advanced Embedded Routing v1 (electrical geometry awareness)
+
+Makes Compose aware of board electrical geometry — WITHOUT faking what the v1
+router cannot do.
+
+- **advanced_constraints.py** — the advanced constraint + detection + planning
+  layer: fine-pitch escape, keepouts, differential-pair detection (USB_DP/DM 90Ω,
+  ETH_*P/N 100Ω high-speed; CANH/CANL + RS485 controlled-but-not-high-speed),
+  real IPC-2141 microstrip impedance ESTIMATION on a default 4-layer FR4 stackup,
+  analog layout rules (quiet zone, Kelvin sense, reference RC filter), power
+  layout rules (high-current trace, regulator hot loop, eFuse thermal), and
+  antenna keepouts. Each constraint carries source / severity / enforcement /
+  provenance / confidence.
+- **HONESTY (the hard boundary):** flroute is a single-width autorouter — it does
+  NOT route true diff pairs or guarantee impedance. So high-speed pairs are marked
+  `unsupported_by_router` and a design that REQUIRES them (USB high-speed,
+  Ethernet) is reported as NOT advanced-routable — never a fake pass. Impedance is
+  always an estimate that "requires a board-house controlled-impedance stackup",
+  never claimed guaranteed.
+- **gen_advanced_routing.py** (pipeline): emits advanced-routing-report.json/.md +
+  stackup-plan.json + impedance-plan.json; logs `ADVANCED_UNSUPPORTED` honestly for
+  high-speed blockers. Added to the PCBA package.
+- **UI** — Advanced Routing tab: diff pairs + enforcement, impedance/stackup plan
+  (with its estimate caveat), USB/Ethernet status, analog/power rules, unsupported
+  constraints in red.
+
+Verified: USB_DP/DM -> 90Ω pair, unsupported_by_router (honest); ETH -> two 100Ω
+pairs, unsupported; CAN -> controlled, advisory, routable; ADS1115 -> quiet_zone +
+reference_rc_filter; regulator -> hot_loop; WROOM -> antenna keepout; 50Ω micro-
+strip ≈ 0.335mm. The pattern-backed ADS1115 measurement front-end PASSES 0/0 with
+the analog rules emitted. Advanced regression 9/9. Next: FL-1 Instrument Core v1.

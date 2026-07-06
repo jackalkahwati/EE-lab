@@ -25,6 +25,7 @@ import { AssemblyPanel } from '@/components/assembly-panel'
 import { PinoutPanel } from '@/components/pinout-panel'
 import { IngestPanel } from '@/components/ingest-panel'
 import { PatternsPanel } from '@/components/patterns-panel'
+import { AdvancedRoutingPanel } from '@/components/advanced-routing-panel'
 import { FL1ValidationView } from '@/components/fl1-validation-view'
 import { BuildStatus } from '@/components/build-status'
 import { ErrorBoundary } from '@/components/error-boundary'
@@ -34,7 +35,7 @@ import { ReviewPanel } from '@/components/review-panel'
 import { ReviseDialog } from '@/components/revise-dialog'
 import { FL1Loop } from '@/components/fl1-loop'
 
-const TABS = ['Board', 'Code', 'BOM', 'Checks', 'Constraints', 'Pinout', 'Ingest', 'Patterns', 'Recovery', 'Assembly', 'Review', 'FL-1', 'Order'] as const
+const TABS = ['Board', 'Code', 'BOM', 'Checks', 'Constraints', 'Advanced', 'Pinout', 'Ingest', 'Patterns', 'Recovery', 'Assembly', 'Review', 'FL-1', 'Order'] as const
 type Tab = (typeof TABS)[number]
 
 interface PipelineEvent {
@@ -523,6 +524,9 @@ export default function FirstLightPage() {
             )}
             {tab === 'Pinout' && (
               <PinoutPanel runId={selectedRun.runDir ? selectedRun.id : null} />
+            )}
+            {tab === 'Advanced' && (
+              <AdvancedRoutingPanel runId={selectedRun.runDir ? selectedRun.id : null} />
             )}
             {tab === 'Ingest' && <IngestPanel />}
             {tab === 'Patterns' && <PatternsPanel />}

@@ -824,6 +824,26 @@ export async function GET(req: Request) {
           else log('validation', 'assembly package generation incomplete', 'warn')
           log('validation', 'sourcing: live supplier data unavailable — parts labelled fallback/estimate (no faked sourcing)', 'warn')
 
+          // ---- Advanced routing analysis (Phase 9): diff pairs, keepouts,
+          // analog/power layout rules, impedance/stackup plan. HONEST: high-speed
+          // pairs the v1 router cannot enforce are reported as unsupported, never
+          // as routed; impedance is an estimate needing a fab controlled-Z stackup.
+          const adv = await exec('validation', KPY, [
+            path.join(appDir, 'scripts/gen_advanced_routing.py'), variantBoard, pubData,
+          ])
+          const advm = adv.out.match(/^ADVANCED dp=(\d+) hs=(\d+) keepout=(\d+) analog=(\d+) power=(\d+) routable=(\w+)/m)
+          if (advm)
+            log('validation', `advanced routing: ${advm[1]} diff-pair(s) (${advm[2]} high-speed), ${advm[3]} keepout, ${advm[4]} analog + ${advm[5]} power rule(s), advanced-routable=${advm[6]} → advanced-routing-report.json, stackup-plan.json, impedance-plan.json`, advm[6] === 'True' ? 'ok' : 'warn')
+          const advUns = adv.out.match(/^ADVANCED_UNSUPPORTED:(.+)$/m)
+          if (advUns) {
+            try {
+              const u = JSON.parse(advUns[1]) as { blockers: string[] }
+              log('validation', `⚠ advanced routing UNSUPPORTED (honest): high-speed pair(s) ${u.blockers.join(', ')} need controlled-impedance routing the v1 router cannot enforce — planned + reported, not faked`, 'warn')
+            } catch {
+              /* non-fatal */
+            }
+          }
+
           const zipMatch = fab.out.match(/^FAB_ZIP:(.+)$/m)
           if (zipMatch && fs.existsSync(zipMatch[1].trim())) {
             const pubFab = path.join(appDir, 'public/fab')

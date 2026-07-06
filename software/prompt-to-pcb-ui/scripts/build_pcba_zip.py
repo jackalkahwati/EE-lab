@@ -24,7 +24,8 @@ DATA_FILES = [
     "pick_and_place.csv", "bom.csv", "sourcing-report.json",
     "assembly-readiness.json", "assembly-readiness.md", "substitutions.json",
     "constraints.json", "fl1-testplan.json", "fl1-validation.json",
-    "power-budget.json",
+    "power-budget.json", "advanced-routing-report.json", "advanced-routing-report.md",
+    "stackup-plan.json", "impedance-plan.json",
 ]
 
 n = 0
