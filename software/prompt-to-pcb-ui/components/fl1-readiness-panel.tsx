@@ -37,7 +37,7 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
       'fl1-reference-pattern-readiness', 'fl1-rf-50ohm-interface-report',
       'fl1-scope-lite-starter-report', 'fl1-stimulus-starter-report',
       'fl1-logic-capture-starter-report', 'fl1-fpga-module-carrier-report',
-      'fl1-manufacturing-capability-report', 'cal-board-attempt',
+      'fl1-manufacturing-capability-report', 'cal-board-attempt', 'shared-bus-report',
     ]
     Promise.all(
       files.map((f) =>
@@ -111,6 +111,59 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
               blocker: {d['cal-board-attempt'].blocker}
             </p>
           )}
+        </div>
+      )}
+
+      {/* shared-bus status (Phase 12.5) — multi-drop I2C / SPI fanout model */}
+      {d['shared-bus-report']?.buses?.length > 0 && (
+        <div>
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-primary">
+            Shared buses ({d['shared-bus-report'].bus_count})
+          </p>
+          <div className="space-y-1">
+            {d['shared-bus-report'].buses.map((bus: any, i: number) => (
+              <div key={i} className="rounded-md border border-border px-3 py-1.5">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-foreground">{bus.name}</span>
+                  <span className="rounded-sm border border-border px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">
+                    {bus.type}
+                  </span>
+                  <span
+                    className={`rounded-sm border px-1.5 py-0.5 text-[10px] ${
+                      bus.routing_status === 'connected'
+                        ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500'
+                        : bus.routing_status?.includes('warning')
+                          ? 'border-amber-500/40 bg-amber-500/10 text-amber-500'
+                          : 'border-border text-muted-foreground'
+                    }`}
+                  >
+                    {bus.routing_status}
+                  </span>
+                  <span className="ml-auto font-mono text-[9px] text-muted-foreground">
+                    {bus.device_count} dev · fanout {bus.fanout_count}
+                  </span>
+                </div>
+                <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">
+                  source: {bus.source} · nets: {(bus.required_nets ?? []).join(', ')}
+                  {bus.routed_connections
+                    ? ' · routed: ' +
+                      Object.entries(bus.routed_connections)
+                        .map(([k, v]) => `${k}=${v}`)
+                        .join(' ')
+                    : ''}
+                </div>
+                <div className="text-[9px] text-muted-foreground">{bus.topology}</div>
+                {(bus.problems ?? [])
+                  .filter((p: any) => p.severity === 'error')
+                  .slice(0, 2)
+                  .map((p: any, j: number) => (
+                    <p key={j} className="mt-0.5 text-[10px] text-destructive">
+                      {p.code}: {p.detail}
+                    </p>
+                  ))}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

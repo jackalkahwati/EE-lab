@@ -483,3 +483,32 @@ calibration/reference board. Corrected without weakening any gate:
 Regressions: fl1-cal-fix 8/8, ingest 6/6 (updated to the fixed behavior), all other
 unit suites green, frontend 24/24, board 5/5. The standard now: a board is not
 "passed" just because DRC/ERC is clean — it must also match the named intent.
+
+## Phase 12.5: Shared bus / multi-drop routing fix
+
+The real FL-1 Calibration board exposed a concrete blocker: ADS1115 + EEPROM +
+FL-1 header on a shared I2C bus. Root cause was NOT bus topology (flroute already
+routes multi-pin nets as a spanning tree) but placement + fine-pitch escape.
+
+- **shared_bus.py** — first-class shared-bus model: I2C multi-drop, SPI shared
+  SCK/MOSI/MISO + per-device CS (groundwork), GPIO fanout. Per bus: source/master,
+  device list, required nets, pull-ups, addresses/chip-selects, topology, fanout
+  count, routing status, blockers. `check_bus()` rejects disconnected bus pins,
+  fake independent nets, missing pull-ups, duplicate net names, dropped devices,
+  and DRC-clean-but-not-all-devices-connected.
+- **Multi-drop I2C FIXED**: the shared I2C bus (ADS1115 + 24LC02 + FL-1 header +
+  pull-ups) routes and CONNECTS every device — the 2-escape shared-bus board routes
+  5/5 with 0 DRC. `gen_shared_bus_report.py` checks it against the realized board.
+- **synth cal topology**: a voltage reference now wires OUT -> REF_OUT, builds an
+  RCAL divider producing REF_DIV, and (with an ADC) has the ADC MEASURE both nodes;
+  unused fine-pitch pins are tied to the GND plane so they take a via instead of
+  walling the escape lanes. FL-1 bus connector added as the shared-bus source.
+- **Real cal board rebuilt via synth**: all 7 nets route (shared I2C multi-drop +
+  analog measurement of REF_OUT/REF_DIV). The Phase-12 "multi-drop I2C" blocker is
+  FIXED; it is REPLACED by a more specific one — the ADS1115 needs 4 simultaneous
+  fine-pitch escapes (SDA/SCL + AIN0/AIN1) on a 0.5mm-pitch TSSOP-10, and the
+  router's 0.46mm grid cannot cleanly resolve 4 escapes at 0.5mm pitch (13
+  fine-pitch shorts). Needs finer-grid fanout / via-in-pad for 4+ escapes.
+
+Regression: shared-bus 11/11, ingest 6/6, fl1-cal 8/8, high-speed 8/8 (USB pair
+still routes), board 5/5. No DRC/ERC weakening; the router is never bypassed.

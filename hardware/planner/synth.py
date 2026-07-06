@@ -396,6 +396,13 @@ def synth(design, out_path):
     specs = sorted(specs, key=lambda s: 0 if s.get("category", "").startswith(
         ("connector.usb", "connector.power", "power")) else 1)
     placed, dropped, refn, cs_i = [], [], 2, 0
+    # Calibration/reference topology: when a voltage reference is present, wire its
+    # OUT to a REF_OUT node, build a divider producing REF_DIV, and (if an ADC is
+    # present) have the ADC MEASURE both nodes. Turns a reference that's merely
+    # placed into a reference that's wired into the measurement path.
+    _has_ref = any(s.get("category") == "voltage_reference" for s in specs)
+    _has_adc = any(s.get("category", "").startswith("adc") for s in specs)
+    _cal_nets = []          # [(net, rail_or_gnd)] divider + test-point requests
     for spec in specs:
         fp = spec.get("kicad_footprint")
         if not fp or ":" not in fp:
@@ -409,6 +416,28 @@ def synth(design, out_path):
         if not nm:
             dropped.append({"mpn": spec["mpn"], "reason": "no pins could be wired"})
             continue
+        # cal-topology wiring (only when a reference is in the design)
+        if _has_ref:
+            cat = spec.get("category", "")
+            if cat == "voltage_reference":
+                for p in spec["pins"]:
+                    if p["etype"] == "power_out":
+                        nm[p["number"]] = "REF_OUT"
+                        wired.append("ref_out")
+                _cal_nets = [("REF_DIV", None)]  # sentinel: build the divider
+            elif cat.startswith("adc"):
+                ains = [p["number"] for p in spec["pins"] if p["etype"] == "analog_in"]
+                for pnum, cnet in zip(ains, ("REF_OUT", "REF_DIV")):
+                    nm[pnum] = cnet
+                    wired.append("measures_%s" % cnet.lower())
+                # fine-pitch escape hygiene: tie every UNUSED pin (spare analog
+                # inputs, unconnected config/alert) to the GND plane so it takes
+                # a plane via at the pad instead of a floating obstacle — that
+                # frees the escape lanes the used fine-pitch signals need. (This
+                # is the difference between the walled and the routable ADS1115.)
+                for p in spec["pins"]:
+                    if p["number"] not in nm and p["etype"] not in ("power_in",):
+                        nm[p["number"]] = "GND"
         # wrap to a new row before placing if this cell would run past the budget
         if x + COLW - X0 > WRAP:
             x = X0 + MARGIN
@@ -451,6 +480,31 @@ def synth(design, out_path):
         if net in nets.order:
             body += compose.tp("TP%d" % (i + 1), px + i * 5, py, net, nets)
             note_extent(px + i * 5, py, 4, 6)
+
+    # ---- calibration divider + reference/measurement node test points -------
+    # REF_OUT -> RCAL1 -> REF_DIV -> RCAL2 -> GND gives a known divided node; both
+    # nodes get a labeled test point so they are externally measurable.
+    if _cal_nets and "REF_OUT" in nets.order:
+        body += compose.res("RCAL1", px, py + 12, "REF_OUT", "REF_DIV", nets)
+        body += compose.res("RCAL2", px, py + 16, "REF_DIV", "GND", nets)
+        note_extent(px, py + 12, 6, 10)
+        px += 10
+        for i, net in enumerate(["REF_OUT", "REF_DIV"]):
+            if net in nets.order:
+                body += compose.tp("TP%d" % (i + 8), px + i * 5, py + 12, net, nets)
+                note_extent(px + i * 5, py + 12, 4, 6)
+        px += 12
+
+    # ---- FL-1 instrument-bus connector (source/tap for the shared I2C bus) ---
+    # For an FL-1 instrument board the bus header carries power + the shared I2C
+    # control bus + a trigger, so an external controller can drive the board.
+    if _cal_nets and "I2C_SDA" in nets.order:
+        body += compose.place("Connector_PinHeader_2.54mm", "PinHeader_2x03_P2.54mm_Vertical",
+                              "J1", px, py, 0,
+                              {"1": "+5V", "2": "+3V3", "3": "I2C_SDA", "4": "I2C_SCL",
+                               "5": "GND", "6": "TRIG"}, nets)
+        compose._DEVICES.append({"ref": "J1", "type": "connector", "name": "FL-1 instrument bus"})
+        note_extent(px, py, 10, 8)
 
     # ---- assemble the board (outline that ENCLOSES every placement) ---------
     BW = round(right_extent[0] + MARGIN - X0, 1)
