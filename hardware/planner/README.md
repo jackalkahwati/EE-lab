@@ -396,3 +396,32 @@ pairs, unsupported; CAN -> controlled, advisory, routable; ADS1115 -> quiet_zone
 reference_rc_filter; regulator -> hot_loop; WROOM -> antenna keepout; 50Ω micro-
 strip ≈ 0.335mm. The pattern-backed ADS1115 measurement front-end PASSES 0/0 with
 the analog rules emitted. Advanced regression 9/9. Next: FL-1 Instrument Core v1.
+
+## True High-Speed Routing v1 (real routed + checked differential pairs)
+
+Turns Phase 9's honest "USB/Ethernet detected but unsupported_by_router" into an
+actually-routed, actually-checked differential pair — without faking impedance.
+
+- **highspeed.py** — first-class high-speed route objects + planner. v1 profiles:
+  USB 2.0 full-speed / high-speed (90ohm), 10/100 Ethernet PHY<->magnetics &
+  magnetics<->RJ45 (100ohm), LVDS-like, clock pair. Geometry (width/spacing) from
+  the IPC-2141 estimate. CAN/RS485 stay controlled/advisory unless explicitly
+  requested as strict differential.
+- **route_diff_pairs.py** — REAL differential-pair router + length/skew checker.
+  Routes both pair members together (parallel, matched width, same layer) between
+  their true ENDPOINT pads as real KiCad tracks, then checks length delta, skew,
+  spacing, via count. NEVER falls back to independent single-ended routing; a
+  REQUIRED pair that fails compliance fails the design. Impedance stays advisory.
+- **gen_highspeed_demo.py** — a USB 2.0 device demo board (breakout + USBLC6 ESD +
+  MCU header) with a real USB_DP/USB_DM pair.
+- **UI** — the Advanced Routing tab now shows a High-Speed Routing table: routed
+  lengths, delta/skew, status per pair, with the advisory-impedance caveat.
+- **Recovery** — highspeed_pair_fail -> match_pair_length / move_endpoints_closer
+  / mark_unsupported; a REQUIRED high-speed constraint is never auto-relaxed.
+
+Proof: the USB 2.0 demo routes USB_D as a matched pair (34.0mm / 34.0mm, delta
+0.0mm, 0 skew) -> routed_and_checked, impedance routed_but_advisory (needs a
+board-house controlled-Z stackup). The checker independently REJECTS a 0.434mm
+mismatch (failed_constraints). High-speed regression 8/8. No fake diff-pair
+routing, no impedance guarantee, no weakened gates. (Honest v1 scope: the demo
+pair spacing is header-pitch; tighter coupled geometry is future work.)

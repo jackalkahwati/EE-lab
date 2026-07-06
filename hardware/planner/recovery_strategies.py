@@ -13,7 +13,7 @@ marked terminal-for-auto so the orchestrator surfaces them instead of guessing.
 from failure_taxonomy import (
     FINE_PITCH_ESCAPE, CLEARANCE, UNCONNECTED, KEEPOUT_PLACEMENT, ERC,
     FOOTPRINT_MISMATCH, MISSING_PASSIVE, PIN_ALLOCATION, MCU_UNFIT,
-    HIGH_SPEED_UNSUPPORTED, COMPONENT_UNSUPPORTED, SOURCING,
+    HIGH_SPEED_UNSUPPORTED, HIGHSPEED_PAIR_FAIL, COMPONENT_UNSUPPORTED, SOURCING,
 )
 
 STRATEGIES = {
@@ -80,9 +80,25 @@ STRATEGIES = {
         "risks": "value must be correct", "preserves_function": True,
         "requires_approval": False, "auto": True,
     },
+    "match_pair_length": {
+        "applies": [HIGHSPEED_PAIR_FAIL],
+        "precondition": "a routed diff pair failed length/skew",
+        "effect": "add a length-match meander to the shorter member + re-check "
+                  "(never relax a REQUIRED high-speed constraint)",
+        "risks": "board space", "preserves_function": True, "requires_approval": False,
+        "auto": True,
+    },
+    "move_endpoints_closer": {
+        "applies": [HIGHSPEED_PAIR_FAIL],
+        "precondition": "connector/ESD/PHY can be placed nearer the pair endpoints",
+        "effect": "shorten + symmetrize the pair route",
+        "risks": "placement fit", "preserves_function": True, "requires_approval": False,
+        "auto": True,
+    },
     "mark_unsupported": {
         "applies": [FINE_PITCH_ESCAPE, KEEPOUT_PLACEMENT, HIGH_SPEED_UNSUPPORTED,
-                    UNCONNECTED, ERC, CLEARANCE, PIN_ALLOCATION, COMPONENT_UNSUPPORTED],
+                    HIGHSPEED_PAIR_FAIL, UNCONNECTED, ERC, CLEARANCE, PIN_ALLOCATION,
+                    COMPONENT_UNSUPPORTED],
         "precondition": "no auto strategy resolved the failure",
         "effect": "stop and report an honest, specific blocker (never a fake pass)",
         "risks": "none — this is the honest terminal state", "preserves_function": True,
@@ -104,6 +120,7 @@ _ORDER = {
     COMPONENT_UNSUPPORTED: ["substitute_component", "mark_unsupported"],
     MISSING_PASSIVE: ["add_missing_passive", "mark_unsupported"],
     HIGH_SPEED_UNSUPPORTED: ["mark_unsupported"],
+    HIGHSPEED_PAIR_FAIL: ["match_pair_length", "move_endpoints_closer", "mark_unsupported"],
     ERC: ["mark_unsupported"],
     SOURCING: ["substitute_component", "mark_unsupported"],
 }

@@ -23,6 +23,7 @@ MISSING_PASSIVE = "missing_required_passive"
 PIN_ALLOCATION = "pin_allocation"
 MCU_UNFIT = "mcu_unfit"
 HIGH_SPEED_UNSUPPORTED = "high_speed_unsupported"
+HIGHSPEED_PAIR_FAIL = "highspeed_pair_fail"      # a routed pair failed length/skew
 COMPONENT_UNSUPPORTED = "component_unsupported"
 SOURCING = "sourcing"
 
@@ -137,6 +138,19 @@ def classify(result):
         failures.append({"type": t, "severity": "high", "components": [mpn],
                         "nets": [], "auto_recovery": True, "requires_approval": False,
                         "evidence": reason, "explanation": "a component could not be placed"})
+
+    # ---- high-speed differential pairs that failed length/skew compliance ----
+    hs = result.get("highspeed") or {}
+    for r in hs.get("routes", []):
+        if r.get("required") and r.get("status") not in ("routed_and_checked", None):
+            failures.append({
+                "type": HIGHSPEED_PAIR_FAIL, "severity": "high",
+                "components": [], "nets": [r.get("positive"), r.get("negative")],
+                "auto_recovery": True, "requires_approval": False,
+                "evidence": "; ".join(r.get("compliance_fails", [])) or r.get("reason", ""),
+                "explanation": "a required %s pair did not meet length/skew — never "
+                               "auto-relax a required high-speed constraint" % r.get("interface", ""),
+            })
 
     # ---- MCU / pin allocation ----
     mcu = result.get("mcu") or {}

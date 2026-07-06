@@ -128,6 +128,58 @@ export function AdvancedRoutingPanel({ runId }: { runId: string | null }) {
         </div>
       )}
 
+      {/* high-speed routed pairs (Phase 11) — routed + checked, honest status */}
+      {Array.isArray(m.high_speed) && m.high_speed.length > 0 && (
+        <div>
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-primary">
+            High-speed routing ({m.high_speed.length})
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse font-mono text-[10px]">
+              <thead>
+                <tr className="border-b border-border text-left text-muted-foreground">
+                  <th className="py-1 pr-3">Pair</th>
+                  <th className="py-1 pr-3">Interface</th>
+                  <th className="py-1 pr-3">Len +/-</th>
+                  <th className="py-1 pr-3">Δ / skew</th>
+                  <th className="py-1 pr-3">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {m.high_speed.map((h: any, i: number) => (
+                  <tr key={i} className="border-b border-border/40">
+                    <td className="py-1 pr-3 text-foreground">{h.group}</td>
+                    <td className="py-1 pr-3 text-muted-foreground">{h.interface}</td>
+                    <td className="py-1 pr-3 text-muted-foreground">
+                      {h.pos_length_mm}/{h.neg_length_mm}
+                    </td>
+                    <td className="py-1 pr-3 text-muted-foreground">
+                      {h.length_delta_mm}mm
+                    </td>
+                    <td
+                      className={`py-1 pr-3 ${
+                        h.status === 'routed_and_checked'
+                          ? 'text-emerald-500'
+                          : h.status === 'failed_constraints'
+                            ? 'text-destructive'
+                            : 'text-amber-500'
+                      }`}
+                    >
+                      {h.status}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-1 text-[10px] text-amber-500">
+            impedance is routed to the estimate geometry but stays advisory —{' '}
+            {m.high_speed[0]?.impedance_guarantee ??
+              'final impedance requires a board-house controlled-impedance stackup'}
+          </p>
+        </div>
+      )}
+
       {/* impedance / stackup */}
       <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-2.5">
         <p className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-500">
