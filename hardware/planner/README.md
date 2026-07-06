@@ -584,3 +584,37 @@ rf_50ohm needs_external_tool. Regression: benchmark+signoff 29/29; fine-pitch 10
 shared-bus 11/11, fl1-cal 8/8, fl1boards 12/12, high-speed 8/8, ingest 6/6, frontend
 24/24 unchanged. No DRC/ERC weakening, no fake simulation/signoff, no fake
 RF/scope/funcgen/LA claims.
+
+## Phase 14: instrument adapter layer + FL-1 validation readiness v1
+
+One common command layer so FL-1 validation can measure_voltage / set_power /
+route_channel / flash_firmware / capture_waveform through MOCK, external COTS, or
+future internal FL-1 boards. This phase does NOT build the boards and NEVER performs
+or claims a real measurement.
+
+- instruments.py: capability model (34 caps across measurement/stimulus/routing/
+  firmware/calibration), adapter interface (8 adapter types + command/result
+  envelopes), a MockAdapter that marks every value simulated_evidence, COTS specs
+  (10 external instruments: supply/DMM/scope/funcgen/logic-analyzer/eload/matrix/
+  programmer/serial/VNA-external), and internal FL-1 board adapter specs that CONSUME
+  Phase 13 build-readiness — a do_not_build board is mock_only (physically_available
+  False), an unsupported board has no adapter.
+- validation.py: workflow model + 10 FL-1 board-class workflow templates, evidence
+  model (simulated/manual/external_tool/physical), the build->validation readiness
+  BRIDGE, the command DSL, and validation package v2. run_workflow() executes a
+  workflow through an adapter; a mock run yields simulated_pass/fail only, never a
+  physical pass.
+- The hard rail: a do_not_build board is validation_ready_with_mock ONLY — physical
+  validation blocked, internal-board adapter forbidden. The cal board's mock demo
+  passes the workflow LOGIC (simulated_pass) but physical validation is blocked
+  (build status do_not_build / blocked_by_grid_resolution). scope-lite stays
+  unsupported (no oscilloscope claim); stimulus/logic make no funcgen/analyzer claims.
+- gen_instrument_validation.py: emits all capability/adapter/workflow/evidence/
+  readiness/DSL/package-v2 artifacts + runs the 5 demo mock validations. UI shows the
+  validation-readiness dashboard (physical-blocked is obvious) + mock demos (◈sim =
+  simulated only).
+
+Regression: validation 28/28; benchmark+signoff 29/29, fine-pitch 10/10, shared-bus
+11/11, high-speed 8/8, ingest 6/6, fl1boards 12/12, frontend 24/24 unchanged. Phase 13
+build/signoff verdicts untouched. No fake physical measurement, no fake calibration/
+traceability, no weakened DRC/ERC/benchmark/signoff gates.

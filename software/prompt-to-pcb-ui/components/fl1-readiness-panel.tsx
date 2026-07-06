@@ -39,7 +39,7 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
       'fl1-logic-capture-starter-report', 'fl1-fpga-module-carrier-report',
       'fl1-manufacturing-capability-report', 'cal-board-attempt', 'shared-bus-report',
       'fine-pitch-escape-model', 'fl1-build-readiness-dashboard', 'combined-signoff-report',
-      'fl1-curated-reference-library',
+      'fl1-curated-reference-library', 'fl1-validation-readiness-dashboard', 'demo-validation-runs',
     ]
     Promise.all(
       files.map((f) =>
@@ -113,6 +113,76 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
               blocker: {d['cal-board-attempt'].blocker}
             </p>
           )}
+        </div>
+      )}
+
+      {/* validation readiness (Phase 14) — mock vs COTS vs internal, physical-blocked */}
+      {d['fl1-validation-readiness-dashboard']?.boards?.length > 0 && (
+        <div>
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-primary">
+            Validation readiness ({d['fl1-validation-readiness-dashboard'].board_count})
+          </p>
+          <div className="space-y-1">
+            {d['fl1-validation-readiness-dashboard'].boards.map((b: any, i: number) => (
+              <div key={i} className="rounded-md border border-border px-3 py-1.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-foreground">{b.board_class ?? b.board}</span>
+                  <span
+                    className={`rounded-sm border px-1.5 py-0.5 text-[10px] ${
+                      b.validation_readiness_status === 'unsupported'
+                        ? 'border-destructive/50 bg-destructive/15 font-semibold text-destructive'
+                        : b.physical_validation_blocked
+                          ? 'border-amber-500/40 bg-amber-500/10 text-amber-500'
+                          : b.validation_readiness_status?.includes('cots')
+                            ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500'
+                            : 'border-sky-500/40 bg-sky-500/10 text-sky-400'
+                    }`}
+                  >
+                    {b.validation_readiness_status}
+                  </span>
+                  {b.physical_validation_blocked && (
+                    <span className="rounded-sm border border-destructive/50 bg-destructive/15 px-1.5 py-0.5 text-[9px] font-semibold text-destructive">
+                      physical blocked
+                    </span>
+                  )}
+                  <span className="ml-auto font-mono text-[9px] text-muted-foreground">
+                    build {b.build_recommendation}
+                  </span>
+                </div>
+                <div className="mt-0.5 font-mono text-[9px] text-muted-foreground">
+                  adapters: mock{b.external_cots_alternatives?.length ? ' + cots' : ''}
+                  {b.internal_board_future_adapter ? ' + internal(future)' : ''}
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="mt-1 text-[9px] text-muted-foreground">
+            amber = physical validation blocked (mock/simulated only) · sky = mock/logic only · green
+            = COTS-validatable now. Simulated evidence is never physical evidence.
+          </p>
+        </div>
+      )}
+
+      {/* mock demo runs — simulated evidence must be visibly simulated */}
+      {d['demo-validation-runs']?.runs?.length > 0 && (
+        <div>
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-primary">
+            Mock validation demos ({d['demo-validation-runs'].run_count})
+          </p>
+          <div className="flex flex-wrap gap-1">
+            {d['demo-validation-runs'].runs.map((r: any, i: number) => (
+              <span
+                key={i}
+                title={`${r.workflow_name} — ${r.physical_validation}`}
+                className="rounded-sm border border-sky-500/40 bg-sky-500/10 px-1.5 py-0.5 font-mono text-[9px] text-sky-400"
+              >
+                ◈sim {r.board_id}: {r.final_verdict}
+              </span>
+            ))}
+          </div>
+          <p className="mt-1 text-[9px] text-muted-foreground">
+            ◈sim = simulated (mock) evidence only, never a physical pass.
+          </p>
         </div>
       )}
 
