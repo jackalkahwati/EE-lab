@@ -34,9 +34,29 @@ import { WelcomeHero } from '@/components/welcome-hero'
 import { ReviewPanel } from '@/components/review-panel'
 import { ReviseDialog } from '@/components/revise-dialog'
 import { FL1Loop } from '@/components/fl1-loop'
+import { RunOverview } from '@/components/run-overview'
+import { ArtifactExplorer } from '@/components/artifact-explorer'
 
-const TABS = ['Board', 'Code', 'BOM', 'Checks', 'Constraints', 'Advanced', 'Pinout', 'Ingest', 'Patterns', 'Recovery', 'Assembly', 'Review', 'FL-1', 'Order'] as const
+const TABS = ['Overview', 'Board', 'Code', 'Pinout', 'Constraints', 'Advanced', 'BOM', 'Assembly', 'Order', 'Checks', 'FL-1', 'Recovery', 'Review', 'Ingest', 'Patterns', 'Artifacts'] as const
 type Tab = (typeof TABS)[number]
+
+// Grouped workspace navigation — replaces the single overflowing tab row.
+// Every existing view is preserved; groups just organise them so the nav scales.
+const GROUPS: { name: string; views: Tab[] }[] = [
+  { name: 'Overview', views: ['Overview'] },
+  { name: 'Design', views: ['Board', 'Code', 'Pinout', 'Constraints', 'Advanced'] },
+  { name: 'Build', views: ['BOM', 'Assembly', 'Order'] },
+  { name: 'Validate', views: ['Checks', 'FL-1', 'Recovery', 'Review'] },
+  { name: 'Learn', views: ['Ingest', 'Patterns'] },
+  { name: 'Artifacts', views: ['Artifacts'] },
+]
+// Future phases — shown as disabled/not_generated so the roadmap is honest and
+// the structure scales, without ever implying the capability exists yet.
+const FUTURE_PHASES = [
+  'High-Speed Routing', 'Compute / RF', 'Benchmarks', 'Simulation / Signoff',
+  'Instrument Adapters', 'FL-1 Auto-Validation', 'Calibration', 'Manufacturing',
+  'Certification', 'Architecture Search', 'Multi-board', 'Production', 'Fleet Learning',
+]
 
 interface PipelineEvent {
   type: 'stage' | 'log' | 'design' | 'done' | 'error'
@@ -58,7 +78,9 @@ export default function FirstLightPage() {
   const [runs, setRuns] = useState<Run[]>([])
   const [selectedId, setSelectedId] = useState('')
   const [collapsed, setCollapsed] = useState(false)
-  const [tab, setTab] = useState<Tab>('Board')
+  const [tab, setTab] = useState<Tab>('Overview')
+  const [group, setGroup] = useState('Overview')
+  const [roadmapOpen, setRoadmapOpen] = useState(false)
   const [liveRunId, setLiveRunId] = useState<string | null>(null)
   const [liveElapsed, setLiveElapsed] = useState<Record<string, number>>({})
   const [realBoard, setRealBoard] = useState<RealBoard | null>(null)
@@ -450,36 +472,105 @@ export default function FirstLightPage() {
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col">
+          {/* top-level workspace groups (scales without horizontal overflow) */}
           <div
             role="tablist"
-            aria-label="Run viewport"
-            className="flex items-center border-b border-border"
+            aria-label="Workspace groups"
+            className="flex items-center gap-1 border-b border-border px-2"
           >
-            {TABS.map((t) => (
+            {GROUPS.map((g) => {
+              const active = group === g.name
+              return (
+                <button
+                  key={g.name}
+                  role="tab"
+                  aria-selected={active}
+                  type="button"
+                  onClick={() => {
+                    setGroup(g.name)
+                    setRoadmapOpen(false)
+                    if (!g.views.includes(tab)) setTab(g.views[0])
+                  }}
+                  className={cn(
+                    'rounded-t-md border-b-2 px-3 py-2 text-xs font-semibold transition-colors',
+                    active
+                      ? 'border-primary text-primary'
+                      : 'border-transparent text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  {g.name}
+                </button>
+              )
+            })}
+            {/* Roadmap: future phases as disabled/not_generated (honest structure) */}
+            <div className="relative">
               <button
-                key={t}
-                role="tab"
-                aria-selected={tab === t}
                 type="button"
-                onClick={() => setTab(t)}
-                className={cn(
-                  'border-b-2 px-4 py-2 text-xs font-medium transition-colors',
-                  tab === t
-                    ? 'border-primary text-primary'
-                    : 'border-transparent text-muted-foreground hover:text-foreground',
-                )}
+                onClick={() => setRoadmapOpen((o) => !o)}
+                className="rounded-t-md border-b-2 border-transparent px-3 py-2 text-xs font-medium text-muted-foreground/70 hover:text-foreground"
               >
-                {t}
+                Roadmap ▾
               </button>
-            ))}
+              {roadmapOpen && (
+                <div className="absolute left-0 top-full z-20 mt-1 w-56 rounded-md border border-border bg-card p-1 shadow-lg">
+                  <p className="px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                    Future phases · not generated
+                  </p>
+                  {FUTURE_PHASES.map((f) => (
+                    <div
+                      key={f}
+                      className="flex cursor-not-allowed items-center justify-between px-2 py-1 text-[11px] text-muted-foreground/50"
+                      title="Future phase — not yet available"
+                    >
+                      {f}
+                      <span className="rounded-sm border border-border bg-muted/30 px-1 text-[9px]">
+                        soon
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
             {selectedRun.runDir && (
               <div className="ml-auto pr-3">
                 <BuildStatus runId={selectedRun.id} status={selectedRun.status} />
               </div>
             )}
           </div>
+          {/* sub-views within the current group */}
+          {(GROUPS.find((g) => g.name === group)?.views.length ?? 0) > 1 && (
+            <div
+              role="tablist"
+              aria-label="Views"
+              className="flex items-center gap-1 border-b border-border bg-muted/20 px-2"
+            >
+              {GROUPS.find((g) => g.name === group)?.views.map((t) => (
+                <button
+                  key={t}
+                  role="tab"
+                  aria-selected={tab === t}
+                  type="button"
+                  onClick={() => setTab(t)}
+                  className={cn(
+                    'border-b-2 px-3 py-1.5 text-xs font-medium transition-colors',
+                    tab === t
+                      ? 'border-primary text-primary'
+                      : 'border-transparent text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="min-h-0 flex-1">
             <ErrorBoundary key={tab} label={`The ${tab} panel`}>
+            {tab === 'Overview' && (
+              <RunOverview runId={selectedRun.runDir ? selectedRun.id : null} />
+            )}
+            {tab === 'Artifacts' && (
+              <ArtifactExplorer runId={selectedRun.runDir ? selectedRun.id : null} />
+            )}
             {tab === 'Board' && (
               <BoardCanvas
                 key={selectedRun.id}
