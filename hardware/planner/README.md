@@ -328,3 +328,39 @@ reverted) → a2 rotate (29 viol from a short, reverted) → a3 enlarge_board (0
 PASSED). Independently confirmed PASSED 0/0. Recovery regression 6/6; board
 regression 5/5 unchanged. Next: Phase 8 advanced routing (fine-pitch/fanout,
 keepout-aware placement, differential pairs / USB / Ethernet).
+
+## Reference Design Ingestion & Pattern Learning v1 (design from proven patterns)
+
+Compose can start a design from PROVEN engineering patterns, not just component
+specs — extracted from trusted, provenance-tracked sources, never scraped.
+
+- **reference_manifest.py** — controlled reference ingestion. A `references/` tree
+  + a manifest with per-reference provenance + LICENSE + trust. Trust hierarchy:
+  FirstLight-own (permissive) > manufacturer eval/app-note (reference_only unless
+  licensed) > open-source (needs license) > forum/blog (idea-only). `can_direct_
+  reuse()` gates: ONLY permissive licenses reuse directly; unknown/manufacturer/
+  copyleft -> reference/review, never silent reuse.
+- **pattern_spec.py** — Design Pattern Spec: reusable topology, support circuitry,
+  layout/routing constraints, firmware hooks, test points, calibration, risks,
+  adaptation ZONES (preserve_exactly / adapt_allowed / requires_review …),
+  provenance + confidence + license. `derive_status()`: license gates reuse,
+  evidence gates confidence; high-risk parts force reusable_with_review.
+- **pattern_extract.py** — extracts patterns from REAL local sources: Compose's
+  own passing boards (functional blocks, rails, interfaces, passives, test points,
+  decoupling-adjacent + analog-isolation layout rules, and a LEARNED synth_hint —
+  the board_margin that made a recovered board pass), FirstLight contracts, and
+  ingested UCS. Un-extractable geometry -> honest unknown.
+- **pattern_library.py** — FirstLight Instrument Pattern Library: 7 real patterns
+  + 9 honest needs_reference placeholders. `select()` scores/ranks by functional/
+  interface/license/validation and explains selected + rejected.
+- **UI** — Reference Patterns tab: library + reference manifest, license/trust
+  badges, adaptation zones, download pattern JSON.
+
+Proof of pattern learning: the precision-ADC channel pattern was extracted from
+the RECOVERED ADS1115 board and carries the board_margin fix the recovery loop
+found. A pattern-backed FL-1 measurement front-end v2 applied that learned hint UP
+FRONT and PASSED 0/0 on the FIRST attempt — no recovery needed. License gate
+verified (manufacturer eval board -> reference_only, no direct reuse); pattern
+regression 7/7; board regression 5/5 unchanged. Next: Phase 9 advanced embedded
+routing (fine-pitch/fanout, keepout-aware placement, diff pairs, USB/Ethernet) —
+now with proven layout patterns to preserve.

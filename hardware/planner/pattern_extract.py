@@ -70,10 +70,24 @@ def from_board(run_dir, name, category, source_entry):
         layout.append({"rule": "decoupling_adjacent",
                        "detail": "one 100nF cap within a few mm of each IC power pin",
                        "provenance": "firstlight_board", "confidence": 0.8})
-    if any(_role_for(dv) in ("adc", "current_sense", "voltage_reference") for dv in ics):
+    synth_hints = {}
+    is_analog = any(_role_for(dv) in ("adc", "current_sense", "voltage_reference")
+                    for dv in ics)
+    if is_analog:
         layout.append({"rule": "analog_isolation",
                        "detail": "keep the analog front-end away from switching nodes",
                        "provenance": "firstlight_practice", "confidence": 0.5})
+        # LEARNED hint: this pattern came from a board that only passed after the
+        # recovery loop enlarged it (fine-pitch analog escape). Encode that fix so a
+        # pattern-backed design applies it up front — pattern learning in action.
+        bsz = board.get("boardSize", {})
+        if (bsz.get("wMm") or bsz.get("width") or 0) > 100:
+            synth_hints = {"board_margin": 15}
+            layout.append({"rule": "generous_area",
+                           "detail": "fine-pitch analog channel needs a larger board — "
+                                     "learned from a FirstLight board that passed only "
+                                     "after the recovery loop enlarged it",
+                           "provenance": "firstlight_recovery", "confidence": 0.7})
 
     net_classes = cons.get("class_counts", {})
     p = ps.make_pattern(
@@ -100,6 +114,7 @@ def from_board(run_dir, name, category, source_entry):
                     "geometry": 0.3},
         unknowns=["exact component-to-component spacing", "copper pour geometry"],
     )
+    p["synth_hints"] = synth_hints    # learned recovery hint the pattern applies up front
     return ps.finalize(p)
 
 

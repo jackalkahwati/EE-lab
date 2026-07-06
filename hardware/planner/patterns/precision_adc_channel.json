@@ -60,6 +60,12 @@
    "detail": "keep the analog front-end away from switching nodes",
    "provenance": "firstlight_practice",
    "confidence": 0.5
+  },
+  {
+   "rule": "generous_area",
+   "detail": "fine-pitch analog channel needs a larger board \u2014 learned from a FirstLight board that passed only after the recovery loop enlarged it",
+   "provenance": "firstlight_recovery",
+   "confidence": 0.7
   }
  ],
  "routing_constraints": [
@@ -106,6 +112,9 @@
   "exact component-to-component spacing",
   "copper pour geometry"
  ],
+ "synth_hints": {
+  "board_margin": 15
+ },
  "status_reasons": [
   "permissive license but contains high-risk parts (ADC/ref/opamp/feedback) \u2014 review before reuse"
  ]
