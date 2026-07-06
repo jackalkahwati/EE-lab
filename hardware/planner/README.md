@@ -542,3 +542,45 @@ logical routing 7/7, shared bus connected, fine-pitch escape failed, DRC failed
 required next capability finer-grid fanout or via-in-pad. The task is NOT "make the cal
 board pass" — it already did its job by exposing the real limitation. D-F must give
 every FL-1 board that same honest verdict.
+
+## Phase 13 D-F + D.5: reference benchmarks, curated library, scoring, signoff
+
+The evidence layer built AROUND the proven fine-pitch result — it consumes that
+result, never reinterprets it. The cal board stays do_not_build / blocked_by_grid_resolution.
+
+- benchmark_model.py (D): reference PCBA benchmark structure + FL-1 suite (10 board
+  classes) with trust/license classification, required blocks/components/nets/
+  protection/calibration/test-points/validation/manufacturing, hard-fail + advisory
+  rules, and forbidden-claim rails (scope-lite forbids oscilloscope-class, RF forbids
+  guaranteed impedance/S-parameters, stimulus forbids funcgen-class, logic forbids
+  LA-class).
+- reference_library.py (D.5): curated library — 9 internal FirstLight refs
+  (direct_reuse=true) + 9 external placeholders (manufacturer_reference_only /
+  open_source_needs_license_review, ALL direct_reuse=false, needs_source_file). No
+  external schematic/layout/BOM is copied; nothing is scraped. The ADS1115
+  measurement front-end is an ADC-measurement SUB-PATTERN only, never a
+  calibration-board reference. Reference coverage feeds the scorer but external refs
+  alone can never reach benchmark_pass.
+- benchmark_score.py (E): 13 category scores + status (pass / pass_with_review /
+  partial / fail / do_not_build). Consumes fine-pitch, shared-bus, DRC, ingestion
+  evidence. Cal board scores do_not_build / blocked_by_grid_resolution even though its
+  architecture is 100% complete — the physical evidence wins. Missing ingestion and
+  forbidden claims are hard fails.
+- signoff.py (F): 6 domains (power / analog / digital / high-speed / RF-50ohm /
+  manufacturing). Every check tagged calculated / rule_based / routed / drc_erc /
+  external_tool_required / measured_only / not_supported / advisory. No faked
+  SPICE/SI/PI/RF/precision. Cal board combined signoff = do_not_build (analog
+  fine-pitch escape + manufacturing DRC), RF carries no guarantee, HS needs a
+  controlled-stackup quote.
+- gen_benchmark_signoff.py: emits all artifacts per run — reference schema, curated
+  library, pattern extraction, benchmark model + suite, benchmark scores, 6 signoff
+  reports + combined, reference gap list, and the FL-1 build-readiness dashboard. UI
+  shows the dashboard verdicts (do_not_build is obvious) + reference trust badges
+  (internal reusable vs external reference-only vs needs-license-review).
+
+Build-readiness dashboard verdicts (honest): calibration_reference do_not_build
+(blocked_by_grid_resolution), scope_lite unsupported, others needs_ingestion,
+rf_50ohm needs_external_tool. Regression: benchmark+signoff 29/29; fine-pitch 10/10,
+shared-bus 11/11, fl1-cal 8/8, fl1boards 12/12, high-speed 8/8, ingest 6/6, frontend
+24/24 unchanged. No DRC/ERC weakening, no fake simulation/signoff, no fake
+RF/scope/funcgen/LA claims.

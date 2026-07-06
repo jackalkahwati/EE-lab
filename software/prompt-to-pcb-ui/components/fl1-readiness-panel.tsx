@@ -38,7 +38,8 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
       'fl1-scope-lite-starter-report', 'fl1-stimulus-starter-report',
       'fl1-logic-capture-starter-report', 'fl1-fpga-module-carrier-report',
       'fl1-manufacturing-capability-report', 'cal-board-attempt', 'shared-bus-report',
-      'fine-pitch-escape-model',
+      'fine-pitch-escape-model', 'fl1-build-readiness-dashboard', 'combined-signoff-report',
+      'fl1-curated-reference-library',
     ]
     Promise.all(
       files.map((f) =>
@@ -112,6 +113,75 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
               blocker: {d['cal-board-attempt'].blocker}
             </p>
           )}
+        </div>
+      )}
+
+      {/* build-readiness dashboard (Phase 13 D-F) — the honest per-board verdict */}
+      {d['fl1-build-readiness-dashboard']?.boards?.length > 0 && (
+        <div>
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-primary">
+            Build readiness ({d['fl1-build-readiness-dashboard'].board_count})
+          </p>
+          <div className="space-y-1">
+            {d['fl1-build-readiness-dashboard'].boards.map((b: any, i: number) => (
+              <div key={i} className="rounded-md border border-border px-3 py-1.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-foreground">{b.board_class}</span>
+                  <span
+                    className={`rounded-sm border px-1.5 py-0.5 text-[10px] ${
+                      b.recommendation === 'do_not_build' || b.recommendation === 'unsupported'
+                        ? 'border-destructive/50 bg-destructive/15 font-semibold text-destructive'
+                        : b.recommendation?.startsWith('ready')
+                          ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500'
+                          : 'border-amber-500/40 bg-amber-500/10 text-amber-500'
+                    }`}
+                  >
+                    {b.recommendation}
+                  </span>
+                  <span className="ml-auto font-mono text-[9px] text-muted-foreground">
+                    bench {b.benchmark_status}
+                    {b.fine_pitch_escape !== 'n/a' ? ` · fp ${b.fine_pitch_escape}` : ''}
+                  </span>
+                </div>
+                {b.exact_blockers?.length > 0 && (
+                  <p className="mt-0.5 text-[10px] text-destructive">{b.exact_blockers[0]}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* curated reference library — trust / reuse must be obvious */}
+      {d['fl1-curated-reference-library']?.references?.length > 0 && (
+        <div>
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-primary">
+            Reference library ({d['fl1-curated-reference-library'].internal_count} internal ·{' '}
+            {d['fl1-curated-reference-library'].external_count} external)
+          </p>
+          <div className="flex flex-wrap gap-1">
+            {d['fl1-curated-reference-library'].references.map((r: any, i: number) => (
+              <span
+                key={i}
+                title={`${r.name} — reuse=${r.direct_reuse} — ${r.status}`}
+                className={`rounded-sm border px-1.5 py-0.5 font-mono text-[9px] ${
+                  r.trust_classification === 'internal_firstlight'
+                    ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500'
+                    : r.trust_classification === 'open_source_needs_license_review'
+                      ? 'border-destructive/40 bg-destructive/10 text-destructive'
+                      : r.trust_classification === 'idea_only'
+                        ? 'border-destructive/40 bg-destructive/10 text-destructive'
+                        : 'border-amber-500/40 bg-amber-500/10 text-amber-500'
+                }`}
+              >
+                {r.trust_classification === 'internal_firstlight' ? '✓reuse' : '⌀no-reuse'} {r.name}
+              </span>
+            ))}
+          </div>
+          <p className="mt-1 text-[9px] text-muted-foreground">
+            green = internal (reusable) · amber = manufacturer (reference-only) · red = open-source
+            needs license review / idea-only. External references are never directly reused.
+          </p>
         </div>
       )}
 
