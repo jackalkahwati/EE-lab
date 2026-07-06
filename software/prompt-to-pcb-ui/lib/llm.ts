@@ -18,12 +18,20 @@ export interface LLMOverride {
   model?: string
 }
 
+// Every provider fetch gets a hard timeout. Without one, a stalled provider
+// connection (rate-limit black-holing, network stall) hangs the WHOLE pipeline
+// in the firmware stage and wedges the run lock — a hung fetch was the root
+// cause of the "pipeline already in progress" lockups. On timeout the provider
+// throws, the chain falls through, and callers degrade honestly.
+const LLM_TIMEOUT_MS = 120_000
+
 async function openaiCall(system: string, user: string, key?: string): Promise<string> {
   const k = key || process.env.OPENAI_API_KEY
   const model = process.env.OPENAI_MODEL || 'gpt-5.1'
   if (!k) throw new Error('no openai key')
   const r = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
+    signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
     headers: { Authorization: `Bearer ${k}`, 'content-type': 'application/json' },
     body: JSON.stringify({
       model,
@@ -46,6 +54,7 @@ async function anthropicCall(system: string, user: string, key?: string, model?:
   if (!k) throw new Error('no anthropic key')
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
+    signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
     headers: {
       'x-api-key': k,
       'anthropic-version': '2023-06-01',
@@ -73,6 +82,7 @@ async function geminiCall(system: string, user: string, key?: string): Promise<s
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${k}`,
     {
       method: 'POST',
+      signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         system_instruction: { parts: [{ text: system }] },
@@ -94,6 +104,7 @@ async function nemotronCall(system: string, user: string, key?: string): Promise
   if (!k) throw new Error('NVIDIA_API_KEY not set')
   const r = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
     method: 'POST',
+    signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
     headers: { Authorization: `Bearer ${k}`, 'content-type': 'application/json' },
     body: JSON.stringify({
       model,
