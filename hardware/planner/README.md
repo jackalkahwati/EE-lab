@@ -1076,3 +1076,40 @@ The two Phase 19 findings are now ENFORCEABLE RULES, not review notes.
 
 Regression: phase191 27/27; all suites green; frontend 24/24; board 5/5
 unchanged (artifact-only). Seven boards untouched; nothing ordered.
+
+## Phase 20: production line + supply chain optimization v1
+
+The manufacturing layer for the seven-board system — grounded in real data
+where it exists, placeholders LABELED where it does not, and a readiness state
+machine that is hard-capped until physical evidence exists.
+
+- System BOM rollup: 90 lines from the seven REAL bom.json files + system
+  items (standoffs/plate/harness/labels/fuse). Real per-board BOM costs
+  ($7-15/board, ~$75/set). I2C pull-up DNP states per build variant; keyed
+  shrouded connectors listed as Rev B alternates; protected classes
+  (reference/ADC/shunt/relay/EEPROM/MCU module/backplane connectors/safety
+  parts) forbid silent substitution.
+- Approved vendor list + sourcing risk: single-source TI parts (REF3025,
+  ADS1115) flagged with buy-spares mitigation; counterfeit-market caution on
+  Pico modules; lead times are quote-time placeholders — no fake availability.
+- Cost model: first-article batch (3 PCBAs x 7 boards + mechanicals + spares +
+  rework reserve) ~$1,357 with fab/assembly/labor/shipping PLACEHOLDERS until
+  real quotes; BOM component grounded.
+- 4 build variants: standalone card validation (card pull-ups POPULATED),
+  backplane system first article (backplane owns bus, cards DNP, unkeyed
+  connectors only with inspection), Rev B system (keyed shrouded + jumper
+  enables), cost-down monolithic future (never a first article).
+- Manufacturing package audit: all seven boards package_complete_with_review
+  against the real run artifacts.
+- First-article order batch plan (order_submitted: false — approval form v2
+  first), incoming-inspection optimization, 20-step assembly/test flow with
+  evidence + human-inspection + COTS-identity flags per step, yield/failure
+  tracking model (MODEL ONLY — no fake yield data), RevA->RevB feedback loop
+  (no auto redesign/substitution/release; Phase 19.1 REVB-001..005 seeded).
+- Production readiness dashboard: current state first_article_ready_for_
+  human_approval, hard-capped by production_line.readiness_state — production_
+  ready is unreachable without physical boards + validation + yield + human
+  approval. Both Phase 19.1 findings stay visible; blocked claims listed.
+
+Regression: phase20 26/26; all suites green; frontend 24/24; board 5/5
+unchanged (artifact-only). Nothing ordered.

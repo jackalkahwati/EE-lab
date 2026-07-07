@@ -50,6 +50,7 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
       'pcm1-measurement-claim-model', 'pcm1-safety-protection-model', 'pcm1-compose-report',
       'fl1-system-architecture', 'fl1-backplane-v1-compose-report', 'fl1-slot-standard-v1',
       'fl1-i2c-pullup-checker-report', 'fl1-connector-orientation-checker-report',
+      'fl1-production-readiness-dashboard', 'fl1-cost-model', 'fl1-first-article-order-batch-plan',
       'fl1-system-revb-recommendations',
       'fl1-pinout-compatibility-report', 'fl1-system-risk-register', 'fl1-monolithic-costdown-roadmap',
       'full16-monolithic-architecture-comparison', 'full16-monolithic-treatment-classification',
@@ -126,6 +127,49 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
           {d['cal-board-attempt'].blocker && (
             <p className="mt-1 text-[10px] text-destructive">
               blocker: {d['cal-board-attempt'].blocker}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Phase 20: Production / Supply Chain */}
+      {d['fl1-production-readiness-dashboard'] && (
+        <div className="rounded-md border border-border p-3">
+          <p className="mb-1 text-[11px] font-semibold text-foreground">
+            Production / Supply Chain —{' '}
+            <span className="text-amber-500">
+              {d['fl1-production-readiness-dashboard'].current_state}
+            </span>
+          </p>
+          {d['fl1-cost-model'] && (
+            <p className="text-[10px] text-muted-foreground">
+              per-board BOM (real bom.json):{' '}
+              {Object.entries(d['fl1-cost-model'].per_board_bom_usd)
+                .map(([k, v]: [string, any]) => `${k.split(' ')[0]} $${v}`)
+                .join(' · ')}{' '}
+              — first-article batch (3 PCBAs/board):{' '}
+              ${d['fl1-cost-model'].batches?.[0]?.total_placeholder_usd} (fab/assembly/labor
+              are PLACEHOLDERS until quotes)
+            </p>
+          )}
+          <div className="mt-1 space-y-0.5">
+            {d['fl1-production-readiness-dashboard'].open_findings?.map(
+              (f: string, i: number) => (
+                <p key={i} className="text-[9px] text-amber-500">
+                  open: {f}
+                </p>
+              ),
+            )}
+          </div>
+          <p className="mt-1 text-[9px] text-muted-foreground">
+            blocked claims:{' '}
+            {d['fl1-production-readiness-dashboard'].blocked_claims?.join(' · ')} · human
+            approval: {d['fl1-production-readiness-dashboard'].human_approval_state}
+          </p>
+          {d['fl1-first-article-order-batch-plan'] && (
+            <p className="mt-1 text-[9px] text-muted-foreground">
+              batch plan: 3 PCBAs per board + spares (REF3025/ADS1115/relays/EEPROMs) —
+              order_submitted: {String(d['fl1-first-article-order-batch-plan'].order_submitted)}
             </p>
           )}
         </div>
