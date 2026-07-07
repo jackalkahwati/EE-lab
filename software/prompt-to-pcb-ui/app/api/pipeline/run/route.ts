@@ -951,10 +951,11 @@ export async function GET(req: Request) {
             // it (a real control loop), gated by cargo build with one self-repair
             // pass. Best-effort: if it can't be made to compile, the crate still
             // ships with the verified BSP/HAL, the app layer is just omitted.
+            const srcDir = path.join(fwDir, 'src')
+            const libPath = path.join(srcDir, 'lib.rs')
+            let libOrig: string | null = null
             try {
-              const srcDir = path.join(fwDir, 'src')
-              const libPath = path.join(srcDir, 'lib.rs')
-              const libOrig = fs.readFileSync(libPath, 'utf8')
+              libOrig = fs.readFileSync(libPath, 'utf8')
               const mods = fs
                 .readdirSync(srcDir)
                 .filter((f) => f.endsWith('.rs') && f !== 'lib.rs' && f !== 'app.rs')
@@ -1015,6 +1016,13 @@ export async function GET(req: Request) {
                 log('firmware', 'app firmware: did not compile after repair, shipping BSP/HAL only', 'warn')
               }
             } catch (e) {
+              // a thrown provider call (e.g. the LLM timeout) must not leave a
+              // half-applied, non-compiling app.rs in the shipped crate after the
+              // BSP/HAL gate already passed — revert to the verified crate.
+              if (libOrig !== null) {
+                fs.rmSync(path.join(srcDir, 'app.rs'), { force: true })
+                fs.writeFileSync(libPath, libOrig)
+              }
               log('firmware', `app firmware skipped: ${String(e)}`, 'warn')
             }
 

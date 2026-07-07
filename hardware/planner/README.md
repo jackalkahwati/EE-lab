@@ -672,3 +672,21 @@ frontend 24/24 unchanged. No faked board, no weakened gate.
 Regression: phase15 21/21; fl1-core 12/12, validation 28/28, benchmark+signoff 29/29,
 fine-pitch 10/10, shared-bus 11/11, high-speed 8/8, ingest 6/6, fl1boards 12/12,
 fl1-cal 8/8, board 5/5, frontend 24/24. Only evidence-safe boards get an order package.
+
+## Phase 15 reliability patch: LLM provider timeouts
+
+The regression harness exposed real infrastructure debt: all four LLM provider
+fetches (lib/llm.ts) had NO timeout, so one stalled provider connection hung the
+firmware self-repair stage forever. Boards that routed clean (DRC/ERC PASS) were
+misclassified as status=None, and the hung request wedged the pipeline run lock —
+the root cause of every "pipeline already in progress" lockup.
+
+- Every provider fetch now carries a hard 120s timeout (AbortSignal.timeout). A
+  stalled provider fails fast, the chain falls through, and the pipeline always
+  returns a REAL terminal status.
+- The timeout degrades honestly, never fakes a pass: app-firmware success still
+  requires a green cargo build of real generated code; on a thrown/timed-out
+  provider call the app layer is reverted (no half-applied non-compiling app.rs)
+  and the crate ships as verified BSP/HAL only, logged as a warning.
+- Board regression with the patch: 5/5 with real statuses. This patch precedes any
+  physical board order — the regression system must be trustworthy before fab.
