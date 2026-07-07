@@ -10,13 +10,27 @@ shrink ONLY the DSN boundary the router sees; the real Edge.Cuts in the
 .kicad_pcb is untouched, so the board outline stays correct. Inset =
 edge_clearance + track_width/2 + guard so all routed copper clears 0.5mm.
 """
+import os
 import re
 import sys
 
 import pcbnew
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fine_pitch_fanout  # noqa: E402
+
 board_path, dsn_path = sys.argv[1], sys.argv[2]
 inset_mm = float(sys.argv[3]) if len(sys.argv) > 3 else 0.65
+
+# Phase 16.5: fine-pitch pre-escape fanout. Solves multi-escape fine-pitch rows
+# in EXACT geometry (stubs + breakout pads) BEFORE the grid router runs; the
+# original fine pins are then removed from the DSN net lists so flroute routes
+# from the breakouts. Final DRC + unconnected check verifies the whole chain —
+# a broken/shorted stub fails honestly, nothing is faked.
+fanout_entries = fine_pitch_fanout.fanout(board_path)
+if fanout_entries:
+    print("FANOUT: %d fine-pitch escape(s) pre-fanned (%s)" %
+          (len(fanout_entries), ",".join(e["pin_token"] for e in fanout_entries)))
 
 b = pcbnew.LoadBoard(board_path)
 zone_nets = sorted({str(z.GetNetname()) for z in b.Zones() if z.GetNetCode() > 0})
@@ -24,6 +38,14 @@ ok = pcbnew.ExportSpecctraDSN(b, dsn_path)
 if not ok:
     print("DSN export FAILED")
     sys.exit(1)
+
+# strip the fanned-out ORIGINAL pins from the DSN net pin lists (the breakout
+# pads carry the net for the router; the stub copper carries connectivity)
+if fanout_entries:
+    _txt = open(dsn_path).read()
+    for _e in fanout_entries:
+        _txt = re.sub(r'(?<=[\s(])' + re.escape(_e["pin_token"]) + r'(?=[\s)])', '', _txt)
+    open(dsn_path, "w").write(_txt)
 
 
 def inset_boundary(path, inset_um):

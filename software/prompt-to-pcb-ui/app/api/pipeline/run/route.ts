@@ -618,6 +618,11 @@ export async function GET(req: Request) {
         // still hide via-less pads.
         {
           log('validation', 'auto-heal: geometry via-stitch of power/gnd pads + pour islands…')
+          // close same-net track/pad undershoots first (tiny copper bridges only;
+          // the re-DRC below still gates the result — nothing is suppressed)
+          await exec('validation', KPY, [
+            path.join(appDir, 'scripts/stitch_pads.py'), variantBoard,
+          ])
           const sp = await exec('validation', KPY, [
             path.join(appDir, 'scripts/stitch_to_plane.py'), variantBoard, drcPath,
           ])

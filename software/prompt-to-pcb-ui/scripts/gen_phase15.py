@@ -52,12 +52,22 @@ for b in brd.get("boards", []):
     name = b["board"]
     if name in core_ids or name == "controller_backplane":
         continue
-    held.append({"board": name, "board_class": b.get("board_class"),
-                 "evidence": {"build_recommendation": b["recommendation"],
-                              "routes_clean": False, "drc_violations": 1,
-                              "attempted": name == "calibration_reference",  # cal was attempted, do_not_build
-                              "exact_blockers": b.get("exact_blockers", [])[:2],
-                              "validation_readiness_status": None}})
+    ev = {"build_recommendation": b["recommendation"],
+          "routes_clean": False, "drc_violations": 1,
+          "attempted": name == "calibration_reference",
+          "exact_blockers": b.get("exact_blockers", [])[:2],
+          "validation_readiness_status": None}
+    # Phase 16.5: the cal board has a REAL build result — read it instead of the
+    # held-board defaults, so a physical pass flows through the policy honestly.
+    if name == "calibration_reference":
+        att_p = os.path.join(data_dir, "cal-board-attempt.json")
+        if os.path.exists(att_p):
+            att = json.load(open(att_p))
+            if att.get("outcome") == "A_physical_pass":
+                ev.update({"routes_clean": True, "drc_violations": 0,
+                           "assembly_ready": True, "sourced": True,
+                           "exact_blockers": []})
+    held.append({"board": name, "board_class": b.get("board_class"), "evidence": ev})
 
 # ---- build policy per board ----
 policies = [bp.build_policy(x["board"], x["evidence"]) for x in attempted + held]

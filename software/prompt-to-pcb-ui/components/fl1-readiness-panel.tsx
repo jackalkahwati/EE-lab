@@ -43,6 +43,8 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
       'fl1-instrument-core-v1', 'phase15-board-readiness-dashboard',
       'role-completeness-report', 'phase15-first-article-review-v2',
       'fl1-batch1-serial-plan', 'phase16-demo-runs', 'phase16-held-board-status',
+      'calibration-board-finegrid-result', 'via-in-pad-feasibility-report',
+      'batch1-stability-report',
     ]
     Promise.all(
       files.map((f) =>
@@ -114,6 +116,55 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
           {d['cal-board-attempt'].blocker && (
             <p className="mt-1 text-[10px] text-destructive">
               blocker: {d['cal-board-attempt'].blocker}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Phase 16.5: fine-grid fanout result — the cal board's physical verdict */}
+      {d['calibration-board-finegrid-result'] && (
+        <div
+          className={`rounded-md border p-3 ${
+            d['calibration-board-finegrid-result'].outcome === 'A_physical_pass'
+              ? 'border-emerald-500/40 bg-emerald-500/5'
+              : 'border-destructive/40 bg-destructive/5'
+          }`}
+        >
+          <p className="mb-1 text-[11px] font-semibold text-foreground">
+            Fine-grid fanout: {d['calibration-board-finegrid-result'].board} —{' '}
+            <span
+              className={
+                d['calibration-board-finegrid-result'].outcome === 'A_physical_pass'
+                  ? 'text-emerald-500'
+                  : 'text-destructive'
+              }
+            >
+              {d['calibration-board-finegrid-result'].outcome}
+            </span>
+          </p>
+          <p className="font-mono text-[10px] text-muted-foreground">
+            {d['calibration-board-finegrid-result'].routing} nets ·{' '}
+            {d['calibration-board-finegrid-result'].drc_violations} DRC ·{' '}
+            {d['calibration-board-finegrid-result'].unconnected} unconn · escape{' '}
+            {d['calibration-board-finegrid-result'].ads1115_escape}
+          </p>
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            {d['calibration-board-finegrid-result'].previous_blocker} →{' '}
+            {d['calibration-board-finegrid-result'].previous_blocker_status} · build:{' '}
+            <span className="text-amber-500">
+              {d['calibration-board-finegrid-result'].build_recommendation}
+            </span>{' '}
+            · order: {d['calibration-board-finegrid-result'].order_recommendation}
+          </p>
+          {d['via-in-pad-feasibility-report'] && (
+            <p className="mt-1 text-[9px] text-muted-foreground">
+              via-in-pad: {d['via-in-pad-feasibility-report'].status} —{' '}
+              {d['via-in-pad-feasibility-report'].reason}
+            </p>
+          )}
+          {d['batch1-stability-report'] && (
+            <p className="mt-0.5 text-[9px] text-muted-foreground">
+              Batch 1 v2 stability: {d['batch1-stability-report'].all_stable ? 'unchanged, still review-required, not ordered' : 'CHANGED — inspect'}
             </p>
           )}
         </div>

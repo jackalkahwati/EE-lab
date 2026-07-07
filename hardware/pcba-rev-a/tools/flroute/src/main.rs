@@ -621,6 +621,76 @@ fn main() {
         }
     }
 
+    // ---------- v5 (Phase 16.5): pre-existing wires from the DSN (wiring) ---------
+    // KiCad exports existing tracks (e.g. the fine-pitch pre-escape fanout stubs)
+    // as (wire (path LAYER W x1 y1 x2 y2 ...)(net N)). Mark their cells as OWNED
+    // by that net so other nets cannot route across the stub corridor, while the
+    // owning net itself may still pass — the same semantics as pad copper. This
+    // is what lets exact-geometry fanout coexist with grid routing honestly.
+    if let Some(wiring) = root.kid("wiring") {
+        let mut wire_cells = 0u32;
+        for w in wiring.kids("wire") {
+            let net_name = w
+                .kid("net")
+                .map(|n| n.list()[1].sym().to_string())
+                .unwrap_or_default();
+            let nid = net_id_of.get(&net_name).copied().unwrap_or(u16::MAX);
+            let path = match w.kid("path") {
+                Some(p) => p,
+                None => continue,
+            };
+            let items = path.list();
+            if items.len() < 7 {
+                continue;
+            }
+            let lname = items[1].sym();
+            let li = layers.iter().position(|l| l == lname).unwrap_or(0);
+            let wwidth: f64 = items[2].sym().parse().unwrap_or(200.0);
+            let r = wwidth / 2.0 + halo;
+            let coords: Vec<f64> = items[3..]
+                .iter()
+                .filter_map(|s| s.sym().parse().ok())
+                .collect();
+            let mut k = 0;
+            while k + 3 < coords.len() {
+                let (x1, y1, x2, y2) = (coords[k], coords[k + 1], coords[k + 2], coords[k + 3]);
+                k += 2;
+                let x_lo = (((x1.min(x2) - r - bx0) / pitch).floor() as isize).max(0);
+                let x_hi = (((x1.max(x2) + r - bx0) / pitch).ceil() as isize).min(gw as isize - 1);
+                let y_lo = (((y1.min(y2) - r - by0) / pitch).floor() as isize).max(0);
+                let y_hi = (((y1.max(y2) + r - by0) / pitch).ceil() as isize).min(gh as isize - 1);
+                let dx = x2 - x1;
+                let dy = y2 - y1;
+                let len2 = dx * dx + dy * dy;
+                for yy in y_lo..=y_hi {
+                    let cy = by0 + yy as f64 * pitch;
+                    for xx in x_lo..=x_hi {
+                        let cx = bx0 + xx as f64 * pitch;
+                        let t = if len2 > 0.0 {
+                            (((cx - x1) * dx + (cy - y1) * dy) / len2).clamp(0.0, 1.0)
+                        } else {
+                            0.0
+                        };
+                        let px = x1 + t * dx;
+                        let py = y1 + t * dy;
+                        let d2 = (cx - px) * (cx - px) + (cy - py) * (cy - py);
+                        if d2 > r * r {
+                            continue;
+                        }
+                        let c = &mut owner[idx(xx as usize, yy as usize, li)];
+                        if *c == 0 {
+                            *c = nid;
+                            wire_cells += 1;
+                        } else if *c != nid {
+                            *c = u16::MAX;
+                        }
+                    }
+                }
+            }
+        }
+        eprintln!("v5 wiring: {} pre-existing wire cells marked", wire_cells);
+    }
+
     // ---------- v2: respect the boundary (no edge-clearance overshoot) ------------
     // The grid is ceil(span/pitch)+2 cells, so the far-edge cells overshoot the
     // boundary bbox by up to ~2*pitch — routing there put copper <0.5mm from the

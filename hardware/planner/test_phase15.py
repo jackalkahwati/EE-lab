@@ -31,6 +31,8 @@ def art(name):
 
 
 pol = art("phase15-build-policy-report")
+_fg = art("calibration-board-finegrid-result")
+FIXED = bool(_fg and _fg.get("outcome") == "A_physical_pass")
 dash = art("phase15-board-readiness-dashboard")
 bybrd = {b["board"]: b for b in dash["boards"]} if dash else {}
 bypol = {b["board"]: b for b in pol["boards"]} if pol else {}
@@ -39,9 +41,11 @@ bypol = {b["board"]: b for b in pol["boards"]} if pol else {}
 check("1 Phase 15 build policy report generated", pol is not None and len(pol["boards"]) >= 10)
 
 # 2-3 do_not_build / unsupported cannot generate order packages
-check("2 do_not_build (cal) cannot generate order-ready package",
-      not bypol["calibration_reference"]["allowed_to_generate_order_package"]
-      and bypol["calibration_reference"]["package_type"] != "order_ready_pcba_package")
+check("2 cal order package honest (blocked unless truly fixed; review if fixed)",
+      (bypol["calibration_reference"]["allowed_to_generate_order_package"]
+       and bypol["calibration_reference"]["required_human_review"]) if FIXED
+      else (not bypol["calibration_reference"]["allowed_to_generate_order_package"]
+            and bypol["calibration_reference"]["package_type"] != "order_ready_pcba_package"))
 check("3 unsupported (scope-lite) cannot generate order-ready package",
       not bypol["scope_lite"]["allowed_to_generate_order_package"])
 
@@ -76,9 +80,11 @@ check("16 mock evidence marked simulated (never physical)",
           for r in demos["runs"]))
 
 # 18 cal board held do_not_build (Phase 13 unchanged)
-check("18 calibration board held / do_not_order",
-      bybrd["calibration_reference"]["order_recommendation"] == "do_not_order"
-      and bybrd["calibration_reference"]["physical_validation_blocked"])
+check("18 calibration board order state honest",
+      (bybrd["calibration_reference"]["order_recommendation"] == "order_3_pcba_review_required"
+       and bybrd["calibration_reference"]["human_review_required"]) if FIXED
+      else (bybrd["calibration_reference"]["order_recommendation"] == "do_not_order"
+            and bybrd["calibration_reference"]["physical_validation_blocked"]))
 
 # 19 ADS1115 front-end not mislabeled (reference library)
 lib = art("fl1-curated-reference-library")

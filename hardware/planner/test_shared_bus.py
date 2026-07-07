@@ -89,7 +89,8 @@ if os.path.exists(cal):
     check("8 multi-drop I2C blocker FIXED on the cal board",
           a["shared_i2c_bus"]["routing_status"] == "connected"
           and "FIXED" in a["previous_blocker_status"]
-          and "multi-drop" not in a["blocker"].lower().split("more specific")[0][:40],
+          and (a["blocker"] is None or
+               "multi-drop" not in a["blocker"].lower().split("more specific")[0][:40]),
           a["shared_i2c_bus"]["routing_status"])
 else:
     check("8 cal board attempt present", False)

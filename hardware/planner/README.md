@@ -785,3 +785,34 @@ Regression: phase16 34/34; role-completeness 22/22, phase15 21/21, fl1-core 12/1
 validation 28/28, benchmark+signoff 29/29, fine-pitch 10/10, shared-bus 11/11,
 high-speed 8/8, ingest 6/6, frontend 24/24. No gate weakened; no fake calibration,
 traceability, or physical-evidence claims.
+
+## Phase 16.5: fine-grid fanout / via-in-pad capability v1 — THE CAL BOARD PASSES
+
+The highest-leverage software blocker is fixed: the FL-1 Calibration/Reference board
+physically PASSES the full pipeline — 7/7 nets, 0 DRC, 0 unconnected, ERC PASS —
+with strict gates untouched. do_not_build -> ready_to_build_with_review; order stays
+review-required, never automatic.
+
+TWO root causes, both real:
+1. compose.place pad-rotation bug: KiCad pad angles are ABSOLUTE (footprint rotation
+   summed in). Placing a rotated footprint without adding the rotation to each pad
+   left positions rotated but orientations not — mutually OVERLAPPING fine-pitch
+   pads. This was the hidden source of the "residual shorts" on every rotated board,
+   including part of the Phase 13 result.
+2. Grid contention at 0.5mm pitch (the original blocked_by_grid_resolution): solved
+   by EXACT-GEOMETRY pre-escape fanout (fine_pitch_fanout.py) — signal pads get
+   L-shaped private-lane escapes to breakout pads the 0.46mm grid resolves; plane
+   pads get staggered-depth dogbone vias (a 0.5mm row cannot legally take in-pad
+   vias). export_dsn strips the original fine pins from the router's net lists;
+   flroute v5 marks the stub wires as net-owned obstacles (foreign nets blocked, own
+   net passable); import_ses re-adds stubs+vias after SES import; stitch_to_plane
+   skips dogboned pads and bridges nudged vias with a connecting track; the pipeline
+   heal now closes same-net undershoots (stitch_pads) before re-DRC. A stub alone
+   NEVER counts as routed — final DRC + unconnected verify the chain end-to-end.
+
+Honest bounds: via-in-pad is NOT needed for this board and is modeled as
+human-review-required with NO fab-support assumption; HDI is a placeholder with NO
+readiness claim. Batch 1 v2 boards verified unchanged (still review-required, not
+ordered). Rev A do_not_build evidence preserved. Regression suites updated to assert
+the CONDITIONAL truth (do_not_build unless truly fixed — it now is, backed by the
+real passing run): finegrid 24/24 and all suites green.

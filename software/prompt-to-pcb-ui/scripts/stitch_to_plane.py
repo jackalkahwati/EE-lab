@@ -84,6 +84,17 @@ def _fine_pitch(fp, pos):
     return False
 
 
+# Phase 16.5: pads already dogboned by the fine-pitch fanout carry their own
+# offset via — an in-pad via here would clip the 0.5mm-pitch neighbours.
+import json as _json  # noqa: E402
+import os as _os      # noqa: E402
+_fanout_skip = set()
+_fp_path = _os.path.splitext(board_path)[0] + ".fanout.json"
+if _os.path.exists(_fp_path):
+    _fo = _json.load(open(_fp_path))
+    for _e in _fo.get("dogbones", []) + _fo.get("entries", []):
+        _fanout_skip.add(_e["pin_token"])
+
 # candidate pads: SMD, on an outer copper layer, net has a plane zone, and NOT
 # already served by a same-net via.
 placed = 0
@@ -93,6 +104,8 @@ for fp in b.GetFootprints():
         nc = pad.GetNetCode()
         if nc not in zone_nets:
             continue
+        if "%s-%s" % (fp.GetReference(), pad.GetPadName()) in _fanout_skip:
+            continue  # fanout dogbone already connects this pad to its plane
         # through-hole pads already span to the inner plane — no via needed
         if pad.GetAttribute() == pcbnew.PAD_ATTRIB_PTH:
             continue
@@ -136,6 +149,17 @@ for fp in b.GetFootprints():
         via.SetDrill(int(vk))
         via.SetNetCode(nc)
         b.Add(via)
+        # a NUDGED via may only graze (or miss) a small 0402 pad — guarantee the
+        # connection with a short same-net track from the pad centre to the via.
+        if spot.x != pos.x or spot.y != pos.y:
+            lk = pcbnew.F_Cu if pcbnew.F_Cu in layers else pcbnew.B_Cu
+            tr = pcbnew.PCB_TRACK(b)
+            tr.SetStart(pos)
+            tr.SetEnd(spot)
+            tr.SetWidth(pcbnew.FromMM(0.2))
+            tr.SetLayer(lk)
+            tr.SetNetCode(nc)
+            b.Add(tr)
         vias_by_net.setdefault(nc, []).append((spot.x, spot.y))
         seen.add(key)
         placed += 1

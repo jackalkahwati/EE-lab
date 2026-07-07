@@ -120,8 +120,10 @@ check("31 Phase 15 FA review v2 unchanged", "order_3_pcba_review_required" in fa
 cal_b = json.load(open(os.path.join(HERE, "..", "..", "software", "prompt-to-pcb-ui",
                                     "public", "runs", "fl1-cal-board", "data",
                                     "cal-board-attempt.json")))
-check("32-33 cal board do_not_build unchanged",
-      cal_b["fine_pitch_escape"]["build_recommendation"] == "do_not_build")
+_cal_fixed = cal_b["fine_pitch_escape"].get("result") == "escaped_and_checked"
+check("32-33 cal board build state honest (fixed -> review, else do_not_build)",
+      cal_b["fine_pitch_escape"]["build_recommendation"] ==
+      ("ready_to_build_with_review" if _cal_fixed else "do_not_build"))
 
 # calibration state model rules
 csm = art("calibration-state-model")

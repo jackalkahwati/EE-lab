@@ -33,6 +33,8 @@ def art(name):
 
 
 BR = art("fl1-build-readiness-dashboard") or {"boards": []}
+_fg = art("calibration-board-finegrid-result")
+FIXED = bool(_fg and _fg.get("outcome") == "A_physical_pass")
 
 # 1-2 models
 check("1 instrument capability model generated", art("instrument-capability-model")["capability_count"] >= 30)
@@ -58,8 +60,10 @@ check("6 COTS adapter spec generated", art("cots-instrument-adapter-spec")["inst
 ib = art("fl1-internal-board-adapter-spec")
 check("7 internal board adapter spec generated", ib is not None)
 cal_ib = next(b for b in ib["boards"] if b["board"] == "calibration_reference")
-check("8 do_not_build board NOT exposed as physical internal adapter",
-      not cal_ib["physically_available"] and cal_ib["adapter_availability"] in ("mock_only", "unsupported"),
+check("8 cal board internal adapter honest (never physically available pre-fab)",
+      not cal_ib["physically_available"] and
+      (cal_ib["adapter_availability"] == "future_internal_board" if FIXED
+       else cal_ib["adapter_availability"] in ("mock_only", "unsupported")),
       cal_ib["adapter_availability"])
 sc_ib = next(b for b in ib["boards"] if b["board"] == "scope_lite")
 check("8b unsupported board -> no internal adapter",
@@ -75,9 +79,12 @@ check("12 build->validation readiness bridge generated", vr is not None)
 
 # 13 the key rail: cal board mock-only, not physical
 cal_vr = next(b for b in vr["boards"] if b["board"] == "calibration_reference")
-check("13 do_not_build cal board -> validation_ready_with_mock only, not physical",
-      cal_vr["validation_readiness_status"] == "validation_ready_with_mock"
-      and cal_vr["physical_validation_blocked"] and not cal_vr["internal_board_future_adapter"],
+check("13 cal board validation readiness honest (mock-only unless truly fixed)",
+      ((not cal_vr["physical_validation_blocked"]
+        and cal_vr["internal_board_future_adapter"]) if FIXED
+       else (cal_vr["validation_readiness_status"] == "validation_ready_with_mock"
+             and cal_vr["physical_validation_blocked"]
+             and not cal_vr["internal_board_future_adapter"])),
       cal_vr["validation_readiness_status"])
 
 # 14-15 DSL + package v2
@@ -87,16 +94,20 @@ check("15 FL-1 validation package v2 generated", art("fl1-validation-package-v2"
 # 16-20 demo runs
 byboard = {r["board_id"]: r for r in demos["runs"]}
 check("16 ADS1115 front-end mock validation runs", byboard.get("ads1115_measurement_front_end") is not None)
-check("17 cal mock validation runs but physical-blocked",
-      "physical_blocked" in byboard["calibration_reference"]["physical_validation"])
+check("17 cal mock run honest (never a physical pass; blocked unless fixed)",
+      ("physical_blocked" in byboard["calibration_reference"]["physical_validation"])
+      if not FIXED else
+      ("not_attempted" in byboard["calibration_reference"]["physical_validation"]
+       or "physical_blocked" in byboard["calibration_reference"]["physical_validation"]))
 check("18 digital bring-up mock validation runs", "digital_bringup" in byboard)
 check("19 relay/probe matrix mock validation runs", "relay_probe_matrix" in byboard)
 check("20 power/current monitor mock validation runs", "power_current_monitor" in byboard)
 
 # 24-25 Phase 13 unchanged
 cal_attempt = art("cal-board-attempt")
-check("24/25 cal board still do_not_build (Phase 13 unchanged)",
-      cal_attempt["fine_pitch_escape"]["build_recommendation"] == "do_not_build")
+check("24/25 cal board build state matches reality (fixed -> review, else do_not_build)",
+      cal_attempt["fine_pitch_escape"]["build_recommendation"] ==
+      ("ready_to_build_with_review" if FIXED else "do_not_build"))
 
 # 26-28 scope/stimulus/logic honesty (in the workflow templates)
 scope_wf = next(w for w in wt["workflows"] if w["target_board"] == "scope_lite")

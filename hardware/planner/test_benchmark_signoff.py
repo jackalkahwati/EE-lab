@@ -57,7 +57,13 @@ rf = art("rf-50ohm-signoff-report")
 check("18 RF signoff has NO RF guarantee",
       rf and any("NO RF performance" in c["detail"] for c in rf["checks"]))
 comb = art("combined-signoff-report")
-check("cal combined signoff = do_not_build", comb and comb["recommendation"] == "do_not_build")
+# Phase 16.5: if the fine-pitch blocker is ACTUALLY fixed, the combined signoff
+# legitimately clears do_not_build (external-tool validation notes remain).
+_fg = art("calibration-board-finegrid-result")
+_fixed = bool(_fg and _fg.get("outcome") == "A_physical_pass")
+check("cal combined signoff honest (do_not_build unless truly fixed)",
+      comb and (comb["recommendation"] != "do_not_build" if _fixed
+                else comb["recommendation"] == "do_not_build"))
 
 # ---- honesty rails: scope/stimulus/logic/FPGA ----
 check("22 scope-lite forbids oscilloscope-class claims",
@@ -106,12 +112,14 @@ check("D.5.5 unknown/idea refs default direct_reuse=false",
 # ---- dashboard + fine-pitch checkpoint unchanged ----
 dash = art("fl1-build-readiness-dashboard")
 cal_d = next(b for b in dash["boards"] if b["board"] == "calibration_reference") if dash else None
-check("21 build-readiness dashboard generated + cal board do_not_build",
-      cal_d and cal_d["recommendation"] == "do_not_build")
+check("21 dashboard: cal board honest (review-required if fixed, else do_not_build)",
+      cal_d and (cal_d["recommendation"] == "ready_to_build_with_review" if _fixed
+                 else cal_d["recommendation"] == "do_not_build"))
 check("scope-lite stays unsupported in the dashboard",
       next(b for b in dash["boards"] if b["board"] == "scope_lite")["recommendation"] == "unsupported")
-check("12(checkpoint) cal fine-pitch stays escaped_but_drc_failed",
-      cal_d and cal_d["fine_pitch_escape"] == "escaped_but_drc_failed")
+check("12(checkpoint) cal fine-pitch state matches reality",
+      cal_d and (cal_d["fine_pitch_escape"] == "escaped_and_checked" if _fixed
+                 else cal_d["fine_pitch_escape"] == "escaped_but_drc_failed"))
 
 npass = sum(1 for ok in checks if ok)
 print("%d/%d benchmark+signoff checks pass" % (npass, len(checks)))

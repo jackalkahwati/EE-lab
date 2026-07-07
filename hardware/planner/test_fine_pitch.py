@@ -59,13 +59,28 @@ cal = os.path.join(RUNS, "fl1-cal-board", "data", "cal-board-attempt.json")
 if os.path.exists(cal):
     a = json.load(open(cal))
     fp = a.get("fine_pitch_escape", {})
-    check("cal board records EXACT escape result + do_not_build",
-          fp.get("exact_blocker") == "blocked_by_grid_resolution"
-          and fp.get("build_recommendation") == "do_not_build"
-          and a["outcome"] != "A_pass",
-          "%s / %s" % (fp.get("result"), fp.get("build_recommendation")))
-    check("cal board escape did NOT fake a pass or drop a net",
-          "7/7" in fp.get("logical_routing", "") and fp.get("result") == "escaped_but_drc_failed")
+    # Phase 16.5: the blocker may be ACTUALLY FIXED (fine-grid fanout). If so the
+    # honest state is escaped_and_checked + ready_to_build_with_review, backed by
+    # a REAL passing pipeline run; otherwise it must stay do_not_build.
+    fixed = fp.get("result") == "escaped_and_checked"
+    if fixed:
+        v3 = os.path.join(RUNS, "fl1-cal-board-v3", "data", "last-run.json")
+        v3_pass = os.path.exists(v3) and json.load(open(v3)).get("status") == "PASSED"
+        check("cal board escape FIXED is backed by a real passing run",
+              v3_pass and fp.get("build_recommendation") == "ready_to_build_with_review",
+              "%s / %s" % (fp.get("result"), fp.get("build_recommendation")))
+        check("cal board fix preserves the Rev A blocker history",
+              a.get("previous_blocker") == "blocked_by_grid_resolution"
+              and "FIXED" in a.get("previous_blocker_status", ""))
+    else:
+        check("cal board records EXACT escape result + do_not_build",
+              fp.get("exact_blocker") == "blocked_by_grid_resolution"
+              and fp.get("build_recommendation") == "do_not_build"
+              and a["outcome"] != "A_pass",
+              "%s / %s" % (fp.get("result"), fp.get("build_recommendation")))
+        check("cal board escape did NOT fake a pass or drop a net",
+              "7/7" in fp.get("logical_routing", "")
+              and fp.get("result") == "escaped_but_drc_failed")
 else:
     check("cal board escape result present", False)
     check("cal board no fake pass", False)

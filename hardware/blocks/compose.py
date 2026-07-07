@@ -97,6 +97,18 @@ def place(lib, name, ref, x, y, rot, netmap, nets):
     nl = t.index("\n")
     t = t[:nl + 1] + "  (at {} {} {})\n".format(round(x, 3), round(y, 3), rot) + t[nl + 1:]
     t = t.replace('"REF**"', '"{}"'.format(ref), 1)
+    if rot:
+        # KiCad stores PAD angles as ABSOLUTE (footprint rotation already summed
+        # in). A library footprint's pads carry their local angle, so placing at
+        # rot without adding it left rotated parts with sideways, mutually
+        # OVERLAPPING pads (positions rotate, orientations don't) — the hidden
+        # source of the fine-pitch "residual shorts" on every rotated board.
+        def _pad_rot(m):
+            ang = (float(m.group(3) or 0) + rot) % 360
+            a = ("%g" % ang)
+            return "{} {})".format(m.group(1), a)
+        t = re.sub(r'(\(pad\s+"[^"]*"[^()]*?\(at\s+[-0-9.]+\s+[-0-9.]+)(\s+([-0-9.]+))?\)',
+                   _pad_rot, t)
     t = _inject(t, netmap, nets)
     return "  " + t.strip() + "\n"
 
@@ -873,9 +885,22 @@ def compose(spec, blocks, out_path):
                       X0 + hx, Y0 + hy, 0, {}, nets)
 
     # assembly fiducials (3, inboard of the mounting holes, clear of the part band)
+    # + a router keepout around each: the fiducial pad carries a 0.6mm clearance
+    # ring the grid router does not model, so without the keepout a track can run
+    # legally-by-grid but violate the fiducial's pad clearance (the FID3/+5V DRC
+    # hits on the dc-measure fixture).
     for i, (fx, fy) in enumerate([(13, 6), (BW - 13, 6), (13, BH - 6)]):
         body += place("Fiducial", "Fiducial_1mm_Mask2mm", "FID" + str(i + 1),
                       X0 + fx, Y0 + fy, 0, {}, nets)
+        kx0, ky0 = X0 + fx - 1.4, Y0 + fy - 1.4
+        kx1, ky1 = X0 + fx + 1.4, Y0 + fy + 1.4
+        body += ('  (zone (net 0) (net_name "") (layer "F.Cu") (uuid "{}") (hatch edge 0.5)\n'
+                 '    (connect_pads (clearance 0)) (min_thickness 0.25)\n'
+                 '    (keepout (tracks not_allowed) (vias not_allowed) (pads allowed)'
+                 ' (copperpour allowed) (footprints allowed))\n'
+                 '    (fill (thermal_gap 0.5) (thermal_bridge_width 0.5))\n'
+                 '    (polygon (pts (xy {} {}) (xy {} {}) (xy {} {}) (xy {} {}))))\n'
+                 ).format(U(), kx0, ky0, kx1, ky0, kx1, ky1, kx0, ky1)
 
     # test points (Phase 15.6 role primitive): labeled probe pads on the rails +
     # the shared buses/safety lines, along the bottom margin band.

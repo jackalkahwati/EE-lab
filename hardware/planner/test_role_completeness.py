@@ -94,8 +94,10 @@ check("18 validated order pack v2 for passing boards",
 
 # 19-20: held boards stay held
 cal = json.load(open(os.path.join(RUNS, "fl1-cal-board", "data", "cal-board-attempt.json")))
-check("19 calibration board still do_not_build (fine-pitch unfixed)",
-      cal["fine_pitch_escape"]["build_recommendation"] == "do_not_build")
+_fixed = cal["fine_pitch_escape"].get("result") == "escaped_and_checked"
+check("19 calibration board honest (review-required if truly fixed, else do_not_build)",
+      cal["fine_pitch_escape"]["build_recommendation"] ==
+      ("ready_to_build_with_review" if _fixed else "do_not_build"))
 dash = json.load(open(os.path.join(RUNS, "fl1-cal-board", "data",
                                    "fl1-build-readiness-dashboard.json")))
 check("20 scope-lite remains unsupported",

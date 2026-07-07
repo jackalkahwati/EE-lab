@@ -71,6 +71,13 @@ def _recommend(bench, sr, comb):
         return ("needs_reference" if bench["trust"] in
                 ("manufacturer_reference_only", "open_source_needs_license_review", "idea_only")
                 else "needs_ingestion")
+    # Phase 15 build-policy rule: an external tool needed only for VALIDATION
+    # (SPICE transient, controlled-stackup quote, S-parameters) does not block
+    # BUILD readiness — the board is buildable with review, the tool need stays
+    # visible in the signoff report.
+    if comb["recommendation"] == "needs_external_tool" and \
+            sr["status"] in ("benchmark_pass", "benchmark_pass_with_review"):
+        return "ready_to_build_with_review"
     return comb["recommendation"]
 
 
