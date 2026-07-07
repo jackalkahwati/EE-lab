@@ -1016,3 +1016,36 @@ here is an order candidate.
   monolithic_core6 (16 reqs) + mono_nopico_checks (7 on-copper checks).
 
 Regression: phase188 42/42; all 17 suites green; frontend 24/24; board 5/5.
+
+## Phase 19: multi-board + electromechanical co-design v1
+
+The six-card family is now a MACHINE architecture — engineering concept layer,
+no certification/safety/EMC/thermal claims, six plugin boards untouched.
+
+- FL-1 Passive Backplane v1: a REAL routed board (fl1-backplane-v1, 9/9 nets,
+  0 DRC, ERC PASS, ready_to_build_with_review). Six 2x07 bus-v2 slots sharing
+  power/I2C/safety/sync, per-slot ID straps to +3V3 by slot-number bits
+  (0x50-0x55 by construction, bench default 0x50 preserved), system I2C
+  pull-ups, safety-line TPs. The ERC gate forced the pull-up decision — and
+  surfaced a REAL integration finding: populated cards stack their own 4.7k
+  pull-ups (~670-780 ohm effective, beyond the I2C 3mA sink spec). Recorded as
+  REVIEW_REQUIRED in the pinout compatibility report with a Rev B DNP plan,
+  not hidden. Second recorded gap: 2x07 headers are unkeyed (Rev B: shrouded).
+- Slot standard: vertical cards on the backplane, 6 slots at 30mm pitch,
+  envelopes from REAL board geometry, uniform M3 corner holes + bottom bus
+  edge + top access edge (the Phase 15.6 primitives earn their keep).
+- DUT fixture: swappable DUT adapter card recommended (hybrid harness as
+  day-one interim); fixture removal opens INTERLOCK -> relay enable drops.
+- Grounding/power/thermal/enclosure: single GND plane + slot-order noise
+  partitioning (cal card one slot from relay coils), bench 5V single rail
+  (~1.5A budget, inline fuse recommendation, NO mains/PSU/HV claims), passive
+  convection concept, open-frame first article (220x200 plate) with full TP
+  access.
+- Assembly (13 steps) + service (7 steps) workflows; 9-stage multi-board
+  validation plan; system traceability (FL1-SYS-V1 serials, 11 lifecycle
+  states, currently architecture_defined); monolithic cost-down roadmap
+  (18.8 evidence, future-only); system manufacturing readiness + 8-risk
+  register; layout map + SVG.
+
+Regression: phase19 37/37; all 18 suites green; frontend 24/24; board 5/5.
+Seven review-required boards; nothing ordered.

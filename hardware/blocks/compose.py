@@ -638,6 +638,41 @@ def block_mcu_bare(x, y, n, nets):
     return b, 48, 52
 
 
+def block_backplane6(x, y, n, nets):
+    """FL-1 six-slot PASSIVE backplane (Phase 19): six bus-v2 2x07 slot
+    connectors sharing power/I2C/safety/sync, with per-slot board-ID straps —
+    slot k ties ID_An to +3V3 where bit n of k is 1, else leaves it floating
+    (the plugin card's pull-downs read it as 0). Bench default stays 0x50 on a
+    bare card; slots resolve 0x50-0x55. No MCU, no logic: pure copper."""
+    b = ""
+    for k in range(6):
+        pm = {"1": "+5V", "2": "+3V3",
+              "3": n.get("i2c_sda", "I2C_SDA"), "4": n.get("i2c_scl", "I2C_SCL"),
+              "5": "FAULT", "6": "INTERLOCK", "7": "RST_OUT", "8": "TRIG",
+              "12": "GND", "13": "GND", "14": "GND"}
+        for bit, pin in ((0, "9"), (1, "10"), (2, "11")):  # ID_A0..A2 straps
+            if k & (1 << bit):
+                pm[pin] = "+3V3"
+        b += place("Connector_PinHeader_2.54mm", "PinHeader_2x07_P2.54mm_Vertical",
+                   "J4%d" % k, x + 6 + k * 22, y + 10, 0, pm, nets)
+        label("SLOT %d  ID 0x5%d" % (k, k), x + 6 + k * 22, y + 4, 0.7)
+    # SYSTEM I2C pull-ups live on the backplane (defined bus even with no
+    # cards inserted). Known Rev B item recorded in the pinout compatibility
+    # report: populated cards stack their own pull-ups (see fl1-pinout-
+    # compatibility-report) — card-side DNP option planned.
+    b += res("R94", x + 40, y + 34, n.get("i2c_sda", "I2C_SDA"), "+3V3", nets)
+    b += res("R95", x + 48, y + 34, n.get("i2c_scl", "I2C_SCL"), "+3V3", nets)
+    b += tp("TP60", x + 6, y + 34, "FAULT", nets)
+    b += tp("TP61", x + 14, y + 34, "INTERLOCK", nets)
+    b += tp("TP62", x + 22, y + 34, "TRIG", nets)
+    b += tp("TP63", x + 30, y + 34, "RST_OUT", nets)
+    label("FL-1 BUS v2 BACKPLANE  slots 0-5", x + 60, y + 38, 0.9)
+    for k in range(6):
+        _DEVICES.append({"ref": "J4%d" % k, "type": "connector",
+                         "name": "FL-1 slot %d (bus v2, ID 0x5%d)" % (k, k)})
+    return b, 138, 42
+
+
 def block_relay_matrix(x, y, n, nets):
     """FL-1 relay / instrument-routing matrix (B-4) — Compose's native domain,
     built entirely from the block layer on coarse resolved parts. An MCU shifts a
@@ -818,6 +853,7 @@ BLOCK_TABLE = {
     "calref": block_calref,
     "calrefext": block_calref_expansion,
     "baremcu": block_mcu_bare,
+    "backplane6": block_backplane6,
     "relaymatrix": block_relay_matrix,
     "fl1bus": block_fl1_bus,
     "boardid": block_board_id,
@@ -880,6 +916,9 @@ def _block_keys(s):
         add("calrefext")
     if any(k in s for k in ("bare rp2040", "bare mcu", "no-pico mcu", "qfn mcu")):
         add("baremcu")
+    if any(k in s for k in ("six-slot backplane", "slot backplane", "passive backplane",
+                            "backplane slots")):
+        add("backplane6")
     elif any(k in s for k in ("current sense", "current monitor", "dc measure",
                               "power monitor", "ina228", "instrument", "shunt")):
         add("instrument")
@@ -929,7 +968,9 @@ def classify(blocks):
     if "baremcu" in seen and "mcu" in seen:
         uniq.remove("mcu")
         seen.discard("mcu")
-    if not (seen & {"mcu", "baremcu"}):
+    if "backplane6" in seen and "mcu" in seen and len(seen) <= 3:
+        pass  # explicit mcu request stands
+    if not (seen & {"mcu", "baremcu", "backplane6"}):
         uniq.append("mcu")
         seen.add("mcu")
     if not (seen & {"power", "usbc"}):
@@ -972,12 +1013,13 @@ LAYERS = '''  (layers
 # grows past the width budget, so the layout scales as blocks are added.
 ROW = {"power": 0, "usbc": 0, "mcu": 0, "imu": 0, "radio": 0, "antenna": 0,
        "gnss": 0, "cellular": 0, "tempsensor": 0, "comms": 0, "motion": 1,
-       "instrument": 0, "dutmonitor": 0, "calref": 0, "calrefext": 0,
+       "instrument": 0, "dutmonitor": 0, "calref": 0, "calrefext": 0, "backplane6": 0,
        "baremcu": 0, "relaymatrix": 1, "motors": 1,
        "fl1bus": 0, "boardid": 0, "gpiobank": 0, "spibus": 0, "uartbridge": 0}
 COL = {"power": 0, "usbc": 0, "mcu": 2, "imu": 3, "tempsensor": 3, "gnss": 4,
        "radio": 5, "cellular": 6, "comms": 7, "antenna": 9, "motors": 1,
        "motion": 3, "instrument": 4, "dutmonitor": 4, "calref": 5, "calrefext": 6,
+       "backplane6": 1,
        "baremcu": 2, "relaymatrix": 1,
        "boardid": 3, "fl1bus": 8, "gpiobank": 8, "spibus": 8, "uartbridge": 9}
 ROW_BUDGET = 170.0  # mm — wrap a band wider than this

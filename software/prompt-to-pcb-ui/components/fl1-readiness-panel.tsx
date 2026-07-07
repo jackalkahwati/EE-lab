@@ -48,6 +48,8 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
       'fl1-final-first-article-review-v3', 'fl1-board-id-addressing-strategy',
       'fl1-manufacturing-readiness-pack', 'fl1-held-board-architecture-search',
       'pcm1-measurement-claim-model', 'pcm1-safety-protection-model', 'pcm1-compose-report',
+      'fl1-system-architecture', 'fl1-backplane-v1-compose-report', 'fl1-slot-standard-v1',
+      'fl1-pinout-compatibility-report', 'fl1-system-risk-register', 'fl1-monolithic-costdown-roadmap',
       'full16-monolithic-architecture-comparison', 'full16-monolithic-treatment-classification',
       'full16-monolithic-final-recommendation', 'rp2040-qfn56-fanout-feasibility',
       'fl1-recommended-next-board-roadmap',
@@ -124,6 +126,58 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
               blocker: {d['cal-board-attempt'].blocker}
             </p>
           )}
+        </div>
+      )}
+
+      {/* Phase 19: System / Mechanical — the modular machine */}
+      {d['fl1-system-architecture'] && (
+        <div className="rounded-md border border-border p-3">
+          <p className="mb-1 text-[11px] font-semibold text-foreground">
+            System / Mechanical — modular six-card machine (engineering concept, not
+            production-ready)
+          </p>
+          {d['fl1-backplane-v1-compose-report'] && (
+            <p className="text-[10px] text-emerald-500">
+              Passive backplane v1: {d['fl1-backplane-v1-compose-report'].routing} nets, DRC{' '}
+              {d['fl1-backplane-v1-compose-report'].drc_violations} —{' '}
+              {d['fl1-backplane-v1-compose-report'].status} ·{' '}
+              {d['fl1-backplane-v1-compose-report'].order}
+            </p>
+          )}
+          <div className="mt-1 flex flex-wrap gap-1">
+            {d['fl1-system-architecture'].modules?.map((m: any, i: number) => (
+              <span
+                key={i}
+                className="rounded-sm border border-border px-1.5 py-0.5 font-mono text-[8px] text-muted-foreground"
+              >
+                S{m.slot}: {m.module} @ {m.i2c_identity}
+              </span>
+            ))}
+          </div>
+          {d['fl1-pinout-compatibility-report'] && (
+            <div className="mt-1 space-y-0.5">
+              {d['fl1-pinout-compatibility-report'].findings
+                .filter((f: any) => f.status !== 'CONSISTENT')
+                .map((f: any, i: number) => (
+                  <p key={i} className="text-[9px] text-amber-500">
+                    {f.item}: {f.status} — {f.detail}
+                  </p>
+                ))}
+            </div>
+          )}
+          {d['fl1-monolithic-costdown-roadmap'] && (
+            <p className="mt-1 text-[9px] text-muted-foreground">
+              cost-down: {d['fl1-monolithic-costdown-roadmap'].rule}
+            </p>
+          )}
+          <a
+            href={`/runs/${runId}/data/fl1-system-layout.svg`}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-1 inline-block text-[9px] text-primary underline"
+          >
+            system layout map (SVG)
+          </a>
         </div>
       )}
 
