@@ -861,3 +861,29 @@ real pipeline:
   Human approval form v3; nothing ordered; no production-ready claim.
 
 Regression: phase167 22/22 + all 12 suites green; frontend 24/24.
+
+## Phase 17: first-article manufacturing readiness + supplier package v1
+
+Turns the four review-ready designs into a boring, controlled manufacturing
+handoff. Nothing ordered, nothing production-ready, no certification claim.
+
+- Manufacturing package normalization: all four boards verified complete (BOM,
+  P&P, renders, notes, TP/connector maps, revision, serial plan, QR, EEPROM
+  contents, workflow links; gerbers/drill/STEP generated deterministically at
+  order time from the package hash).
+- Supplier quote packages (qty 3 each): layer/dims/finish (ENIG recommended for
+  the fine-pitch cal board), trace/space, drill, via classes, NO controlled
+  impedance, NO HDI/via-in-pad, per-board assembly + inspection notes.
+- BOM risk + substitution policy: no silent substitutions for the precision
+  reference, ADC, EEPROM, relays, connectors, MCU, or safety parts; single-source
+  REF3025/ADS1115 flagged with a buy-spares mitigation.
+- Order record model (12 states, draft -> canceled) with package/BOM/PNP hashes,
+  serial ranges, and approval records; all four stubs sit at human_review_required
+  with approval_record=null.
+- Human approval gate: 10 requirements; the gate NEVER submits orders — Compose
+  has no payment or supplier-submission capability by design.
+- Incoming inspection acceptance criteria (15 common + per-board, incl. R21
+  safe-default and R70-72 strap population checks) + a 13-entry manufacturing risk
+  register (severity/likelihood/mitigation/owner; high-severity risks require review).
+
+Regression: phase17 14/14; frontend 24/24; board 5/5 unchanged (artifact-only).

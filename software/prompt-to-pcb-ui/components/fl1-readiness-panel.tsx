@@ -46,6 +46,7 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
       'calibration-board-finegrid-result', 'via-in-pad-feasibility-report',
       'batch1-stability-report', 'fl1-first-article-review-pack',
       'fl1-final-first-article-review-v3', 'fl1-board-id-addressing-strategy',
+      'fl1-manufacturing-readiness-pack',
     ]
     Promise.all(
       files.map((f) =>
@@ -119,6 +120,33 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
               blocker: {d['cal-board-attempt'].blocker}
             </p>
           )}
+        </div>
+      )}
+
+      {/* Phase 17: manufacturing readiness — quote-ready, human-gated */}
+      {d['fl1-manufacturing-readiness-pack'] && (
+        <div className="rounded-md border border-border p-3">
+          <p className="mb-1 text-[11px] font-semibold text-foreground">
+            Manufacturing readiness (Batch 1) — quote-ready, human approval pending
+          </p>
+          <div className="flex flex-wrap gap-1">
+            {d['fl1-manufacturing-readiness-pack'].order_records?.records?.map(
+              (o: any, i: number) => (
+                <span
+                  key={i}
+                  title={`${o.board_name} qty ${o.quantity} — ${o.order_status}`}
+                  className="rounded-sm border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 font-mono text-[9px] text-amber-500"
+                >
+                  {o.order_id}: {o.order_status}
+                </span>
+              ),
+            )}
+          </div>
+          <p className="mt-1 text-[9px] text-muted-foreground">
+            {d['fl1-manufacturing-readiness-pack'].risk_register?.length} risks registered ·
+            substitution policy: no silent subs for reference/ADC/EEPROM/relays/connectors ·{' '}
+            {d['fl1-manufacturing-readiness-pack'].honesty}
+          </p>
         </div>
       )}
 
