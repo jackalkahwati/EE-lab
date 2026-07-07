@@ -816,3 +816,20 @@ readiness claim. Batch 1 v2 boards verified unchanged (still review-required, no
 ordered). Rev A do_not_build evidence preserved. Regression suites updated to assert
 the CONDITIONAL truth (do_not_build unless truly fixed — it now is, backed by the
 real passing run): finegrid 24/24 and all suites green.
+
+## Phase 16.6: final first-article review pack (Batch 1)
+
+One human-decision bundle for the four review-required boards — and the review
+actually REVIEWS. Findings: the cal board is electrically clean (16.5 pass stands)
+but came through the synth path and lacks the 15.6 role primitives (no mounting
+holes, refs-only silk, v1 2x03 bus header) -> revise_before_order by the SAME
+standard that revised the v1 core boards. Cross-board integration flags two real
+items: the 2x05-vs-2x03 bus-header mismatch, and ALL boards strapping their
+board-ID EEPROM to 0x50 (a conflict on a shared backplane bus; fine for individual
+bench first-articles, must be resolved before multi-board operation).
+
+Verdicts: controller/digital/relay v2 -> order_3_pcba; calibration -> revise_
+before_order. Human approval form generated with the standing rule: approval is a
+HUMAN fabrication decision — Compose provides evidence and recommendations but
+never spends money or submits orders. first-article regression 14/14; frontend
+24/24.

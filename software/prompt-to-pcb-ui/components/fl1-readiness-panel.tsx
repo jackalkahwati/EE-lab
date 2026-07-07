@@ -44,7 +44,7 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
       'role-completeness-report', 'phase15-first-article-review-v2',
       'fl1-batch1-serial-plan', 'phase16-demo-runs', 'phase16-held-board-status',
       'calibration-board-finegrid-result', 'via-in-pad-feasibility-report',
-      'batch1-stability-report',
+      'batch1-stability-report', 'fl1-first-article-review-pack',
     ]
     Promise.all(
       files.map((f) =>
@@ -118,6 +118,47 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
               blocker: {d['cal-board-attempt'].blocker}
             </p>
           )}
+        </div>
+      )}
+
+      {/* Phase 16.6: final first-article review pack — the human decision artifact */}
+      {d['fl1-first-article-review-pack']?.order_quantity_recommendation && (
+        <div className="rounded-md border border-primary/40 bg-primary/5 p-3">
+          <p className="mb-1 text-[11px] font-semibold text-primary">
+            Final First-Article Review — Batch 1 (human decision pending)
+          </p>
+          <div className="space-y-1">
+            {d['fl1-first-article-review-pack'].order_quantity_recommendation.boards.map(
+              (r: any, i: number) => (
+                <div key={i} className="flex items-center gap-2 text-[10px]">
+                  <span className="text-foreground">{r.board}</span>
+                  <span
+                    className={`rounded-sm border px-1.5 py-0.5 text-[9px] ${
+                      r.recommendation === 'order_3_pcba'
+                        ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500'
+                        : 'border-amber-500/40 bg-amber-500/10 text-amber-500'
+                    }`}
+                  >
+                    {r.recommendation}
+                  </span>
+                  <span className="ml-auto font-mono text-[8px] text-muted-foreground">
+                    qty {r.quantity}
+                  </span>
+                </div>
+              ),
+            )}
+          </div>
+          {d['fl1-first-article-review-pack'].integration_review?.findings
+            ?.filter((f: any) => f.status.includes('FLAG') || f.status.includes('CONFLICT'))
+            .map((f: any, i: number) => (
+              <p key={i} className="mt-1 text-[9px] text-amber-500">
+                ⚠ {f.item}: {f.detail.slice(0, 110)}…
+              </p>
+            ))}
+          <p className="mt-1 text-[9px] text-muted-foreground">
+            Approval is a HUMAN fabrication decision — Compose provides evidence and
+            recommendations but never spends money or submits orders automatically.
+          </p>
         </div>
       )}
 
