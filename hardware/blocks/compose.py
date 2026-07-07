@@ -142,6 +142,22 @@ def tp(ref, x, y, net, nets):
                  {"1": net}, nets)
 
 
+# functional silkscreen labels (Phase 15.6): blocks register labels here so the
+# board carries CONNECTOR/SIGNAL names, not just reference designators. compose()
+# resets the list per board and emits every entry as F.SilkS gr_text.
+_SILK = []
+
+
+def label(text, x, y, size=1.0):
+    _SILK.append((text, round(x, 2), round(y, 2), size))
+
+
+def _silk_text(text, x, y, size):
+    return ('  (gr_text "{}" (at {} {}) (layer "F.SilkS") (uuid "{}")\n'
+            '    (effects (font (size {} {}) (thickness 0.15))))\n').format(
+        text, x, y, U(), size, size)
+
+
 # ---- BLOCKS -----------------------------------------------------------------
 # Each returns (footprint_text, width_mm, height_mm) placed at its top-left (x,y)
 # and binds its interface to the shared net names passed in `n`.
@@ -153,6 +169,7 @@ def block_usbc_power(x, y, n, nets):
     b = place("Connector_PinHeader_2.54mm", "PinHeader_1x02_P2.54mm_Vertical",
               "J1", x + 4, y + 10, 90, {"1": "+5V", "2": "GND"}, nets)
     b += cap("C1", x + 4, y + 18, "+5V", "GND", nets)
+    label("PWR 5V/GND", x + 4, y + 4)
     return b, 10, 24
 
 
@@ -171,7 +188,16 @@ def block_mcu_pico(x, y, n, nets):
         "21": "cell_pwrkey", "22": "cell_rst",           # modem power control
         "24": "can_txd", "25": "can_rxd",                # CAN comms head
         "26": "step", "27": "dir", "29": "en",           # stepper motion controller
+        "31": "fault", "32": "interlock", "34": "trig",  # FL-1 bus safety/sync lines
     }
+    # pin-sharing role primitives: these reuse pins whose primary block is absent
+    # on FL-1 core boards (documented conflict, resolved by absence):
+    if "gp_a" in n and "mot1" not in n:                  # GPIO bank vs motors
+        opt.update({"14": "gp_a", "15": "gp_b", "16": "gp_c", "17": "gp_d"})
+    if "rst_out" in n and "step" not in n:               # RESET line vs stepper EN
+        opt["29"] = "rst_out"
+    if "sr_oe" in n and "cell_rst" not in n:             # relay OE gate vs modem reset
+        opt["22"] = "sr_oe"
     pmap = {"40": "+5V", "39": "+5V", "38": "GND", "36": "+3V3"}
     for pin, key in opt.items():
         if key in n:
@@ -382,6 +408,7 @@ def block_comms_can(x, y, n, nets):
     b += res("R20", x + 13, y + 10, "CANH", "CANL", nets)    # 120-ohm bus termination
     b += place("Connector_PinHeader_2.54mm", "PinHeader_1x03_P2.54mm_Vertical",
                "J7", x + 13, y + 16, 0, {"1": "CANH", "2": "CANL", "3": "GND"}, nets)
+    label("CAN H/L/G", x + 13, y + 24, 0.7)
     return b, 20, 26
 
 
@@ -442,13 +469,18 @@ def block_relay_matrix(x, y, n, nets):
     select word into a 74HC595, a ULN2803 buffers those bits to relay coils, and
     each DPDT relay multiplexes a probe point onto the shared instrument bus.
     All SOIC/through-hole (>=1.27mm), so it routes clean."""
-    # 74HC595: SPI serial in -> 8 parallel select lines
+    # 74HC595: SPI serial in -> 8 parallel select lines. SAFE DEFAULT: /OE is
+    # gated on SR_OE with a pull-up, so outputs are Hi-Z (relays OFF, ULN inputs
+    # float low) from power-up until the MCU loads a safe word and drives SR_OE
+    # low. Without this the register powers up random with outputs enabled and
+    # relay coils can chatter during boot.
     b, _ = sourced_ic("74HC595 8-bit shift register", "shift_register", {
-        "power": "+5V", "gnd": "GND",
+        "power": "+5V", "gnd": "GND", "sr_oe": n.get("sr_oe", "SR_OE"),
         "sr_ser": n["spi_mosi"], "sr_srclk": n["spi_sck"], "sr_rclk": n["spi_cs"],
         "sr_q0": "SR_Q0", "sr_q1": "SR_Q1", "sr_q2": "SR_Q2", "sr_q3": "SR_Q3"},
         "U7", x + 8, y + 10, 0, nets)
     b += cap("C20", x + 8, y + 18, "+5V", "GND", nets)
+    b += res("R21", x + 2, y + 10, n.get("sr_oe", "SR_OE"), "+5V", nets)  # OE pull-up: off at boot
     # ULN2803: buffer the select bits to relay-coil sinks (COM -> +5V flyback)
     b2, _ = sourced_ic("ULN2803 octal darlington driver", "darlington_array", {
         "gnd": "GND", "drv_com": "+5V",
@@ -473,7 +505,82 @@ def block_relay_matrix(x, y, n, nets):
     b += place("Connector_PinHeader_2.54mm", "PinHeader_1x04_P2.54mm_Vertical",
                "J9", x + 20, y + 52, 0,
                {"1": "PROBE0", "2": "PROBE1", "3": "PROBE2", "4": "PROBE3"}, nets)
+    # channel map on silk + in the device manifest (the review's "clear channel
+    # map" requirement): Kx routes PROBEx onto the shared 2-wire instrument bus.
+    label("BUS", x + 4, y + 48)
+    label("PROBE 0-3", x + 20, y + 48)
+    label("K1-K4: PROBEn->BUS", x + 40, y + 50, 0.7)
+    _DEVICES.append({"ref": "J7/J9", "type": "channel_map",
+                     "name": "relay channel map",
+                     "map": {"K%d" % (i + 1): "PROBE%d -> INSTR_BUS/INSTR_BUS2 (DPDT, both poles)" % i
+                             for i in range(4)},
+                     "safe_default": "SR_OE pulled up: all relays OFF from power-up "
+                                     "until MCU enables after loading a safe word"})
     return b, 78, 62
+
+
+def block_fl1_bus(x, y, n, nets):
+    """FL-1 instrument bus header (Phase 15.6 role primitive). A 2x05 header
+    carrying the backplane interface every FL-1 board needs: power, the shared
+    I2C control bus, and the safety/sync lines (FAULT, INTERLOCK, RESET, TRIG).
+    Wired to real MCU pins via the shared net map — role hardware, not a label."""
+    pmap = {"1": "+5V", "2": "+3V3",
+            "3": n.get("i2c_sda", "I2C_SDA"), "4": n.get("i2c_scl", "I2C_SCL"),
+            "5": n.get("fault", "FAULT"), "6": n.get("interlock", "INTERLOCK"),
+            "7": n.get("rst_out", "RST_OUT"), "8": n.get("trig", "TRIG"),
+            "9": "GND", "10": "GND"}
+    b = place("Connector_PinHeader_2.54mm", "PinHeader_2x05_P2.54mm_Vertical",
+              "J8", x + 5, y + 8, 0, pmap, nets)
+    label("FL1-BUS", x + 5, y + 3)
+    label("5V 3V3 SDA SCL FLT ILK RST TRG GND", x + 5, y + 22, 0.6)
+    _DEVICES.append({"ref": "J8", "type": "connector", "name": "FL-1 instrument bus"})
+    return b, 18, 26
+
+
+def block_board_id(x, y, n, nets):
+    """Board-ID EEPROM (24LC02, SOIC-8) on the shared I2C bus — the identity the
+    FL-1 interconnect spec requires on every device board. A0-A2 strapped to GND
+    (address 0x50), WP grounded (writable in-fixture; strap high for lockdown)."""
+    b = place("Package_SO", "SOIC-8_3.9x4.9mm_P1.27mm", "U9", x + 6, y + 8, 0, {
+        "1": "GND", "2": "GND", "3": "GND", "4": "GND",
+        "5": n.get("i2c_sda", "I2C_SDA"), "6": n.get("i2c_scl", "I2C_SCL"),
+        "7": "GND", "8": "+3V3"}, nets)
+    b += cap("C25", x + 10, y + 17, "+3V3", "GND", nets)
+    label("ID 0x50", x + 6, y + 3)
+    _DEVICES.append({"ref": "U9", "type": "board_id_eeprom", "name": "24LC02",
+                     "i2c_address": "0x50"})
+    return b, 14, 22
+
+
+def block_gpio_bank(x, y, n, nets):
+    """Protected GPIO bank: 4 MCU GPIOs, each through a 100R series resistor to a
+    labeled header — the external pins take the ESD/short hit at the resistor, not
+    the MCU pin. The bring-up board's fan-out role hardware."""
+    b = ""
+    for i, key in enumerate(("gp_a", "gp_b", "gp_c", "gp_d")):
+        b += res("R6%d" % i, x + 4, y + 6 + i * 5, n.get(key, "GPIO%d" % i),
+                 "GPIO%d_EXT" % i, nets)
+    b += place("Connector_PinHeader_2.54mm", "PinHeader_1x05_P2.54mm_Vertical",
+               "J10", x + 12, y + 6, 0,
+               {"1": "GPIO0_EXT", "2": "GPIO1_EXT", "3": "GPIO2_EXT",
+                "4": "GPIO3_EXT", "5": "GND"}, nets)
+    label("GPIO 0-3 (100R)", x + 4, y + 2)
+    _DEVICES.append({"ref": "J10", "type": "connector", "name": "protected GPIO bank"})
+    return b, 20, 32
+
+
+def block_spibus(x, y, n, nets):
+    """SPI bring-up header: the shared SPI bus (SCK/MOSI/MISO/CS) on a labeled
+    connector so external targets can be driven — the SPI role the composer
+    previously DROPPED instead of building."""
+    b = place("Connector_PinHeader_2.54mm", "PinHeader_1x06_P2.54mm_Vertical",
+              "J11", x + 4, y + 6, 0,
+              {"1": n.get("spi_sck", "SPI_SCK"), "2": n.get("spi_mosi", "SPI_MOSI"),
+               "3": n.get("spi_miso", "SPI_MISO"), "4": n.get("spi_cs", "SPI_CS"),
+               "5": "+3V3", "6": "GND"}, nets)
+    label("SPI SCK MO MI CS 3V3 GND", x + 4, y + 2, 0.6)
+    _DEVICES.append({"ref": "J11", "type": "connector", "name": "SPI bring-up header"})
+    return b, 12, 24
 
 
 # free-text sensor detector for blocks no fixed key matched — these SOURCE a
@@ -501,6 +608,10 @@ BLOCK_TABLE = {
     "motion": block_motion_controller,
     "instrument": block_dc_measure,
     "relaymatrix": block_relay_matrix,
+    "fl1bus": block_fl1_bus,
+    "boardid": block_board_id,
+    "gpiobank": block_gpio_bank,
+    "spibus": block_spibus,
 }
 
 
@@ -553,6 +664,16 @@ def _block_keys(s):
     if any(k in s for k in ("relay matrix", "relay bank", "instrument matrix",
                             "probe matrix", "switch matrix", "relay")):
         add("relaymatrix")
+    # FL-1 role primitives (Phase 15.6)
+    if any(k in s for k in ("fl1 bus", "fl-1 bus", "instrument bus", "bus header",
+                            "backplane header")):
+        add("fl1bus")
+    if any(k in s for k in ("board id", "board-id", "id eeprom", "identity eeprom")):
+        add("boardid")
+    if any(k in s for k in ("gpio bank", "protected io", "protected gpio")):
+        add("gpiobank")
+    if re.search(r"\bspi\b", s):
+        add("spibus")
     if "usbc" not in out and any(k in s for k in ("power", "regulator", "battery", "vin",
                                                   "5v", "3v3", "charg", "ldo", "buck",
                                                   "usb power", "usb-c power")):
@@ -621,10 +742,12 @@ LAYERS = '''  (layers
 # grows past the width budget, so the layout scales as blocks are added.
 ROW = {"power": 0, "usbc": 0, "mcu": 0, "imu": 0, "radio": 0, "antenna": 0,
        "gnss": 0, "cellular": 0, "tempsensor": 0, "comms": 0, "motion": 1,
-       "instrument": 0, "relaymatrix": 1, "motors": 1}
+       "instrument": 0, "relaymatrix": 1, "motors": 1,
+       "fl1bus": 0, "boardid": 0, "gpiobank": 0, "spibus": 0}
 COL = {"power": 0, "usbc": 0, "mcu": 2, "imu": 3, "tempsensor": 3, "gnss": 4,
        "radio": 5, "cellular": 6, "comms": 7, "antenna": 9, "motors": 1,
-       "motion": 3, "instrument": 4, "relaymatrix": 1}
+       "motion": 3, "instrument": 4, "relaymatrix": 1,
+       "boardid": 3, "fl1bus": 8, "gpiobank": 8, "spibus": 8}
 ROW_BUDGET = 170.0  # mm — wrap a band wider than this
 
 
@@ -656,6 +779,7 @@ def _unique_refs(body):
 def compose(spec, blocks, out_path):
     nets = Nets()
     _DEVICES[:] = []  # reset the per-board device manifest
+    _SILK[:] = []     # reset the per-board functional silkscreen labels
     keys, dropped, sensor_reqs = classify(blocks)
     dyn = {}
     for i, desc in enumerate(sensor_reqs):
@@ -681,6 +805,20 @@ def compose(spec, blocks, out_path):
         n.update({"can_txd": "CAN_TXD", "can_rxd": "CAN_RXD"})
     if "relaymatrix" in keys and "spi_sck" not in n:
         n.update({"spi_sck": "SPI_SCK", "spi_mosi": "SPI_MOSI", "spi_cs": "SR_LATCH"})
+    if "relaymatrix" in keys:
+        n["sr_oe"] = "SR_OE"     # safety: shift-register outputs gated, off at boot
+    # FL-1 role primitives (Phase 15.6)
+    if "fl1bus" in keys or "boardid" in keys:
+        n.setdefault("i2c_sda", "I2C_SDA")
+        n.setdefault("i2c_scl", "I2C_SCL")
+    if "fl1bus" in keys:
+        n.update({"fault": "FAULT", "interlock": "INTERLOCK",
+                  "rst_out": "RST_OUT", "trig": "TRIG"})
+    if "gpiobank" in keys:
+        n.update({"gp_a": "GPIO0", "gp_b": "GPIO1", "gp_c": "GPIO2", "gp_d": "GPIO3"})
+    if "spibus" in keys and "spi_sck" not in n:
+        n.update({"spi_sck": "SPI_SCK", "spi_mosi": "SPI_MOSI",
+                  "spi_miso": "SPI_MISO", "spi_cs": "SPI_CS"})
     if "motion" in keys:
         n.update({"step": "STEP", "dir": "DIR", "en": "MOT_EN"})
     if "cellular" in keys:
@@ -725,10 +863,37 @@ def compose(spec, blocks, out_path):
     BW = round(maxright + MARGIN - X0, 1)
     BH = round(ytop - ROWGAP - (Y0 + MARGIN) + 2 * MARGIN, 1)
 
-    # assembly fiducials (3, in the corner margins clear of the part band)
-    for i, (fx, fy) in enumerate([(6, 6), (BW - 6, 6), (6, BH - 6)]):
+    # mounting holes (Phase 15.6 role primitive): 4x M3 in the corners — every
+    # real FL-1 board must be mountable/fixturable. The corner margins are part
+    # of the outline margin band, clear of the part rows.
+    # 7mm inset: the M3 pad (~6.8mm dia) needs >=3.0mm edge clearance at the
+    # placement gate (7.0 - 3.4 pad radius = 3.6mm clear).
+    for i, (hx, hy) in enumerate([(7, 7), (BW - 7, 7), (7, BH - 7), (BW - 7, BH - 7)]):
+        body += place("MountingHole", "MountingHole_3.2mm_M3", "H" + str(i + 1),
+                      X0 + hx, Y0 + hy, 0, {}, nets)
+
+    # assembly fiducials (3, inboard of the mounting holes, clear of the part band)
+    for i, (fx, fy) in enumerate([(13, 6), (BW - 13, 6), (13, BH - 6)]):
         body += place("Fiducial", "Fiducial_1mm_Mask2mm", "FID" + str(i + 1),
                       X0 + fx, Y0 + fy, 0, {}, nets)
+
+    # test points (Phase 15.6 role primitive): labeled probe pads on the rails +
+    # the shared buses/safety lines, along the bottom margin band.
+    tp_nets = ["+5V", "+3V3", "GND"]
+    for cand in ("I2C_SDA", "I2C_SCL", "FAULT", "INTERLOCK", "TRIG", "SR_OE"):
+        if cand in nets.idx:
+            tp_nets.append(cand)
+    tx = X0 + 22
+    for i, tnet in enumerate(tp_nets):
+        body += tp("TP%d" % (i + 1), tx, Y0 + BH - 5, tnet, nets)
+        label(tnet, tx, Y0 + BH - 9, 0.6)
+        tx += 7
+
+    # board name + revision on silk (functional labels, not just refs)
+    board_name = str((spec or {}).get("boardClass") or "FL-1 board")[:40]
+    label("%s  rev A" % board_name, X0 + BW / 2, Y0 + 3)
+    for text, lx, ly, size in _SILK:
+        body += _silk_text(text, lx, ly, size)
 
     # blocks hardcode their reference designators, so two similar blocks (e.g. a
     # USB-C inlet + a header power block) can both emit J1/C1. Renumber any

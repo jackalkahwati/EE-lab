@@ -715,3 +715,36 @@ mounting_holes, test_points, relay channel breakout, protected GPIO bank), re-ru
 pipeline with unchanged gates, re-review, THEN order 3 each. Revising costs a
 pipeline re-run; ordering first costs a respin. Artifacts: first-article-review.json/md
 per run + FA badges on the Phase 15 dashboard.
+
+## Phase 15.6: FL-1 board role-completeness fix
+
+The first-article review's findings became composer capabilities: the boards now
+SATISFY their names, not just route cleanly.
+
+- compose.py primitives (P1): fl1_bus_header (2x05, +5V/+3V3/SDA/SCL/FAULT/INTERLOCK/
+  RST_OUT/TRIG wired to real MCU pins, silk legend), board_id_eeprom (24LC02 at 0x50
+  on the shared I2C), protected gpio_bank (100R series + header), spibus header (SPI
+  no longer silently dropped), and universal primitives on EVERY composed board:
+  4x M3 corner mounting holes, labeled test points (rails + buses + safety lines),
+  board name + rev on silk, functional connector labels.
+- Boot-chatter fix: 74HC595 /OE is no longer hard-tied to GND. It is gated on SR_OE
+  with a pull-up (outputs Hi-Z -> relays OFF from power-up) and MCU-driven only after
+  a safe word is loaded. The relay channel map is on silk + in the device manifest.
+- role_completeness.py (P2): checks the REALIZED board (footprints/nets/manifest,
+  never labels alone) against per-role requirements. Statuses: role_complete /
+  role_complete_with_review / role_incomplete / do_not_order. A DRC-clean but
+  role-incomplete board is REJECTED for order — verified against the v1 boards
+  (0-2 of 11 requirements met) vs the v2 boards (all requirements met).
+- Regenerated through the REAL pipeline, strict gates unchanged:
+    Controller/Backplane v2  13/13 nets, 0 DRC  (interlock/fault/reset/trigger wired)
+    Digital Bring-up v2      21/21 nets, 0 DRC  (SPI restored + protected GPIO bank)
+    Relay/Probe Matrix v2    27/27 nets, 0 DRC  (SR_OE safe default routed)
+- First-article review v2: order recommendation REQUIRES gates + role completeness +
+  valid order pack. Batch decision: order_3_pcba_review_required (all three), with
+  honest caveats (no JTAG, no level shift, 4-channel matrix, no HV/precision claims).
+  The placement gate caught the first mounting-hole placement (1.58mm edge clearance)
+  — the gates police the new primitives too.
+
+Regression: role-completeness 22/22; phase15 21/21, fl1-core 12/12, validation 28/28,
+benchmark+signoff 29/29, fine-pitch 10/10, shared-bus 11/11, high-speed 8/8, ingest
+6/6, frontend 24/24. Cal board stays do_not_build; scope-lite stays unsupported.

@@ -1,0 +1,162 @@
+"""Role-completeness checker (Phase 15.6 P2).
+
+Separate from DRC/ERC: a board can route perfectly and still not BE the thing its
+name claims. This checks the REALIZED board (footprints, nets, device manifest —
+never labels alone) against its FL-1 role requirements.
+
+Statuses:
+  role_complete             every required role feature physically present
+  role_complete_with_review present but with noted caveats
+  role_incomplete           missing role requirements (exact list)
+  do_not_order              role failures that make fabrication pointless
+
+A DRC-clean but role_incomplete board is REJECTED for order.
+"""
+import json
+import re
+
+
+def _board_facts(board_text, devices):
+    dev_types = {d.get("type") for d in devices}
+    dev_names = {str(d.get("name", "")) for d in devices}
+    # format tolerant: compose writes (net 5 "X"); pcbnew v10 writes pad refs as
+    # (net "X") with no numeric id. Accept both.
+    nets = set(re.findall(r'\(net\s+(?:\d+\s+)?"([^"]+)"', board_text))
+    return {
+        "mounting_holes": board_text.count('footprint "MountingHole:'),
+        "test_points": board_text.count('footprint "TestPoint:'),
+        "silk_labels": board_text.count("(gr_text "),
+        "fl1_bus_header": any("FL-1 instrument bus" in n for n in dev_names),
+        "board_id_eeprom": "board_id_eeprom" in dev_types,
+        "nets": nets,
+        "dev_types": dev_types,
+        "dev_names": dev_names,
+        "devices": devices,
+    }
+
+
+# per-role physical requirements: (requirement, check(facts) -> bool)
+def _common_reqs(f):
+    return [
+        ("mounting holes (>=4)", f["mounting_holes"] >= 4),
+        ("test points (>=4, labeled)", f["test_points"] >= 4),
+        ("board-ID EEPROM on shared I2C", f["board_id_eeprom"]),
+        ("FL-1 instrument bus header", f["fl1_bus_header"]),
+        ("functional silkscreen labels", f["silk_labels"] >= 5),
+        ("shared I2C control bus", {"I2C_SDA", "I2C_SCL"} <= f["nets"]),
+    ]
+
+
+def _controller_reqs(f):
+    return _common_reqs(f) + [
+        ("interlock line wired to MCU", "INTERLOCK" in f["nets"]),
+        ("fault line wired to MCU", "FAULT" in f["nets"]),
+        ("reset line wired to MCU", "RST_OUT" in f["nets"]),
+        ("trigger line wired to MCU", "TRIG" in f["nets"]),
+        ("comms/backplane link (CAN)", {"CANH", "CANL"} <= f["nets"]),
+    ]
+
+
+def _digital_reqs(f):
+    return _common_reqs(f) + [
+        ("SPI bus built (not dropped)", {"SPI_SCK", "SPI_MOSI", "SPI_MISO"} <= f["nets"]),
+        ("protected GPIO bank (series-R + header)",
+         any("GPIO" in n and n.endswith("_EXT") for n in f["nets"])),
+        ("I2C peripheral or header present",
+         "i2c_sensor" in f["dev_types"] or "I2C_SDA" in f["nets"]),
+    ]
+
+
+def _relay_reqs(f):
+    ch_map = next((d for d in f["devices"] if d.get("type") == "channel_map"), None)
+    return _common_reqs(f) + [
+        ("relay/switch matrix present", "shift_register" in f["dev_types"]
+         and "darlington_array" in f["dev_types"]),
+        ("coil flyback protection (driver COM)", "darlington_array" in f["dev_types"]),
+        ("channel breakout connectors (probes + bus)",
+         {"PROBE0", "PROBE1", "PROBE2", "PROBE3", "INSTR_BUS"} <= f["nets"]),
+        ("clear channel map (manifest + silk)", ch_map is not None and bool(ch_map.get("map"))),
+        ("safe default disconnected state (gated OE, off at boot)",
+         "SR_OE" in f["nets"] and ch_map is not None and "OFF" in str(ch_map.get("safe_default", "")).upper()),
+    ]
+
+
+ROLE_CHECKS = {
+    "controller_backplane": _controller_reqs,
+    "digital_bringup": _digital_reqs,
+    "relay_probe_matrix": _relay_reqs,
+}
+
+# caveats that keep a complete board at _with_review (honest limits, not failures)
+ROLE_CAVEATS = {
+    "controller_backplane": ["fixture IO is header-level (no dedicated protected fixture bank yet)",
+                             "sync/clock line not implemented (TRIG only) — v1 scope"],
+    "digital_bringup": ["no JTAG connector (SWD via Pico USB header) — v1 scope",
+                        "no CAN/RS485 population on the bring-up board — v1 scope",
+                        "no level shifting (single 3V3 domain) — v1 scope"],
+    "relay_probe_matrix": ["4-channel v1 matrix (PROBEn -> shared 2-wire bus), not a crossbar",
+                           "NO high-voltage isolation claim (signal relays, standard spacing)",
+                           "NO precision/low-leakage switching claim"],
+}
+
+
+def check_role(role, board_text, devices):
+    f = _board_facts(board_text, devices)
+    fn = ROLE_CHECKS.get(role)
+    if not fn:
+        return {"role": role, "status": "role_incomplete",
+                "missing": ["no role requirements defined for '%s'" % role]}
+    reqs = fn(f)
+    missing = [name for name, ok in reqs if not ok]
+    caveats = ROLE_CAVEATS.get(role, [])
+    if missing:
+        status = "role_incomplete"
+    elif caveats:
+        status = "role_complete_with_review"
+    else:
+        status = "role_complete"
+    return {
+        "role": role, "status": status,
+        "requirements_checked": len(reqs),
+        "requirements_met": len(reqs) - len(missing),
+        "missing": missing,
+        "caveats": caveats,
+        "facts": {"mounting_holes": f["mounting_holes"], "test_points": f["test_points"],
+                  "silk_labels": f["silk_labels"], "board_id_eeprom": f["board_id_eeprom"],
+                  "fl1_bus_header": f["fl1_bus_header"]},
+        "orderable": not missing,
+        "note": "DRC-clean but role_incomplete boards are REJECTED for order" if missing else None,
+    }
+
+
+def primitive_library():
+    """The FL-1 board primitive library manifest (Phase 15.6 P1)."""
+    return {
+        "version": "v1",
+        "primitives": [
+            {"block": "fl1_bus_header", "key": "fl1bus",
+             "provides": ["+5V", "+3V3", "GND", "I2C_SDA", "I2C_SCL", "FAULT",
+                          "INTERLOCK", "RST_OUT", "TRIG"],
+             "hardware": "2x05 header wired to real MCU pins; silkscreen pin legend"},
+            {"block": "board_id_eeprom", "key": "boardid",
+             "provides": ["board identity at I2C 0x50 (24LC02)"],
+             "hardware": "SOIC-8 on the shared I2C bus, A0-A2+WP strapped, decoupled",
+             "validation_hook": "read_board_id"},
+            {"block": "mounting_holes", "key": "(universal)",
+             "provides": ["4x M3 corner holes"],
+             "hardware": "corner margin band, fiducials moved inboard, no collisions"},
+            {"block": "test_points", "key": "(universal)",
+             "provides": ["labeled TPs on +5V/+3V3/GND + I2C/FAULT/INTERLOCK/TRIG/SR_OE when present"],
+             "hardware": "1.5mm probe pads along the bottom margin, silk net names"},
+            {"block": "functional_silkscreen_labels", "key": "(universal)",
+             "provides": ["board name + rev", "connector names", "bus/pin legends"],
+             "hardware": "F.SilkS gr_text emitted from every block's label() calls"},
+            {"block": "gpio_bank", "key": "gpiobank",
+             "provides": ["4 protected GPIO (100R series) + GND on a labeled header"]},
+            {"block": "spibus", "key": "spibus",
+             "provides": ["SPI SCK/MOSI/MISO/CS + 3V3/GND bring-up header"]},
+            {"block": "relay safe-default", "key": "(relaymatrix)",
+             "provides": ["SR_OE gated shift-register outputs, pulled up = relays OFF at boot"],
+             "hardware": "74HC595 /OE on SR_OE net + pull-up; MCU enables after safe word"},
+        ],
+    }

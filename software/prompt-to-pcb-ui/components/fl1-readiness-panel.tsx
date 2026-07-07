@@ -41,6 +41,7 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
       'fine-pitch-escape-model', 'fl1-build-readiness-dashboard', 'combined-signoff-report',
       'fl1-curated-reference-library', 'fl1-validation-readiness-dashboard', 'demo-validation-runs',
       'fl1-instrument-core-v1', 'phase15-board-readiness-dashboard',
+      'role-completeness-report', 'phase15-first-article-review-v2',
     ]
     Promise.all(
       files.map((f) =>
@@ -114,6 +115,80 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
               blocker: {d['cal-board-attempt'].blocker}
             </p>
           )}
+        </div>
+      )}
+
+      {/* role completeness (Phase 15.6) — DRC-clean is not enough */}
+      {d['role-completeness-report'] && (
+        <div
+          className={`rounded-md border p-3 ${
+            d['role-completeness-report'].status === 'role_incomplete'
+              ? 'border-destructive/40 bg-destructive/5'
+              : 'border-emerald-500/40 bg-emerald-500/5'
+          }`}
+        >
+          <p className="mb-1 text-[11px] font-semibold text-foreground">
+            Role completeness: {d['role-completeness-report'].role} —{' '}
+            <span
+              className={
+                d['role-completeness-report'].status === 'role_incomplete'
+                  ? 'text-destructive'
+                  : 'text-emerald-500'
+              }
+            >
+              {d['role-completeness-report'].status}
+            </span>{' '}
+            ({d['role-completeness-report'].requirements_met}/
+            {d['role-completeness-report'].requirements_checked})
+          </p>
+          {d['role-completeness-report'].missing?.length > 0 && (
+            <p className="text-[10px] text-destructive">
+              missing: {d['role-completeness-report'].missing.join('; ')}
+            </p>
+          )}
+          {d['role-completeness-report'].caveats?.length > 0 && (
+            <p className="text-[10px] text-amber-500">
+              caveats: {d['role-completeness-report'].caveats.join('; ')}
+            </p>
+          )}
+          <p className="mt-1 text-[9px] text-muted-foreground">
+            A DRC-clean but role-incomplete board is rejected for order.
+          </p>
+        </div>
+      )}
+
+      {/* first-article review v2 (regenerated batch) */}
+      {d['phase15-first-article-review-v2']?.boards?.length > 0 && (
+        <div>
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-primary">
+            First-article review v2 — {d['phase15-first-article-review-v2'].batch_decision}
+          </p>
+          <div className="space-y-1">
+            {d['phase15-first-article-review-v2'].boards.map((b: any, i: number) => (
+              <div key={i} className="rounded-md border border-border px-3 py-1.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-foreground">{b.board_class}</span>
+                  <span
+                    className={`rounded-sm border px-1.5 py-0.5 text-[10px] ${
+                      b.recommendation?.startsWith('order')
+                        ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500'
+                        : 'border-amber-500/40 bg-amber-500/10 text-amber-500'
+                    }`}
+                  >
+                    {b.recommendation}
+                  </span>
+                  <span className="ml-auto font-mono text-[9px] text-muted-foreground">
+                    {b.routing} · DRC {b.drc_violations} · {b.role_completeness}
+                  </span>
+                </div>
+                {b.known_limitations?.length > 0 && (
+                  <p className="mt-0.5 text-[9px] text-muted-foreground">
+                    limits: {b.known_limitations.join('; ')}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

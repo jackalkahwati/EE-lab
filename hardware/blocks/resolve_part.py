@@ -126,7 +126,11 @@ CONTRACTS = {
         ("ser", ["SER", "DS", "SI", "A", "SDI"], "sr_ser", "one", True),
         ("srclk", ["SRCLK", "SHCP", "SCK", "SCLK"], "sr_srclk", "one", True),
         ("rclk", ["RCLK", "STCP", "LATCH", "RCK"], "sr_rclk", "one", True),
-        ("oe", ["OE", "G"], "gnd", "one", False),          # output enable -> GND (on)
+        # output enable is a SAFETY line: gated (sr_oe net, pulled up = disabled at
+        # boot) so relay coils cannot chatter while the register powers up random.
+        # The caller provides sr_oe; the MCU drives it low only after loading a
+        # safe word. (Was hard-tied to GND = always-on, the boot-chatter bug.)
+        ("oe", ["OE", "G"], "sr_oe", "one", False),
         ("srclr", ["SRCLR", "MR", "SCLR"], "power", "one", False),  # clear -> VCC (off)
         ("q0", ["QA", "Q0"], "sr_q0", "one", False),
         ("q1", ["QB", "Q1"], "sr_q1", "one", False),
