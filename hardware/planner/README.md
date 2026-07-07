@@ -690,3 +690,28 @@ the root cause of every "pipeline already in progress" lockup.
   and the crate ships as verified BSP/HAL only, logged as a warning.
 - Board regression with the patch: 5/5 with real statuses. This patch precedes any
   physical board order — the regression system must be trustworthy before fab.
+
+## First-Article Order Review — Batch 1 verdict: revise_before_order (all three)
+
+The handoff gate from "software says order-ready" to "willing to send to fab."
+Inspected the real artifacts (renders, footprints, BOM, sourcing, P&P, coverage) of
+the three order-ready packs. Electrically all three are clean (0 DRC, sourced,
+assembly-ready) — but as composed they do not yet fulfil their FL-1 ROLES:
+
+- ALL boards: no mounting holes, no test points, no board-ID EEPROM, no FL-1
+  instrument-bus connector (so they cannot join the backplane bus the core spec
+  defines), silkscreen refs only.
+- Controller/Backplane: a clean MCU+CAN node, but the controller ROLE needs
+  interlock/fault/reset/trigger + the bus-master header — none present. The Phase-12
+  lesson recurring at system level: DRC-clean does not equal satisfies the named intent.
+- Digital Bring-up: SPI was honestly dropped by the composer; no GPIO bank header, no
+  protected IO — too thin for the bring-up role.
+- Relay/Probe Matrix: relays switch but 24 contact pins route to only 6 header pins —
+  a matrix with no channel connectors. Also needs a guaranteed power-on-safe
+  disconnected state (74HC595 outputs undefined until first latch).
+
+Decision: revise (extend composer blocks: fl1_bus_header, board_id_eeprom,
+mounting_holes, test_points, relay channel breakout, protected GPIO bank), re-run the
+pipeline with unchanged gates, re-review, THEN order 3 each. Revising costs a
+pipeline re-run; ordering first costs a respin. Artifacts: first-article-review.json/md
+per run + FA badges on the Phase 15 dashboard.

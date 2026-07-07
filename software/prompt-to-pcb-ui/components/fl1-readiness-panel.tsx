@@ -40,7 +40,7 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
       'fl1-manufacturing-capability-report', 'cal-board-attempt', 'shared-bus-report',
       'fine-pitch-escape-model', 'fl1-build-readiness-dashboard', 'combined-signoff-report',
       'fl1-curated-reference-library', 'fl1-validation-readiness-dashboard', 'demo-validation-runs',
-      'fl1-instrument-core-v1',
+      'fl1-instrument-core-v1', 'phase15-board-readiness-dashboard',
     ]
     Promise.all(
       files.map((f) =>
@@ -114,6 +114,59 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
               blocker: {d['cal-board-attempt'].blocker}
             </p>
           )}
+        </div>
+      )}
+
+      {/* Phase 15 build/order decisions — order-ready vs held, review flags */}
+      {d['phase15-board-readiness-dashboard']?.boards?.length > 0 && (
+        <div>
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-primary">
+            Phase 15 build batch ({d['phase15-board-readiness-dashboard'].board_count})
+          </p>
+          <div className="space-y-1">
+            {d['phase15-board-readiness-dashboard'].boards.map((b: any, i: number) => (
+              <div key={i} className="rounded-md border border-border px-3 py-1.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-foreground">{b.board_class ?? b.board}</span>
+                  <span
+                    className={`rounded-sm border px-1.5 py-0.5 text-[10px] ${
+                      b.order_recommendation === 'do_not_order' || b.order_recommendation === 'unsupported'
+                        ? 'border-destructive/50 bg-destructive/15 font-semibold text-destructive'
+                        : b.package_type === 'order_ready_pcba_package'
+                          ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500'
+                          : 'border-amber-500/40 bg-amber-500/10 text-amber-500'
+                    }`}
+                  >
+                    {b.order_recommendation}
+                  </span>
+                  {b.human_review_required && (
+                    <span className="rounded-sm border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[9px] text-amber-500">
+                      review
+                    </span>
+                  )}
+                  {b.first_article_review && (
+                    <span className="rounded-sm border border-amber-500/50 bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-amber-500">
+                      FA: {b.first_article_review}
+                    </span>
+                  )}
+                  <span className="ml-auto font-mono text-[9px] text-muted-foreground">
+                    {b.package_type?.replace(/_package$/, '')}
+                    {b.order_pack_valid ? ' · pack ✓' : ''}
+                  </span>
+                </div>
+                {b.review_note && (
+                  <p className="mt-0.5 text-[10px] text-amber-500">{b.review_note}</p>
+                )}
+                {b.held_reason && (
+                  <p className="mt-0.5 text-[10px] text-destructive">held: {b.held_reason}</p>
+                )}
+              </div>
+            ))}
+          </div>
+          <p className="mt-1 text-[9px] text-muted-foreground">
+            green = order-ready PCBA (with first-article review) · amber = design-attempt/architecture
+            only · red = do_not_order / unsupported. Only evidence-safe boards get an order package.
+          </p>
         </div>
       )}
 
