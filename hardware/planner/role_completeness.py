@@ -95,11 +95,25 @@ def _calibration_reqs(f):
     ]
 
 
+def _eii_reqs(f):
+    return _common_reqs(f) + [
+        ("instrument UART bridge header",
+         any("UART bridge" in n for n in f["dev_names"])),
+        ("protected GPIO for trigger/sync/presence",
+         any("GPIO" in n and n.endswith("_EXT") for n in f["nets"])),
+        ("bus-v2 safety lines (FAULT/INTERLOCK/RST_OUT/TRIG)",
+         {"FAULT", "INTERLOCK", "RST_OUT", "TRIG"} <= f["nets"]),
+        ("board-ID address straps (ID_A0-A2)",
+         {"ID_A0", "ID_A1", "ID_A2"} <= f["nets"]),
+    ]
+
+
 ROLE_CHECKS = {
     "controller_backplane": _controller_reqs,
     "digital_bringup": _digital_reqs,
     "relay_probe_matrix": _relay_reqs,
     "calibration_reference": _calibration_reqs,
+    "external_instrument_interface": _eii_reqs,
 }
 
 # caveats that keep a complete board at _with_review (honest limits, not failures)
@@ -112,6 +126,12 @@ ROLE_CAVEATS = {
     "relay_probe_matrix": ["4-channel v1 matrix (PROBEn -> shared 2-wire bus), not a crossbar",
                            "NO high-voltage isolation claim (signal relays, standard spacing)",
                            "NO precision/low-leakage switching claim"],
+    "external_instrument_interface": [
+        "NOT a measurement instrument: no DMM/scope/funcgen/RF/LA capability claims",
+        "UART bridge is TTL-level (RS232 needs an external transceiver)",
+        "trigger/sync are protected GPIO (Pico boots as inputs = safe default); "
+        "timing is sanity-class unless measured by an external instrument",
+        "COTS instrument capability is COTS capability, never internal FL-1 capability"],
     "calibration_reference": ["NO calibration claim until a traceable reference chain "
                               "exists post-fab", "metrology traceability external",
                               "board-ID defaults to 0x50 standalone; slot straps give "

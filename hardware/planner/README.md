@@ -916,3 +916,36 @@ missing ingestion, or an unsafe default.
 
 Regression: phase18 24/24; phase17 14/14, phase167 22/22, frontend 24/24, board
 5/5 unchanged (artifact-only). Nothing ordered; Batch 1 untouched; no fake claims.
+
+## Phase 18.5: External Instrument Interface EII-1 compose attempt — PASSED
+
+The Phase 18 #1 recommendation is now a REAL routed board: 22/22 nets, 0 DRC,
+0 unconnected, ERC PASS, role_complete_with_review (10/10) through the full
+pipeline. Verdict: ready_to_build_with_review; order stays human-gated.
+
+- EII-1 (blocks: power + mcu + uart bridge + gpio bank + fl1 bus v2 + board id):
+  instrument UART bridge (TTL, honest), trigger/sync/presence as protected GPIO
+  (Pico boots as inputs = safe default), bus-v2 safety lines + ID straps, all
+  proven parts, ZERO new ingestion. Explicitly NOT: DMM/scope/funcgen/RF/LA,
+  RS232 levels, Ethernet, GPIB, HV, autonomous power. COTS capability is never
+  claimed as internal capability.
+- New composer block: block_uart_bridge (1x04 TTL header on Pico UART0).
+- EII role added to the role-completeness checker with honest caveats.
+- STITCHER HARDENED pipeline-wide while chasing EII-1's three chronic skips —
+  the root cause was a max-dimension-circle pad check that made adjacent SOIC
+  pads (1.95mm long, 1.27mm pitch) permanently "block" each other. Fixes: EXACT
+  pad shapes (GetEffectiveShape), layer-aware bridge clearance (inner-layer
+  tracks no longer veto F.Cu bridges), distance-sorted grid search (0.45mm step,
+  6mm radius) replacing fixed rings, pad->via bridge tracks for nudged vias,
+  anchor-bridge fallback + retry pass (bridge to PTH/via/connected-pad anchors),
+  and proper decoupling placement in block_board_id (C25 moved next to U9 pin 8
+  — the DFM gate policed the first two placements).
+- Full artifact set: requirements, interface architecture, component strategy,
+  safety model, compose report, role report, validation workflows (identity/
+  trigger/serial/safety), traceability (FL1-EII-V1-0001..3), manufacturing
+  readiness (order stub human_review_required), and the Phase 18 feedback loop
+  (external_instrument_interface -> ready_for_reviewed_order_package; next best
+  board: power/current monitor).
+
+Regression: phase185 23/23 + all 15 suites green + frontend 24/24. Batch 1
+untouched; nothing ordered; no production-ready claim.

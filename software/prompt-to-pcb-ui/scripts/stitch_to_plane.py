@@ -66,7 +66,50 @@ def _blocked(px, py, nc, vd):
         need = vd // 2 + half + pcbnew.FromMM(0.22)
         if _seg_dist(px, py, t) < need:
             return True
+    # foreign-net PADS too: a nudged via landing beside another net's pad is a
+    # clearance/hole violation the track-only check missed. EXACT pad shapes —
+    # a max-dimension circle falsely blocks everything beside elongated SOIC
+    # pads (1.95mm long at 1.27mm pitch: neighbours "block" each other).
+    pt = pcbnew.VECTOR2I(int(px), int(py))
+    for fp2 in b.GetFootprints():
+        for pad2 in fp2.Pads():
+            if pad2.GetNetCode() == nc:
+                continue
+            L2 = pcbnew.F_Cu if pad2.IsOnLayer(pcbnew.F_Cu) else pcbnew.B_Cu
+            sh2 = pad2.GetEffectiveShape(L2)
+            if sh2.Collide(pt, int(vd // 2 + pcbnew.FromMM(0.22))):
+                return True
     return False
+
+
+def _bridge_clear(x0, y0, x1, y1, nc, layer):
+    """True if a 0.2mm bridge track ON `layer` from (x0,y0) to (x1,y1) clears
+    foreign copper ON THAT LAYER (vias always count — they span all layers).
+    Inner-layer tracks do not conflict with an outer-layer bridge. Sampled along
+    the segment; final DRC still gates everything."""
+    n = max(2, int(((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5 / pcbnew.FromMM(0.3)))
+    half_bridge = pcbnew.FromMM(0.1)
+    for i in range(n + 1):
+        px = x0 + (x1 - x0) * i // n
+        py = y0 + (y1 - y0) * i // n
+        for t in b.GetTracks():
+            if t.GetNetCode() == nc:
+                continue
+            if t.GetClass() != "PCB_VIA" and t.GetLayer() != layer:
+                continue
+            need = half_bridge + t.GetWidth() // 2 + pcbnew.FromMM(0.21)
+            if _seg_dist(px, py, t) < need:
+                return False
+        # foreign pads on the bridge layer block it too (EXACT shapes)
+        pt3 = pcbnew.VECTOR2I(int(px), int(py))
+        for fp3 in b.GetFootprints():
+            for pad3 in fp3.Pads():
+                if pad3.GetNetCode() == nc or not pad3.IsOnLayer(layer):
+                    continue
+                if pad3.GetEffectiveShape(layer).Collide(
+                        pt3, int(half_bridge + pcbnew.FromMM(0.21))):
+                    return False
+    return True
 
 
 def _fine_pitch(fp, pos):
@@ -99,6 +142,8 @@ if _os.path.exists(_fp_path):
 # already served by a same-net via.
 placed = 0
 seen = set()
+connected_pads = {}  # net -> [(x,y)] pads verified/made plane-connected
+_retry = []
 for fp in b.GetFootprints():
     for pad in fp.Pads():
         nc = pad.GetNetCode()
@@ -121,6 +166,7 @@ for fp in b.GetFootprints():
         r = max(sz.x, sz.y) / 2.0 + pcbnew.FromMM(0.1)
         if any((vx - pos.x) ** 2 + (vy - pos.y) ** 2 < r * r
                for vx, vy in vias_by_net.get(nc, [])):
+            connected_pads.setdefault(nc, []).append((pos.x, pos.y))
             continue
 
         # fine-pitch pads take a smaller via so via-in-pad clears the neighbour
@@ -132,14 +178,65 @@ for fp in b.GetFootprints():
             vd, vk = via_d, via_k
         # drop the via at the pad centre, nudging to the first spot clear of
         # other-net copper on all layers.
-        off = pcbnew.FromMM(0.4)
+        # progressive rings: the pad->via bridge track spans the offset, so the
+        # via can live further out when the immediate neighborhood is dense
+        # (0402 clusters need ~1.0mm clear). Final DRC gates every placement.
+        # distance-sorted GRID search (0.45mm step, radius 6mm): fixed-direction
+        # rings miss the only free pocket in dense regions (header fields, SOIC
+        # rows). Via spot must clear all layers; the pad->via bridge must clear
+        # its own layer. Final DRC gates every placement.
+        blayer = pcbnew.F_Cu if pcbnew.F_Cu in layers else pcbnew.B_Cu
+        step = pcbnew.FromMM(0.45)
+        R = 13   # 13*0.45 ~ 5.9mm
+        cands = sorted(((dx, dy) for dx in range(-R, R + 1) for dy in range(-R, R + 1)),
+                       key=lambda t: t[0] * t[0] + t[1] * t[1])
         spot = None
-        for dx, dy in ((0, 0), (off, 0), (-off, 0), (0, off), (0, -off)):
-            if not _blocked(pos.x + dx, pos.y + dy, nc, vd):
-                spot = pcbnew.VECTOR2I(pos.x + dx, pos.y + dy)
-                break
+        for gx, gy in cands:
+            dx, dy = gx * step, gy * step
+            if _blocked(pos.x + dx, pos.y + dy, nc, vd):
+                continue
+            if (dx or dy) and not _bridge_clear(pos.x, pos.y,
+                                                pos.x + dx, pos.y + dy, nc, blayer):
+                continue
+            spot = pcbnew.VECTOR2I(pos.x + dx, pos.y + dy)
+            break
         if spot is None:
-            print("skip %s: no clear via spot at pad" % pad.GetNetname())
+            # FALLBACK: no legal via spot anywhere nearby — bridge the pad BY
+            # TRACK to the nearest same-net anchor that already reaches the
+            # plane (a PTH pad or an existing via), path-checked on this layer.
+            anchors = []
+            for vx, vy in vias_by_net.get(nc, []):
+                anchors.append((vx, vy))
+            for fp4 in b.GetFootprints():
+                for pad4 in fp4.Pads():
+                    if pad4.GetNetCode() == nc and pad4.HasHole():
+                        pp4 = pad4.GetPosition()
+                        anchors.append((pp4.x, pp4.y))
+            # already-plane-connected same-net SMD pads are valid anchors too
+            # (landing at a pad often clears where landing at its via cannot)
+            anchors += connected_pads.get(nc, [])
+            anchors.sort(key=lambda a2: (a2[0] - pos.x) ** 2 + (a2[1] - pos.y) ** 2)
+            bl2 = pcbnew.F_Cu if pcbnew.F_Cu in layers else pcbnew.B_Cu
+            bridged = False
+            for ax, ay in anchors[:5]:
+                if (ax - pos.x) ** 2 + (ay - pos.y) ** 2 > pcbnew.FromMM(14) ** 2:
+                    break
+                if not _bridge_clear(pos.x, pos.y, ax, ay, nc, bl2):
+                    continue
+                tr2 = pcbnew.PCB_TRACK(b)
+                tr2.SetStart(pos)
+                tr2.SetEnd(pcbnew.VECTOR2I(ax, ay))
+                tr2.SetWidth(pcbnew.FromMM(0.2))
+                tr2.SetLayer(bl2)
+                tr2.SetNetCode(nc)
+                b.Add(tr2)
+                placed += 1
+                bridged = True
+                break
+            if not bridged:
+                _retry.append((pad, nc, pos))
+            else:
+                connected_pads.setdefault(nc, []).append((pos.x, pos.y))
             continue
         via = pcbnew.PCB_VIA(b)
         via.SetPosition(spot)
@@ -161,8 +258,42 @@ for fp in b.GetFootprints():
             tr.SetNetCode(nc)
             b.Add(tr)
         vias_by_net.setdefault(nc, []).append((spot.x, spot.y))
+        connected_pads.setdefault(nc, []).append((pos.x, pos.y))
         seen.add(key)
         placed += 1
+
+# RETRY pass: pads that found no via spot and no anchor on the first pass get a
+# second chance once every other pad has been stitched (anchors now complete).
+for pad, nc, pos in _retry:
+    layers5 = list(pad.GetLayerSet().CuStack())
+    bl5 = pcbnew.F_Cu if pcbnew.F_Cu in layers5 else pcbnew.B_Cu
+    anchors = list(vias_by_net.get(nc, [])) + connected_pads.get(nc, [])
+    for fp5 in b.GetFootprints():
+        for pad5 in fp5.Pads():
+            if pad5.GetNetCode() == nc and pad5.HasHole():
+                pp5 = pad5.GetPosition()
+                anchors.append((pp5.x, pp5.y))
+    anchors.sort(key=lambda a5: (a5[0] - pos.x) ** 2 + (a5[1] - pos.y) ** 2)
+    ok5 = False
+    for ax, ay in anchors[:6]:
+        if (ax - pos.x) ** 2 + (ay - pos.y) ** 2 > pcbnew.FromMM(14) ** 2:
+            break
+        if abs(ax - pos.x) < 100 and abs(ay - pos.y) < 100:
+            continue
+        if not _bridge_clear(pos.x, pos.y, ax, ay, nc, bl5):
+            continue
+        tr5 = pcbnew.PCB_TRACK(b)
+        tr5.SetStart(pos)
+        tr5.SetEnd(pcbnew.VECTOR2I(ax, ay))
+        tr5.SetWidth(pcbnew.FromMM(0.2))
+        tr5.SetLayer(bl5)
+        tr5.SetNetCode(nc)
+        b.Add(tr5)
+        placed += 1
+        ok5 = True
+        break
+    if not ok5:
+        print("skip %s: no clear via spot at pad" % pad.GetNetname())
 
 # refill zones so the new vias are captured by the pours before re-DRC
 pcbnew.ZONE_FILLER(b).Fill(b.Zones())

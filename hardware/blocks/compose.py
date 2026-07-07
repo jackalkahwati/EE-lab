@@ -567,7 +567,9 @@ def block_board_id(x, y, n, nets):
         "1": a0, "2": a1, "3": a2, "4": "GND",
         "5": n.get("i2c_sda", "I2C_SDA"), "6": n.get("i2c_scl", "I2C_SCL"),
         "7": "GND", "8": "+3V3"}, nets)
-    b += cap("C25", x + 14, y + 16, "+3V3", "GND", nets)
+    # decoupling belongs AT the IC's power pin (pin 8, top-right): adjacent
+    # placement also lets the plane stitcher serve U9-8 through C25's via.
+    b += cap("C25", x + 15, y + 6, "+3V3", "GND", nets)
     if strapped:
         # strap pull-downs: bench default 0x50; the backplane slot overrides
         b += res("R70", x + 2, y + 5, a0, "GND", nets)
@@ -611,6 +613,20 @@ def block_spibus(x, y, n, nets):
     return b, 12, 24
 
 
+def block_uart_bridge(x, y, n, nets):
+    """External-instrument UART/serial bridge (EII-1). The Pico's UART0 on a
+    labeled 1x04 header — TTL-level instrument/console link. RS232 levels need an
+    external transceiver (honest limitation, documented, not claimed)."""
+    b = place("Connector_PinHeader_2.54mm", "PinHeader_1x04_P2.54mm_Vertical",
+              "J12", x + 4, y + 6, 0,
+              {"1": n.get("uart_gps_tx", "INSTR_TX"), "2": n.get("uart_gps_rx", "INSTR_RX"),
+               "3": "+3V3", "4": "GND"}, nets)
+    label("INSTR UART TX RX 3V3 GND (TTL)", x + 4, y + 2, 0.6)
+    _DEVICES.append({"ref": "J12", "type": "connector",
+                     "name": "instrument UART bridge (TTL)"})
+    return b, 12, 20
+
+
 # free-text sensor detector for blocks no fixed key matched — these SOURCE a
 # real part instead of being dropped
 SENSOR_PAT = re.compile(
@@ -640,6 +656,7 @@ BLOCK_TABLE = {
     "boardid": block_board_id,
     "gpiobank": block_gpio_bank,
     "spibus": block_spibus,
+    "uartbridge": block_uart_bridge,
 }
 
 
@@ -702,6 +719,9 @@ def _block_keys(s):
         add("gpiobank")
     if re.search(r"\bspi\b", s):
         add("spibus")
+    if any(k in s for k in ("uart bridge", "serial bridge", "instrument uart",
+                            "instrument serial")):
+        add("uartbridge")
     if "usbc" not in out and any(k in s for k in ("power", "regulator", "battery", "vin",
                                                   "5v", "3v3", "charg", "ldo", "buck",
                                                   "usb power", "usb-c power")):
@@ -771,11 +791,11 @@ LAYERS = '''  (layers
 ROW = {"power": 0, "usbc": 0, "mcu": 0, "imu": 0, "radio": 0, "antenna": 0,
        "gnss": 0, "cellular": 0, "tempsensor": 0, "comms": 0, "motion": 1,
        "instrument": 0, "relaymatrix": 1, "motors": 1,
-       "fl1bus": 0, "boardid": 0, "gpiobank": 0, "spibus": 0}
+       "fl1bus": 0, "boardid": 0, "gpiobank": 0, "spibus": 0, "uartbridge": 0}
 COL = {"power": 0, "usbc": 0, "mcu": 2, "imu": 3, "tempsensor": 3, "gnss": 4,
        "radio": 5, "cellular": 6, "comms": 7, "antenna": 9, "motors": 1,
        "motion": 3, "instrument": 4, "relaymatrix": 1,
-       "boardid": 3, "fl1bus": 8, "gpiobank": 8, "spibus": 8}
+       "boardid": 3, "fl1bus": 8, "gpiobank": 8, "spibus": 8, "uartbridge": 9}
 ROW_BUDGET = 170.0  # mm — wrap a band wider than this
 
 
@@ -848,6 +868,8 @@ def compose(spec, blocks, out_path):
     if "spibus" in keys and "spi_sck" not in n:
         n.update({"spi_sck": "SPI_SCK", "spi_mosi": "SPI_MOSI",
                   "spi_miso": "SPI_MISO", "spi_cs": "SPI_CS"})
+    if "uartbridge" in keys and "uart_gps_tx" not in n:
+        n.update({"uart_gps_tx": "INSTR_TX", "uart_gps_rx": "INSTR_RX"})
     if "motion" in keys:
         n.update({"step": "STEP", "dir": "DIR", "en": "MOT_EN"})
     if "cellular" in keys:
