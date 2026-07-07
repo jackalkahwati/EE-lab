@@ -56,6 +56,8 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
       'env-sensor-compose-run', 'env-sensor-fleet-learning-update',
       'compose-jit-primitive-gap-application-report',
       'bme280-primitive-promotion-report', 'env-sensor-v2-compose-run',
+      'compose-general-physical-synthesis-benchmark-report',
+      'compose-general-synthesis-fleet-learning-update',
       'bme280-env-sensor-v2-fleet-learning-update',
       'compose-board-job-outcome-ledger',
       'fl1-system-revb-recommendations',
@@ -136,6 +138,47 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
               blocker: {d['cal-board-attempt'].blocker}
             </p>
           )}
+        </div>
+      )}
+
+      {/* Phase 23.2: general physical synthesis */}
+      {d['compose-general-physical-synthesis-benchmark-report'] && (
+        <div className="rounded-md border border-primary/40 bg-primary/5 p-3">
+          <p className="mb-1 text-[11px] font-semibold text-primary">
+            General Physical Synthesis — intent-driven boards (synthesized = review-required,
+            never proven)
+          </p>
+          <div className="space-y-0.5">
+            {d['compose-general-physical-synthesis-benchmark-report'].benchmarks?.map(
+              (b: any, i: number) => (
+                <div key={i} className="flex items-center gap-2 text-[9px]">
+                  <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                    {b.benchmark}
+                  </span>
+                  {b.routing && (
+                    <span className="font-mono text-foreground">
+                      {b.routing} · DRC {b.drc}
+                    </span>
+                  )}
+                  <span
+                    className={`rounded-sm border px-1.5 py-0.5 font-mono text-[8px] ${
+                      b.outcome === 'package_ready_with_review'
+                        ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500'
+                        : b.outcome === 'architecture_only'
+                          ? 'border-sky-500/40 bg-sky-500/10 text-sky-400'
+                          : 'border-destructive/40 bg-destructive/10 text-destructive'
+                    }`}
+                  >
+                    {b.outcome}
+                  </span>
+                </div>
+              ),
+            )}
+          </div>
+          <p className="mt-1 text-[9px] text-muted-foreground">
+            {d['compose-general-physical-synthesis-benchmark-report'].summary} ·{' '}
+            {d['compose-general-physical-synthesis-benchmark-report'].honesty}
+          </p>
         </div>
       )}
 

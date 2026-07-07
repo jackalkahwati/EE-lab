@@ -738,6 +738,172 @@ def block_bme280_breakout(x, y, n, nets):
     return b, 34, 24
 
 
+# =============================================================================
+# Phase 23.2 — synthesized generic subcircuits. Low-risk ordinary PCB structure
+# generated from functional intent instead of hand-written blocks. ALL
+# synthesized subcircuits are REVIEW-REQUIRED and never count as physically
+# validated. High-current/HV/RF/high-speed/safety-critical kinds do not exist
+# here by design.
+# Each emitter: (x, y, p, n, nets) -> (footprint_text, w, h); p = params dict.
+_SC_REF = [0]
+
+
+def _scref(prefix):
+    _SC_REF[0] += 1
+    return "%s%d" % (prefix, 300 + _SC_REF[0])
+
+
+def sc_pullup(x, y, p, n, nets):
+    b = res(_scref("R"), x + 2, y + 3, p["net"], p.get("rail", "+3V3"), nets)
+    return b, 6, 7
+
+
+def sc_pulldown(x, y, p, n, nets):
+    b = res(_scref("R"), x + 2, y + 3, p["net"], "GND", nets)
+    return b, 6, 7
+
+
+def sc_divider(x, y, p, n, nets):
+    b = res(_scref("R"), x + 2, y + 3, p["top"], p["mid"], nets)
+    b += res(_scref("R"), x + 2, y + 8, p["mid"], p.get("bottom", "GND"), nets)
+    return b, 6, 12
+
+
+def sc_led_indicator(x, y, p, n, nets):
+    knet = "%s_K" % p.get("name", "LED")
+    b = place("LED_SMD", "LED_0603_1608Metric", _scref("D"), x + 2, y + 3, 0,
+              {"1": knet, "2": p.get("rail", "+3V3")}, nets)
+    b += res(_scref("R"), x + 2, y + 8, knet, "GND", nets)
+    label(p.get("label", "LED"), x + 2, y + 1, 0.6)
+    return b, 7, 11
+
+
+def sc_button(x, y, p, n, nets):
+    b = place("Button_Switch_SMD", "SW_SPST_EVQP0", _scref("SW"), x + 3, y + 4, 0,
+              {"1": p["net"], "2": "GND"}, nets)
+    b += res(_scref("R"), x + 3, y + 9, p["net"], p.get("rail", "+3V3"), nets)
+    label(p.get("label", "BTN"), x + 3, y + 1, 0.6)
+    return b, 9, 12
+
+
+def sc_decoupling(x, y, p, n, nets):
+    b, cnt = "", int(p.get("count", 2))
+    for i in range(cnt):
+        b += cap(_scref("C"), x + 2 + i * 4, y + 3, p.get("rail", "+3V3"), "GND", nets)
+    return b, 2 + cnt * 4 + 2, 7
+
+
+def sc_testpoints(x, y, p, n, nets):
+    b = ""
+    for i, tnet in enumerate(p["nets"]):
+        b += tp(_scref("TP"), x + 3 + i * 6, y + 4, tnet, nets)
+        label(tnet, x + 3 + i * 6, y + 1, 0.5)
+    return b, 3 + len(p["nets"]) * 6 + 2, 8
+
+
+def _sc_header(x, y, p, n, nets, pins, label_txt):
+    fp = "PinHeader_1x%02d_P2.54mm_Vertical" % len(pins)
+    b = place("Connector_PinHeader_2.54mm", fp, _scref("J"), x + 3, y + 5, 0,
+              {str(i + 1): net for i, net in enumerate(pins)}, nets)
+    label(label_txt, x + 3, y + 1, 0.6)
+    return b, 10, 6 + len(pins) * 2.6
+
+
+def sc_i2c_header(x, y, p, n, nets):
+    return _sc_header(x, y, p, n, nets,
+                      ["+3V3", "GND", n.get("i2c_sda", "I2C_SDA"),
+                       n.get("i2c_scl", "I2C_SCL")], "I2C 3V3 GND SDA SCL")
+
+
+def sc_spi_header(x, y, p, n, nets):
+    return _sc_header(x, y, p, n, nets,
+                      ["+3V3", "GND", n.get("spi_sck", "SPI_SCK"),
+                       n.get("spi_mosi", "SPI_MOSI"), n.get("spi_miso", "SPI_MISO"),
+                       n.get("spi_cs", "SPI_CS")], "SPI")
+
+
+def sc_uart_header(x, y, p, n, nets):
+    return _sc_header(x, y, p, n, nets,
+                      [n.get("uart_gps_tx", "UART_TX"), n.get("uart_gps_rx", "UART_RX"),
+                       "+3V3", "GND"], "UART TX RX 3V3 GND")
+
+
+def sc_gpio_header(x, y, p, n, nets):
+    return _sc_header(x, y, p, n, nets, p.get("nets", ["GPIO0", "GPIO1", "GND"]),
+                      p.get("label", "GPIO"))
+
+
+def sc_debug_header(x, y, p, n, nets):
+    return _sc_header(x, y, p, n, nets, p.get("nets", ["RUN", "GND"]),
+                      p.get("label", "DEBUG/RESET"))
+
+
+def sc_power_header(x, y, p, n, nets):
+    b, w, h = _sc_header(x, y, p, n, nets, [p.get("rail", "+5V"), "GND"],
+                         p.get("label", "PWR IN"))
+    b += cap(_scref("C"), x + 3, y + int(h), p.get("rail", "+5V"), "GND", nets)
+    return b, w, h + 5
+
+
+def sc_solder_jumper(x, y, p, n, nets):
+    b = place("Jumper", "SolderJumper-2_P1.3mm_Open_Pad1.0x1.5mm", _scref("JP"),
+              x + 3, y + 4, 0, {"1": p["a"], "2": p["b"]}, nets)
+    label(p.get("label", "SEL"), x + 3, y + 1, 0.5)
+    return b, 8, 8
+
+
+def sc_rc_filter(x, y, p, n, nets):
+    b = res(_scref("R"), x + 2, y + 3, p["in"], p["out"], nets)
+    b += cap(_scref("C"), x + 2, y + 8, p["out"], "GND", nets)
+    return b, 6, 12
+
+
+def sc_voltage_monitor(x, y, p, n, nets):
+    return sc_divider(x, y, {"top": p["rail"], "mid": p["tap"],
+                             "bottom": "GND"}, n, nets)
+
+
+SUBCIRCUITS = {
+    "pullup": sc_pullup, "pulldown": sc_pulldown, "divider": sc_divider,
+    "led_indicator": sc_led_indicator, "button": sc_button,
+    "decoupling_cluster": sc_decoupling, "testpoint_cluster": sc_testpoints,
+    "i2c_header": sc_i2c_header, "spi_header": sc_spi_header,
+    "uart_header": sc_uart_header, "gpio_header": sc_gpio_header,
+    "debug_header": sc_debug_header, "power_header": sc_power_header,
+    "address_jumper": sc_solder_jumper, "config_jumper": sc_solder_jumper,
+    "rc_filter": sc_rc_filter, "voltage_monitor": sc_voltage_monitor,
+    # mounting holes / fiducials / board-name silk are universal primitives
+    # emitted for every board already (Phase 15.6) — intent maps to those.
+}
+
+
+def block_usbc_sink(x, y, n, nets):
+    """USB-C 5V SINK power entry (JIT primitive, Phase 23.2 benchmark): GCT
+    USB4125 6-pin POWER-ONLY receptacle — no data pins EXIST on this part, so
+    no data claim is possible by construction. CC1/CC2 get 5.1k pull-downs
+    (UFP sink advertisement). HONESTY: no USB compliance claim, no PD claim,
+    no charger — 5V/USB-default-current sink only, review-required."""
+    b = place("Connector_USB", "USB_C_Receptacle_GCT_USB4125-xx-x_6P_TopMnt_Horizontal",
+              "J25", x + 6, y + 8, 0,
+              {"A9": "+5V", "B9": "+5V", "A12": "GND", "B12": "GND",
+               "A5": "USB_CC1", "B5": "USB_CC2", "SH": "GND"}, nets)
+    b += res("R99", x + 14, y + 4, "USB_CC1", "GND", nets)
+    b += res("R100", x + 14, y + 9, "USB_CC2", "GND", nets)
+    b += cap("C35", x + 14, y + 14, "+5V", "GND", nets)
+    b += tp("TP55", x + 3, y + 18, "+5V", nets)
+    label("USB-C 5V SINK ONLY (no PD, no data)", x + 10, y + 1, 0.6)
+    _DEVICES.append({"ref": "J25", "type": "connector",
+                     "name": "USB-C 5V sink (USB4125 power-only)",
+                     "jit": "no compliance/PD/data claims"})
+    return b, 22, 22
+
+
+def block_standalone_marker(x, y, n, nets):
+    """No-op: marks a board as intentionally MCU-less (breakouts, passive
+    boards). Emits nothing."""
+    return "", 0, 0
+
+
 def block_relay_matrix(x, y, n, nets):
     """FL-1 relay / instrument-routing matrix (B-4) — Compose's native domain,
     built entirely from the block layer on coarse resolved parts. An MCU shifts a
@@ -922,6 +1088,8 @@ BLOCK_TABLE = {
     "statusled": block_status_led,
     "bme280": block_bme280,
     "bme280breakout": block_bme280_breakout,
+    "usbcsink": block_usbc_sink,
+    "standalone": block_standalone_marker,
     "relaymatrix": block_relay_matrix,
     "fl1bus": block_fl1_bus,
     "boardid": block_board_id,
@@ -991,6 +1159,11 @@ def _block_keys(s):
         add("statusled")
     if "bme280 breakout" in s or "bme280 sandbox" in s:
         add("bme280breakout")
+    if any(k in s for k in ("usb-c sink", "usb-c power entry", "usbc sink",
+                            "usb c power entry")):
+        add("usbcsink")
+    if any(k in s for k in ("standalone", "no mcu", "headless board")):
+        add("standalone")
     elif any(k in s for k in ("bme280", "environmental sensor", "humidity sensor",
                               "pressure sensor")):
         add("bme280")
@@ -1045,7 +1218,8 @@ def classify(blocks):
         seen.discard("mcu")
     if "backplane6" in seen and "mcu" in seen and len(seen) <= 3:
         pass  # explicit mcu request stands
-    if not (seen & {"mcu", "baremcu", "backplane6", "bme280breakout"}):
+    if not (seen & {"mcu", "baremcu", "backplane6", "bme280breakout",
+                    "standalone"}):
         uniq.append("mcu")
         seen.add("mcu")
     if not (seen & {"power", "usbc"}):
@@ -1089,13 +1263,15 @@ LAYERS = '''  (layers
 ROW = {"power": 0, "usbc": 0, "mcu": 0, "imu": 0, "radio": 0, "antenna": 0,
        "gnss": 0, "cellular": 0, "tempsensor": 0, "comms": 0, "motion": 1,
        "instrument": 0, "dutmonitor": 0, "calref": 0, "calrefext": 0, "backplane6": 0,
-       "statusled": 0, "bme280": 0, "bme280breakout": 0,
+       "statusled": 0, "bme280": 0, "bme280breakout": 0, "usbcsink": 0,
+       "standalone": 0,
        "baremcu": 0, "relaymatrix": 1, "motors": 1,
        "fl1bus": 0, "boardid": 0, "gpiobank": 0, "spibus": 0, "uartbridge": 0}
 COL = {"power": 0, "usbc": 0, "mcu": 2, "imu": 3, "tempsensor": 3, "gnss": 4,
        "radio": 5, "cellular": 6, "comms": 7, "antenna": 9, "motors": 1,
        "motion": 3, "instrument": 4, "dutmonitor": 4, "calref": 5, "calrefext": 6,
        "backplane6": 1, "statusled": 6, "bme280": 3, "bme280breakout": 1,
+       "usbcsink": 0, "standalone": 9,
        "baremcu": 2, "relaymatrix": 1,
        "boardid": 3, "fl1bus": 8, "gpiobank": 8, "spibus": 8, "uartbridge": 9}
 ROW_BUDGET = 170.0  # mm — wrap a band wider than this
@@ -1135,6 +1311,22 @@ def compose(spec, blocks, out_path):
     for i, desc in enumerate(sensor_reqs):
         dyn["gsensor%d" % i] = desc
     keys = keys + sorted(dyn)
+    # Phase 23.2: synthesized subcircuits ride the same band layout as blocks.
+    # Every synthesized subcircuit is REVIEW-REQUIRED (recorded in the device
+    # manifest) and never physically validated by generation.
+    _SC_REF[0] = 0
+    subs = {}
+    for i, entry in enumerate((spec or {}).get("subcircuits") or []):
+        kind = entry.get("kind")
+        if kind not in SUBCIRCUITS:
+            raise RuntimeError("unknown synthesized subcircuit kind: %r" % kind)
+        subs["zsc%02d" % i] = entry
+    keys = keys + sorted(subs)
+    if subs:
+        _DEVICES.append({"ref": "(synthesized)", "type": "synthesized_subcircuits",
+                         "kinds": [e["kind"] for e in subs.values()],
+                         "honesty": "generated, REVIEW-REQUIRED, not physically "
+                                    "validated"})
 
     # shared interface nets — allocated only for the buses that are actually
     # used, so the MCU and netlist carry no dangling stubs.
@@ -1143,8 +1335,23 @@ def compose(spec, blocks, out_path):
         n.update({"spi_sck": "SPI_SCK", "spi_mosi": "SPI_MOSI", "spi_miso": "SPI_MISO",
                   "spi_cs": "LORA_NSS", "ctrl_rst": "LORA_RST", "ctrl_irq": "LORA_DIO0",
                   "ant": "ANT"})
-    if "imu" in keys or "tempsensor" in keys or "instrument" in keys or dyn:  # shared I2C bus
-        n.update({"i2c_sda": "I2C_SDA", "i2c_scl": "I2C_SCL"})
+    if ("imu" in keys or "tempsensor" in keys or "instrument" in keys or dyn
+            or "calref" in keys or "dutmonitor" in keys or "bme280" in keys):
+        n.update({"i2c_sda": "I2C_SDA", "i2c_scl": "I2C_SCL"})  # shared I2C bus
+    # synthesized headers request the matching MCU nets (Phase 23.2): a
+    # generated UART/I2C/SPI header must be WIRED, never labels-only copper.
+    _sub_kinds = {e["kind"] for e in subs.values()}
+    if "i2c_header" in _sub_kinds:
+        n.setdefault("i2c_sda", "I2C_SDA")
+        n.setdefault("i2c_scl", "I2C_SCL")
+    if "uart_header" in _sub_kinds:
+        n.setdefault("uart_gps_tx", "UART_TX")
+        n.setdefault("uart_gps_rx", "UART_RX")
+    if "spi_header" in _sub_kinds:
+        n.setdefault("spi_sck", "SPI_SCK")
+        n.setdefault("spi_mosi", "SPI_MOSI")
+        n.setdefault("spi_miso", "SPI_MISO")
+        n.setdefault("spi_cs", "SPI_CS")
     if "imu" in keys:
         n["imu_int"] = "IMU_INT"
     if "motors" in keys:
@@ -1198,6 +1405,9 @@ def compose(spec, blocks, out_path):
             def build(bx, by, kk=k):
                 if kk in dyn:
                     return block_sourced_sensor(bx, by, n, nets, dyn[kk], kk)
+                if kk in subs:
+                    e = subs[kk]
+                    return SUBCIRCUITS[e["kind"]](bx, by, e.get("params", {}), n, nets)
                 return BLOCK_TABLE[kk](bx, by, n, nets)
             txt, w, h = build(x, ytop)
             # wrap to a new sub-row if this band overflows the width budget

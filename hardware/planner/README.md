@@ -1269,3 +1269,41 @@ promotion -> reuse in a real non-FL-1 board.
 
 Regression: phase231 26/26; all 18 suites green; frontend 24/24; board 5/5.
 Nothing ordered; nothing physically claimed.
+
+## Phase 23.2: general physical board synthesis engine v1
+
+The move from "assemble known blocks" to "synthesize ordinary board structure
+from intent" — proven with SEVEN clean pipeline runs including a board built
+from pure synthesis and the USB-C gap closure.
+
+- Synthesized subcircuit engine IN THE COMPOSER: 17 emitters + 3 universal
+  kinds (pullup/pulldown/divider/LED/button/decoupling/TP cluster/I2C-SPI-
+  UART-GPIO-debug-power headers/solder jumpers/RC filter/voltage monitor)
+  generating REAL copper via the proven primitives, instantiated from
+  spec.subcircuits and flowing through the SAME gates as blocks. ALL
+  review-required, never physically validated by generation. High-current/HV/
+  RF/high-speed/safety-critical kinds do not exist by design.
+- physical_synthesis.py: machine audit of compose (29 blocks scoped fl1/
+  generic/mixed), functional intent IR (22 intents), request->intent compiler
+  (no silent high-risk inference), intent->implementation planner (6
+  strategies), conservative power-tree synthesizer (no invented regulators),
+  connector strategy engine (orientation risk explicit), constraint-driven
+  placement planner v1 (constraint groups over the proven band machinery —
+  free-form solver recorded as future capability), role framework v2 (11
+  family templates; FL-1 requirements ONLY for FL-1 boards).
+- JIT USB-C sink primitive: GCT USB4125 6-pin POWER-ONLY receptacle — no data
+  pins EXIST, so no data claim is possible by construction; CC 5.1k pulldowns;
+  no PD/compliance/charger claims. THE #1 LEVERAGE GAP CLOSED with a real
+  routed board.
+- Benchmarks (10): power-entry header (PURE SYNTHESIS — no hand-written
+  functional block) 4/4; USB-C power entry 5/5; I2C sensor breakout
+  (synthesized header+pullups, standalone) 5/5; ADC logger 10/10 (the run
+  CAUGHT a wiring-allocation gap — synthesized headers now request MCU nets,
+  labels-only copper impossible); Pi HAT relay 30/30; env-sensor v2 + BME280
+  breakout regressions stand; motor/RF/PCIe honestly blocked/architecture_only.
+- Fleet learning: led_indicator + testpoint_cluster recommended for pattern
+  promotion after repeat success; constraint-solver + 2-layer-flow gaps
+  recorded.
+
+Regression: phase232 44/44; all 21 suites green; frontend 24/24; board 5/5.
+Nothing ordered; nothing physically claimed; no gate weakened.
