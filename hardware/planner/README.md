@@ -887,3 +887,32 @@ handoff. Nothing ordered, nothing production-ready, no certification claim.
   register (severity/likelihood/mitigation/owner; high-severity risks require review).
 
 Regression: phase17 14/14; frontend 24/24; board 5/5 unchanged (artifact-only).
+
+## Phase 18: architecture search + trade-space explorer v1
+
+The layer that decides what to design NEXT — before any board is generated or
+ordered. Candidates (internal / COTS / hybrid / multi-board / reduced-scope /
+mock-only / hold) are grounded in the real evidence stack, scored across 17
+dimensions, and HARD BLOCKERS DOMINATE: no aggregate score can hide do_not_build,
+a missing validation path, a fake precision claim, unrouteable fine pitch,
+missing ingestion, or an unsafe default.
+
+- arch_search.py: candidate model (11 readiness states), scoring model, search
+  engine over 9 held FL-1 families (3 candidates each, 27 total), partitioning
+  search (backplane+modules SELECTED — matches Batch 1 + slot straps), component
+  strategy search (proven-part-first rules), validation-path + calibration-path
+  classification per candidate.
+- Honest verdicts: internal scope (SCP-2) and internal RF (RF-2) REJECTED by hard
+  blockers; scope/funcgen/LA/RF stay external-COTS; DMM-lite (proven ADS1115+
+  REF3025 chain) HELD on the physical cal-board dependency; stimulus DC-only until
+  DAC approval; logic capture = event-class honesty (COTS LA for timing truth).
+- Recommended next-board roadmap: #1 External Instrument Interface (all parts
+  proven, 80% reuse of digital v2.1, compose-ready), #2 power/current monitor
+  (shunt+ADS1115 buildable today; INA variant after ingestion), #3 DMM-lite after
+  the cal board is physical, #4 relay expansion by duplicating the proven board
+  (slot straps make duplicates work).
+- 5 demo searches with expectations met; UI shows the roadmap + per-target
+  verdicts with rejected-candidate flags.
+
+Regression: phase18 24/24; phase17 14/14, phase167 22/22, frontend 24/24, board
+5/5 unchanged (artifact-only). Nothing ordered; Batch 1 untouched; no fake claims.

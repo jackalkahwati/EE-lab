@@ -46,7 +46,8 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
       'calibration-board-finegrid-result', 'via-in-pad-feasibility-report',
       'batch1-stability-report', 'fl1-first-article-review-pack',
       'fl1-final-first-article-review-v3', 'fl1-board-id-addressing-strategy',
-      'fl1-manufacturing-readiness-pack',
+      'fl1-manufacturing-readiness-pack', 'fl1-held-board-architecture-search',
+      'fl1-recommended-next-board-roadmap',
     ]
     Promise.all(
       files.map((f) =>
@@ -120,6 +121,51 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
               blocker: {d['cal-board-attempt'].blocker}
             </p>
           )}
+        </div>
+      )}
+
+      {/* Phase 18: architecture search — what to design NEXT */}
+      {d['fl1-recommended-next-board-roadmap']?.after_batch1 && (
+        <div className="rounded-md border border-border p-3">
+          <p className="mb-1 text-[11px] font-semibold text-foreground">
+            Architecture search — recommended next boards (after Batch 1)
+          </p>
+          <div className="space-y-0.5">
+            {d['fl1-recommended-next-board-roadmap'].after_batch1.map((r: any, i: number) => (
+              <p key={i} className="text-[10px] text-muted-foreground">
+                <span className="font-mono text-primary">#{r.rank}</span>{' '}
+                <span className="text-foreground">{r.board}</span> — {r.why}
+                {r.needs !== 'nothing new — compose-ready' && (
+                  <span className="text-amber-500"> · needs: {r.needs}</span>
+                )}
+              </p>
+            ))}
+          </div>
+          {d['fl1-held-board-architecture-search']?.searches && (
+            <div className="mt-1 flex flex-wrap gap-1">
+              {Object.entries(d['fl1-held-board-architecture-search'].searches).map(
+                ([t, s]: [string, any], i: number) => (
+                  <span
+                    key={i}
+                    title={`recommended: ${s.recommended} · rejected: ${s.rejected.join(',') || 'none'}`}
+                    className={`rounded-sm border px-1.5 py-0.5 font-mono text-[8px] ${
+                      s.rejected.length
+                        ? 'border-destructive/40 bg-destructive/10 text-destructive'
+                        : 'border-border text-muted-foreground'
+                    }`}
+                  >
+                    {t}: {s.recommended}
+                    {s.rejected.length ? ` (✗${s.rejected.join(',')})` : ''}
+                  </span>
+                ),
+              )}
+            </div>
+          )}
+          <p className="mt-1 text-[9px] text-muted-foreground">
+            hard blockers dominate scores · stays external COTS:{' '}
+            {(d['fl1-recommended-next-board-roadmap'].stay_external_cots ?? []).join(', ')} · no
+            precision/RF/scope claims without evidence
+          </p>
         </div>
       )}
 
