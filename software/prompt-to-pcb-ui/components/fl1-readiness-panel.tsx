@@ -42,6 +42,7 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
       'fl1-curated-reference-library', 'fl1-validation-readiness-dashboard', 'demo-validation-runs',
       'fl1-instrument-core-v1', 'phase15-board-readiness-dashboard',
       'role-completeness-report', 'phase15-first-article-review-v2',
+      'fl1-batch1-serial-plan', 'phase16-demo-runs', 'phase16-held-board-status',
     ]
     Promise.all(
       files.map((f) =>
@@ -115,6 +116,80 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
               blocker: {d['cal-board-attempt'].blocker}
             </p>
           )}
+        </div>
+      )}
+
+      {/* Phase 16: traceability — serials, lifecycle, calibration state, evidence */}
+      {d['fl1-batch1-serial-plan']?.serials?.length > 0 && (
+        <div>
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-primary">
+            Batch 1 traceability ({d['fl1-batch1-serial-plan'].serials.length} serials ·{' '}
+            {d['fl1-batch1-serial-plan'].batch_id})
+          </p>
+          <div className="flex flex-wrap gap-1">
+            {d['fl1-batch1-serial-plan'].serials.map((s: any, i: number) => (
+              <span
+                key={i}
+                title={`${s.board_name} — ${s.current_lifecycle_state} — cal: ${s.board_id_eeprom_fields?.cal_state}`}
+                className="rounded-sm border border-border px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground"
+              >
+                {s.serial_number} · {s.board_id_eeprom_fields?.cal_state}
+              </span>
+            ))}
+          </div>
+          <p className="mt-1 text-[9px] text-muted-foreground">
+            lifecycle: first_article_review_required · all channels uncalibrated (no physical
+            calibration exists until real evidence exists)
+          </p>
+        </div>
+      )}
+
+      {/* Phase 16: demo evidence (all simulated) + redesign loop */}
+      {d['phase16-demo-runs']?.demos?.length > 0 && (
+        <div>
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-primary">
+            Traceability demos ({d['phase16-demo-runs'].demo_count} · all simulated)
+          </p>
+          <div className="space-y-1">
+            {d['phase16-demo-runs'].demos.map((dm: any, i: number) => (
+              <div key={i} className="flex items-center gap-2 rounded-md border border-border px-3 py-1">
+                <span className="text-[10px] text-foreground">{dm.demo}</span>
+                <span
+                  className={`rounded-sm border px-1.5 py-0.5 text-[9px] ${
+                    dm.final_verdict === 'do_not_calibrate_physical'
+                      ? 'border-destructive/50 bg-destructive/15 font-semibold text-destructive'
+                      : dm.final_verdict === 'simulated_fail'
+                        ? 'border-amber-500/40 bg-amber-500/10 text-amber-500'
+                        : 'border-sky-500/40 bg-sky-500/10 text-sky-400'
+                  }`}
+                >
+                  {dm.final_verdict}
+                </span>
+                {dm.redesign_recommendation && (
+                  <span className="ml-auto font-mono text-[9px] text-amber-500">
+                    → {dm.redesign_recommendation.recommendation_type} (human review)
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Phase 16: held boards stay visibly held */}
+      {d['phase16-held-board-status']?.boards?.length > 0 && (
+        <div>
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-primary">
+            Held boards ({d['phase16-held-board-status'].boards.length})
+          </p>
+          <div className="space-y-0.5">
+            {d['phase16-held-board-status'].boards.map((h: any, i: number) => (
+              <p key={i} className="text-[9px] text-muted-foreground">
+                <span className="text-destructive">{h.board}</span>: {h.why_held} — needs{' '}
+                {h.missing_capability}
+              </p>
+            ))}
+          </div>
         </div>
       )}
 

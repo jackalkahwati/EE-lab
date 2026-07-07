@@ -748,3 +748,40 @@ SATISFY their names, not just route cleanly.
 Regression: role-completeness 22/22; phase15 21/21, fl1-core 12/12, validation 28/28,
 benchmark+signoff 29/29, fine-pitch 10/10, shared-bus 11/11, high-speed 8/8, ingest
 6/6, frontend 24/24. Cal board stays do_not_build; scope-lite stays unsupported.
+
+## Phase 16: calibration, traceability, and closed-loop redesign v1
+
+Prepares FirstLight for REAL boards arriving from fab: every board traceable, every
+run evidence-backed, every calibration claim explicit, every failure convertible
+into a structured Rev B recommendation. Nothing fakes calibration or traceability.
+
+- traceability.py: board identity model (13 lifecycle states) + Batch 1 serial plan
+  (FL1-CB/DB/RM-V2-0001..0003 — 9 serials with REAL sha256 artifact hashes, board-ID
+  EEPROM contents at 0x50, QR payloads, honest lifecycle start at
+  first_article_review_required); append-only evidence ledger model (8 evidence
+  types — simulated/mock NEVER satisfy physical validation, COTS needs instrument
+  identity, failed evidence preserved); 33-class failure taxonomy; Rev A->B package
+  model (Rev B never automatic, Rev A evidence never hidden); incoming inspection
+  workflows (common + per-board, manual evidence + photos).
+- calibration.py: calibration state model (9 states — mock_calibrated is never
+  physical; internally_calibrated requires an internal board that EXISTS) +
+  measurement uncertainty / claim policy (per-capability allowed/forbidden claims:
+  no precision/6.5-digit/scope/funcgen/LA/RF claims without evidence) + Batch 1
+  verification workflows (controller/digital = verification NOT calibration ->
+  sanity_checked; relay continuity can reach cots_verified with a recorded DMM
+  identity).
+- redesign_engine.py: failure -> Rev B recommendation with evidence citation.
+  15 recommendation types; every recommendation requires human review; automatic
+  redesign is never allowed; fine-pitch failures map to
+  do_not_redesign_until_external_tool.
+- gen_phase16.py: all artifacts + 5 demo runs (3 mock bring-ups simulated_pass with
+  ledger entries; a SIMULATED relay_stuck failure -> taxonomy record -> RB
+  recommendation (revise_component, human review) with the failed evidence preserved
+  in the ledger; calibration/reference physical calibration -> do_not_calibrate_
+  physical). UI: Batch 1 serials + lifecycle + cal state, demo evidence (visibly
+  simulated), held boards visibly held with missing capabilities.
+
+Regression: phase16 34/34; role-completeness 22/22, phase15 21/21, fl1-core 12/12,
+validation 28/28, benchmark+signoff 29/29, fine-pitch 10/10, shared-bus 11/11,
+high-speed 8/8, ingest 6/6, frontend 24/24. No gate weakened; no fake calibration,
+traceability, or physical-evidence claims.
