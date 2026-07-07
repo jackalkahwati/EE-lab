@@ -51,6 +51,7 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
       'fl1-system-architecture', 'fl1-backplane-v1-compose-report', 'fl1-slot-standard-v1',
       'fl1-i2c-pullup-checker-report', 'fl1-connector-orientation-checker-report',
       'fl1-production-readiness-dashboard', 'fl1-cost-model', 'fl1-first-article-order-batch-plan',
+      'compose-general-design-examples', 'compose-fabrication-decision-engine',
       'fl1-system-revb-recommendations',
       'fl1-pinout-compatibility-report', 'fl1-system-risk-register', 'fl1-monolithic-costdown-roadmap',
       'full16-monolithic-architecture-comparison', 'full16-monolithic-treatment-classification',
@@ -127,6 +128,45 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
           {d['cal-board-attempt'].blocker && (
             <p className="mt-1 text-[10px] text-destructive">
               blocker: {d['cal-board-attempt'].blocker}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Phase 21: General PCBA Designer */}
+      {d['compose-general-design-examples'] && (
+        <div className="rounded-md border border-primary/40 bg-primary/5 p-3">
+          <p className="mb-1 text-[11px] font-semibold text-primary">
+            General PCBA Designer — tested examples (no general-success claim beyond them)
+          </p>
+          <div className="space-y-0.5">
+            {d['compose-general-design-examples'].summary?.map((e: any, i: number) => (
+              <div key={i} className="flex items-center gap-2 text-[9px]">
+                <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                  {e.request}
+                </span>
+                <span className="font-mono text-foreground">{e.family}</span>
+                <span
+                  className={`rounded-sm border px-1.5 py-0.5 font-mono text-[8px] ${
+                    e.buildability.startsWith('buildable')
+                      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500'
+                      : e.buildability === 'architecture_only'
+                        ? 'border-sky-500/40 bg-sky-500/10 text-sky-400'
+                        : 'border-destructive/40 bg-destructive/10 text-destructive'
+                  }`}
+                >
+                  {e.buildability}
+                </span>
+              </div>
+            ))}
+          </div>
+          {d['compose-fabrication-decision-engine'] && (
+            <p className="mt-1 text-[9px] text-muted-foreground">
+              proven: 2/4-layer + 0.5mm fine pitch · blocked:{' '}
+              {Object.keys(d['compose-fabrication-decision-engine'].blocked_capabilities).join(
+                ', ',
+              )}{' '}
+              — layer counts are recommendations with confidence, never hard claims
             </p>
           )}
         </div>

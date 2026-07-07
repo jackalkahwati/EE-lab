@@ -1113,3 +1113,32 @@ machine that is hard-capped until physical evidence exists.
 
 Regression: phase20 26/26; all suites green; frontend 24/24; board 5/5
 unchanged (artifact-only). Nothing ordered.
+
+## Phase 21: general-purpose PCBA design engine v1
+
+The pivot: FL-1 capabilities extracted into a general engine. Any board
+request now gets parse -> classify -> fabrication decision -> pattern
+selection -> capability check -> architecture plan -> gated board job, with
+honest capability limits at every stage.
+
+- pcba_engine.py: request schema (14 domains, assumptions labeled), board-type
+  classifier (19 families), fabrication decision engine (2/4-layer + 0.5mm
+  fine pitch PROVEN; QFN-56 escape, HDI/microvia, large BGA, high-speed SI/PI,
+  RF signoff, power stages BLOCKED — unproven fabrication is never recommended
+  as buildable), claim/gate model (18 claim types; production_ready forbidden
+  without physical+yield+human evidence), 19-pattern library extracted from
+  FL-1 and made generic, component capability checker, architecture planner
+  (10 buildability states), board job generator with NO FL-1 assumptions (no
+  FL-1 bus, no Pico unless selected, no 4-layer unless recommended).
+- 8 tested examples, all landing honestly: env sensor buildable_with_review
+  (2-layer candidate); USB-C monitor architecture_only (USB-C footprint gap);
+  motor controller blocked_by_missing_component_model (no gate driver/power
+  stage); Pi HAT relay buildable_with_review; satellite watchdog buildable_
+  with_review with space claims BLOCKED; RF adapter architecture_only (SMA
+  footprint + advisory impedance); PCIe capture architecture_only (external
+  SI/PI required); AI carrier blocked_by_unproven_fabrication (HDI/BGA/SI-PI).
+- No general-purpose success claim beyond the tested examples. FL-1 remains
+  intact as the proven example system, no longer the only design path.
+
+Regression: phase21 27/27; all 22 suites green; frontend 24/24; board 5/5
+unchanged (artifact-only). Nothing ordered.
