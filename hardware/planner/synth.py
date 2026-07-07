@@ -168,6 +168,11 @@ def _wire_mcu(design_specs):
     ifaces = {t for s in design_specs for i in s.get("interfaces", []) for t in [i["type"]]}
     if "i2c" in ifaces:
         n.update({"i2c_sda": "I2C_SDA", "i2c_scl": "I2C_SCL"})
+    # FL-1 role lines (Phase 16.7): a calibration/reference board carries the full
+    # bus-v2 safety/sync set, wired to real Pico pins (31/32/34 + 29).
+    if any(s.get("category") == "voltage_reference" for s in design_specs):
+        n.update({"fault": "FAULT", "interlock": "INTERLOCK",
+                  "rst_out": "RST_OUT", "trig": "TRIG"})
     if ifaces & {"spi", "spi_write_only"}:
         n.update({"spi_sck": "SPI_SCK", "spi_mosi": "SPI_MOSI", "spi_miso": "SPI_MISO"})
     # one CS from the Pico's SPI CS pin, a second (shift-register latch) on a
@@ -430,6 +435,17 @@ def synth(design, out_path):
                 for pnum, cnet in zip(ains, ("REF_OUT", "REF_DIV")):
                     nm[pnum] = cnet
                     wired.append("measures_%s" % cnet.lower())
+            elif cat == "memory.eeprom":
+                # board-ID addressing v2 (Phase 16.7): A0-A2 ride the bus-header
+                # ID straps (pull-downs at the header give bench default 0x50; a
+                # backplane slot drives 0x50-0x57). WP grounded (in-fixture write).
+                for p in spec["pins"]:
+                    pn = resolve_part._norm(p["name"])
+                    if pn in ("A0", "A1", "A2"):
+                        nm[p["number"]] = "ID_" + pn
+                        wired.append("id_strap_" + pn.lower())
+                    elif pn == "WP":
+                        nm[p["number"]] = "GND"
                 # fine-pitch escape hygiene: tie every UNUSED pin (spare analog
                 # inputs, unconnected config/alert) to the GND plane so it takes
                 # a plane via at the pad instead of a floating obstacle — that
@@ -495,23 +511,48 @@ def synth(design, out_path):
                 note_extent(px + i * 5, py + 12, 4, 6)
         px += 12
 
-    # ---- FL-1 instrument-bus connector (source/tap for the shared I2C bus) ---
-    # For an FL-1 instrument board the bus header carries power + the shared I2C
-    # control bus + a trigger, so an external controller can drive the board.
+    # ---- FL-1 instrument-bus header v2 (Phase 16.7) --------------------------
+    # Full role-complete backplane interface: power + shared I2C + FAULT/
+    # INTERLOCK/RST_OUT/TRIG + the board-ID ADDRESS STRAPS (ID_A0-A2) with local
+    # pull-downs (bench default 0x50; a backplane slot drives 0x50-0x57).
     if _cal_nets and "I2C_SDA" in nets.order:
-        body += compose.place("Connector_PinHeader_2.54mm", "PinHeader_2x03_P2.54mm_Vertical",
+        body += compose.place("Connector_PinHeader_2.54mm", "PinHeader_2x07_P2.54mm_Vertical",
                               "J1", px, py, 0,
                               {"1": "+5V", "2": "+3V3", "3": "I2C_SDA", "4": "I2C_SCL",
-                               "5": "GND", "6": "TRIG"}, nets)
-        compose._DEVICES.append({"ref": "J1", "type": "connector", "name": "FL-1 instrument bus"})
-        note_extent(px, py, 10, 8)
+                               "5": "FAULT", "6": "INTERLOCK", "7": "RST_OUT",
+                               "8": "TRIG", "9": "ID_A0", "10": "ID_A1",
+                               "11": "ID_A2", "12": "GND", "13": "GND", "14": "GND"}, nets)
+        compose._DEVICES.append({"ref": "J1", "type": "connector",
+                                 "name": "FL-1 instrument bus v2",
+                                 "id_straps": "ID_A0-A2 from backplane slot (0x50-0x57)"})
+        # strap pull-downs (default 0x50 standalone)
+        body += compose.res("R70", px + 14, py, "ID_A0", "GND", nets)
+        body += compose.res("R71", px + 14, py + 5, "ID_A1", "GND", nets)
+        body += compose.res("R72", px + 14, py + 10, "ID_A2", "GND", nets)
+        note_extent(px, py, 24, 20)
 
     # ---- assemble the board (outline that ENCLOSES every placement) ---------
     BW = round(right_extent[0] + MARGIN - X0, 1)
     BH = round(bottom_extent[0] + MARGIN - Y0, 1)
-    for i, (fx, fy) in enumerate([(6, 6), (BW - 6, 6), (6, BH - 6)]):
+    # role primitives (Phase 16.7, matching the compose path): 4x M3 corner
+    # mounting holes (7mm inset clears the placement gate's 3.0mm edge rule)
+    for i, (hx, hy) in enumerate([(7, 7), (BW - 7, 7), (7, BH - 7), (BW - 7, BH - 7)]):
+        body += compose.place("MountingHole", "MountingHole_3.2mm_M3", "H%d" % (i + 1),
+                              X0 + hx, Y0 + hy, 0, {}, nets)
+    for i, (fx, fy) in enumerate([(13, 6), (BW - 13, 6), (13, BH - 6)]):
         body += compose.place("Fiducial", "Fiducial_1mm_Mask2mm", "FID%d" % (i + 1),
                               X0 + fx, Y0 + fy, 0, {}, nets)
+    # functional silkscreen: board name + rev, cal-node labels, bus-header legend
+    _silk = [("%s  rev A" % str((design.get("intent") or {}).get(
+        "product_goal", "FL-1 board"))[:38], X0 + BW / 2, Y0 + 3, 1.0)]
+    if _cal_nets and "REF_OUT" in nets.order:
+        _silk += [("REF_OUT / REF_DIV cal nodes", X0 + BW / 2, Y0 + BH - 3, 0.7),
+                  ("FL1-BUS v2: 5V 3V3 SDA SCL FLT ILK RST TRG A0-A2 GND",
+                   X0 + BW / 2, Y0 + BH - 6, 0.6),
+                  ("PWR 5V/GND", X0 + 14, Y0 + 10, 0.7),
+                  ("TP row: rails / I2C / REF nodes", X0 + BW / 2, Y0 + BH - 9, 0.6)]
+    for text, lx, ly, size in _silk:
+        body += compose._silk_text(text, lx, ly, size)
     body = compose._unique_refs(body)
 
     p = '(kicad_pcb (version 20240108) (generator "ee-lab-compose") (generator_version "8.0")\n'

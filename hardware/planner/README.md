@@ -833,3 +833,31 @@ before_order. Human approval form generated with the standing rule: approval is 
 HUMAN fabrication decision — Compose provides evidence and recommendations but
 never spends money or submits orders. first-article regression 14/14; frontend
 24/24.
+
+## Phase 16.7: calibration role completion + board-ID addressing
+
+The two Phase 16.6 findings are FIXED, verified on regenerated boards through the
+real pipeline:
+
+- Board-ID addressing strategy: per-slot address straps SELECTED (3 options
+  evaluated). The FL-1 bus header v2 (2x07) carries ID_A0-A2 from the backplane
+  slot; boards carry local pull-downs -> bench default 0x50, slots 0x50-0x57,
+  duplicates of the same board type supported, 8-per-segment limit explicitly
+  bounded (segmentation deferred).
+- Calibration/Reference v2 rebuilt with the full role set on the synth path:
+  mounting holes, functional silk, labeled TPs, bus header v2 with FAULT/
+  INTERLOCK/RST_OUT/TRIG wired to real Pico pins, EEPROM straps + pull-downs.
+  14/14 nets, 0 DRC, ERC PASS, role_complete_with_review (11/11).
+- Core boards regenerated as v2.1 (minimal change: shared primitives only):
+  controller 16/16, digital 24/24, relay 30/30 — all 0 DRC, role-complete, straps
+  verified on the real boards. DFM gate caught the first strap-resistor placement
+  (0.37mm gap) — gates police the new primitives.
+- stitch_pads tee-bridge pass: closes same-net track-end -> track junction gaps
+  (the REF_OUT tee) — same-net only, clearance-gated, DRC still the judge.
+- Cross-board integration review v2: BOTH v1 findings RESOLVED (header pinout
+  consistent on all four; address plan resolved+bounded). FA review v3:
+  order_3_pcba_review_required (ALL FOUR). Cal board history preserved:
+  do_not_build -> physically passed -> revise_before_order -> role-complete v2.
+  Human approval form v3; nothing ordered; no production-ready claim.
+
+Regression: phase167 22/22 + all 12 suites green; frontend 24/24.

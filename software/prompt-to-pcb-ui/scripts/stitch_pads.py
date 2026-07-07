@@ -82,6 +82,61 @@ for code, pads in pads_by_net.items():
         plan.append((best[1], pcbnew.VECTOR2I(pad.GetPosition().x, pad.GetPosition().y),
                      best[2], best[3], code, f"{ref}-{pad.GetNumber()}"))
 
+# ---- tee-bridge pass (Phase 16.7): close same-net track-end -> track gaps ----
+# flroute tree branches occasionally tee into another branch one grid cell off,
+# leaving a 0.1-0.5mm same-net gap MID-track that the pad pass cannot see (the
+# REF_OUT junction gap). Bridge any dangling same-net end to the nearest same-net
+# segment within reach — same net, electrically safe, and the clearance gate
+# below still vets every bridge before it ships.
+def _seg_pt(px, py, s):
+    x1, y1 = s.GetStart().x, s.GetStart().y
+    x2, y2 = s.GetEnd().x, s.GetEnd().y
+    dx, dy = x2 - x1, y2 - y1
+    L2 = dx * dx + dy * dy
+    t = 0.0 if L2 == 0 else max(0.0, min(1.0, ((px - x1) * dx + (py - y1) * dy) / L2))
+    cx, cy = x1 + t * dx, y1 + t * dy
+    return (px - cx) ** 2 + (py - cy) ** 2, int(cx), int(cy)
+
+
+for code, segs in segs_by_net.items():
+    if code <= 0 or code in zone_codes:
+        continue
+    tracks = [s for s in segs if s.GetClass() != "PCB_VIA"]
+    for s in tracks:
+        for e in (s.GetStart(), s.GetEnd()):
+            touching = False
+            for o in segs:
+                if o is s:
+                    continue
+                if o.GetClass() == "PCB_VIA":
+                    r = o.GetWidth() // 2 + s.GetWidth() // 2
+                    if (o.GetPosition().x - e.x) ** 2 + (o.GetPosition().y - e.y) ** 2 <= r * r:
+                        touching = True
+                        break
+                elif o.GetLayer() == s.GetLayer():
+                    d2, _cx, _cy = _seg_pt(e.x, e.y, o)
+                    if d2 <= ((o.GetWidth() + s.GetWidth()) // 2) ** 2:
+                        touching = True
+                        break
+            if not touching:
+                for pad in pads_by_net.get(code, []):
+                    if pad.GetEffectiveShape(s.GetLayer()).Collide(e, 0):
+                        touching = True
+                        break
+            if touching:
+                continue
+            best = None
+            for o in tracks:
+                if o is s or o.GetLayer() != s.GetLayer():
+                    continue
+                d2, cx, cy = _seg_pt(e.x, e.y, o)
+                if d2 <= MAX_STITCH_NM ** 2 and (best is None or d2 < best[0]):
+                    best = (d2, cx, cy)
+            if best is not None and best[0] > 100:
+                plan.append((pcbnew.VECTOR2I(e.x, e.y),
+                             pcbnew.VECTOR2I(best[1], best[2]),
+                             s.GetLayer(), s.GetWidth(), code, "tee-bridge"))
+
 # ---- clearance index: foreign-net copper per layer (read-only snapshot) ------
 # A stitch is non-grid copper, so unlike the main router its segment can graze
 # another net within clearance (DRC clearance). Build per-layer shapes of every

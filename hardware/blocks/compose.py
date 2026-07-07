@@ -532,36 +532,52 @@ def block_relay_matrix(x, y, n, nets):
 
 
 def block_fl1_bus(x, y, n, nets):
-    """FL-1 instrument bus header (Phase 15.6 role primitive). A 2x05 header
-    carrying the backplane interface every FL-1 board needs: power, the shared
-    I2C control bus, and the safety/sync lines (FAULT, INTERLOCK, RESET, TRIG).
-    Wired to real MCU pins via the shared net map — role hardware, not a label."""
+    """FL-1 instrument bus header v2 (Phase 16.7). A 2x07 header carrying the
+    full backplane interface: power, the shared I2C control bus, the safety/sync
+    lines (FAULT, INTERLOCK, RESET, TRIG), and the board-ID ADDRESS STRAPS
+    (ID_A0-A2) — the backplane slot drives the straps so multiple boards of the
+    same type get unique EEPROM addresses (0x50-0x57); local pull-downs give the
+    bench default 0x50. Wired to real MCU pins — role hardware, not a label."""
     pmap = {"1": "+5V", "2": "+3V3",
             "3": n.get("i2c_sda", "I2C_SDA"), "4": n.get("i2c_scl", "I2C_SCL"),
             "5": n.get("fault", "FAULT"), "6": n.get("interlock", "INTERLOCK"),
             "7": n.get("rst_out", "RST_OUT"), "8": n.get("trig", "TRIG"),
-            "9": "GND", "10": "GND"}
-    b = place("Connector_PinHeader_2.54mm", "PinHeader_2x05_P2.54mm_Vertical",
+            "9": n.get("id_a0", "ID_A0"), "10": n.get("id_a1", "ID_A1"),
+            "11": n.get("id_a2", "ID_A2"), "12": "GND", "13": "GND", "14": "GND"}
+    b = place("Connector_PinHeader_2.54mm", "PinHeader_2x07_P2.54mm_Vertical",
               "J8", x + 5, y + 8, 0, pmap, nets)
-    label("FL1-BUS", x + 5, y + 3)
-    label("5V 3V3 SDA SCL FLT ILK RST TRG GND", x + 5, y + 22, 0.6)
-    _DEVICES.append({"ref": "J8", "type": "connector", "name": "FL-1 instrument bus"})
-    return b, 18, 26
+    label("FL1-BUS v2", x + 5, y + 3)
+    label("5V 3V3 SDA SCL FLT ILK RST TRG A0 A1 A2 GND", x + 5, y + 27, 0.6)
+    _DEVICES.append({"ref": "J8", "type": "connector", "name": "FL-1 instrument bus v2",
+                     "id_straps": "ID_A0-A2 from backplane slot (0x50-0x57)"})
+    return b, 18, 31
 
 
 def block_board_id(x, y, n, nets):
-    """Board-ID EEPROM (24LC02, SOIC-8) on the shared I2C bus — the identity the
-    FL-1 interconnect spec requires on every device board. A0-A2 strapped to GND
-    (address 0x50), WP grounded (writable in-fixture; strap high for lockdown)."""
-    b = place("Package_SO", "SOIC-8_3.9x4.9mm_P1.27mm", "U9", x + 6, y + 8, 0, {
-        "1": "GND", "2": "GND", "3": "GND", "4": "GND",
+    """Board-ID EEPROM v2 (24LC02, SOIC-8) on the shared I2C bus. A0-A2 come from
+    the FL-1 bus header's ID straps (backplane slot -> unique address 0x50-0x57)
+    with local pull-downs so a bench-standalone board defaults to 0x50 — the fix
+    for the all-boards-at-0x50 conflict the cross-board review caught. Without an
+    fl1bus block the straps fall back to GND (fixed 0x50, single-board only)."""
+    strapped = "id_a0" in n
+    a0 = n.get("id_a0", "GND")
+    a1 = n.get("id_a1", "GND")
+    a2 = n.get("id_a2", "GND")
+    b = place("Package_SO", "SOIC-8_3.9x4.9mm_P1.27mm", "U9", x + 9, y + 8, 0, {
+        "1": a0, "2": a1, "3": a2, "4": "GND",
         "5": n.get("i2c_sda", "I2C_SDA"), "6": n.get("i2c_scl", "I2C_SCL"),
         "7": "GND", "8": "+3V3"}, nets)
-    b += cap("C25", x + 10, y + 17, "+3V3", "GND", nets)
-    label("ID 0x50", x + 6, y + 3)
+    b += cap("C25", x + 14, y + 16, "+3V3", "GND", nets)
+    if strapped:
+        # strap pull-downs: bench default 0x50; the backplane slot overrides
+        b += res("R70", x + 2, y + 5, a0, "GND", nets)
+        b += res("R71", x + 2, y + 10, a1, "GND", nets)
+        b += res("R72", x + 2, y + 15, a2, "GND", nets)
+    label("ID 0x50+slot" if strapped else "ID 0x50", x + 9, y + 3)
     _DEVICES.append({"ref": "U9", "type": "board_id_eeprom", "name": "24LC02",
-                     "i2c_address": "0x50"})
-    return b, 14, 22
+                     "i2c_address": "0x50-0x57 (slot straps, default 0x50)"
+                     if strapped else "0x50 (fixed — single-board only)"})
+    return b, 20, 22
 
 
 def block_gpio_bank(x, y, n, nets):
@@ -825,7 +841,8 @@ def compose(spec, blocks, out_path):
         n.setdefault("i2c_scl", "I2C_SCL")
     if "fl1bus" in keys:
         n.update({"fault": "FAULT", "interlock": "INTERLOCK",
-                  "rst_out": "RST_OUT", "trig": "TRIG"})
+                  "rst_out": "RST_OUT", "trig": "TRIG",
+                  "id_a0": "ID_A0", "id_a1": "ID_A1", "id_a2": "ID_A2"})
     if "gpiobank" in keys:
         n.update({"gp_a": "GPIO0", "gp_b": "GPIO1", "gp_c": "GPIO2", "gp_d": "GPIO3"})
     if "spibus" in keys and "spi_sck" not in n:

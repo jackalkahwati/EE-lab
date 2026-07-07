@@ -45,6 +45,7 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
       'fl1-batch1-serial-plan', 'phase16-demo-runs', 'phase16-held-board-status',
       'calibration-board-finegrid-result', 'via-in-pad-feasibility-report',
       'batch1-stability-report', 'fl1-first-article-review-pack',
+      'fl1-final-first-article-review-v3', 'fl1-board-id-addressing-strategy',
     ]
     Promise.all(
       files.map((f) =>
@@ -118,6 +119,47 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
               blocker: {d['cal-board-attempt'].blocker}
             </p>
           )}
+        </div>
+      )}
+
+      {/* Phase 16.7: FA review v3 — addressing resolved, four-board decision */}
+      {d['fl1-final-first-article-review-v3']?.boards?.length > 0 && (
+        <div className="rounded-md border border-emerald-500/40 bg-emerald-500/5 p-3">
+          <p className="mb-1 text-[11px] font-semibold text-emerald-500">
+            First-Article Review v3 — {d['fl1-final-first-article-review-v3'].batch_decision}
+          </p>
+          <div className="space-y-1">
+            {d['fl1-final-first-article-review-v3'].boards.map((r: any, i: number) => (
+              <div key={i} className="rounded-md border border-border px-3 py-1">
+                <div className="flex items-center gap-2 text-[10px]">
+                  <span className="text-foreground">{r.board_class}</span>
+                  <span
+                    className={`rounded-sm border px-1.5 py-0.5 text-[9px] ${
+                      r.recommendation === 'order_3_pcba'
+                        ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500'
+                        : 'border-amber-500/40 bg-amber-500/10 text-amber-500'
+                    }`}
+                  >
+                    {r.recommendation}
+                  </span>
+                  <span className="ml-auto font-mono text-[8px] text-muted-foreground">
+                    {r.routing} · DRC {r.drc} · {r.role_completeness} · ID {r.eeprom_address}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-[8px] text-muted-foreground">{r.history}</p>
+              </div>
+            ))}
+          </div>
+          {d['fl1-board-id-addressing-strategy'] && (
+            <p className="mt-1 text-[9px] text-muted-foreground">
+              board-ID strategy: {d['fl1-board-id-addressing-strategy'].selected} —{' '}
+              {d['fl1-board-id-addressing-strategy'].address_map} (
+              {d['fl1-board-id-addressing-strategy'].limitation})
+            </p>
+          )}
+          <p className="mt-1 text-[9px] text-muted-foreground">
+            Human approval pending — Compose never orders or spends money.
+          </p>
         </div>
       )}
 

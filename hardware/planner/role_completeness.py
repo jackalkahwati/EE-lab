@@ -27,7 +27,9 @@ def _board_facts(board_text, devices):
         "test_points": board_text.count('footprint "TestPoint:'),
         "silk_labels": board_text.count("(gr_text "),
         "fl1_bus_header": any("FL-1 instrument bus" in n for n in dev_names),
-        "board_id_eeprom": "board_id_eeprom" in dev_types,
+        # compose path types it board_id_eeprom; the synth/UCS path types the
+        # 24LC02 as plain "eeprom" (category memory.eeprom) — both are identity
+        "board_id_eeprom": "board_id_eeprom" in dev_types or "eeprom" in dev_types,
         "nets": nets,
         "dev_types": dev_types,
         "dev_names": dev_names,
@@ -81,10 +83,23 @@ def _relay_reqs(f):
     ]
 
 
+def _calibration_reqs(f):
+    return _common_reqs(f) + [
+        ("precision reference wired to REF_OUT", "REF_OUT" in f["nets"]),
+        ("divider producing REF_DIV", "REF_DIV" in f["nets"]),
+        ("ADC measures the reference nodes",
+         any("ADS1115" in n for n in f["dev_names"]) or "adc" in str(f["dev_types"])),
+        ("bus-v2 safety lines (FAULT/INTERLOCK/RST_OUT/TRIG)",
+         {"FAULT", "INTERLOCK", "RST_OUT", "TRIG"} <= f["nets"]),
+        ("board-ID address straps (ID_A0-A2)", {"ID_A0", "ID_A1", "ID_A2"} <= f["nets"]),
+    ]
+
+
 ROLE_CHECKS = {
     "controller_backplane": _controller_reqs,
     "digital_bringup": _digital_reqs,
     "relay_probe_matrix": _relay_reqs,
+    "calibration_reference": _calibration_reqs,
 }
 
 # caveats that keep a complete board at _with_review (honest limits, not failures)
@@ -97,6 +112,10 @@ ROLE_CAVEATS = {
     "relay_probe_matrix": ["4-channel v1 matrix (PROBEn -> shared 2-wire bus), not a crossbar",
                            "NO high-voltage isolation claim (signal relays, standard spacing)",
                            "NO precision/low-leakage switching claim"],
+    "calibration_reference": ["NO calibration claim until a traceable reference chain "
+                              "exists post-fab", "metrology traceability external",
+                              "board-ID defaults to 0x50 standalone; slot straps give "
+                              "0x50-0x57 on a backplane"],
 }
 
 
