@@ -49,6 +49,8 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
       'fl1-manufacturing-readiness-pack', 'fl1-held-board-architecture-search',
       'pcm1-measurement-claim-model', 'pcm1-safety-protection-model', 'pcm1-compose-report',
       'fl1-system-architecture', 'fl1-backplane-v1-compose-report', 'fl1-slot-standard-v1',
+      'fl1-i2c-pullup-checker-report', 'fl1-connector-orientation-checker-report',
+      'fl1-system-revb-recommendations',
       'fl1-pinout-compatibility-report', 'fl1-system-risk-register', 'fl1-monolithic-costdown-roadmap',
       'full16-monolithic-architecture-comparison', 'full16-monolithic-treatment-classification',
       'full16-monolithic-final-recommendation', 'rp2040-qfn56-fanout-feasibility',
@@ -168,6 +170,32 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
           {d['fl1-monolithic-costdown-roadmap'] && (
             <p className="mt-1 text-[9px] text-muted-foreground">
               cost-down: {d['fl1-monolithic-costdown-roadmap'].rule}
+            </p>
+          )}
+          {d['fl1-i2c-pullup-checker-report'] && (
+            <div className="mt-1 rounded-md border border-destructive/40 bg-destructive/5 px-2 py-1">
+              <p className="text-[9px] text-destructive">
+                I2C as-built:{' '}
+                {d['fl1-i2c-pullup-checker-report'].scenarios.system_all_populated_AS_BUILT.classification}{' '}
+                ({d['fl1-i2c-pullup-checker-report'].scenarios.system_all_populated_AS_BUILT.effective_ohm}
+                Ω, {d['fl1-i2c-pullup-checker-report'].scenarios.system_all_populated_AS_BUILT.estimated_sink_ma_at_VOL}
+                mA &gt; 3mA spec) — Rev B backplane-owner config:{' '}
+                {d['fl1-i2c-pullup-checker-report'].scenarios.system_revb_backplane_owner.classification}{' '}
+                ({d['fl1-i2c-pullup-checker-report'].scenarios.system_revb_backplane_owner.effective_ohm}Ω)
+              </p>
+              <p className="text-[8px] text-muted-foreground">
+                {d['fl1-i2c-pullup-checker-report'].physical_compliance}
+              </p>
+            </div>
+          )}
+          {d['fl1-connector-orientation-checker-report'] && (
+            <p className="mt-1 text-[9px] text-amber-500">
+              connectors:{' '}
+              {d['fl1-connector-orientation-checker-report'].connectors.filter(
+                (c: any) => c.classification === 'unkeyed_review_required',
+              ).length}{' '}
+              unkeyed_review_required — first-article mitigation: pin-1 silk + checklist +
+              inspection; Rev B: keyed shrouded headers
             </p>
           )}
           <a

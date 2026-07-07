@@ -1049,3 +1049,30 @@ no certification/safety/EMC/thermal claims, six plugin boards untouched.
 
 Regression: phase19 37/37; all 18 suites green; frontend 24/24; board 5/5.
 Seven review-required boards; nothing ordered.
+
+## Phase 19.1: backplane integration fixes + Rev B readiness v1
+
+The two Phase 19 findings are now ENFORCEABLE RULES, not review notes.
+
+- I2C pull-up ownership model (7 boards): cards own their pull-ups standalone,
+  the backplane owns them in system mode, exactly one owner required. The
+  effective pull-up checker computes real parallel resistance + sink current:
+  as-built (6 cards + backplane, all populated) = too_strong_pullup at 671 ohm
+  / 4.32mA (>3mA spec); Rev B backplane-owner config = ok at 4.7k; missing ->
+  missing_pullup; unknown -> unknown_population. NO I2C compliance claim from
+  arithmetic — physical rise-time/sink measurement stays measurement_required.
+- Rev B population plan: card R10/R11 DNP by default in system BOM views
+  (sufficient for first articles — no redesign), solder-jumper enable in Rev B,
+  backplane R94/R95 confirmed owner.
+- Connector keying policy + orientation checker: all 7 connector families
+  flagged unkeyed_review_required; safety/power connectors high severity;
+  first-article mitigation = pin-1 silk + checklist + human inspection; Rev B =
+  keyed shrouded headers. No connector safety claim without mitigation.
+- 5 Rev B recommendations (evidence-linked, no auto-redesign, human review
+  required); validation plan v2 BLOCKS system validation on invalid pull-up
+  configuration or unverifiable connector orientation; manufacturing readiness
+  v2 (standalone-vs-system BOM views); risk register v2 (both findings
+  ENFORCED); seven-board human approval form v2 with explicit acknowledgements.
+
+Regression: phase191 27/27; all suites green; frontend 24/24; board 5/5
+unchanged (artifact-only). Seven boards untouched; nothing ordered.
