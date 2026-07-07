@@ -949,3 +949,33 @@ pipeline. Verdict: ready_to_build_with_review; order stays human-gated.
 
 Regression: phase185 23/23 + all 15 suites green + frontend 24/24. Batch 1
 untouched; nothing ordered; no production-ready claim.
+
+## Phase 18.6: Power / Current Monitor PCM-1 v1 — PASSED
+
+The Phase 18 #2 recommendation composed through the real pipeline: 17/17 nets,
+0 DRC, 0 unconnected, ERC PASS, role_complete_with_review (14/14). Verdict:
+ready_to_build_with_review. Six boards now sit in the review queue.
+
+- PCM-1 (power + mcu + dut monitor + fl1 bus v2 + board id): conservative
+  shunt+ADS1115 monitor on the PROVEN cal-board chain. Low-side 0402 shunt,
+  11:1 divider, series-R protected ADC inputs, DUT connector, TPs for DUT_V/
+  SHUNT_HI/SHUNT_LO/both ADC inputs, MONITOR-ONLY silk. ADS1115 pin map taken
+  from the VALIDATED UCS (never guessed). Pico module kept BY DESIGN this phase;
+  bare-MCU is its own future architecture-search target.
+- Claim model: uncalibrated -> sanity_checkable before calibration;
+  cots_verifiable vs identified instruments; internally_calibratable only after
+  the Calibration/Reference board is physical + verified. 0-24V / 0-500mA
+  labeled limits bounded by the 0402 shunt power budget; inline-fuse
+  recommendation until bring-up thermal data exists. No DMM/supply/HV/
+  high-current/isolation/certification claims.
+- Architecture choice recorded honestly, including a CORRECTION: the INA228
+  block already sources and routes (dc-measure fixture) — the INA variant is
+  gated on measurement-path validation, not basic ingestion as Phase 18 scored.
+- flroute v5.1: wiring VIAS are now all-layer net-owned obstacles (fanout
+  dogbone vias were invisible to inner-layer routing — the PCM-1 DUT_V/GND
+  short). Stitcher: finer 0.3mm grid + fine-via (0.4/0.2) second pass squeezes
+  pockets the 0.6 via cannot (the R11 pull-up corridor).
+- New role: power_current_monitor (14 requirements + honest caveats).
+
+Regression: phase186 33/33; all 16 suites green; frontend 24/24; board 5/5.
+Nothing ordered; five prior boards untouched; no gate weakened.

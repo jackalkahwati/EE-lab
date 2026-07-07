@@ -475,6 +475,48 @@ def block_dc_measure(x, y, n, nets):
     return b, 32, 28
 
 
+def block_dut_monitor(x, y, n, nets):
+    """PCM-1 DUT power/current monitor (Phase 18.6): conservative shunt+ADS1115
+    path on the PROVEN cal-board measurement chain. Low-side 0402 shunt
+    (monitor-only, low current), 11:1 divider for DUT voltage, series-R
+    protected ADC inputs. NOT a DMM, NOT a supply — labels say so."""
+    # DUT input: V+ / RTN (through shunt to GND) / GND reference
+    b = place("Connector_PinHeader_2.54mm", "PinHeader_1x03_P2.54mm_Vertical",
+              "J20", x + 3, y + 8, 0,
+              {"1": "DUT_V", "2": "SHUNT_HI", "3": "GND"}, nets)
+    # low-side shunt: DUT return -> SHUNT_HI --R85(shunt)-- GND
+    b += res("R85", x + 3, y + 20, "SHUNT_HI", "GND", nets)
+    # divider DUT_V -> VSENSE_DIV -> GND (11:1, 0-24V in -> 0-2.2V at ADC)
+    b += res("R86", x + 9, y + 4, "DUT_V", "VSENSE_DIV", nets)
+    b += res("R87", x + 9, y + 9, "VSENSE_DIV", "GND", nets)
+    # series protection into the ADC pins
+    b += res("R88", x + 9, y + 14, "VSENSE_DIV", "VSENSE_ADC", nets)
+    b += res("R89", x + 9, y + 19, "SHUNT_HI", "ISENSE_ADC", nets)
+    # ADS1115 (validated UCS pin map), fine-pitch escape handled by fanout
+    b += place("Package_SO", "TSSOP-10_3x3mm_P0.5mm", "U15", x + 17, y + 10, 0, {
+        "1": "GND",            # ADDR -> 0x48
+        "3": "GND", "8": "+3V3",
+        "4": "VSENSE_ADC", "5": "ISENSE_ADC", "6": "GND", "7": "GND",
+        "9": n.get("i2c_sda", "I2C_SDA"), "10": n.get("i2c_scl", "I2C_SCL")}, nets)
+    b += cap("C30", x + 21, y + 17, "+3V3", "GND", nets)
+    # probe points the validation workflows name explicitly
+    b += tp("TP30", x + 26, y + 10, "DUT_V", nets)
+    b += tp("TP31", x + 26, y + 15, "SHUNT_HI", nets)
+    b += tp("TP32", x + 26, y + 20, "VSENSE_ADC", nets)
+    b += tp("TP33", x + 30, y + 10, "ISENSE_ADC", nets)
+    b += tp("TP34", x + 30, y + 15, "GND", nets)
+    label("DUT IN 0-24V 0-500mA MAX", x + 14, y + 1, 0.7)
+    label("MONITOR-ONLY  no supply  no DMM claim", x + 14, y + 25, 0.6)
+    label("J20: V+ / RTN(shunt) / GND", x + 3, y + 4, 0.6)
+    label("SHUNT R85 low-side  TP31=SHUNT_HI TP34=SHUNT_LO/GND", x + 16, y + 23, 0.6)
+    _DEVICES.append({"ref": "U15", "type": "adc", "name": "ADS1115",
+                     "i2c_address": "0x48",
+                     "role": "DUT V/I monitor (AIN0=VSENSE, AIN1=ISENSE)"})
+    _DEVICES.append({"ref": "R85", "type": "shunt", "name": "low-side shunt",
+                     "note": "monitor-only; value+rating recorded in safety model"})
+    return b, 34, 28
+
+
 def block_relay_matrix(x, y, n, nets):
     """FL-1 relay / instrument-routing matrix (B-4) — Compose's native domain,
     built entirely from the block layer on coarse resolved parts. An MCU shifts a
@@ -651,6 +693,7 @@ BLOCK_TABLE = {
     "comms": block_comms_can,
     "motion": block_motion_controller,
     "instrument": block_dc_measure,
+    "dutmonitor": block_dut_monitor,
     "relaymatrix": block_relay_matrix,
     "fl1bus": block_fl1_bus,
     "boardid": block_board_id,
@@ -703,8 +746,10 @@ def _block_keys(s):
     if any(k in s for k in ("stepper", "motion controller", "stepper driver",
                             "tmc2209", "tmc5160", "step/dir")):
         add("motion")
-    if any(k in s for k in ("current sense", "current monitor", "dc measure",
-                            "power monitor", "ina228", "instrument", "shunt")):
+    if any(k in s for k in ("dut monitor", "dut power monitor", "pcm")):
+        add("dutmonitor")
+    elif any(k in s for k in ("current sense", "current monitor", "dc measure",
+                              "power monitor", "ina228", "instrument", "shunt")):
         add("instrument")
     if any(k in s for k in ("relay matrix", "relay bank", "instrument matrix",
                             "probe matrix", "switch matrix", "relay")):
@@ -790,11 +835,11 @@ LAYERS = '''  (layers
 # grows past the width budget, so the layout scales as blocks are added.
 ROW = {"power": 0, "usbc": 0, "mcu": 0, "imu": 0, "radio": 0, "antenna": 0,
        "gnss": 0, "cellular": 0, "tempsensor": 0, "comms": 0, "motion": 1,
-       "instrument": 0, "relaymatrix": 1, "motors": 1,
+       "instrument": 0, "dutmonitor": 0, "relaymatrix": 1, "motors": 1,
        "fl1bus": 0, "boardid": 0, "gpiobank": 0, "spibus": 0, "uartbridge": 0}
 COL = {"power": 0, "usbc": 0, "mcu": 2, "imu": 3, "tempsensor": 3, "gnss": 4,
        "radio": 5, "cellular": 6, "comms": 7, "antenna": 9, "motors": 1,
-       "motion": 3, "instrument": 4, "relaymatrix": 1,
+       "motion": 3, "instrument": 4, "dutmonitor": 4, "relaymatrix": 1,
        "boardid": 3, "fl1bus": 8, "gpiobank": 8, "spibus": 8, "uartbridge": 9}
 ROW_BUDGET = 170.0  # mm — wrap a band wider than this
 

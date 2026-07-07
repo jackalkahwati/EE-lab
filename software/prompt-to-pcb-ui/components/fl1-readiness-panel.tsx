@@ -47,6 +47,7 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
       'batch1-stability-report', 'fl1-first-article-review-pack',
       'fl1-final-first-article-review-v3', 'fl1-board-id-addressing-strategy',
       'fl1-manufacturing-readiness-pack', 'fl1-held-board-architecture-search',
+      'pcm1-measurement-claim-model', 'pcm1-safety-protection-model', 'pcm1-compose-report',
       'fl1-recommended-next-board-roadmap',
     ]
     Promise.all(
@@ -121,6 +122,29 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
               blocker: {d['cal-board-attempt'].blocker}
             </p>
           )}
+        </div>
+      )}
+
+      {/* Phase 18.6: PCM-1 — monitor-only claims, calibration dependency */}
+      {d['pcm1-compose-report'] && (
+        <div className="rounded-md border border-border p-3">
+          <p className="mb-1 text-[11px] font-semibold text-foreground">
+            PCM-1 Power/Current Monitor — {d['pcm1-compose-report'].verdict} (
+            {d['pcm1-compose-report'].routing}, DRC {d['pcm1-compose-report'].drc_violations})
+          </p>
+          <p className="text-[10px] text-amber-500">
+            MONITOR-ONLY · UNCALIBRATED until COTS or cal-board verification · not a DMM ·
+            not a power supply · 0-24V / 0-500mA labeled limits
+          </p>
+          {d['pcm1-measurement-claim-model'] && (
+            <p className="mt-1 text-[9px] text-muted-foreground">
+              voltage: {d['pcm1-measurement-claim-model'].voltage.claims_before_calibration} ·
+              current: {d['pcm1-measurement-claim-model'].current.claims_before_calibration}
+            </p>
+          )}
+          <p className="mt-1 text-[9px] text-muted-foreground">
+            {d['pcm1-compose-report'].mcu} · {d['pcm1-compose-report'].order}
+          </p>
         </div>
       )}
 

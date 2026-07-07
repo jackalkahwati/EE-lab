@@ -186,20 +186,29 @@ for fp in b.GetFootprints():
         # rows). Via spot must clear all layers; the pad->via bridge must clear
         # its own layer. Final DRC gates every placement.
         blayer = pcbnew.F_Cu if pcbnew.F_Cu in layers else pcbnew.B_Cu
-        step = pcbnew.FromMM(0.45)
-        R = 13   # 13*0.45 ~ 5.9mm
+        step = pcbnew.FromMM(0.3)
+        R = 20   # 20*0.3 = 6mm
         cands = sorted(((dx, dy) for dx in range(-R, R + 1) for dy in range(-R, R + 1)),
                        key=lambda t: t[0] * t[0] + t[1] * t[1])
         spot = None
-        for gx, gy in cands:
-            dx, dy = gx * step, gy * step
-            if _blocked(pos.x + dx, pos.y + dy, nc, vd):
-                continue
-            if (dx or dy) and not _bridge_clear(pos.x, pos.y,
-                                                pos.x + dx, pos.y + dy, nc, blayer):
-                continue
-            spot = pcbnew.VECTOR2I(pos.x + dx, pos.y + dy)
-            break
+        # pass 1: default via; pass 2 (fanout boards only, finer via class is
+        # legal there): the 0.4/0.2 via squeezes pockets the 0.6 via cannot.
+        via_options = [(vd, vk)]
+        if _fanout_skip or _os.path.exists(_fp_path):
+            via_options.append((pcbnew.FromMM(0.4), pcbnew.FromMM(0.2)))
+        for try_vd, try_vk in via_options:
+            for gx, gy in cands:
+                dx, dy = gx * step, gy * step
+                if _blocked(pos.x + dx, pos.y + dy, nc, try_vd):
+                    continue
+                if (dx or dy) and not _bridge_clear(pos.x, pos.y,
+                                                    pos.x + dx, pos.y + dy, nc, blayer):
+                    continue
+                spot = pcbnew.VECTOR2I(pos.x + dx, pos.y + dy)
+                vd, vk = try_vd, try_vk
+                break
+            if spot is not None:
+                break
         if spot is None:
             # FALLBACK: no legal via spot anywhere nearby — bridge the pad BY
             # TRACK to the nearest same-net anchor that already reaches the

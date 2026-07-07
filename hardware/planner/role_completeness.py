@@ -108,12 +108,32 @@ def _eii_reqs(f):
     ]
 
 
+def _pcm_reqs(f):
+    return _common_reqs(f) + [
+        ("voltage sense path (divider -> protected ADC input)",
+         {"DUT_V", "VSENSE_DIV", "VSENSE_ADC"} <= f["nets"]),
+        ("current sense path (shunt -> protected ADC input)",
+         {"SHUNT_HI", "ISENSE_ADC"} <= f["nets"]),
+        ("shunt present (device manifest)", "shunt" in f["dev_types"]),
+        ("ADC on shared I2C (ADS1115)",
+         "adc" in f["dev_types"] and any("ADS1115" in n for n in f["dev_names"])),
+        ("ADC input protection (series R into both channels)",
+         {"VSENSE_ADC", "ISENSE_ADC"} <= f["nets"]),
+        ("DUT input connector", "DUT_V" in f["nets"]),
+        ("bus-v2 safety lines (FAULT/INTERLOCK/RST_OUT/TRIG)",
+         {"FAULT", "INTERLOCK", "RST_OUT", "TRIG"} <= f["nets"]),
+        ("board-ID address straps (ID_A0-A2)",
+         {"ID_A0", "ID_A1", "ID_A2"} <= f["nets"]),
+    ]
+
+
 ROLE_CHECKS = {
     "controller_backplane": _controller_reqs,
     "digital_bringup": _digital_reqs,
     "relay_probe_matrix": _relay_reqs,
     "calibration_reference": _calibration_reqs,
     "external_instrument_interface": _eii_reqs,
+    "power_current_monitor": _pcm_reqs,
 }
 
 # caveats that keep a complete board at _with_review (honest limits, not failures)
@@ -132,6 +152,13 @@ ROLE_CAVEATS = {
         "trigger/sync are protected GPIO (Pico boots as inputs = safe default); "
         "timing is sanity-class unless measured by an external instrument",
         "COTS instrument capability is COTS capability, never internal FL-1 capability"],
+    "power_current_monitor": [
+        "MONITOR-ONLY: not a DMM, not a programmable supply, no electronic-load behavior",
+        "UNCALIBRATED until verified against COTS DMM (cots_verifiable) or the physical "
+        "Calibration/Reference board (internally_calibratable)",
+        "low-current low-voltage only: 0-24V, 0-500mA labeled limits; 0402 shunt "
+        "power budget bounds the current claim; NO high-current/high-voltage/isolation claim",
+        "Pico MODULE is the deliberate v1 MCU choice — not a bare-RP2040 productization claim"],
     "calibration_reference": ["NO calibration claim until a traceable reference chain "
                               "exists post-fab", "metrology traceability external",
                               "board-ID defaults to 0x50 standalone; slot straps give "

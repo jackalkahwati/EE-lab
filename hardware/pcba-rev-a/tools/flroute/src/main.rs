@@ -689,6 +689,63 @@ fn main() {
             }
         }
         eprintln!("v5 wiring: {} pre-existing wire cells marked", wire_cells);
+
+        // v5.1 (Phase 18.6): wiring VIAS too. A fanout dogbone via spans ALL
+        // layers, but only its F.Cu stub was marked above — inner-layer routes
+        // then crossed the via barrel (the PCM-1 DUT_V/GND short). Mark every
+        // layer's cells within the via radius as owned by the via's net.
+        let mut via_cells = 0u32;
+        for v in wiring.kids("via") {
+            let items = v.list();
+            if items.len() < 4 {
+                continue;
+            }
+            let x: f64 = match items[2].sym().parse() {
+                Ok(a) => a,
+                Err(_) => continue, // structure-section via header, not a placement
+            };
+            let y: f64 = match items[3].sym().parse() {
+                Ok(a) => a,
+                Err(_) => continue,
+            };
+            let net_name = v
+                .kid("net")
+                .map(|n| n.list()[1].sym().to_string())
+                .unwrap_or_default();
+            let nid = net_id_of.get(&net_name).copied().unwrap_or(u16::MAX);
+            // diameter from the padstack name: Via[0-3]_<dia>:<drill>_um
+            let dia: f64 = items[1]
+                .sym()
+                .split('_')
+                .nth(1)
+                .and_then(|t| t.split(':').next())
+                .and_then(|t| t.parse().ok())
+                .unwrap_or(600.0);
+            let r = dia / 2.0 + halo;
+            let x_lo = (((x - r - bx0) / pitch).floor() as isize).max(0);
+            let x_hi = (((x + r - bx0) / pitch).ceil() as isize).min(gw as isize - 1);
+            let y_lo = (((y - r - by0) / pitch).floor() as isize).max(0);
+            let y_hi = (((y + r - by0) / pitch).ceil() as isize).min(gh as isize - 1);
+            for li in 0..layers.len() {
+                for yy in y_lo..=y_hi {
+                    let cy = by0 + yy as f64 * pitch;
+                    for xx in x_lo..=x_hi {
+                        let cx = bx0 + xx as f64 * pitch;
+                        if (cx - x) * (cx - x) + (cy - y) * (cy - y) > r * r {
+                            continue;
+                        }
+                        let c = &mut owner[idx(xx as usize, yy as usize, li)];
+                        if *c == 0 {
+                            *c = nid;
+                            via_cells += 1;
+                        } else if *c != nid {
+                            *c = u16::MAX;
+                        }
+                    }
+                }
+            }
+        }
+        eprintln!("v5.1 wiring vias: {} cells marked", via_cells);
     }
 
     // ---------- v2: respect the boundary (no edge-clearance overshoot) ------------
