@@ -76,11 +76,20 @@ _KW = {
 }
 
 
+def _kw_hit(t, k):
+    """Word-boundary match for short bare tokens ('sma' must not match inside
+    'small' — a real bug the first non-FL-1 benchmark caught); substring match
+    for phrases."""
+    if " " in k or "-" in k or len(k) > 4:
+        return k in t
+    return re.search(r"\b%s\b" % re.escape(k.strip()), t) is not None
+
+
 def parse_request(text):
     t = text.lower()
     domain = "unknown"
     for d, kws in _KW.items():
-        if any(k in t for k in kws):
+        if any(_kw_hit(t, k) for k in kws):
             domain = d
             break
     spec = {
@@ -94,11 +103,11 @@ def parse_request(text):
         "interfaces": [i for i, kws in
                        [("i2c", ["i2c", "sensor"]), ("usb", ["usb"]),
                         ("spi", ["spi"]), ("uart", ["uart", "serial"]),
-                        ("pcie", ["pcie"]), ("rf", ["rf", "sma", "antenna"]),
+                        ("pcie", ["pcie"]), ("rf", ["rf ", "sma ", "antenna"]),
                         ("gpio", ["relay", "gpio", "hat"])]
                        if any(k in t for k in kws)],
         "high_speed": any(k in t for k in ("pcie", "serdes", "ddr", "10g", "224g", "448g")),
-        "rf": any(k in t for k in ("rf ", "rf adapter", "antenna", "sma", "50 ohm")),
+        "rf": any(_kw_hit(t, k) for k in ("rf", "rf adapter", "antenna", "sma", "50 ohm")),
         "high_current": any(k in t for k in ("motor", "24v", "power supply", "psu")),
         "high_reliability": domain in ("space_electronics", "defense_electronics"),
         "bga_or_dense_soc": any(k in t for k in ("accelerator", "gpu", "soc", "fpga carrier",

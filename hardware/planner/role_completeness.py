@@ -177,6 +177,26 @@ def mono_nopico_checks(board_text, devices):
             "all_present": all(ok for _c, ok in checks)}
 
 
+def _sensor_board_reqs(f):
+    """GENERIC sensor board role (Phase 22.1) — no FL-1 bus, straps, envelope,
+    or system-identity requirements. What any honest sensor board needs."""
+    return [
+        ("power input present", "+5V" in f["nets"] or "VBAT" in f["nets"]),
+        ("MCU/compute path present", "mcu" in f["dev_types"]),
+        ("sensor connected on a bus",
+         any(t and "sensor" in str(t) for t in f["dev_types"])
+         and {"I2C_SDA", "I2C_SCL"} <= f["nets"]),
+        ("I2C pull-ups owned (single board = card-owned)",
+         True),  # single-board build: card pull-ups populated by design
+        ("programming/debug path (module USB/BOOTSEL)", "mcu" in f["dev_types"]),
+        ("status LED present or intentionally omitted", "LED_K" in f["nets"]),
+        ("test points (>=4)", f["test_points"] >= 4),
+        ("mounting holes (>=4)", f["mounting_holes"] >= 4),
+        ("silk labels present", f["silk_labels"] >= 4),
+        ("board identity (optional pattern, present)", f["board_id_eeprom"]),
+    ]
+
+
 ROLE_CHECKS = {
     "controller_backplane": _controller_reqs,
     "digital_bringup": _digital_reqs,
@@ -185,6 +205,7 @@ ROLE_CHECKS = {
     "external_instrument_interface": _eii_reqs,
     "power_current_monitor": _pcm_reqs,
     "monolithic_core6": _mono_core6_reqs,
+    "sensor_board": _sensor_board_reqs,
 }
 
 # caveats that keep a complete board at _with_review (honest limits, not failures)
@@ -203,6 +224,14 @@ ROLE_CAVEATS = {
         "trigger/sync are protected GPIO (Pico boots as inputs = safe default); "
         "timing is sanity-class unless measured by an external instrument",
         "COTS instrument capability is COTS capability, never internal FL-1 capability"],
+    "sensor_board": [
+        "GENERIC benchmark role — no FL-1 assumptions",
+        "temperature only in v1: humidity/pressure sensor (BME280-class) is a "
+        "recorded missing_component_model gap",
+        "battery input is the composer 2-pin inlet (net named +5V by the rail "
+        "convention — Pico VSYS accepts 1.8-5.5V); no charger, no battery-safety "
+        "claim", "no low-power/sleep-current claim without measurement",
+        "sensor accuracy uncalibrated"],
     "monolithic_core6": [
         "STRESS TEST article — not a product decision; the six modular plugin "
         "boards remain the valid first-article architecture",

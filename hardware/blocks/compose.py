@@ -673,6 +673,17 @@ def block_backplane6(x, y, n, nets):
     return b, 138, 42
 
 
+def block_status_led(x, y, n, nets):
+    """Generic power-indicator status LED (Phase 22.1): LED + series R from the
+    3V3 rail. Zero MCU coupling — lights whenever the board is powered. A
+    GPIO-driven status LED is a future generic primitive."""
+    b = place("LED_SMD", "LED_0603_1608Metric", "D1", x + 3, y + 4, 0,
+              {"1": "LED_K", "2": "+3V3"}, nets)
+    b += res("R96", x + 3, y + 9, "LED_K", "GND", nets)
+    label("PWR LED", x + 3, y + 1, 0.6)
+    return b, 8, 12
+
+
 def block_relay_matrix(x, y, n, nets):
     """FL-1 relay / instrument-routing matrix (B-4) — Compose's native domain,
     built entirely from the block layer on coarse resolved parts. An MCU shifts a
@@ -854,6 +865,7 @@ BLOCK_TABLE = {
     "calrefext": block_calref_expansion,
     "baremcu": block_mcu_bare,
     "backplane6": block_backplane6,
+    "statusled": block_status_led,
     "relaymatrix": block_relay_matrix,
     "fl1bus": block_fl1_bus,
     "boardid": block_board_id,
@@ -919,6 +931,8 @@ def _block_keys(s):
     if any(k in s for k in ("six-slot backplane", "slot backplane", "passive backplane",
                             "backplane slots")):
         add("backplane6")
+    if any(k in s for k in ("status led", "power led", "indicator led")):
+        add("statusled")
     elif any(k in s for k in ("current sense", "current monitor", "dc measure",
                               "power monitor", "ina228", "instrument", "shunt")):
         add("instrument")
@@ -1014,12 +1028,13 @@ LAYERS = '''  (layers
 ROW = {"power": 0, "usbc": 0, "mcu": 0, "imu": 0, "radio": 0, "antenna": 0,
        "gnss": 0, "cellular": 0, "tempsensor": 0, "comms": 0, "motion": 1,
        "instrument": 0, "dutmonitor": 0, "calref": 0, "calrefext": 0, "backplane6": 0,
+       "statusled": 0,
        "baremcu": 0, "relaymatrix": 1, "motors": 1,
        "fl1bus": 0, "boardid": 0, "gpiobank": 0, "spibus": 0, "uartbridge": 0}
 COL = {"power": 0, "usbc": 0, "mcu": 2, "imu": 3, "tempsensor": 3, "gnss": 4,
        "radio": 5, "cellular": 6, "comms": 7, "antenna": 9, "motors": 1,
        "motion": 3, "instrument": 4, "dutmonitor": 4, "calref": 5, "calrefext": 6,
-       "backplane6": 1,
+       "backplane6": 1, "statusled": 6,
        "baremcu": 2, "relaymatrix": 1,
        "boardid": 3, "fl1bus": 8, "gpiobank": 8, "spibus": 8, "uartbridge": 9}
 ROW_BUDGET = 170.0  # mm — wrap a band wider than this
