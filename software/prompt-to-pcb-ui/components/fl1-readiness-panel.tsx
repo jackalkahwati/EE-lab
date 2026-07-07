@@ -52,6 +52,8 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
       'fl1-i2c-pullup-checker-report', 'fl1-connector-orientation-checker-report',
       'fl1-production-readiness-dashboard', 'fl1-cost-model', 'fl1-first-article-order-batch-plan',
       'compose-general-design-examples', 'compose-fabrication-decision-engine',
+      'compose-capability-gap-ranking', 'compose-next-board-benchmark-selector',
+      'compose-board-job-outcome-ledger',
       'fl1-system-revb-recommendations',
       'fl1-pinout-compatibility-report', 'fl1-system-risk-register', 'fl1-monolithic-costdown-roadmap',
       'full16-monolithic-architecture-comparison', 'full16-monolithic-treatment-classification',
@@ -128,6 +130,41 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
           {d['cal-board-attempt'].blocker && (
             <p className="mt-1 text-[10px] text-destructive">
               blocker: {d['cal-board-attempt'].blocker}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Phase 22: Fleet Learning */}
+      {d['compose-capability-gap-ranking'] && (
+        <div className="rounded-md border border-border p-3">
+          <p className="mb-1 text-[11px] font-semibold text-foreground">
+            Fleet Learning — capability gaps ranked by leverage
+          </p>
+          <div className="space-y-0.5">
+            {d['compose-capability-gap-ranking'].ranking?.slice(0, 5).map(
+              (g: any, i: number) => (
+                <p key={i} className="text-[9px] text-muted-foreground">
+                  <span className="font-mono text-primary">#{i + 1}</span>{' '}
+                  <span className="text-foreground">{g.capability}</span> — unlocks{' '}
+                  {g.families_unlocked.length} families · complexity{' '}
+                  {g.implementation_complexity_1to5}/5 · score {g.priority_score}
+                </p>
+              ),
+            )}
+          </div>
+          {d['compose-next-board-benchmark-selector'] && (
+            <p className="mt-1 text-[9px] text-emerald-500">
+              next benchmark: {d['compose-next-board-benchmark-selector'].recommendation}{' '}
+              (runner-up: {d['compose-next-board-benchmark-selector'].runner_up}) · excluded
+              near-term:{' '}
+              {d['compose-next-board-benchmark-selector'].excluded_near_term?.join(', ')}
+            </p>
+          )}
+          {d['compose-board-job-outcome-ledger'] && (
+            <p className="mt-1 text-[9px] text-amber-500">
+              outcome ledger: {d['compose-board-job-outcome-ledger'].jobs?.length} jobs, ALL
+              generated/simulated — no physical evidence, no yield data, nothing ordered
             </p>
           )}
         </div>

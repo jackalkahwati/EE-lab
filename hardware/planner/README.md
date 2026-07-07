@@ -1142,3 +1142,32 @@ honest capability limits at every stage.
 
 Regression: phase21 27/27; all 22 suites green; frontend 24/24; board 5/5
 unchanged (artifact-only). Nothing ordered.
+
+## Phase 22: physical build + fleet learning loop v1
+
+The learning system that will ingest physical evidence later — built and
+running NOW on the evidence that actually exists (generated jobs, routed
+boards, blockers). Structural rules enforced in code, not prose.
+
+- Evidence object model: 27 evidence types, 8 physical-only; satisfies_
+  physical() makes simulated evidence STRUCTURALLY unable to satisfy physical
+  gates; failed evidence preserved. Fleet memory: 12 categories; yield_memory
+  stays EMPTY until real boards exist.
+- Failure taxonomy: 29 classes with detection source, severity, buildability/
+  production impact, and physical-evidence requirements.
+- Pattern learning engine: 19 FL-1 patterns placed honestly — 11 proven_in_
+  routed_board, 8 proven_in_manufacturing_package, NONE physically promoted
+  (promote() REFUSES physical states without physical evidence; no silent
+  promotion; no state skipping; failures demote).
+- Capability gap ranking (10 gaps by leverage): #1 USB-C connector/protection
+  (unlocks 3 families at complexity 2), #2 QFN-56 quadrant escape, #3 gate-
+  driver/power-stage primitives. Every Phase 21 blocker appears.
+- Board job outcome ledger: 15 jobs (8 general examples + 7 FL-1 boards), all
+  generated/gated, NONE physical, nothing ordered. Learning report ingests the
+  8 examples into evidence objects + fleet memory deltas.
+- Next-board benchmark selector: battery environmental sensor recommended,
+  Pi HAT relay runner-up; motor controller / PCIe / AI carrier explicitly
+  excluded near-term. Fleet Learning UI section.
+
+Regression: phase22 25/25; all suites green; frontend 24/24; board 5/5
+unchanged (artifact-only). Nothing ordered; nothing physically claimed.
