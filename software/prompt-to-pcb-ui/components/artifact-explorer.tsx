@@ -92,7 +92,7 @@ export function ArtifactExplorer({ runId }: { runId: string | null }) {
   const genCount = Object.values(present).filter(Boolean).length
 
   return (
-    <div className="space-y-3 overflow-y-auto p-4 text-xs">
+    <div className="h-full space-y-3 overflow-y-auto p-4 text-xs">
       <div className="flex items-center gap-2">
         <span className="text-sm font-semibold text-foreground">Artifacts</span>
         <span className="rounded-sm border border-border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">

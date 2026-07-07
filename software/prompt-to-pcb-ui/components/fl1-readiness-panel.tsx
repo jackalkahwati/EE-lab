@@ -86,7 +86,7 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
   ] as const
 
   return (
-    <div className="space-y-4 overflow-y-auto p-4 text-xs">
+    <div className="h-full space-y-4 overflow-y-auto p-4 text-xs">
       <div className="flex items-center gap-2">
         <Cpu className="size-4 text-primary" />
         <span className="text-sm font-semibold text-foreground">FL-1 Instrument Readiness</span>

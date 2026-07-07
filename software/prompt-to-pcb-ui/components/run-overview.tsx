@@ -151,7 +151,7 @@ export function RunOverview({ runId }: { runId: string | null }) {
     )
 
   return (
-    <div className="space-y-4 overflow-y-auto p-4 text-xs">
+    <div className="h-full space-y-4 overflow-y-auto p-4 text-xs">
       <div className="flex items-center gap-2">
         <span className="text-sm font-semibold text-foreground">Run Overview</span>
         <span
