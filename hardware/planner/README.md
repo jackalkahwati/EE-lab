@@ -1233,3 +1233,39 @@ reviewer model, with the trust boundary in code.
   required, high-risk claims blocked for every JIT primitive).
 
 Regression: phase222 25/25; all suites green; frontend 24/24; board 5/5.
+
+## Phase 23.1: BME280 JIT sandbox + environmental sensor v2 — LOOP CLOSED
+
+The complete JIT lifecycle proven end-to-end with real runs:
+new primitive -> quarantine -> symbol/pinmap -> footprint verification ->
+reference circuit -> sandbox board -> route/DRC/ERC -> evidence-state
+promotion -> reuse in a real non-FL-1 board.
+
+- Acquisition (REAL extraction, never memory): 8 BME280 pins parsed
+  programmatically from the KiCad Sensor library symbol (1 GND, 2 CSB, 3 SDI,
+  4 SCK, 5 SDO, 6 VDDIO, 7 GND, 8 VDD); Bosch LGA-8 footprint verified from
+  the .kicad_mod (8 pads matching, 0.65mm pitch computed from actual pad
+  coordinates, courtyard + silk present) -> candidate_from_library_import ->
+  footprint_supported_with_review. I2C-mode straps (CSB=VDDIO, SDO=GND ->
+  0x76) recorded as datasheet reference circuit, REVIEW-REQUIRED.
+- Sandbox (bme280-sandbox-v1): PASSED 5/5 nets, 0 DRC, ERC clean, FL-1-free.
+  THE SANDBOX CAUGHT A REAL CAPABILITY EDGE: fine-pitch fanout was capped at
+  0.55mm (TSSOP tuning) — the 0.65mm LGA interior pad was walled with no
+  escape ("stub FAILED for U18-3"). FINE_PITCH_MAX extended to 0.7mm; board
+  regression re-verified every proven board.
+- Promotion through the REAL gates: candidate -> routed_in_sandbox ->
+  manufacturing_package_supported_with_review; the attempt to promote to
+  physically_validated was REFUSED by promote() as required.
+- Environmental Sensor Benchmark v2 (env-sensor-benchmark-v2): PASSED 14/14
+  nets, 0 DRC, ERC clean, generic role 10/10, FL-1-free verified on copper.
+  Upgrade LM75B temperature-only -> BME280 T/H/P. No calibration/accuracy/
+  low-power/battery-safety claims; validation workflow v2 adds humidity +
+  pressure sanity reads.
+- Fleet learning: 2 gaps CLOSED (BME280 primitive; fanout 0.55->0.7), next
+  recommendation USB-C 5V power-entry sandbox. New blocks: block_bme280 +
+  block_bme280_breakout. Frontend suite hardened: self-provisions its CI
+  session against a PROTECTED endpoint (the /api/auth/me probe was public and
+  always 200 — a real test bug found and fixed).
+
+Regression: phase231 26/26; all 18 suites green; frontend 24/24; board 5/5.
+Nothing ordered; nothing physically claimed.

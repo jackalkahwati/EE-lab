@@ -6,6 +6,19 @@ set -uo pipefail
 BASE=${BASE:-http://localhost:4500}
 COOKIE=${COOKIE:-/tmp/fl-jar3.txt}
 PAGE="app/page.tsx"
+
+# self-provision a session when the cookie is stale (sessions are in-memory,
+# so a server restart invalidates old jars — the suite must not rot with them)
+# probe a PROTECTED endpoint (/api/auth/me is public and always 200)
+authed() { curl -s -o /dev/null -w "%{http_code}" -b "$COOKIE" "$BASE/api/runs" 2>/dev/null || echo 000; }
+if [ "$(authed)" != "200" ]; then
+  curl -s -c "$COOKIE" -X POST "$BASE/api/auth/signup" -H "Content-Type: application/json" \
+    -d '{"email":"ci@firstlight.test","password":"firstlight-ci-2026"}' > /dev/null
+  if [ "$(authed)" != "200" ]; then
+    curl -s -c "$COOKIE" -X POST "$BASE/api/auth/login" -H "Content-Type: application/json" \
+      -d '{"email":"ci@firstlight.test","password":"firstlight-ci-2026"}' > /dev/null
+  fi
+fi
 pass=0; fail=0
 ck() { if [ "$1" = "1" ]; then echo "  [PASS] $2"; pass=$((pass+1)); else echo "  [FAIL] $2"; fail=$((fail+1)); fi; }
 

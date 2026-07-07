@@ -55,6 +55,8 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
       'compose-capability-gap-ranking', 'compose-next-board-benchmark-selector',
       'env-sensor-compose-run', 'env-sensor-fleet-learning-update',
       'compose-jit-primitive-gap-application-report',
+      'bme280-primitive-promotion-report', 'env-sensor-v2-compose-run',
+      'bme280-env-sensor-v2-fleet-learning-update',
       'compose-board-job-outcome-ledger',
       'fl1-system-revb-recommendations',
       'fl1-pinout-compatibility-report', 'fl1-system-risk-register', 'fl1-monolithic-costdown-roadmap',
@@ -132,6 +134,36 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
           {d['cal-board-attempt'].blocker && (
             <p className="mt-1 text-[10px] text-destructive">
               blocker: {d['cal-board-attempt'].blocker}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Phase 23.1: BME280 JIT loop closed */}
+      {d['bme280-primitive-promotion-report'] && (
+        <div className="rounded-md border border-emerald-500/40 bg-emerald-500/5 p-3">
+          <p className="mb-1 text-[11px] font-semibold text-emerald-500">
+            JIT loop CLOSED: BME280 — {d['bme280-primitive-promotion-report'].final_state}
+          </p>
+          <p className="text-[10px] text-muted-foreground">
+            physical promotion attempt:{' '}
+            {d['bme280-primitive-promotion-report'].physical_promotion_attempt?.why} (sandbox
+            is never physical validation)
+          </p>
+          {d['env-sensor-v2-compose-run'] && (
+            <p className="mt-1 text-[10px] text-foreground">
+              Env Sensor v2 (BME280 T/H/P): {d['env-sensor-v2-compose-run'].routing} nets ·
+              DRC {d['env-sensor-v2-compose-run'].drc} ·{' '}
+              {d['env-sensor-v2-compose-run'].role_completeness} · FL-1-free:{' '}
+              {String(d['env-sensor-v2-compose-run'].fl1_free_verified)} ·{' '}
+              {d['env-sensor-v2-compose-run'].honesty}
+            </p>
+          )}
+          {d['bme280-env-sensor-v2-fleet-learning-update'] && (
+            <p className="mt-1 text-[9px] text-amber-500">
+              gaps closed:{' '}
+              {d['bme280-env-sensor-v2-fleet-learning-update'].gaps_closed?.join(' · ')} ·
+              next: {d['bme280-env-sensor-v2-fleet-learning-update'].next_recommendation}
             </p>
           )}
         </div>

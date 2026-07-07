@@ -684,6 +684,60 @@ def block_status_led(x, y, n, nets):
     return b, 8, 12
 
 
+# BME280 pin map — JIT-ACQUIRED from the KiCad Sensor library symbol (trusted
+# library import, extracted programmatically, never from memory):
+#   1 GND, 2 CSB, 3 SDI, 4 SCK, 5 SDO, 6 VDDIO, 7 GND, 8 VDD
+# I2C-mode strapping (CSB=VDDIO -> I2C; SDO=GND -> 0x76) is a datasheet
+# reference circuit: REVIEW-REQUIRED, recorded in the acquisition record.
+_BME280_FP = ("Package_LGA", "Bosch_LGA-8_2.5x2.5mm_P0.65mm_ClockwisePinNumbering")
+
+
+def _bme280_pmap(n):
+    return {"1": "GND", "7": "GND", "8": "+3V3", "6": "+3V3",   # VDD + VDDIO
+            "2": "+3V3",                                         # CSB high = I2C
+            "5": "GND",                                          # SDO low = 0x76
+            "3": n.get("i2c_sda", "I2C_SDA"), "4": n.get("i2c_scl", "I2C_SCL")}
+
+
+def block_bme280(x, y, n, nets):
+    """BME280 T/H/P sensor on the shared I2C bus (JIT primitive, evidence state
+    tracked in the fleet ledger — sandbox-routed, NOT physically validated).
+    No accuracy/calibration claim."""
+    b = place(_BME280_FP[0], _BME280_FP[1], "U18", x + 5, y + 6, 0,
+              _bme280_pmap(n), nets)
+    b += cap("C33", x + 12, y + 14, "+3V3", "GND", nets)  # VDD decoupling
+    b += cap("C34", x + 16, y + 10, "+3V3", "GND", nets)  # VDDIO decoupling
+    b += tp("TP45", x + 5, y + 14, n.get("i2c_sda", "I2C_SDA"), nets)
+    label("BME280 T/H/P 0x76 (uncal)", x + 8, y + 1, 0.6)
+    _DEVICES.append({"ref": "U18", "type": "i2c_envsensor", "name": "BME280",
+                     "i2c_address": "0x76",
+                     "jit": "sandbox-routed primitive; accuracy uncalibrated"})
+    return b, 18, 18
+
+
+def block_bme280_breakout(x, y, n, nets):
+    """Standalone BME280 sandbox breakout (no MCU): sensor + I2C header + THIS
+    BOARD OWNS the bus pull-ups (single-owner rule, explicit) + TPs."""
+    b = place(_BME280_FP[0], _BME280_FP[1], "U18", x + 5, y + 8, 0,
+              _bme280_pmap(n), nets)
+    b += cap("C33", x + 2, y + 21, "+3V3", "GND", nets)
+    b += cap("C34", x + 8, y + 21, "+3V3", "GND", nets)
+    b += place("Connector_PinHeader_2.54mm", "PinHeader_1x04_P2.54mm_Vertical",
+               "J22", x + 20, y + 8, 0,
+               {"1": "+3V3", "2": "GND",
+                "3": n.get("i2c_sda", "I2C_SDA"), "4": n.get("i2c_scl", "I2C_SCL")}, nets)
+    # breakout OWNS its pull-ups (no MCU on board; explicit single owner)
+    b += res("R97", x + 27, y + 5, n.get("i2c_sda", "I2C_SDA"), "+3V3", nets)
+    b += res("R98", x + 27, y + 10, n.get("i2c_scl", "I2C_SCL"), "+3V3", nets)
+    b += tp("TP46", x + 5, y + 16, n.get("i2c_sda", "I2C_SDA"), nets)
+    b += tp("TP47", x + 11, y + 16, n.get("i2c_scl", "I2C_SCL"), nets)
+    label("BME280 BREAKOUT 0x76", x + 14, y + 1, 0.7)
+    label("J22: 3V3 GND SDA SCL (pullups on board)", x + 16, y + 20, 0.6)
+    _DEVICES.append({"ref": "U18", "type": "i2c_envsensor", "name": "BME280",
+                     "i2c_address": "0x76", "jit": "SANDBOX breakout article"})
+    return b, 34, 24
+
+
 def block_relay_matrix(x, y, n, nets):
     """FL-1 relay / instrument-routing matrix (B-4) — Compose's native domain,
     built entirely from the block layer on coarse resolved parts. An MCU shifts a
@@ -866,6 +920,8 @@ BLOCK_TABLE = {
     "baremcu": block_mcu_bare,
     "backplane6": block_backplane6,
     "statusled": block_status_led,
+    "bme280": block_bme280,
+    "bme280breakout": block_bme280_breakout,
     "relaymatrix": block_relay_matrix,
     "fl1bus": block_fl1_bus,
     "boardid": block_board_id,
@@ -933,6 +989,11 @@ def _block_keys(s):
         add("backplane6")
     if any(k in s for k in ("status led", "power led", "indicator led")):
         add("statusled")
+    if "bme280 breakout" in s or "bme280 sandbox" in s:
+        add("bme280breakout")
+    elif any(k in s for k in ("bme280", "environmental sensor", "humidity sensor",
+                              "pressure sensor")):
+        add("bme280")
     elif any(k in s for k in ("current sense", "current monitor", "dc measure",
                               "power monitor", "ina228", "instrument", "shunt")):
         add("instrument")
@@ -984,7 +1045,7 @@ def classify(blocks):
         seen.discard("mcu")
     if "backplane6" in seen and "mcu" in seen and len(seen) <= 3:
         pass  # explicit mcu request stands
-    if not (seen & {"mcu", "baremcu", "backplane6"}):
+    if not (seen & {"mcu", "baremcu", "backplane6", "bme280breakout"}):
         uniq.append("mcu")
         seen.add("mcu")
     if not (seen & {"power", "usbc"}):
@@ -1028,13 +1089,13 @@ LAYERS = '''  (layers
 ROW = {"power": 0, "usbc": 0, "mcu": 0, "imu": 0, "radio": 0, "antenna": 0,
        "gnss": 0, "cellular": 0, "tempsensor": 0, "comms": 0, "motion": 1,
        "instrument": 0, "dutmonitor": 0, "calref": 0, "calrefext": 0, "backplane6": 0,
-       "statusled": 0,
+       "statusled": 0, "bme280": 0, "bme280breakout": 0,
        "baremcu": 0, "relaymatrix": 1, "motors": 1,
        "fl1bus": 0, "boardid": 0, "gpiobank": 0, "spibus": 0, "uartbridge": 0}
 COL = {"power": 0, "usbc": 0, "mcu": 2, "imu": 3, "tempsensor": 3, "gnss": 4,
        "radio": 5, "cellular": 6, "comms": 7, "antenna": 9, "motors": 1,
        "motion": 3, "instrument": 4, "dutmonitor": 4, "calref": 5, "calrefext": 6,
-       "backplane6": 1, "statusled": 6,
+       "backplane6": 1, "statusled": 6, "bme280": 3, "bme280breakout": 1,
        "baremcu": 2, "relaymatrix": 1,
        "boardid": 3, "fl1bus": 8, "gpiobank": 8, "spibus": 8, "uartbridge": 9}
 ROW_BUDGET = 170.0  # mm — wrap a band wider than this

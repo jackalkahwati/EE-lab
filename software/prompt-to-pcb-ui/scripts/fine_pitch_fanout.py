@@ -39,7 +39,7 @@ FAN_GAP = 1.5       # mm: first breakout offset beyond the row end (clears the c
 FAN_STEP = 2.4      # mm: breakout spacing (D1.0 TP courtyard ~2.4mm dia)
 DOG_SHALLOW = 1.6   # mm: dogbone via depth (shallow)
 DOG_DEEP = 2.5      # mm: dogbone via depth (deep — near a signal escape)
-FINE_PITCH_MAX = 0.55
+FINE_PITCH_MAX = 0.7  # 0.5mm TSSOP proven; 0.65mm LGA (BME280 sandbox) showed interior pads wall without fanout
 
 
 def _mm(v):
