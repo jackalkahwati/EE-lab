@@ -517,6 +517,127 @@ def block_dut_monitor(x, y, n, nets):
     return b, 34, 28
 
 
+def block_calref(x, y, n, nets):
+    """Calibration/Reference chain as a compose block (Phase 18.8): REF3025
+    (validated UCS pins: 1 IN, 2 OUT, 3 GND) + divider ladder + a dedicated
+    ADS1115 measuring REF_OUT/REF_DIV. Same chain the cal board proved on the
+    synth path. NO calibration claim until a traceable chain exists post-fab."""
+    b = place("Package_TO_SOT_SMD", "SOT-23", "U16", x + 4, y + 6, 0,
+              {"1": "+3V3", "2": "REF_OUT", "3": "GND"}, nets)
+    b += cap("C31", x + 4, y + 12, "+3V3", "GND", nets)
+    # divider REF_OUT -> REF_DIV -> GND (cal ladder point 1)
+    b += res("R90", x + 10, y + 4, "REF_OUT", "REF_DIV", nets)
+    b += res("R91", x + 10, y + 9, "REF_DIV", "GND", nets)
+    # ADS1115 #2 at ADDR=VDD (0x49) so it coexists with the monitor ADC at 0x48
+    b += place("Package_SO", "TSSOP-10_3x3mm_P0.5mm", "U17", x + 18, y + 10, 0, {
+        "1": "+3V3", "3": "GND", "8": "+3V3",
+        "4": "REF_OUT", "5": "REF_DIV", "6": "GND", "7": "GND",
+        "9": n.get("i2c_sda", "I2C_SDA"), "10": n.get("i2c_scl", "I2C_SCL")}, nets)
+    b += cap("C32", x + 24, y + 17, "+3V3", "GND", nets)
+    b += tp("TP40", x + 28, y + 5, "REF_OUT", nets)
+    b += tp("TP41", x + 28, y + 10, "REF_DIV", nets)
+    label("REF_OUT / REF_DIV cal nodes", x + 14, y + 1, 0.6)
+    label("UNCALIBRATED until traceable chain", x + 14, y + 24, 0.6)
+    _DEVICES.append({"ref": "U16", "type": "voltage_reference", "name": "REF3025"})
+    _DEVICES.append({"ref": "U17", "type": "adc", "name": "ADS1115",
+                     "i2c_address": "0x49", "role": "reference measurement"})
+    return b, 32, 27
+
+
+def block_calref_expansion(x, y, n, nets):
+    """Calibration expansion (Full-16 fn 16): extends the reference ladder with
+    two more tapped points measured by the SAME cal ADC channel via test points.
+    Reduced scope, honestly labeled — more KNOWN nodes, zero accuracy claim."""
+    b = res("R92", x + 3, y + 5, "REF_DIV", "REF_DIV2", nets)
+    b += res("R93", x + 3, y + 10, "REF_DIV2", "GND", nets)
+    b += tp("TP42", x + 8, y + 5, "REF_DIV2", nets)
+    label("CAL LADDER EXT (uncal)", x + 6, y + 1, 0.6)
+    return b, 12, 14
+
+
+def block_mcu_bare(x, y, n, nets):
+    """BARE RP2040 subsystem (Phase 18.8 stress test) — QFN-56 0.4mm + W25Q16
+    QSPI flash + 12MHz 3225 crystal + AMS1117-3.3 regulator + SWD/BOOT/RESET +
+    decoupling. NO Pico module. HONESTY: the RP2040/W25Q16 pin maps are MANUAL
+    datasheet transcriptions (no validated UCS exists) — ingestion validation is
+    a recorded blocker; USB is brought to advisory test pads ONLY (no impedance
+    claim); QSPI timing and crystal layout are UNVALIDATED. This block exists to
+    generate real fanout/routing evidence, not a buildable product claim."""
+    gpio_pin = {  # RP2040 GPIOn -> QFN-56 pin (manual transcription)
+        0: "2", 1: "3", 2: "4", 3: "5", 4: "6", 5: "7", 6: "8", 7: "9",
+        8: "11", 9: "12", 10: "13", 11: "14", 12: "15", 13: "16", 14: "18",
+        15: "19", 16: "27", 17: "28", 18: "29", 19: "30", 20: "31", 21: "32",
+        22: "34", 23: "35", 24: "36", 25: "37", 26: "38", 27: "39", 28: "40",
+        29: "41"}
+    role_gpio = {  # same net contract as block_mcu_pico, on bare GPIOs
+        "uart_gps_tx": 0, "uart_gps_rx": 1,
+        "spi_sck": 2, "spi_mosi": 3, "spi_miso": 4, "spi_cs": 5,
+        "i2c_sda": 8, "i2c_scl": 9,
+        "gp_a": 10, "gp_b": 11, "gp_c": 12, "gp_d": 13,
+        "can_txd": 18, "can_rxd": 19, "sr_oe": 17,
+        "rst_out": 22, "fault": 26, "interlock": 27, "trig": 28,
+    }
+    pmap = {  # power/system pins (manual transcription; EP = pad 57)
+        "1": "+3V3", "10": "+3V3", "17": "+3V3", "23": "+3V3", "33": "+3V3",
+        "42": "+3V3", "49": "+3V3", "43": "+3V3", "44": "+3V3", "48": "+3V3",
+        "45": "RP_DVDD", "50": "RP_DVDD", "20": "GND", "57": "GND",
+        "21": "RP_XIN", "22": "RP_XOUT",
+        "24": "RP_SWCLK", "25": "RP_SWDIO", "26": "RP_RUN",
+        "46": "RP_USB_DM", "47": "RP_USB_DP",
+        "51": "QSPI_SD3", "52": "QSPI_SCLK", "53": "QSPI_SD0",
+        "54": "QSPI_SD2", "55": "QSPI_SD1", "56": "QSPI_SS",
+    }
+    for key, g in role_gpio.items():
+        if key in n:
+            pmap[gpio_pin[g]] = n[key]
+    b = place("Package_DFN_QFN", "QFN-56-1EP_7x7mm_P0.4mm_EP3.2x3.2mm", "U30",
+              x + 14, y + 14, 0, pmap, nets)
+    # QSPI flash W25Q16 SOIC-8 (manual transcription: 1 /CS 2 DO 3 /WP 4 GND
+    # 5 DI 6 CLK 7 /HOLD 8 VCC)
+    b += place("Package_SO", "SOIC-8_3.9x4.9mm_P1.27mm", "U31", x + 32, y + 10, 0, {
+        "1": "QSPI_SS", "2": "QSPI_SD1", "3": "QSPI_SD2", "4": "GND",
+        "5": "QSPI_SD0", "6": "QSPI_SCLK", "7": "QSPI_SD3", "8": "+3V3"}, nets)
+    # 12MHz crystal (3225: pads 1/3 crystal, 2/4 GND) + load caps
+    b += place("Crystal", "Crystal_SMD_3225-4Pin_3.2x2.5mm", "Y1", x + 6, y + 26, 0,
+               {"1": "RP_XIN", "2": "GND", "3": "RP_XOUT", "4": "GND"}, nets)
+    b += cap("C40", x + 2, y + 31, "RP_XIN", "GND", nets)
+    b += cap("C41", x + 10, y + 31, "RP_XOUT", "GND", nets)
+    # 3V3 regulator (AMS1117-3.3 SOT-223: 1 GND 2 VOUT 3 VIN, tab=VOUT)
+    b += place("Package_TO_SOT_SMD", "SOT-223-3_TabPin2", "U32", x + 33, y + 26, 0,
+               {"1": "GND", "2": "+3V3", "3": "+5V"}, nets)
+    b += cap("C42", x + 40, y + 30, "+5V", "GND", nets)
+    b += cap("C43", x + 40, y + 34, "+3V3", "GND", nets)
+    # DVDD (1.1V core from internal VREG) decoupling
+    b += cap("C44", x + 24, y + 24, "RP_DVDD", "GND", nets)
+    b += cap("C45", x + 6, y + 6, "+3V3", "GND", nets)
+    b += cap("C46", x + 24, y + 6, "+3V3", "GND", nets)
+    # boot/reset straps + headers
+    b += res("R30", x + 33, y + 18, "QSPI_SS", "+3V3", nets)
+    b += res("R31", x + 28, y + 32, "RP_RUN", "+3V3", nets)
+    b += place("Connector_PinHeader_2.54mm", "PinHeader_1x02_P2.54mm_Vertical",
+               "J30", x + 4, y + 40, 90, {"1": "QSPI_SS", "2": "GND"}, nets)
+    b += place("Connector_PinHeader_2.54mm", "PinHeader_1x02_P2.54mm_Vertical",
+               "J31", x + 14, y + 40, 90, {"1": "RP_RUN", "2": "GND"}, nets)
+    b += place("Connector_PinHeader_2.54mm", "PinHeader_1x03_P2.54mm_Vertical",
+               "J32", x + 26, y + 40, 90,
+               {"1": "RP_SWCLK", "2": "GND", "3": "RP_SWDIO"}, nets)
+    # USB: ADVISORY test pads only — no connector, no impedance claim
+    b += tp("TP50", x + 38, y + 40, "RP_USB_DM", nets)
+    b += tp("TP51", x + 42, y + 40, "RP_USB_DP", nets)
+    # I2C pull-ups (the Pico block carries these when it is the MCU)
+    if "i2c_sda" in n:
+        b += res("R32", x + 44, y + 10, n["i2c_sda"], "+3V3", nets)
+        b += res("R33", x + 44, y + 15, n["i2c_scl"], "+3V3", nets)
+    label("BARE RP2040 (STRESS TEST)", x + 20, y + 2, 0.8)
+    label("J30 BOOTSEL  J31 RESET  J32 SWD", x + 20, y + 45, 0.6)
+    label("USB pads ADVISORY ONLY no impedance claim", x + 30, y + 48, 0.6)
+    _DEVICES.append({"ref": "U30", "type": "mcu", "name": "RP2040 (bare QFN-56)",
+                     "honesty": "pin map manually transcribed; ingestion "
+                                "validation REQUIRED; unvalidated subsystem"})
+    _DEVICES.append({"ref": "U31", "type": "qspi_flash", "name": "W25Q16 class"})
+    return b, 48, 52
+
+
 def block_relay_matrix(x, y, n, nets):
     """FL-1 relay / instrument-routing matrix (B-4) — Compose's native domain,
     built entirely from the block layer on coarse resolved parts. An MCU shifts a
@@ -694,6 +815,9 @@ BLOCK_TABLE = {
     "motion": block_motion_controller,
     "instrument": block_dc_measure,
     "dutmonitor": block_dut_monitor,
+    "calref": block_calref,
+    "calrefext": block_calref_expansion,
+    "baremcu": block_mcu_bare,
     "relaymatrix": block_relay_matrix,
     "fl1bus": block_fl1_bus,
     "boardid": block_board_id,
@@ -748,6 +872,14 @@ def _block_keys(s):
         add("motion")
     if any(k in s for k in ("dut monitor", "dut power monitor", "pcm")):
         add("dutmonitor")
+    if any(k in s for k in ("cal reference", "calibration reference", "reference chain",
+                            "cal ref")):
+        add("calref")
+    if any(k in s for k in ("cal expansion", "calibration expansion", "reference ladder",
+                            "cal ladder")):
+        add("calrefext")
+    if any(k in s for k in ("bare rp2040", "bare mcu", "no-pico mcu", "qfn mcu")):
+        add("baremcu")
     elif any(k in s for k in ("current sense", "current monitor", "dc measure",
                               "power monitor", "ina228", "instrument", "shunt")):
         add("instrument")
@@ -791,8 +923,13 @@ def classify(blocks):
             if k not in seen:
                 seen.add(k)
                 uniq.append(k)
-    # ensure a usable baseline: every board needs an MCU + a power inlet
-    if "mcu" not in seen:
+    # ensure a usable baseline: every board needs an MCU + a power inlet.
+    # A bare-RP2040 block IS the MCU; a no-Pico candidate must never get the
+    # Pico module auto-added (and never both).
+    if "baremcu" in seen and "mcu" in seen:
+        uniq.remove("mcu")
+        seen.discard("mcu")
+    if not (seen & {"mcu", "baremcu"}):
         uniq.append("mcu")
         seen.add("mcu")
     if not (seen & {"power", "usbc"}):
@@ -835,11 +972,13 @@ LAYERS = '''  (layers
 # grows past the width budget, so the layout scales as blocks are added.
 ROW = {"power": 0, "usbc": 0, "mcu": 0, "imu": 0, "radio": 0, "antenna": 0,
        "gnss": 0, "cellular": 0, "tempsensor": 0, "comms": 0, "motion": 1,
-       "instrument": 0, "dutmonitor": 0, "relaymatrix": 1, "motors": 1,
+       "instrument": 0, "dutmonitor": 0, "calref": 0, "calrefext": 0,
+       "baremcu": 0, "relaymatrix": 1, "motors": 1,
        "fl1bus": 0, "boardid": 0, "gpiobank": 0, "spibus": 0, "uartbridge": 0}
 COL = {"power": 0, "usbc": 0, "mcu": 2, "imu": 3, "tempsensor": 3, "gnss": 4,
        "radio": 5, "cellular": 6, "comms": 7, "antenna": 9, "motors": 1,
-       "motion": 3, "instrument": 4, "dutmonitor": 4, "relaymatrix": 1,
+       "motion": 3, "instrument": 4, "dutmonitor": 4, "calref": 5, "calrefext": 6,
+       "baremcu": 2, "relaymatrix": 1,
        "boardid": 3, "fl1bus": 8, "gpiobank": 8, "spibus": 8, "uartbridge": 9}
 ROW_BUDGET = 170.0  # mm — wrap a band wider than this
 

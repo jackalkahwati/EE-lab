@@ -127,6 +127,56 @@ def _pcm_reqs(f):
     ]
 
 
+def _mono_core6_reqs(f):
+    """Monolithic Core-6 (Phase 18.8): all six board-family functions on ONE
+    board, plus the universal primitives. Works for Pico and no-Pico variants;
+    no-Pico additionally uses _mono_nopico_reqs."""
+    ch_map = next((d for d in f["devices"] if d.get("type") == "channel_map"), None)
+    return _common_reqs(f) + [
+        ("system identity (board-ID EEPROM)", f["board_id_eeprom"]),
+        ("MCU present (module or bare)", "mcu" in f["dev_types"]),
+        ("digital bring-up IO (protected GPIO bank)",
+         any("GPIO" in n and n.endswith("_EXT") for n in f["nets"])),
+        ("relay/probe matrix present", "shift_register" in f["dev_types"]),
+        ("relay safe default (gated OE, off at boot)",
+         "SR_OE" in f["nets"] and ch_map is not None
+         and "OFF" in str(ch_map.get("safe_default", "")).upper()),
+        ("calibration/reference path (REF_OUT/REF_DIV measured)",
+         {"REF_OUT", "REF_DIV"} <= f["nets"]
+         and "voltage_reference" in f["dev_types"]),
+        ("external instrument bridge (UART)",
+         any("UART bridge" in n for n in f["dev_names"])),
+        ("power/current monitor path (shunt + protected ADC)",
+         {"SHUNT_HI", "ISENSE_ADC", "VSENSE_ADC"} <= f["nets"]),
+        ("safety lines (FAULT/INTERLOCK/RST_OUT/TRIG)",
+         {"FAULT", "INTERLOCK", "RST_OUT", "TRIG"} <= f["nets"]),
+        ("comms/backplane link (CAN)", {"CANH", "CANL"} <= f["nets"]),
+    ]
+
+
+def mono_nopico_checks(board_text, devices):
+    """No-Pico specific checks: the Pico module must be ABSENT and every bare
+    subsystem element present (or its absence is the exact blocker)."""
+    dev_names = {str(d.get("name", "")) for d in devices}
+    nets = set(re.findall(r'\(net\s+(?:\d+\s+)?"([^"]+)"', board_text))
+    checks = [
+        ("no Pico module footprint", "RaspberryPi_Pico" not in board_text),
+        ("bare RP2040 present (QFN-56)", "QFN-56" in board_text
+         and any("RP2040" in n for n in dev_names)),
+        ("QSPI flash present", "qspi_flash" in {d.get("type") for d in devices}
+         and {"QSPI_SS", "QSPI_SCLK", "QSPI_SD0"} <= nets),
+        ("clock source present (crystal + XIN/XOUT)",
+         'footprint "Crystal:' in board_text and {"RP_XIN", "RP_XOUT"} <= nets),
+        ("3V3 regulator present", "SOT-223" in board_text),
+        ("SWD/boot/reset present",
+         {"RP_SWCLK", "RP_SWDIO", "RP_RUN", "QSPI_SS"} <= nets),
+        ("USB advisory-only (pads, no connector claim)",
+         {"RP_USB_DM", "RP_USB_DP"} <= nets and "USB_C_Receptacle" not in board_text),
+    ]
+    return {"checks": [{"check": c, "ok": bool(ok)} for c, ok in checks],
+            "all_present": all(ok for _c, ok in checks)}
+
+
 ROLE_CHECKS = {
     "controller_backplane": _controller_reqs,
     "digital_bringup": _digital_reqs,
@@ -134,6 +184,7 @@ ROLE_CHECKS = {
     "calibration_reference": _calibration_reqs,
     "external_instrument_interface": _eii_reqs,
     "power_current_monitor": _pcm_reqs,
+    "monolithic_core6": _mono_core6_reqs,
 }
 
 # caveats that keep a complete board at _with_review (honest limits, not failures)
@@ -152,6 +203,16 @@ ROLE_CAVEATS = {
         "trigger/sync are protected GPIO (Pico boots as inputs = safe default); "
         "timing is sanity-class unless measured by an external instrument",
         "COTS instrument capability is COTS capability, never internal FL-1 capability"],
+    "monolithic_core6": [
+        "STRESS TEST article — not a product decision; the six modular plugin "
+        "boards remain the valid first-article architecture",
+        "monolithic bring-up has all-or-nothing risk: one fault suspends every "
+        "function (no module isolation)",
+        "analog/relay/digital domains share one board — noise partitioning is "
+        "modeled, not measured",
+        "no-Pico variants: RP2040/W25Q16 pin maps are manual transcriptions — "
+        "ingestion validation REQUIRED; USB advisory pads only; QSPI timing and "
+        "crystal layout unvalidated"],
     "power_current_monitor": [
         "MONITOR-ONLY: not a DMM, not a programmable supply, no electronic-load behavior",
         "UNCALIBRATED until verified against COTS DMM (cots_verifiable) or the physical "

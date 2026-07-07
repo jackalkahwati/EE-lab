@@ -48,6 +48,8 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
       'fl1-final-first-article-review-v3', 'fl1-board-id-addressing-strategy',
       'fl1-manufacturing-readiness-pack', 'fl1-held-board-architecture-search',
       'pcm1-measurement-claim-model', 'pcm1-safety-protection-model', 'pcm1-compose-report',
+      'full16-monolithic-architecture-comparison', 'full16-monolithic-treatment-classification',
+      'full16-monolithic-final-recommendation', 'rp2040-qfn56-fanout-feasibility',
       'fl1-recommended-next-board-roadmap',
     ]
     Promise.all(
@@ -122,6 +124,60 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
               blocker: {d['cal-board-attempt'].blocker}
             </p>
           )}
+        </div>
+      )}
+
+      {/* Phase 18.8: Full-16 monolithic STRESS TEST — visibly a stress test */}
+      {d['full16-monolithic-architecture-comparison'] && (
+        <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3">
+          <p className="mb-1 text-[11px] font-semibold text-amber-500">
+            STRESS TEST — Full-16 monolithic / no-Pico integration (not a product decision)
+          </p>
+          <div className="space-y-1">
+            {d['full16-monolithic-architecture-comparison'].candidates.map(
+              (c: any, i: number) => (
+                <div key={i} className="rounded-md border border-border px-3 py-1">
+                  <div className="flex items-center gap-2 text-[10px]">
+                    <span className="font-mono text-primary">{c.id}</span>
+                    <span className="text-foreground">{c.name}</span>
+                    <span
+                      className={`ml-auto rounded-sm border px-1.5 py-0.5 font-mono text-[8px] ${
+                        c.hard_blockers?.length
+                          ? 'border-destructive/40 bg-destructive/10 text-destructive'
+                          : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500'
+                      }`}
+                    >
+                      {c.status}
+                    </span>
+                  </div>
+                  <p className="mt-0.5 text-[8px] text-muted-foreground">{c.evidence}</p>
+                  {c.exact_blocker && (
+                    <p className="mt-0.5 text-[8px] text-destructive">
+                      blocker: {c.exact_blocker}
+                    </p>
+                  )}
+                </div>
+              ),
+            )}
+          </div>
+          {d['full16-monolithic-treatment-classification'] && (
+            <p className="mt-1 text-[9px] text-muted-foreground">
+              16-function treatments:{' '}
+              {Object.entries(d['full16-monolithic-treatment-classification'].counts)
+                .filter(([, v]: [string, any]) => v > 0)
+                .map(([k, v]: [string, any]) => `${k}: ${v}`)
+                .join(' · ')}
+            </p>
+          )}
+          {d['full16-monolithic-final-recommendation'] && (
+            <p className="mt-1 text-[9px] text-emerald-500">
+              recommendation: {d['full16-monolithic-final-recommendation'].recommendation} —{' '}
+              {d['full16-monolithic-final-recommendation'].stress_test_verdict}
+            </p>
+          )}
+          <p className="mt-1 text-[9px] text-muted-foreground">
+            The six modular plugin boards remain valid, review-required, and not ordered.
+          </p>
         </div>
       )}
 

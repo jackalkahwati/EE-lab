@@ -979,3 +979,40 @@ ready_to_build_with_review. Six boards now sit in the review queue.
 
 Regression: phase186 33/33; all 16 suites green; frontend 24/24; board 5/5.
 Nothing ordered; five prior boards untouched; no gate weakened.
+
+## Phase 18.8: Full-16 monolithic no-Pico integration stress test — SUCCESS AS A STRESS TEST
+
+Three REAL compose attempts answered the monolith question with evidence, not
+opinion. The six modular plugin boards remain the valid first articles; nothing
+here is an order candidate.
+
+- Candidate A (modular, CURRENT): proven — six review-required boards.
+- Candidate B (Core-6 monolithic, Pico module): **ROUTED CLEAN** — 70 parts,
+  174x186mm, 51/51 nets, 0 DRC, 0 unconnected, ERC PASS, monolithic role
+  16/16. Monolithic density is now a demonstrated Compose capability; B is a
+  credible Rev C cost-down AFTER the modular system works.
+- Candidate C (Core-6, bare RP2040, NO Pico): blocked_by_qfn56_fanout with ONE
+  exact blocker — the single-row lane fanout (proven at 0.5mm TSSOP) cannot do
+  a four-sided 0.4mm QFN-56: 41 escapes pre-fanned, 48 DRC violations ALL
+  between escape artifacts (none touch the QFN), 18 unconnected (RP_XIN/DVDD/
+  SWD among them). Everything else is PRESENT and role-complete 16/16: no Pico
+  footprint, bare RP2040 + W25Q16 QSPI + 12MHz crystal + AMS1117 + SWD/BOOT/
+  RESET straps + advisory-only USB pads. Honesty recorded: pin maps are manual
+  transcriptions (ingestion validation REQUIRED); no USB/QSPI/crystal claims.
+- Candidate D (Full-16, bare RP2040, MAIN STRETCH): architecture_only_with_
+  blockers — same single blocker; all 16 functions honestly treated:
+  6 implemented_now, 2 implemented_reduced_scope (event capture, cal ladder
+  REF_DIV2 on copper), 2 external_cots_interface_only (funcgen, scope),
+  2 reserved_zone_only (RF, relay expansion), 4 architecture_only (DMM-lite,
+  DUT power control, INA variant, DAC stimulus). No function faked.
+- Candidate E (alternate MCU): architecture_only — no credible proven
+  alternate; an LQFP 0.5mm leaded MCU is the plausible future candidate.
+- Final recommendation: keep_modular_for_first_articles; build a small bare-
+  RP2040 core test board first when the QFN escape capability lands; Core-6+
+  Pico monolith as later cost-down; scope/RF/funcgen stay external COTS.
+- Next capability target fed back to Phase 18: quadrant-aware QFN escape
+  planner. New blocks: block_calref (validated REF3025/ADS1115 pins),
+  block_calref_expansion, block_mcu_bare (flagged unvalidated). New role:
+  monolithic_core6 (16 reqs) + mono_nopico_checks (7 on-copper checks).
+
+Regression: phase188 42/42; all 17 suites green; frontend 24/24; board 5/5.
