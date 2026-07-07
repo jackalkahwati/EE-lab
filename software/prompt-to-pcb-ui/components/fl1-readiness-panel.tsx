@@ -53,6 +53,8 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
       'fl1-production-readiness-dashboard', 'fl1-cost-model', 'fl1-first-article-order-batch-plan',
       'compose-general-design-examples', 'compose-fabrication-decision-engine',
       'compose-capability-gap-ranking', 'compose-next-board-benchmark-selector',
+      'env-sensor-compose-run', 'env-sensor-fleet-learning-update',
+      'compose-jit-primitive-gap-application-report',
       'compose-board-job-outcome-ledger',
       'fl1-system-revb-recommendations',
       'fl1-pinout-compatibility-report', 'fl1-system-risk-register', 'fl1-monolithic-costdown-roadmap',
@@ -130,6 +132,63 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
           {d['cal-board-attempt'].blocker && (
             <p className="mt-1 text-[10px] text-destructive">
               blocker: {d['cal-board-attempt'].blocker}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Phase 22.2: JIT primitive acquisition */}
+      {d['compose-jit-primitive-gap-application-report'] && (
+        <div className="rounded-md border border-border p-3">
+          <p className="mb-1 text-[11px] font-semibold text-foreground">
+            JIT Primitive Acquisition — quarantined candidates (never auto-trusted)
+          </p>
+          <div className="space-y-0.5">
+            {d['compose-jit-primitive-gap-application-report'].cases?.map(
+              (c: any, i: number) => (
+                <div key={i} className="flex items-center gap-2 text-[9px]">
+                  <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                    {c.gap}
+                  </span>
+                  <span
+                    className={`rounded-sm border px-1.5 py-0.5 font-mono text-[8px] ${
+                      c.state === 'blocked'
+                        ? 'border-destructive/40 bg-destructive/10 text-destructive'
+                        : 'border-amber-500/40 bg-amber-500/10 text-amber-500'
+                    }`}
+                  >
+                    {c.state}
+                  </span>
+                </div>
+              ),
+            )}
+          </div>
+          <p className="mt-1 text-[9px] text-muted-foreground">
+            {d['compose-jit-primitive-gap-application-report'].evidence_note} · all
+            high-risk claims blocked for every JIT primitive · sandbox routes are the next
+            evidence step
+          </p>
+        </div>
+      )}
+
+      {/* Phase 22.1: first NON-FL-1 benchmark */}
+      {d['env-sensor-compose-run'] && (
+        <div className="rounded-md border border-emerald-500/40 bg-emerald-500/5 p-3">
+          <p className="mb-1 text-[11px] font-semibold text-emerald-500">
+            First NON-FL-1 benchmark: Battery Environmental Sensor v1 —{' '}
+            {d['env-sensor-compose-run'].outcome}
+          </p>
+          <p className="text-[10px] text-muted-foreground">
+            {d['env-sensor-compose-run'].routing} nets · DRC{' '}
+            {d['env-sensor-compose-run'].drc_violations} · role{' '}
+            {d['env-sensor-compose-run'].role_completeness} · FL-1-free verified on copper:{' '}
+            {String(d['env-sensor-compose-run'].fl1_free_verified)} ·{' '}
+            {d['env-sensor-compose-run'].honesty}
+          </p>
+          {d['env-sensor-fleet-learning-update'] && (
+            <p className="mt-1 text-[9px] text-amber-500">
+              gaps discovered:{' '}
+              {d['env-sensor-fleet-learning-update'].gaps_discovered?.slice(0, 3).join(' · ')}
             </p>
           )}
         </div>

@@ -1171,3 +1171,65 @@ boards, blockers). Structural rules enforced in code, not prose.
 
 Regression: phase22 25/25; all suites green; frontend 24/24; board 5/5
 unchanged (artifact-only). Nothing ordered; nothing physically claimed.
+
+## Phase 22.1: first non-FL-1 benchmark board v1 — PASSED
+
+The platform proof: the GENERAL engine drove a real compose run to a clean
+pass on a board with zero FL-1 content.
+
+- Battery Environmental Sensor Benchmark v1 (env-sensor-benchmark-v1): 14/14
+  nets, 0 DRC, 0 unconnected, ERC PASS, generic sensor_board role 10/10
+  (role_complete_with_review). FL-1-FREE VERIFIED ON COPPER: no FAULT/
+  INTERLOCK/TRIG/RST_OUT nets, no ID straps, no 2x07 bus header. 30 parts:
+  Pico module (SELECTED BY THE PLANNER, not assumed), live-sourced LM75B I2C
+  temp sensor, GND-strapped 24LC02 identity, protected GPIO bank, new generic
+  power-LED primitive, universal holes/TPs/silk.
+- Honest reductions, all recorded: BME280-class humidity/pressure =
+  missing_component_model -> v1 is TEMPERATURE-ONLY; battery charger
+  unsupported -> omitted; programming = Pico USB/BOOTSEL; no low-power/
+  battery-safety/calibration claims.
+- THE BENCHMARK EARNED ITS KEEP TWICE: (1) it caught a real classifier bug —
+  'sma' matched inside 'small', mis-flagging the request as RF; fixed with
+  word-boundary matching (pcba_engine._kw_hit) and the RF-adapter example
+  still classifies correctly. (2) it exposed that the engine's '2-layer
+  proven' claim referred to manual-class work — the AUTOMATED compose flow is
+  4-layer; recorded as a capability gap, not silently claimed.
+- Fleet learning updated: 6 gaps discovered, pattern usage recorded, outcome
+  package_ready_with_review, next recommendation = USB-C connector/protection
+  primitive (the #1 leverage gap) now that generalization is proven.
+- New generic primitives: block_status_led; generic sensor_board role checker
+  (no FL-1 assumptions).
+
+Regression: phase221 23/23; all suites green; frontend 24/24; board 5/5.
+Nothing ordered; nothing physically claimed.
+
+## Phase 22.2: just-in-time primitive acquisition engine v1
+
+Compose no longer needs its library hand-built component by component: when a
+design needs a missing primitive, it acquires a CANDIDATE from trusted sources,
+quarantines it, verifies it, and gates it — the junior-EE-with-a-strict-
+reviewer model, with the trust boundary in code.
+
+- jit_primitives.py: 12 gap types; 15 evidence states (candidate_from_* ->
+  symbol/footprint/layout supported_with_review -> routed_in_sandbox ->
+  physically_validated -> repeatedly_validated). Structural gates:
+  can_support_claim() (candidates can NEVER support production_ready or any
+  high-risk claim), verify_footprint() (pad-count/pitch mismatch BLOCKS,
+  missing pin-1 BLOCKS, third-party/generated never auto-trusted),
+  pinmap_gate() (unknown pins BLOCK; power/ground explicit), promote()
+  (physical states need physical evidence; sandbox routes promote to
+  routed_in_sandbox ONLY; failures demote). Ingestion implementation = the
+  PROVEN resolve_part/source_part path.
+- Applied to the five real gaps with REAL filesystem evidence against the
+  installed KiCad libraries: BME280 (symbol + Bosch LGA-8 exist) ->
+  footprint_supported_with_review, sensor-breakout sandbox next; USB-C (26
+  receptacle footprints) -> footprint_supported_with_review, power-entry
+  sandbox next; SMA (18 footprints) -> candidate, RF claims blocked
+  regardless; gate driver -> BLOCKED (symbols exist but the real gap is
+  power-stage layout rules — symbol presence does not unblock); QFN-56
+  RP2040 -> BLOCKED (footprint exists and was used in 18.8 — the gap is the
+  escape planner; JIT acquisition cannot fix a routing-capability gap).
+- Fleet memory integration; JIT UI section (candidates visibly review-
+  required, high-risk claims blocked for every JIT primitive).
+
+Regression: phase222 25/25; all suites green; frontend 24/24; board 5/5.
