@@ -1307,3 +1307,36 @@ from pure synthesis and the USB-C gap closure.
 
 Regression: phase232 44/44; all 21 suites green; frontend 24/24; board 5/5.
 Nothing ordered; nothing physically claimed; no gate weakened.
+
+## Phase 23.3: general benchmark suite + capability packs v1
+
+Breadth proven: 20-benchmark ordinary-rigid-PCBA suite, 12 routed clean on
+the real pipeline (5 NEW runs this phase, all first-try passes), 3
+architecture_only, 4 blocked — every verdict honest, zero FL-1 contamination
+failures on copper.
+
+- NEW real runs: Debug Programming Adapter 6/6 (generated headers WIRED);
+  Current/Voltage Monitor 11/11 (the dutmonitor pattern proven FL-1-FREE);
+  Connector Breakout 5/5 (generated-only); Generic 3-Slot Backplane 5/5
+  (PURE SYNTHESIS — shared power+I2C slots + owned pull-ups, no FL-1 bus);
+  Lab Instrument Adapter 14/14 (non-FL-1 EII pattern).
+- Honest non-runs: SPI breakout architecture_only (no SPI sensor primitive —
+  a sensor-less SPI board would be decorative); regulator board BLOCKED
+  (AMS1117 only ever placed on GATE-FAILED stress boards = not evidence);
+  low-power logger claims nothing about low power; motor/high-current/RF/
+  PCIe/medical stay blocked or architecture_only, medical never claimed.
+- 18 capability packs GENERATED FROM run evidence (evidence_links = run ids;
+  FL-1-specific evidence marked): 15 at manufacturing_package_supported_with_
+  review, SPI pack candidate, regulator pack blocked, low-power pack
+  generated-only. promote_pack() refuses physical states without physical
+  evidence and demotes on failures; pack state never exceeds evidence.
+- Pattern recommendations: led_indicator + testpoint_cluster -> promote_to_
+  pattern (5+ families, zero failures); voltage_monitor needs more benchmarks;
+  generated headers stay parameterized; power-stage stays blocked.
+- Next-capability recommendation (evidence-cited): AUTOMATED 2-LAYER FLOW —
+  8 of 12 routed benchmarks are simple boards overbuilt on the 4-layer flow;
+  QFN-56 escape and regulator primitive are runners-up; placement solving is
+  explicitly NOT the bottleneck (zero placement failures in the suite).
+
+Regression: phase233 37/37; all suites green; frontend 24/24; board 5/5
+stands (no composer changes). Nothing ordered; nothing physically claimed.

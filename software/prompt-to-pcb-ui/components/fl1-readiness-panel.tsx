@@ -57,6 +57,8 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
       'compose-jit-primitive-gap-application-report',
       'bme280-primitive-promotion-report', 'env-sensor-v2-compose-run',
       'compose-general-physical-synthesis-benchmark-report',
+      'compose-benchmark-coverage-scorecard', 'compose-capability-pack-registry',
+      'compose-next-capability-recommendation', 'compose-permanent-pattern-recommendations',
       'compose-general-synthesis-fleet-learning-update',
       'bme280-env-sensor-v2-fleet-learning-update',
       'compose-board-job-outcome-ledger',
@@ -138,6 +140,61 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
               blocker: {d['cal-board-attempt'].blocker}
             </p>
           )}
+        </div>
+      )}
+
+      {/* Phase 23.3: benchmark suite + capability packs */}
+      {d['compose-benchmark-coverage-scorecard'] && (
+        <div className="rounded-md border border-border p-3">
+          <p className="mb-1 text-[11px] font-semibold text-foreground">
+            Benchmark Suite + Capability Packs — breadth coverage
+          </p>
+          <p className="text-[10px] text-muted-foreground">
+            {d['compose-benchmark-coverage-scorecard'].totals.benchmarks} benchmarks ·{' '}
+            {d['compose-benchmark-coverage-scorecard'].totals.routed_with_review} routed clean
+            · {d['compose-benchmark-coverage-scorecard'].totals.architecture_only}{' '}
+            architecture_only · {d['compose-benchmark-coverage-scorecard'].totals.blocked}{' '}
+            blocked · contamination failures:{' '}
+            {d['compose-benchmark-coverage-scorecard'].totals.fl1_contamination_failures}
+          </p>
+          {d['compose-capability-pack-registry'] && (
+            <div className="mt-1 flex flex-wrap gap-1">
+              {d['compose-capability-pack-registry'].packs?.map((pk: any, i: number) => (
+                <span
+                  key={i}
+                  title={`${pk.evidence_state} · evidence: ${pk.evidence_links.join(', ') || 'none'}`}
+                  className={`rounded-sm border px-1.5 py-0.5 font-mono text-[8px] ${
+                    pk.evidence_state === 'blocked'
+                      ? 'border-destructive/40 bg-destructive/10 text-destructive'
+                      : pk.evidence_state === 'candidate'
+                        ? 'border-sky-500/40 bg-sky-500/10 text-sky-400'
+                        : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500'
+                  }`}
+                >
+                  {pk.pack}
+                </span>
+              ))}
+            </div>
+          )}
+          {d['compose-permanent-pattern-recommendations'] && (
+            <p className="mt-1 text-[9px] text-muted-foreground">
+              pattern promotions:{' '}
+              {d['compose-permanent-pattern-recommendations'].recommendations
+                ?.filter((r: any) => r.recommendation === 'promote_to_pattern')
+                .map((r: any) => r.structure)
+                .join(', ')}
+            </p>
+          )}
+          {d['compose-next-capability-recommendation'] && (
+            <p className="mt-1 text-[9px] text-emerald-500">
+              next capability: {d['compose-next-capability-recommendation'].recommendation} —{' '}
+              {d['compose-next-capability-recommendation'].reason}
+            </p>
+          )}
+          <p className="mt-1 text-[9px] text-amber-500">
+            routed benchmark ≠ physical validation · all packs review-required · nothing
+            ordered
+          </p>
         </div>
       )}
 
