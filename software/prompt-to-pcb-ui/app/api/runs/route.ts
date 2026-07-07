@@ -136,7 +136,11 @@ export async function GET(req: Request) {
     })
   }
 
-  // newest first: ids start with run-<timestamp>, so a reverse string sort works
-  runs.sort((a, b) => (a.id < b.id ? 1 : -1))
+  // newest first by real timestamp (YYYY-MM-DD HH:MM sorts lexically); named
+  // runs (fl1-*) would otherwise always lose a reverse id-string sort to run-*.
+  runs.sort((a, b) => {
+    const t = String(b.timestamp).localeCompare(String(a.timestamp))
+    return t !== 0 ? t : a.id < b.id ? 1 : -1
+  })
   return Response.json({ runs })
 }
