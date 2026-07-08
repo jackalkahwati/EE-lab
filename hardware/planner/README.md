@@ -1514,3 +1514,30 @@ truth, no hand-written block per part.
   decoupling values, multi-rail chips, crystal/flash requirement detection.
 
 Regression: M1 16/16; all suites green; frontend 24/24; board 5/5.
+
+## Milestone M2: bare-MCU productization track v1 — BOTH GATES PASSED
+
+- GATE A — bare-rp2040-pico-replacement-v1: PASSED 26/26 nets, 0 DRC, role
+  12/12. Product-level bare-RP2040 board: QFN-56 + flash + crystal + AMS1117
+  + decoupling + BOOTSEL/RESET + SWD + LED + power inlet + 1x10 GPIO breakout
+  carrying REAL MCU nets (UART/I2C/4x GPIO). NO Pico-compatible, boot,
+  firmware, USB, or cost-down claims.
+- GATE B — fl1-core6-bare-rp2040-combination-v1: PASSED 65/65 nets, 0 DRC,
+  role 16/16 (monolithic_core6). The EXACT Phase 18.8 board that managed
+  55/65 with 48 escape collisions and stood as the honest monolith blocker
+  is now fully routed: bare RP2040 + board-ID + DUT monitor + cal ref + CAN
+  + relay matrix + FL-1 bus + protected GPIO bank + UART bridge. The seven
+  modular FL-1 boards REMAIN the review-required validated path.
+- Escape engineering earned in this milestone (each from a live DRC
+  signature): column-signal B.Cu dive (column fans crossed row laterals at
+  corners); import_ses stub restore made LAYER-AWARE (it silently flattened
+  the dive back to F.Cu); QFN row lanes at 0.6mm step with 0.6mm breakout
+  pads (13+ lanes ran off the board margin; 1.0mm pads touched laterals);
+  column fans pick the direction with board room; row fans start beyond the
+  opposite column's corridor band; column plane pins ride the dive to the
+  far via (in-band zone vias always collide with adjacent signal stubs at
+  0.4mm pitch).
+- QFN sandbox re-verified (18/18) under all fanout changes. New packs:
+  pico_replacement_pack + fl1_monolith_pack, both routed_in_sandbox ONLY.
+
+Regression: M2 16/16; all suites green; frontend 24/24; board 5/5.

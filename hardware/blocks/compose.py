@@ -605,38 +605,38 @@ def block_mcu_bare(x, y, n, nets):
         "1": "QSPI_SS", "2": "QSPI_SD1", "3": "QSPI_SD2", "4": "GND",
         "5": "QSPI_SD0", "6": "QSPI_SCLK", "7": "QSPI_SD3", "8": "+3V3"}, nets)
     # 12MHz crystal (3225: pads 1/3 crystal, 2/4 GND) + load caps
-    b += place("Crystal", "Crystal_SMD_3225-4Pin_3.2x2.5mm", "Y1", x + 30, y + 35, 0,
+    b += place("Crystal", "Crystal_SMD_3225-4Pin_3.2x2.5mm", "Y1", x + 14, y + 36, 0,
                {"1": "RP_XIN", "2": "GND", "3": "RP_XOUT", "4": "GND"}, nets)
-    b += cap("C40", x + 23, y + 35, "RP_XIN", "GND", nets)
-    b += cap("C41", x + 37, y + 35, "RP_XOUT", "GND", nets)
+    b += cap("C40", x + 7, y + 36, "RP_XIN", "GND", nets)
+    b += cap("C41", x + 21, y + 36, "RP_XOUT", "GND", nets)
     # 3V3 regulator (AMS1117-3.3 SOT-223: 1 GND 2 VOUT 3 VIN, tab=VOUT)
     b += place("Package_TO_SOT_SMD", "SOT-223-3_TabPin2", "U32", x + 70, y + 32, 0,
                {"1": "GND", "2": "+3V3", "3": "+5V"}, nets)
     b += cap("C42", x + 78, y + 38, "+5V", "GND", nets)
-    b += cap("C43", x + 78, y + 44, "+3V3", "GND", nets)
+    b += cap("C43", x + 90, y + 44, "+3V3", "GND", nets)
     # DVDD (1.1V core from internal VREG) decoupling — placed OUTSIDE the
     # QFN escape ring (23.5: the ring reaches ~6mm past the package on every
     # side; in-ring caps drew courtyard overlaps with FO breakouts)
-    b += cap("C44", x + 16, y + 35, "RP_DVDD", "GND", nets)
-    b += cap("C45", x + 4, y + 35, "+3V3", "GND", nets)
-    b += cap("C46", x + 10, y + 35, "+3V3", "GND", nets)
+    b += cap("C44", x + 28, y + 36, "RP_DVDD", "GND", nets)
+    b += cap("C45", x + 10, y + 40, "+3V3", "GND", nets)
+    b += cap("C46", x + 22, y + 40, "+3V3", "GND", nets)
     # boot/reset straps + headers
-    b += res("R30", x + 62, y + 20, "QSPI_SS", "+3V3", nets)
-    b += res("R31", x + 44, y + 44, "RP_RUN", "+3V3", nets)
+    b += res("R30", x + 90, y + 38, "QSPI_SS", "+3V3", nets)
+    b += res("R31", x + 66, y + 44, "RP_RUN", "+3V3", nets)
     b += place("Connector_PinHeader_2.54mm", "PinHeader_1x02_P2.54mm_Vertical",
                "J30", x + 4, y + 44, 90, {"1": "QSPI_SS", "2": "GND"}, nets)
     b += place("Connector_PinHeader_2.54mm", "PinHeader_1x02_P2.54mm_Vertical",
                "J31", x + 16, y + 44, 90, {"1": "RP_RUN", "2": "GND"}, nets)
     b += place("Connector_PinHeader_2.54mm", "PinHeader_1x03_P2.54mm_Vertical",
-               "J32", x + 30, y + 44, 90,
+               "J32", x + 56, y + 44, 90,
                {"1": "RP_SWCLK", "2": "GND", "3": "RP_SWDIO"}, nets)
     # USB: ADVISORY test pads only — no connector, no impedance claim
-    b += tp("TP50", x + 56, y + 44, "RP_USB_DM", nets)
-    b += tp("TP51", x + 62, y + 44, "RP_USB_DP", nets)
+    b += tp("TP50", x + 74, y + 44, "RP_USB_DM", nets)
+    b += tp("TP51", x + 80, y + 44, "RP_USB_DP", nets)
     # I2C pull-ups (the Pico block carries these when it is the MCU)
     if "i2c_sda" in n:
-        b += res("R32", x + 78, y + 20, n["i2c_sda"], "+3V3", nets)
-        b += res("R33", x + 78, y + 26, n["i2c_scl"], "+3V3", nets)
+        b += res("R32", x + 90, y + 20, n["i2c_sda"], "+3V3", nets)
+        b += res("R33", x + 90, y + 26, n["i2c_scl"], "+3V3", nets)
     label("BARE RP2040 (STRESS TEST)", x + 60, y + 2, 0.8)
     label("J30 BOOTSEL  J31 RESET  J32 SWD", x + 18, y + 50, 0.6)
     label("USB pads ADVISORY ONLY no impedance claim", x + 58, y + 50, 0.6)
@@ -645,7 +645,23 @@ def block_mcu_bare(x, y, n, nets):
                                 "symbol (23.5); subsystem still unvalidated "
                                 "physically"})
     _DEVICES.append({"ref": "U31", "type": "qspi_flash", "name": "W25Q16 class"})
-    return b, 86, 54
+    return b, 96, 54
+
+
+def block_gpio_breakout(x, y, n, nets):
+    """M2: Pico-replacement GPIO breakout — a 1x10 header carrying REAL MCU
+    nets (UART, I2C, 4 GPIOs, rails). Only emitted when the net contract is
+    allocated, so no labels-only copper can exist."""
+    hmap = {"1": "+3V3", "2": "GND",
+            "3": n["uart_gps_tx"], "4": n["uart_gps_rx"],
+            "5": n["i2c_sda"], "6": n["i2c_scl"],
+            "7": n["gp_a"], "8": n["gp_b"], "9": n["gp_c"], "10": n["gp_d"]}
+    b = place("Connector_PinHeader_2.54mm", "PinHeader_1x10_P2.54mm_Vertical",
+              "J55", x + 2, y + 4, 90, hmap, nets)
+    b += tp("TP75", x + 8, y + 30, n["gp_a"], nets)
+    b += tp("TP76", x + 14, y + 30, n["gp_b"], nets)
+    label("GPIO BREAKOUT (REVIEW REQD)", x + 3, y + 1, 0.7)
+    return b, 20, 34
 
 
 def block_backplane6(x, y, n, nets):
@@ -1130,6 +1146,7 @@ BLOCK_TABLE = {
     "calref": block_calref,
     "calrefext": block_calref_expansion,
     "baremcu": block_mcu_bare,
+    "gpiobreakout": block_gpio_breakout,
     "backplane6": block_backplane6,
     "statusled": block_status_led,
     "bme280": block_bme280,
@@ -1198,6 +1215,8 @@ def _block_keys(s):
         add("calrefext")
     if any(k in s for k in ("bare rp2040", "bare mcu", "no-pico mcu", "qfn mcu")):
         add("baremcu")
+    if "breakout" in s and ("gpio" in s or "pico" in s):
+        add("gpiobreakout")
     if any(k in s for k in ("six-slot backplane", "slot backplane", "passive backplane",
                             "backplane slots")):
         add("backplane6")
@@ -1322,7 +1341,7 @@ ROW = {"power": 0, "usbc": 0, "mcu": 0, "imu": 0, "radio": 0, "antenna": 0,
        "instrument": 0, "dutmonitor": 0, "calref": 0, "calrefext": 0, "backplane6": 0,
        "statusled": 0, "bme280": 0, "bme280breakout": 0, "usbcsink": 0,
        "standalone": 0,
-       "baremcu": 0, "relaymatrix": 1, "motors": 1,
+       "baremcu": 0, "relaymatrix": 1, "motors": 1, "gpiobreakout": 1,
        "fl1bus": 0, "boardid": 0, "gpiobank": 0, "spibus": 0, "uartbridge": 0}
 COL = {"power": 0, "usbc": 0, "mcu": 2, "imu": 3, "tempsensor": 3, "gnss": 4,
        "radio": 5, "cellular": 6, "comms": 7, "antenna": 9, "motors": 1,
@@ -1411,9 +1430,16 @@ def compose(spec, blocks, out_path):
                   "ant": "ANT"})
     _cd_i2c = any(v in ("I2C_SDA", "I2C_SCL")
                   for e in cds.values() for v in e["pmap"].values())
+    if "gpiobreakout" in keys:
+        n.setdefault("uart_gps_tx", "UART_TX")
+        n.setdefault("uart_gps_rx", "UART_RX")
+        n.setdefault("gp_a", "GP10")
+        n.setdefault("gp_b", "GP11")
+        n.setdefault("gp_c", "GP12")
+        n.setdefault("gp_d", "GP13")
     if ("imu" in keys or "tempsensor" in keys or "instrument" in keys or dyn
             or "calref" in keys or "dutmonitor" in keys or "bme280" in keys
-            or _cd_i2c):
+            or _cd_i2c or "gpiobreakout" in keys):
         n.update({"i2c_sda": "I2C_SDA", "i2c_scl": "I2C_SCL"})  # shared I2C bus
     # synthesized headers request the matching MCU nets (Phase 23.2): a
     # generated UART/I2C/SPI header must be WIRED, never labels-only copper.

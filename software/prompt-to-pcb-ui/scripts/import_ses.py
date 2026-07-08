@@ -35,12 +35,15 @@ if os.path.exists(fanout_path):
         net = b.FindNet(e["net"])
         if net is None:
             continue
-        for x0, y0, x1, y1 in e.get("segments_mm", []):
+        for seg in e.get("segments_mm", []):
+            x0, y0, x1, y1 = seg[:4]
+            seg_layer = (pcbnew.B_Cu if len(seg) > 4 and seg[4] == "B.Cu"
+                         else pcbnew.F_Cu)
             t = pcbnew.PCB_TRACK(b)
             t.SetStart(pcbnew.VECTOR2I(pcbnew.FromMM(x0), pcbnew.FromMM(y0)))
             t.SetEnd(pcbnew.VECTOR2I(pcbnew.FromMM(x1), pcbnew.FromMM(y1)))
             t.SetWidth(pcbnew.FromMM(e.get("width_mm", 0.2)))
-            t.SetLayer(pcbnew.F_Cu)
+            t.SetLayer(seg_layer)
             t.SetNet(net)
             b.Add(t)
             n_stubs += 1
@@ -48,6 +51,16 @@ if os.path.exists(fanout_path):
             v = pcbnew.PCB_VIA(b)
             v.SetPosition(pcbnew.VECTOR2I(pcbnew.FromMM(e["via_mm"][0]),
                                           pcbnew.FromMM(e["via_mm"][1])))
+            v.SetViaType(pcbnew.VIATYPE_THROUGH)
+            v.SetLayerPair(pcbnew.F_Cu, pcbnew.B_Cu)
+            v.SetWidth(pcbnew.FromMM(0.4))
+            v.SetDrill(pcbnew.FromMM(0.2))
+            v.SetNet(net)
+            b.Add(v)
+            n_stubs += 1
+        for vx, vy in e.get("vias_mm", []):
+            v = pcbnew.PCB_VIA(b)
+            v.SetPosition(pcbnew.VECTOR2I(pcbnew.FromMM(vx), pcbnew.FromMM(vy)))
             v.SetViaType(pcbnew.VIATYPE_THROUGH)
             v.SetLayerPair(pcbnew.F_Cu, pcbnew.B_Cu)
             v.SetWidth(pcbnew.FromMM(0.4))

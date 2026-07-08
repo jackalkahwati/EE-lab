@@ -63,6 +63,7 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
       'compose-physical-evidence-ledger', 'compose-first-physical-board-selection',
       'compose-package-capability-registry', 'compose-bga-capability-model-v1',
       'compose-chipdown-synthesis-v1-report', 'compose-chipdown-fleet-learning-update',
+      'compose-pico-replacement-board-report', 'compose-core6-combination-report',
       'compose-package-family-benchmark-suite-report',
       'compose-readiness-ladder-physical-update',
       'compose-qfn56-fleet-learning-update',
@@ -148,6 +149,34 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
               blocker: {d['cal-board-attempt'].blocker}
             </p>
           )}
+        </div>
+      )}
+
+      {/* Milestone M2: bare-MCU productization */}
+      {d['compose-core6-combination-report'] && (
+        <div className="rounded-md border border-primary/40 bg-primary/5 p-3">
+          <p className="mb-1 text-[11px] font-semibold text-primary">
+            M2 Bare-MCU Productization — BOTH GATES PASSED
+          </p>
+          {d['compose-pico-replacement-board-report'] && (
+            <p className="text-[10px] text-foreground">
+              Gate A · Pico-replacement board: {d['compose-pico-replacement-board-report'].routing} nets
+              · DRC {d['compose-pico-replacement-board-report'].drc} ·{' '}
+              {d['compose-pico-replacement-board-report'].role}
+            </p>
+          )}
+          <p className="text-[10px] text-foreground">
+            Gate B · FL-1 Core-6 bare-RP2040: {d['compose-core6-combination-report'].routing} nets
+            · DRC {d['compose-core6-combination-report'].drc} ·{' '}
+            {d['compose-core6-combination-report'].role}
+          </p>
+          <p className="mt-1 text-[9px] text-muted-foreground">
+            {d['compose-core6-combination-report'].history}
+          </p>
+          <p className="mt-1 text-[9px] text-amber-500">
+            No boot / firmware / USB / Pico-compatible / cost-down / FL-1-replacement claims —
+            modular FL-1 boards remain the validated path; nothing physical
+          </p>
         </div>
       )}
 

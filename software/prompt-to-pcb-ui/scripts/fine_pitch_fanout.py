@@ -33,6 +33,7 @@ import pcbnew
 FP_SHARE = "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints"
 ZONE_NETS = {"GND", "+3V3", "+5V"}
 STUB_W = 0.2        # mm
+ROW_CLEAR = 16.0    # column signal fans surface beyond the row-fan band
 LANE0 = 1.6         # mm: first lane depth beyond the pad end (clears the package courtyard)
 LANE_STEP = 1.2     # mm: lane spacing (with FAN_STEP keeps breakout courtyards apart)
 FAN_GAP = 1.5       # mm: first breakout offset beyond the row end (clears the courtyard)
@@ -49,12 +50,12 @@ def _mm(v):
 _CUR_W = [STUB_W]
 
 
-def _track(board, net, x0, y0, x1, y1):
+def _track(board, net, x0, y0, x1, y1, layer=None):
     t = pcbnew.PCB_TRACK(board)
     t.SetStart(pcbnew.VECTOR2I(_mm(x0), _mm(y0)))
     t.SetEnd(pcbnew.VECTOR2I(_mm(x1), _mm(y1)))
     t.SetWidth(_mm(_CUR_W[0]))
-    t.SetLayer(pcbnew.F_Cu)
+    t.SetLayer(pcbnew.F_Cu if layer is None else layer)
     t.SetNet(net)
     board.Add(t)
 
@@ -70,12 +71,16 @@ def _via(board, net, x, y):
     board.Add(v)
 
 
-def _breakout_pad(board, ref, x, y, net):
+def _breakout_pad(board, ref, x, y, net, dia=None):
     fp = pcbnew.FootprintLoad(os.path.join(FP_SHARE, "TestPoint.pretty"), "TestPoint_Pad_D1.0mm")
     fp.SetReference(ref)
     fp.SetPosition(pcbnew.VECTOR2I(_mm(x), _mm(y)))
     for p in fp.Pads():
         p.SetNet(net)
+        if dia is not None:
+            # QFN 0.6mm ladder: 1.0mm pads touch adjacent laterals; 0.6mm
+            # pads keep the exact 0.2mm clearance
+            p.SetSize(pcbnew.VECTOR2I(_mm(dia), _mm(dia)))
     board.Add(fp)
 
 
@@ -89,6 +94,17 @@ def fanout(board_path):
         if len(pads) < 6:
             continue
         pos = [(p.GetPosition().x / 1e6, p.GetPosition().y / 1e6, p) for p in pads]
+        # M2: count wired signals per column so QFN row fans can point AWAY
+        # from the column whose B-corridor band they must not invade
+        fcx0 = f.GetPosition().x / 1e6
+        left_sig = sum(1 for (px, py, p) in pos
+                       if px < fcx0 and p.GetNetname()
+                       and p.GetNetname() not in ZONE_NETS
+                       and abs(px - fcx0) > abs(py - f.GetPosition().y / 1e6))
+        right_sig = sum(1 for (px, py, p) in pos
+                        if px > fcx0 and p.GetNetname()
+                        and p.GetNetname() not in ZONE_NETS
+                        and abs(px - fcx0) > abs(py - f.GetPosition().y / 1e6))
         occupied = []  # 23.5: fan targets already claimed by ANY axis/row of
         #                this footprint — corner cells of a 4-sided QFN would
         #                otherwise collide between the row fans and column fans
@@ -130,6 +146,16 @@ def fanout(board_path):
                 else:
                     sig_cen = row_cen  # zone-only row: no signal fan exists
                 fan_dir = 1.0 if sig_cen >= row_cen else -1.0
+                if pitch < 0.45 and axis == 1 and (left_sig or right_sig):
+                    # rows: fan away from the heavier column corridor band
+                    fan_dir = 1.0 if left_sig >= right_sig else -1.0
+                if pitch < 0.45 and axis == 0:
+                    # columns: dive corridors fan toward the side with board
+                    # room (an upward fan walked TRIG/FAULT off the top edge)
+                    bb = board.GetBoardEdgesBoundingBox()
+                    room_dn = bb.GetBottom() / 1e6 - max(along)
+                    room_up = min(along) - bb.GetTop() / 1e6
+                    fan_dir = 1.0 if room_dn >= room_up else -1.0
                 fan_end = max(along) if fan_dir > 0 else min(along)
 
                 # ---- signal escapes: L-shaped private lanes ------------------
@@ -144,8 +170,17 @@ def fanout(board_path):
                 sig_sorted = (sorted(esc, key=lambda t: fan_dir * (fan_end - t[along_i]))
                               if len(esc) >= 2 or (qfn_mode and esc) else [])
                 for i, (x, y, p) in enumerate(sig_sorted):
-                    lane = row_out_edge + outward * (LANE0 + i * LANE_STEP)
-                    target = fan_end + fan_dir * (FAN_GAP + i * FAN_STEP)
+                    # QFN rows can carry 13+ lanes — 0.6mm step (0.4mm gap
+                    # between 0.2 laterals) keeps the deepest lane inside the
+                    # board margin
+                    _step = 0.6 if pitch < 0.45 else LANE_STEP
+                    lane = row_out_edge + outward * (LANE0 + i * _step)
+                    # QFN rows: start fan targets BEYOND the adjacent column's
+                    # B-corridor band so row plane-vias never sit in a
+                    # corridor (the INTERLOCK-x-3V3-via signature)
+                    _gap = 14.0 if (pitch < 0.45 and axis == 1
+                                    and (left_sig or right_sig)) else FAN_GAP
+                    target = fan_end + fan_dir * (_gap + i * FAN_STEP)
                     # dedup against every fan cell this footprint already owns
                     def _bo_of(tg):
                         return (tg, lane) if axis == 1 else (lane, tg)
@@ -166,7 +201,69 @@ def fanout(board_path):
                         bo = (lane, target)
                     for s in segs:
                         _track(board, net, *s)
-                    if qfn_mode and p.GetNetname() in ZONE_NETS and axis == 0:
+                    if qfn_mode and axis == 0:
+                        # M2: COLUMN SIGNAL — its vertical lane run would
+                        # cross the row fans' laterals on F (the Gate A DRC
+                        # signature: I2C/UART/GPIO x XIN/SWD crossings). Keep
+                        # the proven F ladder only to just past the column
+                        # end, dive to B.Cu through the row band, surface
+                        # beyond it at an extended target.
+                        y_split = fan_end + fan_dir * 1.0
+                        far = fan_end + fan_dir * (ROW_CLEAR + i * FAN_STEP)
+                        seg_f1 = (x, y, lane, y)
+                        seg_f2 = (lane, y, lane, y_split)
+                        seg_b = (lane, y_split, lane, far)
+                        pad_at = (lane, far + fan_dir * 1.4)
+                        _track(board, net, *seg_f1)
+                        _track(board, net, *seg_f2)
+                        _via(board, net, lane, y_split)
+                        _track(board, net, *seg_b, layer=pcbnew.B_Cu)
+                        _via(board, net, lane, far)
+                        if p.GetNetname() in ZONE_NETS:
+                            # plane pin: the far via IS the plane connection —
+                            # an in-band zone via always collides with an
+                            # adjacent wired signal's stub at 0.4mm pitch
+                            # (the RST_OUT x IOVDD-via signature)
+                            occupied.append((lane, far))
+                            dogbones.append({"ref": f.GetReference(),
+                                             "pad": p.GetPadName(),
+                                             "net": p.GetNetname(),
+                                             "pin_token": "%s-%s" % (
+                                                 f.GetReference(),
+                                                 p.GetPadName()),
+                                             "segments_mm": [
+                                                 list(seg_f1) + ["F.Cu"],
+                                                 list(seg_f2) + ["F.Cu"],
+                                                 list(seg_b) + ["B.Cu"]],
+                                             "vias_mm": [[lane, y_split],
+                                                         [lane, far]],
+                                             "width_mm": _CUR_W[0]})
+                            continue
+                        _track(board, net, lane, far, pad_at[0], pad_at[1])
+                        fo_n += 1
+                        ref = "FO%d" % fo_n
+                        _breakout_pad(board, ref, pad_at[0], pad_at[1], net)
+                        occupied.append(pad_at)
+                        entries.append({"ref": f.GetReference(),
+                                        "pad": p.GetPadName(),
+                                        "net": p.GetNetname(),
+                                        "breakout_ref": ref,
+                                        "pin_token": "%s-%s" % (
+                                            f.GetReference(), p.GetPadName()),
+                                        "pitch_mm": pitch,
+                                        "row_escapes": len(sig),
+                                        "segments_mm": [
+                                            list(seg_f1) + ["F.Cu"],
+                                            list(seg_f2) + ["F.Cu"],
+                                            list(seg_b) + ["B.Cu"],
+                                            [lane, far, pad_at[0], pad_at[1],
+                                             "F.Cu"]],
+                                        "vias_mm": [[lane, y_split],
+                                                    [lane, far]],
+                                        "width_mm": _CUR_W[0],
+                                        "layer_dive": "B.Cu through row band"})
+                        continue
+                    if False and qfn_mode and p.GetNetname() in ZONE_NETS and axis == 0:
                         # COLUMN plane pin (QFN left/right): no vertical lane
                         # run — it would cross the row fans' laterals in the
                         # corner box. Stub straight out to the lane depth and
@@ -199,7 +296,8 @@ def fanout(board_path):
                                          "via_mm": [bo[0], bo[1]],
                                          "width_mm": _CUR_W[0]})
                         continue
-                    _breakout_pad(board, ref, bo[0], bo[1], net)
+                    _breakout_pad(board, ref, bo[0], bo[1], net,
+                                  dia=0.6 if qfn_mode else None)
                     entries.append({"ref": f.GetReference(), "pad": p.GetPadName(),
                                     "net": p.GetNetname(), "breakout_ref": ref,
                                     "pin_token": "%s-%s" % (f.GetReference(), p.GetPadName()),
