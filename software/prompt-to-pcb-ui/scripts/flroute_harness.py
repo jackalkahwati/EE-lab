@@ -81,7 +81,9 @@ def run_fixture(fix, outdir):
     os.makedirs(d, exist_ok=True)
     board = os.path.join(d, fid + ".kicad_pcb")
     t0 = time.time()
-    if fix.get("run_fanout"):
+    if fix.get("run_fanout") or "bga" in fix:
+        # bga fixtures use the footprint builder but NOT the fanout engine —
+        # there is no BGA escape emitter; that absence is what they measure
         nets = fx.build_fanout_board(fix, board)
     else:
         nets = fx.build(fix, board)
@@ -324,7 +326,7 @@ def run_realboard(fix, outdir):
 
 def _one(fid, outdir):
     """Run a single fixture (crash-isolated child mode)."""
-    pool = fx.CORE + fx.FANOUT + REALBOARD
+    pool = fx.CORE + fx.FANOUT + fx.BGA_FIXTURES + REALBOARD
     fix = next(f for f in pool if f["fixture_id"] == fid)
     r = (run_realboard(fix, outdir) if fix.get("source_run")
          else run_fixture(fix, outdir))
@@ -352,6 +354,10 @@ def main():
         fixtures += [f for f in fx.CORE if f["fixture_id"] in ids]
     if suite in ("realboard", "full"):
         fixtures += REALBOARD
+    if suite == "bga":
+        # M7R suite — deliberately NOT part of "full": the accepted M3A
+        # 21-fixture contract stays frozen; BGA gap evidence runs separately
+        fixtures += fx.BGA_FIXTURES
     if suite == "importexport":
         ids = {"two_layer_no_internal_layers", "four_layer_internal_allowed"}
         fixtures += [f for f in fx.CORE if f["fixture_id"] in ids]

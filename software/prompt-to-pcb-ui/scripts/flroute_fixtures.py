@@ -247,6 +247,48 @@ FANOUT = [
 ]
 
 
+# M7R — BGA escape-gap fixtures. There is NO ball-grid escape emitter; these
+# fixtures pin that gap down with real routing evidence instead of prose.
+# Replay finding (downgrades the M7 draft estimate): at the proven fab class
+# (0.2 track + 2x0.13 clearance = 0.46mm) a track cannot pass between ring-0
+# balls (0.45mm gap at 0.8mm pitch / 0.35mm pads) — so only TRUE perimeter
+# (ring-0) balls escape by plain routing; ring-1 is already trapped, not just
+# the interior. The draft said "outer two rings escape"; the router says no.
+BGA_FIXTURES = [
+ {"fixture_id": "bga121_ring0_escape", "type": "bga_escape_gap",
+  "purpose": "M7R: true perimeter (ring-0) balls of a full-array BGA-121 "
+             "escape with plain routing (no emitter involved)",
+  "expected_result": "should_route", "layers": 4,
+  "bga": {"at": (30, 24), "wire_pins": {"A3": "O1", "L6": "O2",
+                                        "F11": "O3", "H1": "O4"}},
+  "nets": ["O1", "O2", "O3", "O4"],
+  "pads": [("O1", 55, 8), ("O2", 55, 16), ("O3", 55, 24), ("O4", 55, 32)],
+  "size": (70, 56), "drc_required": True},
+ {"fixture_id": "bga121_ring1_trapped", "type": "bga_escape_gap",
+  "purpose": "M7R replay finding: a single ring-1 ball cannot pass between "
+             "ring-0 balls at the proven fab class — trapped even with the "
+             "rest of the array unwired",
+  "expected_result": "should_fail", "layers": 4,
+  "bga": {"at": (30, 24), "wire_pins": {"B2": "R1"}},
+  "nets": ["R1"],
+  "pads": [("R1", 55, 12)],
+  "size": (70, 56), "drc_required": True,
+  "expected_failure_reason": "0.45mm ball gap < 0.46mm track+clearance; "
+                             "needs dogbone via or finer fab class"},
+ {"fixture_id": "bga121_interior_ball_no_emitter", "type": "bga_escape_gap",
+  "purpose": "M7R: interior balls (ring>=2) of a full-array BGA-121 — no "
+             "ball-grid escape emitter exists; failure must be honest and "
+             "visible",
+  "expected_result": "should_fail", "layers": 4,
+  "bga": {"at": (30, 24), "wire_pins": {"F6": "I1", "D8": "I2"}},
+  "nets": ["I1", "I2"],
+  "pads": [("I1", 55, 12), ("I2", 55, 28)],
+  "size": (70, 56), "drc_required": True,
+  "expected_failure_reason": "interior balls unreachable without dogbone "
+                             "via channels (no BGA escape emitter)"},
+]
+
+
 def build_fanout_board(fix, out_path):
     """Fanout fixtures place a REAL fine-pitch footprint with wired pins."""
     board = pcbnew.CreateEmptyBoard()
@@ -289,6 +331,18 @@ def build_fanout_board(fix, out_path):
         fp.SetPosition(pcbnew.VECTOR2I(MM(at[0]), MM(at[1])))
         for p in fp.Pads():
             n = fix["qfn"]["wire_pins"].get(p.GetPadName())
+            if n:
+                p.SetNet(nets[n])
+        board.Add(fp)
+    if "bga" in fix:
+        fp = pcbnew.FootprintLoad(
+            os.path.join(FP_SHARE, "Package_BGA.pretty"),
+            "BGA-121_9.0x9.0mm_Layout11x11_P0.8mm_Ball0.4mm_Pad0.35mm_NSMD")
+        fp.SetReference("U1")
+        at = fix["bga"]["at"]
+        fp.SetPosition(pcbnew.VECTOR2I(MM(at[0]), MM(at[1])))
+        for p in fp.Pads():
+            n = fix["bga"]["wire_pins"].get(p.GetPadName())
             if n:
                 p.SetNet(nets[n])
         board.Add(fp)
