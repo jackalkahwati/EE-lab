@@ -1,0 +1,24 @@
+{
+ "version": "v1",
+ "milestone": "E1 Enterprise Program Workspace",
+ "delivered": {
+  "data_model": "lib/enterprise/store.mjs (8 entities, enums, gate rules)",
+  "api": "app/api/enterprise/route.ts (GET state, POST action dispatch, all mutations audited, RBAC hook in place)",
+  "ui": "app/enterprise/page.tsx (workspace selector, program list, program detail, board detail with Runs/Evidence/Approvals/Usage/Risks tabs)",
+  "tests": "scripts/test_e1.mjs — 13/13 (isolated temp store)"
+ },
+ "honesty_invariants": [
+  "production_ready structurally unreachable without accepted physical + yield + manufacturing evidence AND production_readiness_approval",
+  "approved_for_quote requires an explicit approved approval record",
+  "physically_validated requires an ACCEPTED physical evidence item whose artifact file exists on disk",
+  "physical evidence items cannot be created without a real file",
+  "blocked claims and review-required items are inherited from run artifacts and never hidden by state changes"
+ ],
+ "acceptance": {
+  "entities_exist": true,
+  "programs_contain_multiple_boards_and_runs": true,
+  "existing_artifacts_attachable": "attachRun reads real public/runs artifacts; route/DRC/ERC states are read, never asserted",
+  "evidence_and_approval_states_visible": true,
+  "physical_production_claims_gated": true
+ }
+}
