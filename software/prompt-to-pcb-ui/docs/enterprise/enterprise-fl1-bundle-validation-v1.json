@@ -1,0 +1,16 @@
+{
+ "version": "v1",
+ "milestone": "E8 FL-1 Bundle + Validation Sessions",
+ "delivered": {
+  "engine": "lib/enterprise/fl1.mjs (asset model, 8-state session machine, evidence attach with labeled measurements, claim impact report, bundle status report)",
+  "api": "register_fl1_asset / plan_validation_session / advance_session / attach_session_evidence / claim_impact_report / fl1_bundle_status",
+  "validation_plans": "sessions bind to REAL fl1-testplan.json artifacts from the run; no plan -> session is blocked",
+  "tests": "scripts/test_e8.mjs — 14/14"
+ },
+ "acceptance": {
+  "bundle_representable": true,
+  "sessions_planned_tracked": true,
+  "evidence_attachable_as_metadata": "with real-file requirement inherited from the store",
+  "claims_blocked_until_reviewed": "tested: acceptance refused while evidence is unreviewed; unlocks only after named-reviewer acceptance"
+ }
+}

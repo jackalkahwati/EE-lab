@@ -1,0 +1,56 @@
+{
+ "version": "fl1-validation-session/v1",
+ "fl1_asset_fields": [
+  "asset_id",
+  "org_id",
+  "serial_placeholder",
+  "status",
+  "location_placeholder",
+  "software_term",
+  "service_notes",
+  "calibration_state"
+ ],
+ "session_fields": [
+  "session_id",
+  "asset_id",
+  "board_id",
+  "run_id",
+  "validation_plan",
+  "operator",
+  "start_time",
+  "end_time",
+  "status",
+  "evidence_ids",
+  "measurements",
+  "failures",
+  "claims_affected",
+  "review_state"
+ ],
+ "session_states": [
+  "planned",
+  "ready",
+  "running",
+  "blocked",
+  "completed_pending_review",
+  "accepted",
+  "rejected",
+  "archived"
+ ],
+ "session_evidence_types": [
+  "visual_inspection",
+  "continuity_results",
+  "physical_measurement",
+  "i2c_scan",
+  "oscilloscope_capture",
+  "thermal_image",
+  "operator_notes"
+ ],
+ "rules": [
+  "validation session does not imply pass — completion lands as completed_pending_review",
+  "session acceptance requires at least one REVIEWED (accepted) evidence item by a named reviewer",
+  "uploaded physical evidence requires a real artifact file (store gate)",
+  "measurements require name + value + units — no unlabeled numbers",
+  "FL-1 asset presence does not imply physical validation",
+  "calibration claims require calibration evidence"
+ ]
+}
