@@ -14,12 +14,29 @@ type Any = Record<string, any>
 
 const STATE_STYLE: Record<string, string> = {
   draft: 'border-border bg-muted/30 text-muted-foreground',
-  packet_ready: 'border-amber-500/40 bg-amber-500/10 text-amber-500',
+  quote_packet_ready: 'border-amber-500/40 bg-amber-500/10 text-amber-500',
+  quote_approval_requested: 'border-amber-500/40 bg-amber-500/10 text-amber-500',
   approved_for_quote: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500',
+  quote_submitted_manually: 'border-sky-500/40 bg-sky-500/10 text-sky-400',
   quote_received: 'border-sky-500/40 bg-sky-500/10 text-sky-400',
   approved_for_order: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500',
-  ordered: 'border-primary/40 bg-primary/10 text-primary',
+  order_submitted_manually: 'border-primary/40 bg-primary/10 text-primary',
+  fab_in_progress: 'border-primary/40 bg-primary/10 text-primary',
+  blocked: 'border-destructive/40 bg-destructive/10 text-destructive',
 }
+
+// forward (non-blocked) transition per state — mirrors the server state machine
+const NEXT: Record<string, string[]> = {
+  quote_packet_ready: ['quote_approval_requested'],
+  quote_approval_requested: ['approved_for_quote'],
+  approved_for_quote: ['quote_submitted_manually'],
+  quote_submitted_manually: ['quote_received'],
+  quote_received: ['approved_for_order'],
+  approved_for_order: ['order_submitted_manually'],
+  order_submitted_manually: ['fab_in_progress'],
+}
+// states whose transition is human-gated by an approval outside this button
+const APPROVAL_GATED = new Set(['approved_for_quote', 'approved_for_order'])
 
 export default function QuotesPage() {
   const [db, setDb] = useState<Any | null>(null)
@@ -49,6 +66,14 @@ export default function QuotesPage() {
     setBusy(false)
     if (r.error) setMsg({ tone: 'err', text: `${r.error}${r.detail ? ` — ${r.detail}` : ''}` })
     else { setMsg({ tone: 'ok', text: 'quote packet generated' }); setPick(''); refresh() }
+  }
+
+  async function advance(board_id: string, to: string) {
+    setBusy(true); setMsg(null)
+    const r = await enterpriseAction('advance_quote', { board_id, to })
+    setBusy(false)
+    if (r.error) setMsg({ tone: 'err', text: `${r.error}${r.detail ? ` — ${r.detail}` : ''}` })
+    else { setMsg({ tone: 'ok', text: `→ ${to.replace(/_/g, ' ')}` }); refresh() }
   }
 
   return (
@@ -94,6 +119,14 @@ export default function QuotesPage() {
                 STATE_STYLE[q.state] ?? 'border-border bg-muted/30 text-muted-foreground')}>
                 {q.state?.replace(/_/g, ' ')}
               </span>
+              {(NEXT[q.state] ?? []).map((to) => (
+                <button key={to} type="button" disabled={busy}
+                  onClick={() => advance(q.board_id, to)}
+                  title={APPROVAL_GATED.has(to) ? 'requires an approved approval for this board' : undefined}
+                  className="rounded-sm border border-primary/40 bg-primary/10 px-2 py-0.5 text-[10px] text-primary hover:bg-primary/20 disabled:opacity-50">
+                  → {to.replace(/_/g, ' ')}{APPROVAL_GATED.has(to) ? ' ⚠' : ''}
+                </button>
+              ))}
               <span className="ml-auto font-mono text-[10px] text-muted-foreground">{q.quote_id}</span>
             </div>
             <div className="grid gap-3 p-3 sm:grid-cols-2">

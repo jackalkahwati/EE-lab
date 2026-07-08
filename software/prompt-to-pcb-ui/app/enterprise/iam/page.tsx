@@ -7,9 +7,10 @@
  * store. Role assignment is gated by manage_members through the audited
  * dispatcher; this view is read-first.
  */
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
+import { enterpriseAction } from '@/lib/enterprise-actions'
 
 type Any = Record<string, any>
 const TABS = ['Users', 'Roles', 'Permissions'] as const
@@ -32,11 +33,22 @@ const RoleBadge = ({ r }: { r: string }) => (
 export default function IamPage() {
   const [db, setDb] = useState<Any | null>(null)
   const [tab, setTab] = useState<(typeof TABS)[number]>('Users')
+  const [busy, setBusy] = useState<string | null>(null)
+  const [msg, setMsg] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null)
 
-  useEffect(() => {
+  const refresh = useCallback(() => {
     fetch('/api/enterprise', { cache: 'no-store' })
       .then((r) => r.json()).then(setDb).catch(() => {})
   }, [])
+  useEffect(() => { refresh() }, [refresh])
+
+  async function changeRole(actor_name: string, role: string) {
+    setBusy(actor_name); setMsg(null)
+    const r = await enterpriseAction('set_member_role', { actor_name, role })
+    setBusy(null)
+    if (r.error) setMsg({ tone: 'err', text: `${r.error}${r.detail ? ` — ${r.detail}` : ''}` })
+    else { setMsg({ tone: 'ok', text: `${actor_name} → ${role}` }); refresh() }
+  }
 
   if (!db) return <div className="p-6 text-xs text-muted-foreground">Loading IAM…</div>
   if (db.error) return <div className="p-6 text-xs text-muted-foreground">Sign in required.</div>
@@ -61,6 +73,12 @@ export default function IamPage() {
                 SYNTHETIC DEMO DATA
               </span>
             )}
+          </span>
+        )}
+        {msg && (
+          <span className={cn('rounded-sm px-2 py-0.5 font-mono text-[10px]',
+            msg.tone === 'ok' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-destructive/10 text-destructive')}>
+            {msg.text}
           </span>
         )}
         <Link href="/enterprise/settings"
@@ -104,7 +122,11 @@ export default function IamPage() {
                   </span>
                   <span className="truncate text-xs font-medium">{m.actor}</span>
                 </span>
-                <RoleBadge r={m.role} />
+                <select value={m.role} disabled={busy === m.actor}
+                  onChange={(e) => changeRole(m.actor, e.target.value)}
+                  className="rounded-sm border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] disabled:opacity-50">
+                  {roles.map((r) => <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>)}
+                </select>
                 <span className="text-right font-mono text-[11px] text-muted-foreground">{activityOf(m.actor)} run(s)</span>
                 <span className="text-right font-mono text-[9px] text-muted-foreground">{m.granted_by}</span>
               </div>

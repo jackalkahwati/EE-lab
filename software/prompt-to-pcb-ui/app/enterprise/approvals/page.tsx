@@ -8,7 +8,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
-import { enterpriseAction } from '@/lib/enterprise-actions'
+import { currentActor, enterpriseAction } from '@/lib/enterprise-actions'
 
 type Any = Record<string, any>
 const PENDING = ['pending', 'requested', 'awaiting']
@@ -23,11 +23,12 @@ export default function ApprovalsPage() {
   const [busy, setBusy] = useState<string | null>(null)
   const [msg, setMsg] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null)
   const [pick, setPick] = useState('')
+  const [me, setMe] = useState('')
 
   const refresh = useCallback(() => {
     fetch('/api/enterprise', { cache: 'no-store' }).then((r) => r.json()).then(setDb).catch(() => {})
   }, [])
-  useEffect(() => { refresh() }, [refresh])
+  useEffect(() => { refresh(); currentActor().then(setMe) }, [refresh])
 
   if (!db) return <div className="p-6 text-xs text-muted-foreground">Loading approvals…</div>
   if (db.error) return <div className="p-6 text-xs text-muted-foreground">Sign in required.</div>
@@ -68,12 +69,12 @@ export default function ApprovalsPage() {
         {decidable ? (
           <span className="flex shrink-0 gap-1">
             <button type="button" disabled={!!busy}
-              onClick={() => run(`ok-${a.approval_id}`, 'decide_approval', { approval_id: a.approval_id, decision: 'approved' })}
+              onClick={() => run(`ok-${a.approval_id}`, 'decide_approval', { approval_id: a.approval_id, decision: 'approved', approver: me })}
               className="rounded-sm border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-500 hover:bg-emerald-500/20 disabled:opacity-50">
               Approve
             </button>
             <button type="button" disabled={!!busy}
-              onClick={() => run(`no-${a.approval_id}`, 'decide_approval', { approval_id: a.approval_id, decision: 'rejected' })}
+              onClick={() => run(`no-${a.approval_id}`, 'decide_approval', { approval_id: a.approval_id, decision: 'rejected', approver: me })}
               className="rounded-sm border border-destructive/40 bg-destructive/10 px-2 py-0.5 text-[10px] text-destructive hover:bg-destructive/20 disabled:opacity-50">
               Reject
             </button>
@@ -110,7 +111,7 @@ export default function ApprovalsPage() {
         </select>
         <button type="button" disabled={!pick || !!busy}
           onClick={() => run('req', 'request_approval', {
-            approval_type: 'board_review_approval', scope: { board_id: pick }, requested_by: 'me',
+            approval_type: 'board_review_approval', scope: { board_id: pick }, requested_by: me,
           })}
           className="rounded-sm border border-primary/40 bg-primary/10 px-2.5 py-1 text-[11px] text-primary hover:bg-primary/20 disabled:opacity-50">
           Request
