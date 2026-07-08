@@ -13,6 +13,7 @@ const cr = await import('../lib/enterprise/credits.mjs')
 const qt = await import('../lib/enterprise/quotes.mjs')
 const fl1 = await import('../lib/enterprise/fl1.mjs')
 const pil = await import('../lib/enterprise/pilots.mjs')
+const rbac = await import('../lib/enterprise/rbac.mjs')
 
 const actor = 'demo-seed'
 const db = ent.resetDb()
@@ -116,9 +117,26 @@ pil.createPilot(db, { org_id: org.org_id, workspace_id: ws.workspace_id,
   baseline_process: 'manual EDA + contractor layout, 3 revisions typical',
   actor })
 
+// org billing config + a synthetic team (roles map to the real RBAC set;
+// no permissions are invented — these are the E5 roles)
+org.credit_allocation = 600
+org.usage_limits.monthly_runs = 200
+const MEMBERS = [
+  ['jack@acme.demo', 'org_admin'],
+  ['maya.chen@acme.demo', 'program_manager'],
+  ['devon.park@acme.demo', 'electrical_engineer'],
+  ['sara.okafor@acme.demo', 'reviewer'],
+  ['luis.moreno@acme.demo', 'procurement'],
+  ['fin.reyes@acme.demo', 'finance_viewer'],
+]
+for (const [actor_name, role] of MEMBERS) {
+  rbac.setMemberRole(db, { actor_name, role, actor })
+}
+
 ent.saveDb(db)
 const chain = ent.verifyAuditChain(db)
 console.log('demo seed complete:',
+  db.members?.length ?? 0, 'members |',
   db.programs.length, 'programs |', db.boards.length, 'boards |',
   db.runs.length, 'runs |', db.approvals.length, 'approvals |',
   db.usage.length, 'usage entries |', db.quotes.length, 'quote flows |',

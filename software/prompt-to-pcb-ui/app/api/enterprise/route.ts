@@ -39,8 +39,17 @@ export async function GET() {
     quotes: db.quotes,
     fl1_assets: db.fl1_assets,
     validation_sessions: db.validation_sessions,
+    members: db.members ?? [],
     audit_tail: db.audit.slice(-50),
     audit_chain: ent.verifyAuditChain(db),
+    // static RBAC catalog so Settings can render roles + what each can do
+    // (Sets aren't JSON-serialisable — expand to arrays)
+    rbac: {
+      roles: rbac.ROLES,
+      permissions: rbac.PERMISSIONS,
+      role_permissions: Object.fromEntries(
+        rbac.ROLES.map((r: string) => [r, [...(rbac.ROLE_PERMISSIONS[r] ?? [])]])),
+    },
   })
 }
 
