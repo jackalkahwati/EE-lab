@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { PortfolioSummary } from '@/components/portfolio-summary'
 import { StatusStrip } from '@/components/status-strip'
+import { ConsoleWidgets } from '@/components/console-widgets'
 
 type Db = Record<string, any>
 
@@ -115,7 +116,14 @@ export default function EnterprisePage() {
         </div>
       )}
 
-      {workspaces.length > 0 && programs.length > 0 && (
+      {!progId && workspaces.length > 0 && programs.length > 0 && (
+        <ConsoleWidgets
+          db={db}
+          programs={programs}
+          onOpenBoard={(b) => { setProgId(b.program_id); setBoardId(b.board_id) }}
+        />
+      )}
+      {!progId && workspaces.length > 0 && programs.length > 0 && (
         <PortfolioSummary
           db={db}
           programs={programs}
