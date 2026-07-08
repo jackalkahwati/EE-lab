@@ -58,6 +58,7 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
       'bme280-primitive-promotion-report', 'env-sensor-v2-compose-run',
       'compose-general-physical-synthesis-benchmark-report',
       'compose-benchmark-coverage-scorecard', 'compose-capability-pack-registry',
+      'compose-2layer-benchmark-rerun-report', 'compose-2layer-fleet-learning-update',
       'compose-next-capability-recommendation', 'compose-permanent-pattern-recommendations',
       'compose-general-synthesis-fleet-learning-update',
       'bme280-env-sensor-v2-fleet-learning-update',
@@ -138,6 +139,36 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
           {d['cal-board-attempt'].blocker && (
             <p className="mt-1 text-[10px] text-destructive">
               blocker: {d['cal-board-attempt'].blocker}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Phase 23.4: 2-layer flow */}
+      {d['compose-2layer-benchmark-rerun-report'] && (
+        <div className="rounded-md border border-emerald-500/40 bg-emerald-500/5 p-3">
+          <p className="mb-1 text-[11px] font-semibold text-emerald-500">
+            Automated 2-Layer Flow —{' '}
+            {d['compose-2layer-benchmark-rerun-report'].routed_clean}/
+            {d['compose-2layer-benchmark-rerun-report'].attempted} reruns routed clean
+          </p>
+          <div className="space-y-0.5">
+            {d['compose-2layer-benchmark-rerun-report'].reruns?.map((r: any, i: number) => (
+              <p key={i} className="text-[9px] text-muted-foreground">
+                {r.benchmark}: {r.route} nets · DRC {r.drc} · layers {r.layers_emitted} ·
+                inner absent: {String(r.inner_layers_absent)} · fallback: {r.fallback_4layer}
+              </p>
+            ))}
+          </div>
+          <p className="mt-1 text-[9px] text-amber-500">
+            2-layer routed clean ≠ physical validation · cost deltas are ESTIMATES until
+            quotes · 4-layer fallback always retained
+          </p>
+          {d['compose-2layer-fleet-learning-update'] && (
+            <p className="mt-1 text-[9px] text-emerald-500">
+              next capability:{' '}
+              {d['compose-2layer-fleet-learning-update'].next_recommendation.recommendation} —{' '}
+              {d['compose-2layer-fleet-learning-update'].next_recommendation.reason}
             </p>
           )}
         </div>

@@ -1252,6 +1252,17 @@ LAYERS = '''  (layers
   )
 '''
 
+# Phase 23.4: 2-layer rigid profile — F/B only, NO internal planes, through
+# vias only. +3V3 becomes a ROUTED net (no PWR plane exists); GND pours on
+# both outer layers with an explicit stitching strategy. Selected ONLY by
+# spec {"layers": 2}; the proven 4-layer path is untouched otherwise.
+LAYERS2 = '''  (layers
+    (0 "F.Cu" signal) (31 "B.Cu" signal)
+    (34 "B.Paste" user) (35 "F.Paste" user) (36 "B.SilkS" user) (37 "F.SilkS" user)
+    (38 "B.Mask" user) (39 "F.Mask" user) (44 "Edge.Cuts" user) (46 "B.CrtYd" user) (47 "F.CrtYd" user)
+  )
+'''
+
 
 # ---- floorplan ---------------------------------------------------------------
 # Region-based placement: a function-grouped flow rather than one flat row.
@@ -1478,19 +1489,28 @@ def compose(spec, blocks, out_path):
     # of blocks the classifier produced.
     body = _unique_refs(body)
 
+    two_layer = (spec or {}).get("layers") == 2
     p = '(kicad_pcb (version 20240108) (generator "ee-lab-compose") (generator_version "8.0")\n'
-    p += '  (general (thickness 1.6))\n  (paper "A4")\n' + LAYERS
+    p += '  (general (thickness 1.6))\n  (paper "A4")\n' + (LAYERS2 if two_layer else LAYERS)
     p += '  (setup (pad_to_mask_clearance 0))\n'
     for i, name in enumerate(nets.order):
         p += '  (net {} "{}")\n'.format(i, name)
     # outline + corner mounting holes
     p += ('  (gr_rect (start {} {}) (end {} {}) (stroke (width 0.15) (type default))'
           ' (fill none) (layer "Edge.Cuts") (uuid "{}"))\n').format(X0, Y0, X0 + BW, Y0 + BH, U())
-    # GND pours on F/B/In1, PWR on In2
-    p += gzone("GND", "F.Cu", X0, Y0, X0 + BW, Y0 + BH, nets)
-    p += gzone("GND", "B.Cu", X0, Y0, X0 + BW, Y0 + BH, nets)
-    p += gzone("GND", "In1.Cu", X0, Y0, X0 + BW, Y0 + BH, nets)
-    p += gzone("+3V3", "In2.Cu", X0, Y0, X0 + BW, Y0 + BH, nets)
+    if two_layer:
+        # 2-layer ground strategy: GND pours on BOTH outer layers, stitched by
+        # through vias. +3V3 has NO plane — it is a routed net like any signal.
+        # No controlled-impedance / RF / precision-analog / physical claims.
+        p += gzone("GND", "F.Cu", X0, Y0, X0 + BW, Y0 + BH, nets)
+        p += gzone("GND", "B.Cu", X0, Y0, X0 + BW, Y0 + BH, nets)
+        print("COMPOSE: 2-LAYER profile (F/B only, +3V3 routed, GND pours F+B)")
+    else:
+        # GND pours on F/B/In1, PWR on In2 (the proven 4-layer flow)
+        p += gzone("GND", "F.Cu", X0, Y0, X0 + BW, Y0 + BH, nets)
+        p += gzone("GND", "B.Cu", X0, Y0, X0 + BW, Y0 + BH, nets)
+        p += gzone("GND", "In1.Cu", X0, Y0, X0 + BW, Y0 + BH, nets)
+        p += gzone("+3V3", "In2.Cu", X0, Y0, X0 + BW, Y0 + BH, nets)
     p += body
     p += ')\n'
     open(out_path, "w").write(p)

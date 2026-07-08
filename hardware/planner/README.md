@@ -1340,3 +1340,36 @@ failures on copper.
 
 Regression: phase233 37/37; all suites green; frontend 24/24; board 5/5
 stands (no composer changes). Nothing ordered; nothing physically claimed.
+
+## Phase 23.4: automated 2-layer flow + low-cost fabrication optimization v1
+
+The 23.3 recommendation executed: a GATED 2-layer candidate flow, proven with
+SEVEN clean reruns — the 4-layer path untouched and every fallback retained.
+
+- Composer 2-layer mode (spec {"layers": 2}): LAYERS2 stackup (F/B only, NO
+  internal planes), GND pours on BOTH outer layers + through-via stitching,
+  +3V3 becomes a ROUTED net (no PWR plane exists). Emission verified ON
+  COPPER: In1/In2 absent, board.json reports 2 layers, no silent fallback
+  (the run log announces the 2-LAYER profile). 4-layer emission is
+  byte-identical when the flag is absent.
+- Decision model v2 (12 states) + eligibility checker: simple/low-density
+  boards eligible; fine-pitch = eligible_WITH_REVIEW; measurement/analog
+  (CV monitor, ADC logger, FL-1 cal), high-current, RF, high-speed, medical,
+  and FL-1-reviewed boards NOT eligible — no automatic downgrades.
+- Reruns 7/7 CLEAN on the real pipeline: power-entry 4/4, connector-breakout
+  5/5, i2c-breakout 5/5, debug-adapter 6/6, usbc-entry 5/5, generic-backplane
+  5/5, and the fine-pitch BME280 5/5 (fanout dogbones reach the B.Cu pour).
+  Env-sensor v2 + lab adapter eligible but deferred (recorded, not hidden).
+- 2L-vs-4L comparison: all 7 prefer_2_layer_with_review; cost deltas
+  explicitly ESTIMATE/PLACEHOLDER until real quotes; risk delta recorded (no
+  inner GND plane = reduced noise margin, physically unmeasured). Low-cost
+  optimizer: correct-low-cost, never gates-for-cost. Pack update: 7 packs
+  gain evidence-scoped 2-layer support; measurement packs REQUIRE 4-layer.
+- Fleet learning: the automated-2-layer gap is CLOSED for the simple-board
+  class (7/7); next systemic recommendation = QFN-56 QUADRANT ESCAPE PLANNER
+  (unblocks bare-MCU boards, the FL-1 cost-down monolith, and most modern
+  QFN parts); runner-up: a 2-layer PHYSICAL first article as the cheapest
+  possible physical evidence.
+
+Regression: phase234 29/29; all suites green; frontend 24/24; board 5/5.
+Nothing ordered; 2-layer routed clean is NOT physical validation.
