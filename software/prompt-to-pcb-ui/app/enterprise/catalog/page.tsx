@@ -91,14 +91,12 @@ export default function CatalogPage() {
                 <div className="max-h-72 divide-y divide-border overflow-y-auto">
                   {rows.map((e) => (
                     <div key={e.family} className="px-3 py-1.5">
-                      <div className="flex items-center gap-2">
-                        <span className="min-w-0 flex-1 truncate font-mono text-[11px]">{e.family}</span>
-                        <span className={cn('shrink-0 font-mono text-[9px]', EVIDENCE_STYLE[e.evidence_state] ?? 'text-muted-foreground')}>
-                          {e.evidence_state?.replace(/_/g, ' ')}
-                        </span>
+                      <div className="font-mono text-[11px] break-words">{e.family}</div>
+                      <div className={cn('font-mono text-[9px]', EVIDENCE_STYLE[e.evidence_state] ?? 'text-muted-foreground')}>
+                        {e.evidence_state?.replace(/_/g, ' ')}
                       </div>
                       {e.run_evidence?.length > 0 && (
-                        <div className="truncate text-[9px] text-muted-foreground">evidence: {e.run_evidence.join(', ')}</div>
+                        <div className="mt-0.5 text-[9px] text-muted-foreground break-words">evidence: {e.run_evidence.join(', ')}</div>
                       )}
                     </div>
                   ))}

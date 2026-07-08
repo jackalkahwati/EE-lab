@@ -82,6 +82,11 @@ export const ACTION_PERMISSIONS = {
   create_pilot: 'create_program',
   roi_report: 'view_costs',
   set_member_role: 'manage_members',
+  remove_member: 'manage_members',
+  create_api_key: 'manage_security_settings',
+  revoke_api_key: 'manage_security_settings',
+  create_webhook: 'manage_security_settings',
+  delete_webhook: 'manage_security_settings',
 }
 
 const APPROVAL_PERMISSION = {
@@ -112,10 +117,36 @@ export function hasPermission(db, actor, permission) {
 export function setMemberRole(db, { actor_name, role, workspace_id = null,
                                     actor }) {
   if (!ROLES.includes(role)) return { error: `unknown role ${role}` }
+  if (!actor_name) return { error: 'actor_name required' }
   db.members = db.members ?? []
-  db.members.push({ actor: actor_name, role, workspace_id,
-                    granted_by: actor, at: new Date().toISOString() })
+  // upsert: one record per (actor, workspace) — never push duplicates
+  const existing = db.members.find(
+    (m) => m.actor === actor_name && (m.workspace_id ?? null) === workspace_id)
+  if (existing) {
+    existing.role = role
+    existing.granted_by = actor
+    existing.at = new Date().toISOString()
+  } else {
+    db.members.push({ actor: actor_name, role, workspace_id,
+                      granted_by: actor, at: new Date().toISOString() })
+  }
   return { ok: true, actor_name, role }
+}
+
+export function removeMember(db, { actor_name, workspace_id = null, actor }) {
+  if (!actor_name) return { error: 'actor_name required' }
+  db.members = db.members ?? []
+  // last-admin safety: never remove the final org_admin
+  const admins = db.members.filter((m) => m.role === 'org_admin')
+  const target = db.members.find(
+    (m) => m.actor === actor_name && (m.workspace_id ?? null) === workspace_id)
+  if (!target) return { error: 'no such member' }
+  if (target.role === 'org_admin' && admins.length <= 1) {
+    return { error: 'cannot remove the last org_admin' }
+  }
+  db.members = db.members.filter(
+    (m) => !(m.actor === actor_name && (m.workspace_id ?? null) === workspace_id))
+  return { ok: true, removed: actor_name }
 }
 
 /** the dispatcher gate. Returns {ok} or {ok:false, reason}. */

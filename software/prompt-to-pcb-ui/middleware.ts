@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from 'next/server'
 const PUBLIC_PATTERNS = [
   /^\/login$/,
   /^\/api\/auth\//,
+  /^\/api\/v1\//, // programmatic API — authenticated by API key in the route, not the session cookie
   /^\/api\/billing\/webhook$/, // Stripe calls this unauthenticated (signed payload)
   /^\/icon/,
   /^\/apple-icon/,

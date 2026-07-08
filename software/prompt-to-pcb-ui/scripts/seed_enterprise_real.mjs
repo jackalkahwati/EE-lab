@@ -85,14 +85,14 @@ const org = ent.createOrganization(db, {
 org.credit_allocation = 1000
 org.usage_limits.monthly_runs = 500
 org.integrations = {
+  // only connectors that actually work today — no aspirational placeholders
   eda_connectors: [
     { name: 'KiCad', kind: 'native', status: 'native', io: 'design · route · DRC · fab package' },
     { name: 'Altium Designer', kind: 'connector', status: 'supported', io: 'export → IPC-2581 / ODB++ (Import Wizard); import via KiCad Altium plugin' },
-    { name: 'Autodesk Eagle / Fusion Electronics', kind: 'connector', status: 'planned', io: 'import .sch/.brd' },
-    { name: 'Cadence OrCAD / Allegro', kind: 'connector', status: 'evaluating', io: 'import netlist' },
+    { name: 'Cadence OrCAD / Allegro', kind: 'connector', status: 'supported', io: 'export → IPC-2581 / ODB++ (Allegro import)' },
     { name: 'Specctra DSN / SES', kind: 'format', status: 'supported', io: 'router interchange (flroute)' },
-    { name: 'IPC-2581', kind: 'format', status: 'supported', io: 'export (kicad-cli) — Altium/most CAM' },
-    { name: 'ODB++', kind: 'format', status: 'supported', io: 'export (kicad-cli) — Altium/most CAM' },
+    { name: 'IPC-2581', kind: 'format', status: 'supported', io: 'export (kicad-cli) — Altium / most CAM' },
+    { name: 'ODB++', kind: 'format', status: 'supported', io: 'export (kicad-cli) — Altium / most CAM' },
   ],
   sso: { status: 'not_configured', protocols: ['SAML 2.0', 'OIDC'], scim: false,
     note: 'available on Enterprise / Defense; contact to enable' },

@@ -7,11 +7,16 @@
  * API enforcement are labelled as configuration records, not live functionality,
  * until wired.
  */
-import { useEffect, useState } from 'react'
-import Link from 'next/link'
+import { useCallback, useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
+import { enterpriseAction } from '@/lib/enterprise-actions'
 
 type Any = Record<string, any>
+
+const WEBHOOK_EVENTS = [
+  'approval.requested', 'approval.decided', 'quote.advanced',
+  'evidence.added', 'evidence.reviewed',
+]
 
 const FORMATS = [
   { fmt: 'ipc2581', label: 'IPC-2581', hint: 'Import Wizard → IPC-2581' },
@@ -29,9 +34,31 @@ const CONN_STYLE: Record<string, string> = {
 export default function IntegrationsPage() {
   const [db, setDb] = useState<Any | null>(null)
   const [pick, setPick] = useState('')
-  useEffect(() => {
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null)
+  // API key form + show-once reveal
+  const [keyName, setKeyName] = useState('')
+  const [keyScope, setKeyScope] = useState('read')
+  const [newKey, setNewKey] = useState<string | null>(null)
+  // webhook form + show-once reveal
+  const [whUrl, setWhUrl] = useState('')
+  const [whEvents, setWhEvents] = useState<string[]>([])
+  const [newSecret, setNewSecret] = useState<{ url: string; secret: string } | null>(null)
+
+  const refresh = useCallback(() => {
     fetch('/api/enterprise', { cache: 'no-store' }).then((r) => r.json()).then(setDb).catch(() => {})
   }, [])
+  useEffect(() => { refresh() }, [refresh])
+
+  async function act(action: string, params: Any): Promise<Any> {
+    setBusy(true); setMsg(null)
+    const r = await enterpriseAction(action, params)
+    setBusy(false)
+    if (r.error) { setMsg({ tone: 'err', text: `${r.error}${r.detail ? ` — ${r.detail}` : ''}` }); return {} }
+    setMsg({ tone: 'ok', text: 'done' }); refresh()
+    return r.result ?? {}
+  }
+
   if (!db) return <div className="p-6 text-xs text-muted-foreground">Loading integrations…</div>
   if (db.error) return <div className="p-6 text-xs text-muted-foreground">Sign in required.</div>
 
@@ -55,6 +82,12 @@ export default function IntegrationsPage() {
     <div className="min-h-screen bg-background p-4 text-xs text-foreground">
       <div className="mb-3 flex items-center gap-3">
         <h1 className="text-base font-semibold">Integrations</h1>
+        {msg && (
+          <span className={cn('ml-auto rounded-sm px-2 py-0.5 font-mono text-[10px]',
+            msg.tone === 'ok' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-destructive/10 text-destructive')}>
+            {msg.text}
+          </span>
+        )}
       </div>
 
       {/* EDA / CAD connectors */}
@@ -82,10 +115,10 @@ export default function IntegrationsPage() {
         </p>
       </div>
 
-      {/* Altium export — real handoff via neutral formats */}
+      {/* CAD export — real handoff via neutral formats (Altium · OrCAD/Allegro · CAM) */}
       <div className="mb-4 rounded-md border border-primary/30 bg-primary/[0.03]">
         <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-          <span className="text-xs font-semibold">Export to Altium</span>
+          <span className="text-xs font-semibold">Export to Altium / OrCAD / Allegro</span>
           <span className="rounded-sm border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[9px] text-emerald-500">
             live
           </span>
@@ -100,7 +133,7 @@ export default function IntegrationsPage() {
             <a key={f.fmt}
               aria-disabled={!pickedRun}
               title={f.hint}
-              href={pickedRun ? `/api/altium-export?run=${encodeURIComponent(pickedRun)}&format=${f.fmt}` : undefined}
+              href={pickedRun ? `/api/cad-export?run=${encodeURIComponent(pickedRun)}&format=${f.fmt}` : undefined}
               className={cn('rounded-sm border px-2.5 py-1 text-[11px]',
                 pickedRun
                   ? 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/20'
@@ -111,11 +144,11 @@ export default function IntegrationsPage() {
         </div>
         <p className="border-t border-border px-3 py-2 text-[9px] text-muted-foreground">
           Generates real files with kicad-cli and streams them to you: IPC-2581
-          and ODB++ are Altium's own supported import paths (File → Import
-          Wizard). Native <span className="font-mono">.PcbDoc</span>/<span className="font-mono">.SchDoc</span> write is
+          and ODB++ import into both Altium (File → Import Wizard) and Cadence
+          Allegro. Native <span className="font-mono">.PcbDoc</span> / Allegro <span className="font-mono">.brd</span> write is
           not offered — those are proprietary binaries with no reliable open
-          format, and faking one would be dishonest. Import Altium → Compose via
-          KiCad's built-in Altium importer in the KiCad GUI.
+          format, and faking one would be dishonest. Import back via KiCad's
+          built-in Altium importer (GUI).
         </p>
       </div>
 

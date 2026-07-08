@@ -21,13 +21,26 @@ import * as quotes from '@/lib/enterprise/quotes.mjs'
 import * as fl1 from '@/lib/enterprise/fl1.mjs'
 // @ts-ignore
 import * as pilots from '@/lib/enterprise/pilots.mjs'
+// @ts-ignore
+import * as integrations from '@/lib/enterprise/integrations.mjs'
 
 export const dynamic = 'force-dynamic'
+
+// action -> webhook event fired after a successful mutation
+const WEBHOOK_FOR: Record<string, string> = {
+  request_approval: 'approval.requested',
+  decide_approval: 'approval.decided',
+  advance_quote: 'quote.advanced',
+  add_evidence: 'evidence.added',
+  review_evidence: 'evidence.reviewed',
+}
 
 export async function GET() {
   const db = ent.loadDb()
   return Response.json({
-    organizations: db.organizations,
+    // never leak API-key hashes or webhook secrets through the read API
+    organizations: (db.organizations ?? []).map((o: any) => ({
+      ...o, integrations: integrations.redactIntegrations(o.integrations) })),
     workspaces: db.workspaces,
     programs: db.programs,
     boards: db.boards,
@@ -83,11 +96,17 @@ export async function POST(req: Request) {
         actor, action: 'set_member_role', scope: p, after: r })
       return r
     },
+    remove_member: (p) => {
+      const r = rbac.removeMember(db, { ...p, actor })
+      if (!r.error) ent.appendAudit(db, {
+        actor, action: 'remove_member', scope: p, after: r })
+      return r
+    },
     audit_log_report: (p) => rbac.auditLogReport(db, p ?? {}),
   }
   // milestone extensions (approvals E2, credits E4, quotes E7, FL-1 E8,
   // pilots E6) — each module owns its handlers
-  for (const m of [approvals, credits, quotes, fl1, pilots]) {
+  for (const m of [approvals, credits, quotes, fl1, pilots, integrations]) {
     Object.assign(handlers, m.handlers(db, actor))
   }
 
@@ -96,6 +115,10 @@ export async function POST(req: Request) {
                                 { status: 400 })
   const result = fn(params)
   if (result?.error) return Response.json(result, { status: 422 })
+  // fire subscribed webhooks (best-effort, HMAC-signed) before persisting the
+  // last_delivery status they record
+  const event = WEBHOOK_FOR[action]
+  if (event) { try { await integrations.fireWebhooks(db, event, { action, params, result }) } catch { /* best effort */ } }
   ent.saveDb(db)
   return Response.json({ ok: true, result })
 }

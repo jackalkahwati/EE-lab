@@ -35,6 +35,8 @@ export default function IamPage() {
   const [tab, setTab] = useState<(typeof TABS)[number]>('Users')
   const [busy, setBusy] = useState<string | null>(null)
   const [msg, setMsg] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null)
+  const [newEmail, setNewEmail] = useState('')
+  const [newRole, setNewRole] = useState('viewer')
 
   const refresh = useCallback(() => {
     fetch('/api/enterprise', { cache: 'no-store' })
@@ -42,13 +44,22 @@ export default function IamPage() {
   }, [])
   useEffect(() => { refresh() }, [refresh])
 
-  async function changeRole(actor_name: string, role: string) {
-    setBusy(actor_name); setMsg(null)
-    const r = await enterpriseAction('set_member_role', { actor_name, role })
+  async function run(key: string, action: string, params: Record<string, any>, okText: string) {
+    setBusy(key); setMsg(null)
+    const r = await enterpriseAction(action, params)
     setBusy(null)
     if (r.error) setMsg({ tone: 'err', text: `${r.error}${r.detail ? ` — ${r.detail}` : ''}` })
-    else { setMsg({ tone: 'ok', text: `${actor_name} → ${role}` }); refresh() }
+    else { setMsg({ tone: 'ok', text: okText }); refresh() }
   }
+  const changeRole = (actor_name: string, role: string) =>
+    run(actor_name, 'set_member_role', { actor_name, role }, `${actor_name} → ${role}`)
+  async function addMember() {
+    if (!newEmail) return
+    await run('add', 'set_member_role', { actor_name: newEmail.trim(), role: newRole }, `added ${newEmail.trim()}`)
+    setNewEmail('')
+  }
+  const removeMember = (actor_name: string) =>
+    run(actor_name, 'remove_member', { actor_name }, `removed ${actor_name}`)
 
   if (!db) return <div className="p-6 text-xs text-muted-foreground">Loading IAM…</div>
   if (db.error) return <div className="p-6 text-xs text-muted-foreground">Sign in required.</div>
@@ -107,15 +118,29 @@ export default function IamPage() {
               invites &amp; role changes require manage_members · every change is audited
             </span>
           </div>
-          <div className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-x-4 border-b border-border px-3 py-1.5 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
-            <span>User</span><span>Role</span><span className="text-right">Activity</span><span className="text-right">Granted by</span>
+          <div className="flex flex-wrap items-center gap-2 border-b border-border bg-card/30 px-3 py-2">
+            <span className="text-[11px] font-medium">Add member</span>
+            <input value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="email"
+              className="w-52 rounded-sm border border-border bg-background px-1.5 py-1 text-[11px]" />
+            <select value={newRole} onChange={(e) => setNewRole(e.target.value)}
+              className="rounded-sm border border-border bg-background px-1.5 py-1 font-mono text-[10px]">
+              {roles.map((r) => <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>)}
+            </select>
+            <button type="button" disabled={busy === 'add' || !newEmail} onClick={addMember}
+              className="rounded-sm border border-primary/40 bg-primary/10 px-2.5 py-1 text-[11px] text-primary hover:bg-primary/20 disabled:opacity-50">
+              Add
+            </button>
+            <span className="font-mono text-[9px] text-muted-foreground">requires manage_members · audited</span>
+          </div>
+          <div className="grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-x-4 border-b border-border px-3 py-1.5 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
+            <span>User</span><span>Role</span><span className="text-right">Activity</span><span className="text-right">Granted by</span><span></span>
           </div>
           <div className="divide-y divide-border">
             {members.length === 0 && (
               <p className="px-3 py-3 text-muted-foreground">No users provisioned yet.</p>
             )}
             {members.map((m, i) => (
-              <div key={i} className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-x-4 px-3 py-2">
+              <div key={i} className="grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-x-4 px-3 py-2">
                 <span className="flex min-w-0 items-center gap-2">
                   <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[10px] font-bold text-primary">
                     {m.actor?.[0]?.toUpperCase()}
@@ -129,6 +154,11 @@ export default function IamPage() {
                 </select>
                 <span className="text-right font-mono text-[11px] text-muted-foreground">{activityOf(m.actor)} run(s)</span>
                 <span className="text-right font-mono text-[9px] text-muted-foreground">{m.granted_by}</span>
+                <button type="button" disabled={busy === m.actor} title="remove member"
+                  onClick={() => removeMember(m.actor)}
+                  className="rounded-sm border border-destructive/40 bg-destructive/10 px-1.5 py-0.5 text-[10px] text-destructive hover:bg-destructive/20 disabled:opacity-50">
+                  ✕
+                </button>
               </div>
             ))}
           </div>
@@ -163,10 +193,12 @@ export default function IamPage() {
           <table className="w-full border-collapse text-[10px]">
             <thead>
               <tr className="border-b border-border">
-                <th className="sticky left-0 bg-background px-2 py-2 text-left font-mono font-normal text-muted-foreground">permission</th>
+                <th className="sticky left-0 bg-background px-2 align-bottom pb-2 text-left font-mono font-normal text-muted-foreground">permission</th>
                 {roles.map((r) => (
-                  <th key={r} className="px-1 py-2 text-center font-mono font-normal text-muted-foreground">
-                    <span className="block -rotate-45 whitespace-nowrap text-[9px] leading-none">{r.replace(/_/g, ' ')}</span>
+                  <th key={r} className="h-28 px-1 align-bottom font-mono font-normal text-muted-foreground">
+                    <div className="mx-auto w-4 whitespace-nowrap text-[9px] leading-none [writing-mode:vertical-rl] rotate-180">
+                      {r.replace(/_/g, ' ')}
+                    </div>
                   </th>
                 ))}
               </tr>
