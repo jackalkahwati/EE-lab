@@ -79,7 +79,12 @@ export default function ValidationPage() {
                     <span className="text-destructive">failures: {(s.failures ?? []).length}</span>
                   )}
                 </div>
-                {s.blocked_reason && <div className="mt-1 text-[10px] text-destructive">blocked: {s.blocked_reason}</div>}
+                {s.blocked_reason && (
+                  <div className="mt-1 text-[10px] text-destructive">
+                    blocked: {typeof s.blocked_reason === 'string'
+                      ? s.blocked_reason : JSON.stringify(s.blocked_reason)}
+                  </div>
+                )}
                 {(s.claims_affected ?? []).length > 0 && (
                   <div className="mt-1 text-[10px] text-muted-foreground">
                     claims affected: {(s.claims_affected ?? []).join(' · ')}

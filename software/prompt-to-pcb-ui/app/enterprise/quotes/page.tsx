@@ -69,7 +69,10 @@ export default function QuotesPage() {
             <div className="grid gap-3 p-3 sm:grid-cols-2">
               <div className="space-y-1">
                 <div className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">Fab vendor</div>
-                <div className="text-xs">{q.fab_vendor ?? 'not selected'}</div>
+                <div className="text-xs">{q.fab_vendor?.name ?? 'not selected'}</div>
+                {q.fab_vendor?.note && (
+                  <div className="text-[9px] text-muted-foreground/70">{q.fab_vendor.note}</div>
+                )}
                 <div className="mt-1.5 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">Packet</div>
                 <div className="text-[11px] text-muted-foreground">
                   {q.packet ? 'gerbers · drill · BOM · CPL prepared' : 'not prepared'}
