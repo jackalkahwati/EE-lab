@@ -3,6 +3,7 @@ import type { Metadata, Viewport } from 'next'
 import { Inter, JetBrains_Mono } from 'next/font/google'
 import './globals.css'
 import { TopNav } from '@/components/top-nav'
+import { CommandPalette } from '@/components/command-palette'
 
 const inter = Inter({ variable: '--font-inter', subsets: ['latin'] })
 const jetbrainsMono = JetBrains_Mono({
@@ -33,6 +34,7 @@ export default function RootLayout({
     >
       <body className="font-sans antialiased">
         <TopNav />
+        <CommandPalette />
         {children}
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>

@@ -11,6 +11,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
+import { EnterpriseNav } from '@/components/enterprise-nav'
 
 type Any = Record<string, any>
 const TABS = ['Members', 'Billing & Usage', 'Security'] as const
@@ -82,6 +83,8 @@ export default function SettingsPage() {
           </span>
         )}
       </div>
+
+      <EnterpriseNav />
 
       <div className="mb-4 flex gap-1 border-b border-border">
         {TABS.map((t) => (

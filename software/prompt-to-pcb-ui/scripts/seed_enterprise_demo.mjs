@@ -121,6 +121,40 @@ pil.createPilot(db, { org_id: org.org_id, workspace_id: ws.workspace_id,
 // no permissions are invented — these are the E5 roles)
 org.credit_allocation = 600
 org.usage_limits.monthly_runs = 200
+// integration/security config surfaces — honest states: SSO not wired,
+// webhook delivery not wired, one demo API key (masked). Nothing here
+// enforces access yet; these are configuration records, labelled as such.
+org.integrations = {
+  // EDA / CAD tool connectors. KiCad is the native engine (Compose builds and
+  // routes in KiCad). The others are import/export connectors — honest status:
+  // what actually round-trips today vs planned.
+  eda_connectors: [
+    { name: 'KiCad', kind: 'native', status: 'native', io: 'design · route · DRC · fab package' },
+    { name: 'Altium Designer', kind: 'connector', status: 'planned', io: 'import schematic/PCB, export fab' },
+    { name: 'Autodesk Eagle / Fusion Electronics', kind: 'connector', status: 'planned', io: 'import .sch/.brd' },
+    { name: 'Cadence OrCAD / Allegro', kind: 'connector', status: 'evaluating', io: 'import netlist' },
+    { name: 'Specctra DSN / SES', kind: 'format', status: 'supported', io: 'router interchange (flroute)' },
+    { name: 'IPC-2581 / ODB++', kind: 'format', status: 'planned', io: 'fab handoff' },
+  ],
+  sso: { status: 'not_configured', protocols: ['SAML 2.0', 'OIDC'], scim: false,
+    note: 'available on Enterprise / Defense; contact to enable' },
+  api_keys: [
+    { id: 'key_7c31', name: 'ci-readonly', scope: 'read', masked: 'flk_live_••••3f2a',
+      created_at: org.created_at, last_used: null,
+      note: 'display record only — programmatic API enforcement not yet wired' },
+  ],
+  webhooks: [
+    { id: 'wh_a19f', url: 'https://hooks.acme.demo/compose', events: ['approval.requested', 'gate.failed'],
+      status: 'configured', delivery: 'not_wired',
+      note: 'event delivery is not yet wired; recorded intent only' },
+  ],
+}
+// board tags for cost allocation (synthetic)
+const TAGS = {
+  0: ['telemetry', '2-layer'], 1: ['fl1', '4-layer', 'mcu'],
+  2: ['bga', 'architecture'], 3: ['rf', 'architecture'], 4: ['fl1', 'validation'],
+}
+db.boards.forEach((b, i) => { b.tags = TAGS[i] ?? [] })
 const MEMBERS = [
   ['jack@acme.demo', 'org_admin'],
   ['maya.chen@acme.demo', 'program_manager'],
