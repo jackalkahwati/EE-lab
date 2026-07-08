@@ -31,7 +31,10 @@ import sys
 import pcbnew
 
 FP_SHARE = "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints"
-ZONE_NETS = {"GND", "+3V3", "+5V"}
+# stitchable PLANES only — +5V has no plane on this stackup; a +5V "zone"
+# dogbone creates an orphan via and strips the pin from routing (the TXB0102
+# VCCB signature). +5V escapes like a signal and flroute routes it.
+ZONE_NETS = {"GND", "+3V3"}
 STUB_W = 0.2        # mm
 ROW_CLEAR = 16.0    # column signal fans surface beyond the row-fan band
 LANE0 = 1.6         # mm: first lane depth beyond the pad end (clears the package courtyard)

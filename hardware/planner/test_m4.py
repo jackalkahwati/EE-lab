@@ -38,10 +38,14 @@ check("6 gaps recorded (multi-rail/regulator caps/bus policies/analog)",
       len(rep["gaps"]) == 4)
 check("7 honesty: sandbox only, hand-block measurement path retained",
       "routed_in_sandbox only" in rep["honesty"])
-# live guard checks
+# live guard checks — M6 superseded the blanket block with domain-aware
+# synthesis: distinct rails now synthesize on DISTINCT nets (never merged),
+# and unknown domains still block
 t = cd.synthesize_chipdown("Logic_LevelTranslator", "TXB0102DCU",
                            "Package_TO_SOT_SMD", "SOT-23-8", "U50")
-check("8 multi-rail guard live", t["state"] == "blocked")
+check("8 multi-rail now synthesizes on DISTINCT nets (M6)",
+      t["state"] == "synthesized_review_required"
+      and t["rails"]["dual_supply_a"]["net"] != t["rails"]["dual_supply_b"]["net"])
 m = cd.synthesize_chipdown("Memory_EEPROM", "24LC02", "Package_SO",
                            "SOIC-16_3.9x9.9mm_P1.27mm", "U50")
 check("9 wrong footprint still blocks (8 pins vs SOIC-16)",

@@ -1599,3 +1599,28 @@ so 100% of values are review-required placeholders that SAY SO.
   support_value_provenance.
 
 Regression: M5 8/8; M4/M1 re-verified under the chipdown change.
+
+## Milestone M6: multi-rail and mixed-signal chip synthesis v1
+
+Domain-aware power planning proven ON COPPER — the M4 multi-rail block is
+now real synthesis, and analog pins can no longer masquerade as digital IO.
+
+- multirail.plan_rails: every power domain gets its OWN net (digital /
+  dual_supply_a/b / analog / battery_backup / reference / supply_input);
+  unknown domains BLOCK with no guess; human rail_overrides carry intent.
+- PROVEN on real boards: chipdown-txb0102-v1 PASSED 7/7 0 DRC with
+  VCCA=+3V3 and VCCB=+5V on distinct copper; chipdown-ds3231m-v1 PASSED
+  9/9 with VCC=+3V3 and a distinct VBAT_RAIL (rail exists; battery
+  charging/switchover circuit NOT synthesized — recorded).
+- Mixed-signal: ADS1115 AIN0-3 split OUT of the digital IO header, listed
+  as requiring an analog front end; analog accuracy / noise / reference /
+  calibrated-measurement claims blocked; measurement packs stay 4-layer.
+- Emitter/fanout fixes earned live: per-DOMAIN decoupling (one cap per
+  rail, never assume +3V3); wide-body (SOIC-16W) column shift; fanout
+  ZONE_NETS corrected to actual planes (GND/+3V3 only — a +5V "zone"
+  dogbone made orphan vias and stripped VCCB from routing); SOT-23-8/-6
+  join the fine-pitch fab class.
+
+Regression: M6 9/9; M4 updated for the supersede (multi-rail now
+synthesizes on distinct nets; unknown domains still block); M5/M2/M1/23.5
+re-verified; board 5/5.

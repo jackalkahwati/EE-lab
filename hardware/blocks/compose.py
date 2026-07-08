@@ -905,24 +905,30 @@ def build_chipdown(bx, by, entry, n, nets):
     ios = entry.get("exposed_io", [])[:8]
     for io in ios:
         pmap[io["pin"]] = "EXP_%s" % io["name"]
-    b = place(fp_lib, fp_name, ref, bx + 8, by + 10, 0, pmap, nets)
+    wide = "W_" in fp_name or "W " in fp_name  # e.g. SOIC-16W (7.5mm body)
+    b = place(fp_lib, fp_name, ref, bx + (13 if wide else 8), by + 10, 0,
+              pmap, nets)
     num = int(ref[1:]) if ref[1:].isdigit() else 0
-    for i in range(entry.get("decouple_count", 1)):
+    # M6: one decoupling cap per POWER DOMAIN rail (never assume +3V3)
+    d_rails = entry.get("decouple_rails") or ["+3V3"]
+    for i, rail in enumerate(d_rails):
         b += cap("C%d" % (120 + num + i), bx + 2, by + 4 + 5 * i,
-                 "+3V3", "GND", nets)
+                 rail, "GND", nets)
+    _sh = 10 if wide else 0
     for i, pu in enumerate(entry.get("pullups", [])):
-        b += res("R%d" % (120 + num + i), bx + 14, by + 4 + 5 * i,
+        b += res("R%d" % (120 + num + i), bx + 14 + _sh, by + 4 + 5 * i,
                  pu, "+3V3", nets)
-        b += tp("TP%d" % (80 + num + i), bx + 19, by + 4 + 5 * i, pu, nets)
+        b += tp("TP%d" % (80 + num + i), bx + 19 + _sh, by + 4 + 5 * i,
+                pu, nets)
     if ios:
         hmap = {}
         for i, io in enumerate(ios):
             hmap[str(i + 1)] = "EXP_%s" % io["name"]
         b += place("Connector_PinHeader_2.54mm",
                    "PinHeader_1x%02d_P2.54mm_Vertical" % len(ios),
-                   "J%d" % (60 + num), bx + 24, by + 4, 90, hmap, nets)
+                   "J%d" % (60 + num), bx + 24 + _sh, by + 4, 90, hmap, nets)
     label("%s CHIPDOWN (REVIEW REQD)" % ref, bx + 10, by + 1, 0.7)
-    return b, 34, 22 + 4 * max(0, len(ios) - 4)
+    return b, (46 if wide else 34), 22 + 4 * max(0, len(ios) - 4)
 
 
 SUBCIRCUITS = {
@@ -1617,7 +1623,7 @@ def compose(spec, blocks, out_path):
     # supports. kicad-cli auto-loads <board>.kicad_dru.
     fine_pitch = re.search(
         r"P0\.[1-7]\d*mm|QFN|DFN|WSON|USON|VSSOP|VQFN|UQFN|UFQFPN|BGA|"
-        r"LGA|SON_|USB_C_Receptacle", p)
+        r"LGA|SON_|USB_C_Receptacle|SOT-23-8|SOT-23-6", p)
     if fine_pitch:
         base = os.path.splitext(out_path)[0]
         open(base + ".kicad_dru", "w").write(
