@@ -5,7 +5,8 @@
 set -uo pipefail
 BASE=${BASE:-http://localhost:4500}
 COOKIE=${COOKIE:-/tmp/fl-jar3.txt}
-PAGE="app/page.tsx"
+# the design workspace moved to /compose (Programs is now the front door at /)
+PAGE="app/compose/page.tsx"
 
 # self-provision a session when the cookie is stale (sessions are in-memory,
 # so a server restart invalidates old jars — the suite must not rot with them)
