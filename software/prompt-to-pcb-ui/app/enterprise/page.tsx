@@ -12,7 +12,6 @@ import { cn } from '@/lib/utils'
 import { PortfolioSummary } from '@/components/portfolio-summary'
 import { StatusStrip } from '@/components/status-strip'
 import { ConsoleWidgets } from '@/components/console-widgets'
-import { EnterpriseNav } from '@/components/enterprise-nav'
 
 type Db = Record<string, any>
 
@@ -109,8 +108,6 @@ export default function EnterprisePage() {
           ))}
         </select>
       </div>
-
-      <EnterpriseNav />
 
       {workspaces.length === 0 && (
         <div className="rounded-md border border-border p-6 text-muted-foreground">

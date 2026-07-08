@@ -25,18 +25,14 @@ export function TopNav() {
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur">
       <div className="flex h-11 items-center gap-4 px-4">
-        <Link href="/" className="flex items-center gap-2">
+        <Link href="/" className="flex items-center">
           <span className="text-sm font-semibold tracking-tight">FirstLight Compose</span>
-          <span className="hidden rounded-sm border border-border px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground sm:inline">
-            evidence-gated PCBA programs
-          </span>
         </Link>
         <nav className="flex items-center gap-1" aria-label="Primary">
           {LINKS.map((l) => (
             <Link
               key={l.href}
               href={l.href}
-              title={l.hint}
               className={cn(
                 'rounded-md px-2.5 py-1 text-xs',
                 active(l.href)
@@ -47,9 +43,13 @@ export function TopNav() {
             </Link>
           ))}
         </nav>
-        <span className="ml-auto font-mono text-[9px] text-muted-foreground">
-          nothing here is physically validated unless real evidence exists
-        </span>
+        <button
+          type="button"
+          onClick={() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))}
+          className="ml-auto hidden items-center gap-1.5 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground sm:flex"
+        >
+          Search <kbd className="rounded bg-muted px-1 font-mono text-[9px]">⌘K</kbd>
+        </button>
       </div>
     </header>
   )

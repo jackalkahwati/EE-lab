@@ -6,10 +6,9 @@
  * "order / spend money" step. Compose prepares packets and ingests evidence;
  * it never places an order or submits a quote automatically.
  */
-import { useEffect, useState } from 'react'
-import Link from 'next/link'
+import { useCallback, useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
-import { EnterpriseNav } from '@/components/enterprise-nav'
+import { enterpriseAction } from '@/lib/enterprise-actions'
 
 type Any = Record<string, any>
 
@@ -24,30 +23,61 @@ const STATE_STYLE: Record<string, string> = {
 
 export default function QuotesPage() {
   const [db, setDb] = useState<Any | null>(null)
-  useEffect(() => {
+  const [busy, setBusy] = useState(false)
+  const [pick, setPick] = useState('')
+  const [msg, setMsg] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null)
+
+  const refresh = useCallback(() => {
     fetch('/api/enterprise', { cache: 'no-store' }).then((r) => r.json()).then(setDb).catch(() => {})
   }, [])
+  useEffect(() => { refresh() }, [refresh])
+
   if (!db) return <div className="p-6 text-xs text-muted-foreground">Loading quotes…</div>
   if (db.error) return <div className="p-6 text-xs text-muted-foreground">Sign in required.</div>
 
   const boards: Any[] = db.boards ?? []
   const boardName = (id: string) => boards.find((b) => b.board_id === id)?.name ?? id
   const quotes: Any[] = db.quotes ?? []
+  const quotedIds = new Set(quotes.map((q) => q.board_id))
+  const eligible = boards.filter(
+    (b) => ['routed_in_sandbox', 'package_ready_with_review'].includes(b.readiness) && !quotedIds.has(b.board_id))
+
+  async function generate() {
+    if (!pick) return
+    setBusy(true); setMsg(null)
+    const r = await enterpriseAction('generate_quote_packet', { board_id: pick })
+    setBusy(false)
+    if (r.error) setMsg({ tone: 'err', text: `${r.error}${r.detail ? ` — ${r.detail}` : ''}` })
+    else { setMsg({ tone: 'ok', text: 'quote packet generated' }); setPick(''); refresh() }
+  }
 
   return (
     <div className="min-h-screen bg-background p-4 text-xs text-foreground">
       <div className="mb-3 flex items-center gap-3">
-        <Link href="/enterprise" className="text-muted-foreground hover:text-foreground">← Programs</Link>
         <h1 className="text-base font-semibold">Quotes &amp; procurement</h1>
         <span className="text-muted-foreground">{quotes.length} quote flow(s)</span>
+        {msg && (
+          <span className={cn('ml-auto rounded-sm px-2 py-0.5 font-mono text-[10px]',
+            msg.tone === 'ok' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-destructive/10 text-destructive')}>
+            {msg.text}
+          </span>
+        )}
       </div>
-      <EnterpriseNav />
 
-      <div className="mb-3 rounded-md border border-border bg-muted/10 px-3 py-2 text-[10px] text-muted-foreground">
-        Prices are <span className="font-mono text-foreground">PLACEHOLDER</span> until a real
-        vendor quote is ingested. The order/spend step is human-gated —
-        Compose prepares packets and ingests evidence, it never places an order
-        or spends automatically.
+      <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border border-border bg-card/40 px-3 py-2">
+        <span className="text-[11px] font-medium">Generate quote packet</span>
+        <select value={pick} onChange={(e) => setPick(e.target.value)}
+          className="rounded-sm border border-border bg-background px-2 py-1 text-xs">
+          <option value="">select a routed board…</option>
+          {eligible.map((b) => <option key={b.board_id} value={b.board_id}>{b.name}</option>)}
+        </select>
+        <button type="button" disabled={!pick || busy} onClick={generate}
+          className="rounded-sm border border-primary/40 bg-primary/10 px-2.5 py-1 text-[11px] text-primary hover:bg-primary/20 disabled:opacity-50">
+          Generate
+        </button>
+        <span className="font-mono text-[9px] text-muted-foreground">
+          gated by RBAC (generate_package) · prices stay PLACEHOLDER, order/spend stays human-gated
+        </span>
       </div>
 
       <div className="space-y-3">

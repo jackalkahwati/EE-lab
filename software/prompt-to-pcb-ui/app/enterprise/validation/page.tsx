@@ -10,7 +10,6 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
-import { EnterpriseNav } from '@/components/enterprise-nav'
 
 type Any = Record<string, any>
 
@@ -40,11 +39,9 @@ export default function ValidationPage() {
   return (
     <div className="min-h-screen bg-background p-4 text-xs text-foreground">
       <div className="mb-3 flex items-center gap-3">
-        <Link href="/enterprise" className="text-muted-foreground hover:text-foreground">← Programs</Link>
         <h1 className="text-base font-semibold">Validation console</h1>
         <span className="text-muted-foreground">{sessions.length} session(s) · {assets.length} FL-1 asset(s)</span>
       </div>
-      <EnterpriseNav />
 
       <div className="mb-3 rounded-md border border-border bg-muted/10 px-3 py-2 text-[10px] text-muted-foreground">
         Physical evidence ledger:{' '}

@@ -10,7 +10,6 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
-import { EnterpriseNav } from '@/components/enterprise-nav'
 
 type Any = Record<string, any>
 
@@ -47,11 +46,9 @@ export default function CatalogPage() {
   return (
     <div className="min-h-screen bg-background p-4 text-xs text-foreground">
       <div className="mb-3 flex items-center gap-3">
-        <Link href="/enterprise" className="text-muted-foreground hover:text-foreground">← Programs</Link>
         <h1 className="text-base font-semibold">Catalog</h1>
         <span className="text-muted-foreground">templates · capability · compliance</span>
       </div>
-      <EnterpriseNav />
 
       {/* Templates */}
       <div className="mb-4">

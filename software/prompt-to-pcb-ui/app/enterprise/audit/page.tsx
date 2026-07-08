@@ -8,7 +8,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
-import { EnterpriseNav } from '@/components/enterprise-nav'
 
 type Any = Record<string, any>
 
@@ -40,7 +39,6 @@ export default function AuditPage() {
   return (
     <div className="min-h-screen bg-background p-4 text-xs text-foreground">
       <div className="mb-3 flex items-center gap-3">
-        <Link href="/enterprise" className="text-muted-foreground hover:text-foreground">← Programs</Link>
         <h1 className="text-base font-semibold">Audit log</h1>
         <span className={cn('rounded-sm border px-1.5 py-0.5 font-mono text-[10px]',
           chainOk ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500'
@@ -48,7 +46,6 @@ export default function AuditPage() {
           chain {chainOk ? 'verified' : 'BROKEN'}
         </span>
       </div>
-      <EnterpriseNav />
 
       <div className="mb-3 flex items-center gap-2">
         <input

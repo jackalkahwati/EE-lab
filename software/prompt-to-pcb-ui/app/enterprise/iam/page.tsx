@@ -10,7 +10,6 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
-import { EnterpriseNav } from '@/components/enterprise-nav'
 
 type Any = Record<string, any>
 const TABS = ['Users', 'Roles', 'Permissions'] as const
@@ -53,7 +52,6 @@ export default function IamPage() {
   return (
     <div className="min-h-screen bg-background p-4 text-xs text-foreground">
       <div className="mb-4 flex items-center gap-3">
-        <Link href="/enterprise" className="text-muted-foreground hover:text-foreground">← Programs</Link>
         <h1 className="text-base font-semibold">IAM · identity &amp; access</h1>
         {org && (
           <span className="text-muted-foreground">
@@ -70,8 +68,6 @@ export default function IamPage() {
           Workspace settings →
         </Link>
       </div>
-
-      <EnterpriseNav />
 
       <div className="mb-4 flex gap-1 border-b border-border">
         {TABS.map((t) => (

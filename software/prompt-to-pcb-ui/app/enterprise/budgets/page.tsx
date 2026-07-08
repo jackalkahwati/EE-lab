@@ -8,7 +8,6 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
-import { EnterpriseNav } from '@/components/enterprise-nav'
 
 type Any = Record<string, any>
 const WARN = 0.8
@@ -49,10 +48,8 @@ export default function BudgetsPage() {
   return (
     <div className="min-h-screen bg-background p-4 text-xs text-foreground">
       <div className="mb-3 flex items-center gap-3">
-        <Link href="/enterprise" className="text-muted-foreground hover:text-foreground">← Programs</Link>
         <h1 className="text-base font-semibold">Budgets &amp; alerts</h1>
       </div>
-      <EnterpriseNav />
 
       <div className="grid gap-4 lg:grid-cols-[1fr_340px]">
         <div className="rounded-md border border-border">

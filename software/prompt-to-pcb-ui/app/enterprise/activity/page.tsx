@@ -8,7 +8,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
-import { EnterpriseNav } from '@/components/enterprise-nav'
 
 type Any = Record<string, any>
 
@@ -50,11 +49,9 @@ export default function ActivityPage() {
   return (
     <div className="min-h-screen bg-background p-4 text-xs text-foreground">
       <div className="mb-3 flex items-center gap-3">
-        <Link href="/enterprise" className="text-muted-foreground hover:text-foreground">← Programs</Link>
         <h1 className="text-base font-semibold">Activity</h1>
         <span className="text-muted-foreground">{events.length} recent event(s)</span>
       </div>
-      <EnterpriseNav />
 
       <div className="rounded-md border border-border">
         <div className="max-h-[34rem] divide-y divide-border overflow-y-auto">
