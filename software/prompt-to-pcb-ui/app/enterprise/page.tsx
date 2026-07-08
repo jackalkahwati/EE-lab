@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { PortfolioSummary } from '@/components/portfolio-summary'
+import { StatusStrip } from '@/components/status-strip'
 
 type Db = Record<string, any>
 
@@ -186,6 +187,7 @@ export default function EnterprisePage() {
                   evidence pack ↓
                 </a>
               </div>
+              <StatusStrip board={board} db={db} />
               {(board.blocked_claims.length > 0
                 || board.review_required_items.length > 0) && (
                 <div className="border-b border-border bg-amber-500/5 p-3">
