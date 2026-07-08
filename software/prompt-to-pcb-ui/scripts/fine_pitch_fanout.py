@@ -46,11 +46,14 @@ def _mm(v):
     return pcbnew.FromMM(v)
 
 
+_CUR_W = [STUB_W]
+
+
 def _track(board, net, x0, y0, x1, y1):
     t = pcbnew.PCB_TRACK(board)
     t.SetStart(pcbnew.VECTOR2I(_mm(x0), _mm(y0)))
     t.SetEnd(pcbnew.VECTOR2I(_mm(x1), _mm(y1)))
-    t.SetWidth(_mm(STUB_W))
+    t.SetWidth(_mm(_CUR_W[0]))
     t.SetLayer(pcbnew.F_Cu)
     t.SetNet(net)
     board.Add(t)
@@ -86,6 +89,9 @@ def fanout(board_path):
         if len(pads) < 6:
             continue
         pos = [(p.GetPosition().x / 1e6, p.GetPosition().y / 1e6, p) for p in pads]
+        occupied = []  # 23.5: fan targets already claimed by ANY axis/row of
+        #                this footprint — corner cells of a 4-sided QFN would
+        #                otherwise collide between the row fans and column fans
         for axis in (1, 0):     # 1: horizontal rows (escape in y), 0: vertical columns
             groups = {}
             for x, y, p in pos:
@@ -100,10 +106,17 @@ def fanout(board_path):
                 pitch = min(b2 - a for a, b2 in zip(along, along[1:]))
                 if pitch > FINE_PITCH_MAX or pitch <= 0.05:
                     continue
+                # 0.2 stubs at 0.4 pitch leave exactly-0.2mm gaps —
+                # the clearance rule is >=, and the board min track width is
+                # 0.2 (0.15 stubs drew 32 track_width violations)
+                _CUR_W[0] = STUB_W
                 sig = [t for t in g if t[2].GetNetname() not in ZONE_NETS
                        and t[2].GetNetname() != ""]
                 zone = [t for t in g if t[2].GetNetname() in ZONE_NETS]
-                if len(sig) < 2:
+                # 23.5: a QFN side may carry ONLY plane pins (all its GPIOs
+                # unwired) — zone dogbones must still run; only the signal
+                # LANE pass needs 2+ signals.
+                if len(sig) < 2 and not zone:
                     continue
                 fc = f.GetPosition()
                 fcx, fcy = fc.x / 1e6, fc.y / 1e6
@@ -112,17 +125,36 @@ def fanout(board_path):
                 row_out_edge = key + outward * (pad_len / 2.0)
                 # the fan lives off the SIGNAL end of the row
                 row_cen = sum(along) / len(along)
-                sig_cen = sum(t[along_i] for t in sig) / len(sig)
+                if sig:
+                    sig_cen = sum(t[along_i] for t in sig) / len(sig)
+                else:
+                    sig_cen = row_cen  # zone-only row: no signal fan exists
                 fan_dir = 1.0 if sig_cen >= row_cen else -1.0
                 fan_end = max(along) if fan_dir > 0 else min(along)
 
                 # ---- signal escapes: L-shaped private lanes ------------------
                 # nearest-to-fan gets the SHALLOW lane so verticals never cross
                 # a deeper pad's lateral run.
-                sig_sorted = sorted(sig, key=lambda t: fan_dir * (fan_end - t[along_i]))
+                # 23.5 QFN class (<0.45mm pitch): zone pins ride the SAME lane
+                # system, terminating in a plane via at the fan target — the
+                # outward dogbone depths interleave with lane laterals and
+                # collide (the six RP_DVDD/XIN-vs-via clearance hits).
+                qfn_mode = pitch < 0.45
+                esc = list(sig) + (list(zone) if qfn_mode else [])
+                sig_sorted = (sorted(esc, key=lambda t: fan_dir * (fan_end - t[along_i]))
+                              if len(esc) >= 2 or (qfn_mode and esc) else [])
                 for i, (x, y, p) in enumerate(sig_sorted):
                     lane = row_out_edge + outward * (LANE0 + i * LANE_STEP)
                     target = fan_end + fan_dir * (FAN_GAP + i * FAN_STEP)
+                    # dedup against every fan cell this footprint already owns
+                    def _bo_of(tg):
+                        return (tg, lane) if axis == 1 else (lane, tg)
+                    guard = 0
+                    while any((_bo_of(target)[0] - ox) ** 2 +
+                              (_bo_of(target)[1] - oy) ** 2 < 1.5 ** 2
+                              for ox, oy in occupied) and guard < 20:
+                        target += fan_dir * FAN_STEP
+                        guard += 1
                     net = p.GetNet()
                     fo_n += 1
                     ref = "FO%d" % fo_n
@@ -134,14 +166,49 @@ def fanout(board_path):
                         bo = (lane, target)
                     for s in segs:
                         _track(board, net, *s)
+                    if qfn_mode and p.GetNetname() in ZONE_NETS and axis == 0:
+                        # COLUMN plane pin (QFN left/right): no vertical lane
+                        # run — it would cross the row fans' laterals in the
+                        # corner box. Stub straight out to the lane depth and
+                        # via there. Safe because QFN-56 column plane pins are
+                        # never adjacent (IOVDD pads sit 9 positions apart).
+                        seg1 = segs[0]
+                        _track(board, net, *seg1)
+                        via_at = (seg1[2], seg1[3])
+                        _via(board, net, *via_at)
+                        occupied.append(via_at)
+                        dogbones.append({"ref": f.GetReference(),
+                                         "pad": p.GetPadName(),
+                                         "net": p.GetNetname(),
+                                         "pin_token": "%s-%s" % (
+                                             f.GetReference(), p.GetPadName()),
+                                         "segments_mm": [seg1],
+                                         "via_mm": list(via_at),
+                                         "width_mm": _CUR_W[0]})
+                        continue
+                    occupied.append(bo)
+                    if qfn_mode and p.GetNetname() in ZONE_NETS:
+                        # plane pin: via at the fan target reaches the plane
+                        _via(board, net, bo[0], bo[1])
+                        dogbones.append({"ref": f.GetReference(),
+                                         "pad": p.GetPadName(),
+                                         "net": p.GetNetname(),
+                                         "pin_token": "%s-%s" % (
+                                             f.GetReference(), p.GetPadName()),
+                                         "segments_mm": segs,
+                                         "via_mm": [bo[0], bo[1]],
+                                         "width_mm": _CUR_W[0]})
+                        continue
                     _breakout_pad(board, ref, bo[0], bo[1], net)
                     entries.append({"ref": f.GetReference(), "pad": p.GetPadName(),
                                     "net": p.GetNetname(), "breakout_ref": ref,
                                     "pin_token": "%s-%s" % (f.GetReference(), p.GetPadName()),
                                     "pitch_mm": pitch, "row_escapes": len(sig),
-                                    "segments_mm": segs, "width_mm": STUB_W})
+                                    "segments_mm": segs, "width_mm": _CUR_W[0]})
 
                 # ---- plane-pad dogbones: staggered-depth 0.4/0.2 vias --------
+                if qfn_mode:
+                    zone = []  # already escaped through the lane system
                 sig_pos = [t[along_i] for t in sig]
                 last_deep = None
                 for (x, y, p) in sorted(zone, key=lambda t: t[along_i]):

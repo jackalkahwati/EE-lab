@@ -563,10 +563,14 @@ def block_mcu_bare(x, y, n, nets):
     a recorded blocker; USB is brought to advisory test pads ONLY (no impedance
     claim); QSPI timing and crystal layout are UNVALIDATED. This block exists to
     generate real fanout/routing evidence, not a buildable product claim."""
-    gpio_pin = {  # RP2040 GPIOn -> QFN-56 pin (manual transcription)
+    gpio_pin = {  # RP2040 GPIOn -> QFN-56 pin — VERIFIED against the official
+        # KiCad MCU_RaspberryPi symbol (Phase 23.5). The 18.8 manual
+        # transcription had pins 17-23 SHIFTED (GPIO14/15, TESTEN, XIN/XOUT,
+        # IOVDD) and mis-wired pin 23 (DVDD, 1.1V core) to +3V3 — an error the
+        # JIT quarantine correctly blocked from ever building.
         0: "2", 1: "3", 2: "4", 3: "5", 4: "6", 5: "7", 6: "8", 7: "9",
-        8: "11", 9: "12", 10: "13", 11: "14", 12: "15", 13: "16", 14: "18",
-        15: "19", 16: "27", 17: "28", 18: "29", 19: "30", 20: "31", 21: "32",
+        8: "11", 9: "12", 10: "13", 11: "14", 12: "15", 13: "16", 14: "17",
+        15: "18", 16: "27", 17: "28", 18: "29", 19: "30", 20: "31", 21: "32",
         22: "34", 23: "35", 24: "36", 25: "37", 26: "38", 27: "39", 28: "40",
         29: "41"}
     role_gpio = {  # same net contract as block_mcu_pico, on bare GPIOs
@@ -577,11 +581,14 @@ def block_mcu_bare(x, y, n, nets):
         "can_txd": 18, "can_rxd": 19, "sr_oe": 17,
         "rst_out": 22, "fault": 26, "interlock": 27, "trig": 28,
     }
-    pmap = {  # power/system pins (manual transcription; EP = pad 57)
-        "1": "+3V3", "10": "+3V3", "17": "+3V3", "23": "+3V3", "33": "+3V3",
+    pmap = {  # power/system pins — SYMBOL-VERIFIED (EP = pad 57 GND)
+        # IOVDD: 1,10,22,33,42,49; DVDD (1.1V core from VREG): 23,50;
+        # TESTEN 19 -> GND; XIN 20 / XOUT 21.
+        "1": "+3V3", "10": "+3V3", "22": "+3V3", "33": "+3V3",
         "42": "+3V3", "49": "+3V3", "43": "+3V3", "44": "+3V3", "48": "+3V3",
-        "45": "RP_DVDD", "50": "RP_DVDD", "20": "GND", "57": "GND",
-        "21": "RP_XIN", "22": "RP_XOUT",
+        "23": "RP_DVDD", "45": "RP_DVDD", "50": "RP_DVDD",
+        "19": "GND", "57": "GND",
+        "20": "RP_XIN", "21": "RP_XOUT",
         "24": "RP_SWCLK", "25": "RP_SWDIO", "26": "RP_RUN",
         "46": "RP_USB_DM", "47": "RP_USB_DP",
         "51": "QSPI_SD3", "52": "QSPI_SCLK", "53": "QSPI_SD0",
@@ -591,51 +598,54 @@ def block_mcu_bare(x, y, n, nets):
         if key in n:
             pmap[gpio_pin[g]] = n[key]
     b = place("Package_DFN_QFN", "QFN-56-1EP_7x7mm_P0.4mm_EP3.2x3.2mm", "U30",
-              x + 14, y + 14, 0, pmap, nets)
+              x + 38, y + 14, 0, pmap, nets)
     # QSPI flash W25Q16 SOIC-8 (manual transcription: 1 /CS 2 DO 3 /WP 4 GND
     # 5 DI 6 CLK 7 /HOLD 8 VCC)
-    b += place("Package_SO", "SOIC-8_3.9x4.9mm_P1.27mm", "U31", x + 32, y + 10, 0, {
+    b += place("Package_SO", "SOIC-8_3.9x4.9mm_P1.27mm", "U31", x + 68, y + 10, 0, {
         "1": "QSPI_SS", "2": "QSPI_SD1", "3": "QSPI_SD2", "4": "GND",
         "5": "QSPI_SD0", "6": "QSPI_SCLK", "7": "QSPI_SD3", "8": "+3V3"}, nets)
     # 12MHz crystal (3225: pads 1/3 crystal, 2/4 GND) + load caps
-    b += place("Crystal", "Crystal_SMD_3225-4Pin_3.2x2.5mm", "Y1", x + 6, y + 26, 0,
+    b += place("Crystal", "Crystal_SMD_3225-4Pin_3.2x2.5mm", "Y1", x + 30, y + 35, 0,
                {"1": "RP_XIN", "2": "GND", "3": "RP_XOUT", "4": "GND"}, nets)
-    b += cap("C40", x + 2, y + 31, "RP_XIN", "GND", nets)
-    b += cap("C41", x + 10, y + 31, "RP_XOUT", "GND", nets)
+    b += cap("C40", x + 23, y + 35, "RP_XIN", "GND", nets)
+    b += cap("C41", x + 37, y + 35, "RP_XOUT", "GND", nets)
     # 3V3 regulator (AMS1117-3.3 SOT-223: 1 GND 2 VOUT 3 VIN, tab=VOUT)
-    b += place("Package_TO_SOT_SMD", "SOT-223-3_TabPin2", "U32", x + 33, y + 26, 0,
+    b += place("Package_TO_SOT_SMD", "SOT-223-3_TabPin2", "U32", x + 70, y + 32, 0,
                {"1": "GND", "2": "+3V3", "3": "+5V"}, nets)
-    b += cap("C42", x + 40, y + 30, "+5V", "GND", nets)
-    b += cap("C43", x + 40, y + 34, "+3V3", "GND", nets)
-    # DVDD (1.1V core from internal VREG) decoupling
-    b += cap("C44", x + 24, y + 24, "RP_DVDD", "GND", nets)
-    b += cap("C45", x + 6, y + 6, "+3V3", "GND", nets)
-    b += cap("C46", x + 24, y + 6, "+3V3", "GND", nets)
+    b += cap("C42", x + 78, y + 38, "+5V", "GND", nets)
+    b += cap("C43", x + 78, y + 44, "+3V3", "GND", nets)
+    # DVDD (1.1V core from internal VREG) decoupling — placed OUTSIDE the
+    # QFN escape ring (23.5: the ring reaches ~6mm past the package on every
+    # side; in-ring caps drew courtyard overlaps with FO breakouts)
+    b += cap("C44", x + 16, y + 35, "RP_DVDD", "GND", nets)
+    b += cap("C45", x + 4, y + 35, "+3V3", "GND", nets)
+    b += cap("C46", x + 10, y + 35, "+3V3", "GND", nets)
     # boot/reset straps + headers
-    b += res("R30", x + 33, y + 18, "QSPI_SS", "+3V3", nets)
-    b += res("R31", x + 28, y + 32, "RP_RUN", "+3V3", nets)
+    b += res("R30", x + 62, y + 20, "QSPI_SS", "+3V3", nets)
+    b += res("R31", x + 44, y + 44, "RP_RUN", "+3V3", nets)
     b += place("Connector_PinHeader_2.54mm", "PinHeader_1x02_P2.54mm_Vertical",
-               "J30", x + 4, y + 40, 90, {"1": "QSPI_SS", "2": "GND"}, nets)
+               "J30", x + 4, y + 44, 90, {"1": "QSPI_SS", "2": "GND"}, nets)
     b += place("Connector_PinHeader_2.54mm", "PinHeader_1x02_P2.54mm_Vertical",
-               "J31", x + 14, y + 40, 90, {"1": "RP_RUN", "2": "GND"}, nets)
+               "J31", x + 16, y + 44, 90, {"1": "RP_RUN", "2": "GND"}, nets)
     b += place("Connector_PinHeader_2.54mm", "PinHeader_1x03_P2.54mm_Vertical",
-               "J32", x + 26, y + 40, 90,
+               "J32", x + 30, y + 44, 90,
                {"1": "RP_SWCLK", "2": "GND", "3": "RP_SWDIO"}, nets)
     # USB: ADVISORY test pads only — no connector, no impedance claim
-    b += tp("TP50", x + 38, y + 40, "RP_USB_DM", nets)
-    b += tp("TP51", x + 42, y + 40, "RP_USB_DP", nets)
+    b += tp("TP50", x + 56, y + 44, "RP_USB_DM", nets)
+    b += tp("TP51", x + 62, y + 44, "RP_USB_DP", nets)
     # I2C pull-ups (the Pico block carries these when it is the MCU)
     if "i2c_sda" in n:
-        b += res("R32", x + 44, y + 10, n["i2c_sda"], "+3V3", nets)
-        b += res("R33", x + 44, y + 15, n["i2c_scl"], "+3V3", nets)
-    label("BARE RP2040 (STRESS TEST)", x + 20, y + 2, 0.8)
-    label("J30 BOOTSEL  J31 RESET  J32 SWD", x + 20, y + 45, 0.6)
-    label("USB pads ADVISORY ONLY no impedance claim", x + 30, y + 48, 0.6)
+        b += res("R32", x + 78, y + 20, n["i2c_sda"], "+3V3", nets)
+        b += res("R33", x + 78, y + 26, n["i2c_scl"], "+3V3", nets)
+    label("BARE RP2040 (STRESS TEST)", x + 60, y + 2, 0.8)
+    label("J30 BOOTSEL  J31 RESET  J32 SWD", x + 18, y + 50, 0.6)
+    label("USB pads ADVISORY ONLY no impedance claim", x + 58, y + 50, 0.6)
     _DEVICES.append({"ref": "U30", "type": "mcu", "name": "RP2040 (bare QFN-56)",
-                     "honesty": "pin map manually transcribed; ingestion "
-                                "validation REQUIRED; unvalidated subsystem"})
+                     "honesty": "pin map VERIFIED against the official KiCad "
+                                "symbol (23.5); subsystem still unvalidated "
+                                "physically"})
     _DEVICES.append({"ref": "U31", "type": "qspi_flash", "name": "W25Q16 class"})
-    return b, 48, 52
+    return b, 86, 54
 
 
 def block_backplane6(x, y, n, nets):

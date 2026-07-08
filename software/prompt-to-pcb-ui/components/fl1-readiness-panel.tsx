@@ -59,6 +59,8 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
       'compose-general-physical-synthesis-benchmark-report',
       'compose-benchmark-coverage-scorecard', 'compose-capability-pack-registry',
       'compose-2layer-benchmark-rerun-report', 'compose-2layer-fleet-learning-update',
+      'bare-mcu-qfn56-core-sandbox-compose-run', 'compose-qfn56-primitive-acquisition-report',
+      'compose-qfn56-fleet-learning-update',
       'compose-next-capability-recommendation', 'compose-permanent-pattern-recommendations',
       'compose-general-synthesis-fleet-learning-update',
       'bme280-env-sensor-v2-fleet-learning-update',
@@ -139,6 +141,40 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
           {d['cal-board-attempt'].blocker && (
             <p className="mt-1 text-[10px] text-destructive">
               blocker: {d['cal-board-attempt'].blocker}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Phase 23.5: QFN-56 escape + bare-MCU sandbox */}
+      {d['bare-mcu-qfn56-core-sandbox-compose-run'] && (
+        <div className="rounded-md border border-primary/40 bg-primary/5 p-3">
+          <p className="mb-1 text-[11px] font-semibold text-primary">
+            QFN-56 Quadrant Escape SOLVED (sandbox) — bare RP2040:{' '}
+            {d['bare-mcu-qfn56-core-sandbox-compose-run'].routing} nets · DRC{' '}
+            {d['bare-mcu-qfn56-core-sandbox-compose-run'].drc} ·{' '}
+            {d['bare-mcu-qfn56-core-sandbox-compose-run'].role_completeness}
+          </p>
+          <p className="text-[10px] text-amber-500">
+            {d['bare-mcu-qfn56-core-sandbox-compose-run'].honesty} — the MCU is NOT claimed
+            to boot; USB advisory pads only; 2-layer QFN failed honestly (power web needs a
+            plane)
+          </p>
+          {d['compose-qfn56-primitive-acquisition-report'] && (
+            <p className="mt-1 text-[9px] text-muted-foreground">
+              RP2040 symbol-verified:{' '}
+              {d['compose-qfn56-primitive-acquisition-report'].pin_count} pins · footprint{' '}
+              {d['compose-qfn56-primitive-acquisition-report'].footprint_pads} pads @{' '}
+              {d['compose-qfn56-primitive-acquisition-report'].pitch_computed_mm}mm ·{' '}
+              {d['compose-qfn56-primitive-acquisition-report'].transcription_errors_caught?.length}{' '}
+              manual-transcription errors caught by verification (incl. DVDD-to-3V3 — the
+              quarantine had blocked it)
+            </p>
+          )}
+          {d['compose-qfn56-fleet-learning-update'] && (
+            <p className="mt-1 text-[9px] text-emerald-500">
+              next: {d['compose-qfn56-fleet-learning-update'].next_recommendation.recommendation}{' '}
+              — {d['compose-qfn56-fleet-learning-update'].next_recommendation.reason}
             </p>
           )}
         </div>

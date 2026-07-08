@@ -1373,3 +1373,42 @@ SEVEN clean reruns — the 4-layer path untouched and every fallback retained.
 
 Regression: phase234 29/29; all suites green; frontend 24/24; board 5/5.
 Nothing ordered; 2-layer routed clean is NOT physical validation.
+
+## Phase 23.5: QFN-56 quadrant escape + bare-MCU core sandbox v1 — SOLVED IN SANDBOX
+
+The strategic routing gap standing since Phase 18.8 is CLOSED at sandbox
+level: a bare RP2040 QFN-56 routes clean through every gate. No boot claim,
+no physical validation, nothing ordered.
+
+- SYMBOL VERIFICATION FIRST: the RP2040 primitive was verified against the
+  official KiCad MCU_RaspberryPi symbol (57 pins parsed programmatically) and
+  the QFN-56 footprint (57 pads, 0.4mm pitch computed from pad coordinates).
+  This caught SEVEN errors in the 18.8 manual transcription — including pin
+  23 (DVDD, the 1.1V core) wired to +3V3, which would have damaged real
+  silicon. The JIT quarantine had correctly blocked any build on the
+  unverified map: the two-layer honesty system worked exactly as designed.
+- Escape solved with FIVE real fanout fixes: zone-only fine-pitch rows now
+  dogboned (sides with all GPIOs unwired previously stranded their IOVDD
+  pins); QFN zone pins ride the lane system (outward dogbone depths
+  interleaved with lane laterals and collided); column plane pins stub+via at
+  lane depth (vertical lane runs crossed row laterals in the corner box);
+  cross-axis fan-target dedup (row and column fans claimed the same corner
+  cells); bare-MCU block re-laid-out with RESERVED fan fields.
+- bare-mcu-qfn56-core-sandbox-v1: PASSED 18/18 nets, 0 DRC, 0 unconnected,
+  ERC clean, bare_mcu_core role 12/12 (with_review). Contents: QFN-56 RP2040
+  + W25Q16 QSPI + 12MHz crystal + AMS1117 + SWD/BOOT/RESET + LED + TPs. USB
+  advisory pads only. Decoupling values REVIEW-REQUIRED (not datasheet-
+  extracted — recorded as the next JIT step).
+- 2-layer QFN feasibility: FAILED HONESTLY (16/18, 18 unconnected — the
+  +3V3 12-pin power web needs a plane). QFN core boards are 4-layer only;
+  the failure is preserved and does not block the 4-layer result.
+- bare_mcu_core_pack scoped to QFN-56+RP2040 ONLY (no BGA/HDI/other-QFN
+  generalization). Pico replacement feasibility: equivalence NOT claimed;
+  the remaining list is explicit (datasheet extraction, physical bring-up,
+  USB decision, regulator validation). FL-1 monolith impact: the 18.8
+  blocker is addressed; Core-6 bare-RP2040 is now UNBLOCKED FOR ATTEMPT.
+- Fleet next recommendation: PHYSICAL 2-LAYER FIRST ARTICLE — every systemic
+  routing gap in the ordinary-rigid class is now sandbox-closed; the
+  platform's single largest evidence gap is physical (zero boards exist).
+
+Regression: phase235 25/25; all suites green; frontend 24/24; board 5/5.

@@ -197,6 +197,29 @@ def _sensor_board_reqs(f):
     ]
 
 
+def _bare_mcu_reqs(f):
+    """Bare-MCU QFN core sandbox role (23.5): the support circuits that make a
+    bare chip honest — NO boot/firmware claim is part of this role."""
+    return [
+        ("power input present", "+5V" in f["nets"]),
+        ("bare MCU present (QFN-56)", "mcu" in f["dev_types"]
+         and any("RP2040" in n for n in f["dev_names"])),
+        ("core rail present (DVDD from internal VREG)", "RP_DVDD" in f["nets"]),
+        ("QSPI flash wired", {"QSPI_SS", "QSPI_SCLK", "QSPI_SD0"} <= f["nets"]),
+        ("crystal wired (XIN/XOUT + load caps)", {"RP_XIN", "RP_XOUT"} <= f["nets"]),
+        ("SWD/debug header wired (real nets)", {"RP_SWCLK", "RP_SWDIO"} <= f["nets"]),
+        ("boot/reset straps + headers", {"RP_RUN", "QSPI_SS"} <= f["nets"]),
+        ("USB advisory pads only (no connector claim)",
+         {"RP_USB_DM", "RP_USB_DP"} <= f["nets"]
+         and "USB_C_Receptacle" not in str(f["dev_names"])),
+        ("status LED present", "LED_K" in f["nets"] or
+         any("PWR" in str(x) for x in f["dev_names"])),
+        ("test points (>=4)", f["test_points"] >= 4),
+        ("mounting holes (>=4)", f["mounting_holes"] >= 4),
+        ("silk labels", f["silk_labels"] >= 4),
+    ]
+
+
 ROLE_CHECKS = {
     "controller_backplane": _controller_reqs,
     "digital_bringup": _digital_reqs,
@@ -206,6 +229,7 @@ ROLE_CHECKS = {
     "power_current_monitor": _pcm_reqs,
     "monolithic_core6": _mono_core6_reqs,
     "sensor_board": _sensor_board_reqs,
+    "bare_mcu_core": _bare_mcu_reqs,
 }
 
 # caveats that keep a complete board at _with_review (honest limits, not failures)
@@ -224,6 +248,12 @@ ROLE_CAVEATS = {
         "trigger/sync are protected GPIO (Pico boots as inputs = safe default); "
         "timing is sanity-class unless measured by an external instrument",
         "COTS instrument capability is COTS capability, never internal FL-1 capability"],
+    "bare_mcu_core": [
+        "SANDBOX article: NO boot claim, NO firmware claim, NO USB compliance,"
+        " NO clock-performance claim — routed clean is not a working MCU",
+        "pin map symbol-verified (23.5) but the subsystem is physically "
+        "unvalidated; decoupling values review-required",
+        "EP reflow + stencil review-required for assembly"],
     "sensor_board": [
         "GENERIC benchmark role — no FL-1 assumptions",
         "temperature only in v1: humidity/pressure sensor (BME280-class) is a "
