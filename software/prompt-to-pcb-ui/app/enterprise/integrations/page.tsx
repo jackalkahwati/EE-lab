@@ -13,6 +13,12 @@ import { cn } from '@/lib/utils'
 
 type Any = Record<string, any>
 
+const FORMATS = [
+  { fmt: 'ipc2581', label: 'IPC-2581', hint: 'Import Wizard → IPC-2581' },
+  { fmt: 'odb', label: 'ODB++', hint: 'Import Wizard / CAMtastic' },
+  { fmt: 'pack', label: 'Handoff pack (.zip)', hint: 'IPC-2581 + ODB++ + BOM + readme' },
+]
+
 const CONN_STYLE: Record<string, string> = {
   native: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500',
   supported: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500',
@@ -22,6 +28,7 @@ const CONN_STYLE: Record<string, string> = {
 
 export default function IntegrationsPage() {
   const [db, setDb] = useState<Any | null>(null)
+  const [pick, setPick] = useState('')
   useEffect(() => {
     fetch('/api/enterprise', { cache: 'no-store' }).then((r) => r.json()).then(setDb).catch(() => {})
   }, [])
@@ -33,6 +40,16 @@ export default function IntegrationsPage() {
   const apiKeys: Any[] = ig.api_keys ?? []
   const webhooks: Any[] = ig.webhooks ?? []
   const sso = ig.sso ?? {}
+
+  // board -> its KiCad run dir (for the real Altium export)
+  const boards: Any[] = db.boards ?? []
+  const runs: Any[] = db.runs ?? []
+  const runDirOf = (board_id: string) =>
+    runs.find((r) => r.board_id === board_id)?.source_run_dir ?? null
+  const exportable = boards
+    .map((b) => ({ b, run: runDirOf(b.board_id) }))
+    .filter((x) => x.run)
+  const pickedRun = runDirOf(pick)
 
   return (
     <div className="min-h-screen bg-background p-4 text-xs text-foreground">
@@ -62,6 +79,43 @@ export default function IntegrationsPage() {
           KiCad is the native engine (Compose builds, routes and DRCs in KiCad).
           Altium / Eagle / OrCAD are import-export connectors — status reflects
           what actually round-trips today, not aspiration.
+        </p>
+      </div>
+
+      {/* Altium export — real handoff via neutral formats */}
+      <div className="mb-4 rounded-md border border-primary/30 bg-primary/[0.03]">
+        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+          <span className="text-xs font-semibold">Export to Altium</span>
+          <span className="rounded-sm border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[9px] text-emerald-500">
+            live
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 px-3 py-2.5">
+          <select value={pick} onChange={(e) => setPick(e.target.value)}
+            className="rounded-sm border border-border bg-background px-2 py-1 text-xs">
+            <option value="">select a board…</option>
+            {exportable.map(({ b }) => <option key={b.board_id} value={b.board_id}>{b.name}</option>)}
+          </select>
+          {FORMATS.map((f) => (
+            <a key={f.fmt}
+              aria-disabled={!pickedRun}
+              title={f.hint}
+              href={pickedRun ? `/api/altium-export?run=${encodeURIComponent(pickedRun)}&format=${f.fmt}` : undefined}
+              className={cn('rounded-sm border px-2.5 py-1 text-[11px]',
+                pickedRun
+                  ? 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/20'
+                  : 'pointer-events-none border-border text-muted-foreground opacity-50')}>
+              ↓ {f.label}
+            </a>
+          ))}
+        </div>
+        <p className="border-t border-border px-3 py-2 text-[9px] text-muted-foreground">
+          Generates real files with kicad-cli and streams them to you: IPC-2581
+          and ODB++ are Altium's own supported import paths (File → Import
+          Wizard). Native <span className="font-mono">.PcbDoc</span>/<span className="font-mono">.SchDoc</span> write is
+          not offered — those are proprietary binaries with no reliable open
+          format, and faking one would be dishonest. Import Altium → Compose via
+          KiCad's built-in Altium importer in the KiCad GUI.
         </p>
       </div>
 
