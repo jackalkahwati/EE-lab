@@ -9,6 +9,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
+import { PortfolioSummary } from '@/components/portfolio-summary'
 
 type Db = Record<string, any>
 
@@ -103,6 +104,14 @@ export default function EnterprisePage() {
           No enterprise data. Seed the demo workspace:
           <code className="ml-2 rounded bg-muted px-1">node scripts/seed_enterprise_demo.mjs</code>
         </div>
+      )}
+
+      {workspaces.length > 0 && programs.length > 0 && (
+        <PortfolioSummary
+          db={db}
+          programs={programs}
+          onOpenBoard={(b) => { setProgId(b.program_id); setBoardId(b.board_id) }}
+        />
       )}
 
       <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
