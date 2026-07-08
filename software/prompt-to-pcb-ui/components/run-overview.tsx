@@ -10,6 +10,8 @@ import { useEffect, useState } from 'react'
 import {
   CheckCircle2, XCircle, Wrench, AlertTriangle, HelpCircle, MinusCircle,
 } from 'lucide-react'
+import type { Run } from '@/lib/firstlight'
+import { describeBoard } from '@/lib/describe-board'
 
 type S =
   | 'passed' | 'failed' | 'recovered' | 'needs_review'
@@ -34,8 +36,9 @@ function Icon({ s }: { s: S }) {
   return <AlertTriangle className="size-3.5" />
 }
 
-export function RunOverview({ runId }: { runId: string | null }) {
+export function RunOverview({ runId, run }: { runId: string | null; run?: Run | null }) {
   const [a, setA] = useState<Record<string, any> | null | undefined>(undefined)
+  const [promptOpen, setPromptOpen] = useState(false)
 
   useEffect(() => {
     if (!runId) {
@@ -140,6 +143,26 @@ export function RunOverview({ runId }: { runId: string | null }) {
     ],
   ]
 
+  // ---- board description (title + what this board is), from last-run.json ----
+  const lr = a['last-run']
+  const spec = lr?.composeSpec
+  const board = lr?.board
+  const title: string =
+    run?.name ?? spec?.boardClass ?? lr?.prompt ?? runId
+  const prompt: string | null = lr?.prompt ?? run?.prompt ?? null
+  const blocks: string[] = spec?.blocks ?? []
+  const purpose = describeBoard(lr)
+  const summaryBits: string[] = []
+  if (board?.layers) summaryBits.push(`${board.layers}-layer`)
+  if (board?.boardSize)
+    summaryBits.push(
+      `${Math.round(board.boardSize.wMm)} × ${Math.round(board.boardSize.hMm)} mm`,
+    )
+  if (board?.components) summaryBits.push(`${board.components} components`)
+  if (board?.netsTotal) summaryBits.push(`${board.netsTotal} nets`)
+  if (blocks.length) summaryBits.push(`${blocks.length} blocks`)
+  const summary = summaryBits.length > 0 ? summaryBits.join(' · ') : null
+
   const warnings: string[] = []
   if (adv?.unsupported_constraints?.length)
     warnings.push(
@@ -152,6 +175,26 @@ export function RunOverview({ runId }: { runId: string | null }) {
 
   return (
     <div className="h-full space-y-4 overflow-y-auto p-4 text-xs">
+      <div className="rounded-md border border-border bg-muted/20 p-3">
+        <p className="text-sm font-semibold text-foreground">{title}</p>
+        {purpose && (
+          <p className="mt-1.5 text-[13px] leading-relaxed text-foreground/90">{purpose}</p>
+        )}
+        {summary && (
+          <p className="mt-1.5 font-mono text-[11px] text-muted-foreground">{summary}</p>
+        )}
+        {prompt && prompt !== title && (
+          <button
+            type="button"
+            onClick={() => setPromptOpen((v) => !v)}
+            title={promptOpen ? 'Collapse prompt' : 'Show full prompt'}
+            className="mt-1.5 block w-full cursor-pointer text-left text-[11px] italic text-muted-foreground"
+          >
+            <span className={promptOpen ? '' : 'line-clamp-2'}>“{prompt}”</span>
+          </button>
+        )}
+      </div>
+
       <div className="flex items-center gap-2">
         <span className="text-sm font-semibold text-foreground">Run Overview</span>
         <span

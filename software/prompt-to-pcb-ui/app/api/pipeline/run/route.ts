@@ -767,6 +767,21 @@ export async function GET(req: Request) {
           } catch {
             /* persist best-effort; repair just won't be available for this run */
           }
+          // full 3D model (GLB) for the interactive board viewer. Exported from
+          // the PERSISTED copy so /api/board3d's mtime freshness check sees the
+          // glb as current. Advisory only — a failure never gates the run; the
+          // viewer just builds it on demand instead.
+          const glb = await exec('validation', KCLI, [
+            'pcb', 'export', 'glb', '--force', '--subst-models',
+            '--include-tracks', '--include-pads', '--include-zones',
+            '--include-silkscreen', '--include-soldermask',
+            '-o', path.join(pubBoard, 'board.glb'),
+            path.join(runRoot, 'variant.kicad_pcb'),
+          ])
+          if (glb.code === 0)
+            log('validation', '3D model exported (board.glb) for the interactive viewer', 'ok')
+          else
+            log('validation', '3D export skipped; the viewer will build it on demand', 'warn')
         }
 
         let fabZip: string | undefined

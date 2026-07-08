@@ -2,6 +2,10 @@
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
 
+/* keep Tailwind's source scanner out of generated board artifacts — the
+   multi-MB binary .glb models crash the oxide scanner outright */
+@source not "../public";
+
 @theme inline {
   --font-sans: var(--font-inter), system-ui, sans-serif;
   --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;

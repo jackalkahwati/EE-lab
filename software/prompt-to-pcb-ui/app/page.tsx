@@ -567,7 +567,7 @@ export default function FirstLightPage() {
           <div className="min-h-0 flex-1">
             <ErrorBoundary key={tab} label={`The ${tab} panel`}>
             {tab === 'Overview' && (
-              <RunOverview runId={selectedRun.runDir ? selectedRun.id : null} />
+              <RunOverview runId={selectedRun.runDir ? selectedRun.id : null} run={selectedRun} />
             )}
             {tab === 'Artifacts' && (
               <ArtifactExplorer runId={selectedRun.runDir ? selectedRun.id : null} />

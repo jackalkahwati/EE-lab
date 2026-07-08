@@ -24,3 +24,7 @@ public/data/last-run.md
 # per-run artifact snapshots (regenerated each run)
 public/runs/
 data/
+
+# generated 3D board models (kicad-cli glb export, 20-40 MB binaries —
+# also excluded from Tailwind's source scanner, which crashes on them)
+*.glb
