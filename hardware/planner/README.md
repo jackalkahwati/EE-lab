@@ -1562,3 +1562,22 @@ package_ready_with_review, ledger empty, next action = the human signature.
 
 Regression: M3 11/11; ledger untouched; no UI/composer change (no frontend
 or board rerun required).
+
+## Milestone M4: chip-down expansion benchmarks v1
+
+Nine real library candidates through the generic chip-down engine — four
+routed clean, two blocked with exact reasons, zero fake primitives.
+
+- ROUTED (generic path, no hand blocks): PCF8574 (SOIC-16), 24LC02 EEPROM
+  7/7 (SOIC-8), 74HC595 12/12 (SOIC-16 logic), ADS1115 12/12 (TSSOP-10
+  FINE-PITCH through the generic path). All 0 DRC.
+- BLOCKED with exact reasons (new multi-rail guard): TXB0102 (VCCA/VCCB) and
+  DS3231M (VCC/VBAT) — distinct power domains must not silently merge onto
+  one rail; M6 closes this. Verified-only: TCA9534, SHT30-DIS (DFN),
+  AP2112K (regulator synthesized but in/out cap requirements not
+  datasheet-derived — M5/M9).
+- Gaps recorded: bus policies beyond I2C, analog domain semantics (AIN pins
+  currently exposed as generic IO), regulator support values.
+
+Regression: M4 10/10; no composer change (board regression not required);
+suite green.

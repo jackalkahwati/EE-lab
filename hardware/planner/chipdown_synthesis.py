@@ -113,6 +113,18 @@ def synthesize_chipdown(symbol_lib, symbol_name, footprint_lib, footprint_name,
     if cls.get("advanced_gate"):
         return {"state": "architecture_only",
                 "reason": "tier-3 package family %s" % cls["family"]}
+    # M4 guard: chips with DISTINCT power-domain names (VCCA/VCCB, VCC+VBAT)
+    # must not silently merge onto one rail — that is the M6 multi-rail gap
+    pwr_names = {p["name"].upper().split("/")[0] for p in pins
+                 if p["etype"] == "power_in"
+                 and not ("GND" in p["name"].upper()
+                          or p["name"].upper() == "VSS")}
+    if len(pwr_names) > 1:
+        return {"state": "blocked",
+                "gate": "multi-rail power domains",
+                "reason": "distinct power pins %s would silently merge onto "
+                          "one rail — blocked until multi-rail synthesis "
+                          "(M6)" % sorted(pwr_names)}
     pmap, straps, pullups, ios, power_pins = {}, [], [], [], []
     for p in pins:
         kind, net = _policy(p, rails)
