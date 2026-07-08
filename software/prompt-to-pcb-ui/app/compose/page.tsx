@@ -41,13 +41,18 @@ import { FL1ReadinessPanel } from '@/components/fl1-readiness-panel'
 const TABS = ['Overview', 'Board', 'Code', 'Pinout', 'Constraints', 'Advanced', 'BOM', 'Assembly', 'Order', 'Checks', 'FL-1', 'Recovery', 'Review', 'Ingest', 'Patterns', 'FL-1 Ready', 'Artifacts'] as const
 type Tab = (typeof TABS)[number]
 
-// Grouped workspace navigation — replaces the single overflowing tab row.
-// Every existing view is preserved; groups just organise them so the nav scales.
+// Grouped workspace navigation, ordered as the enterprise board journey:
+// Design -> Review -> Quote -> Build -> Validate -> Learn. Review (design
+// gates + human review) and Quote (fab quote/order) are now first-class steps
+// rather than buried under Build/Validate. Every view is preserved and lives
+// in exactly one group, so the nav scales without overflow.
 const GROUPS: { name: string; views: Tab[] }[] = [
   { name: 'Overview', views: ['Overview'] },
   { name: 'Design', views: ['Board', 'Code', 'Pinout', 'Constraints', 'Advanced'] },
-  { name: 'Build', views: ['BOM', 'Assembly', 'Order'] },
-  { name: 'Validate', views: ['Checks', 'FL-1', 'Recovery', 'Review'] },
+  { name: 'Review', views: ['Checks', 'Review'] },
+  { name: 'Quote', views: ['Order'] },
+  { name: 'Build', views: ['BOM', 'Assembly'] },
+  { name: 'Validate', views: ['FL-1', 'Recovery'] },
   { name: 'Learn', views: ['Ingest', 'Patterns', 'FL-1 Ready'] },
   { name: 'Artifacts', views: ['Artifacts'] },
 ]
