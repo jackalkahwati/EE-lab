@@ -1412,3 +1412,38 @@ no physical validation, nothing ordered.
   platform's single largest evidence gap is physical (zero boards exist).
 
 Regression: phase235 25/25; all suites green; frontend 24/24; board 5/5.
+
+## Phase 23.6: first physical evidence loop v1
+
+The bridge from sandbox to silicon: everything needed to turn ONE real board
+into real physical validation evidence — with every gate a real function and
+the ledger starting EMPTY.
+
+- Physical evidence state model (15 states): nothing past package_ready_with_
+  review without human approval or real-world evidence; advance() REFUSES
+  ungated transitions. Readiness ladder (12 rungs): production_ready
+  structurally forbidden without repeated validation + yield + process
+  evidence + human approval.
+- First physical board selection (6 candidates scored): power-entry-header
+  2-LAYER variant wins — lowest fab/assembly/test complexity, zero firmware,
+  no fine pitch, one multimeter validates it, and a pass promotes the
+  synthesized-structure generator, the 2-layer flow, led_indicator +
+  testpoint_cluster patterns, and two capability packs in one article. The
+  QFN sandbox is marked STRATEGIC BUT EXPLICITLY NOT FIRST.
+- First article package verified complete for human review; human approval
+  packet with EXPLICIT signature gates (APPROVED_FOR_QUOTE and APPROVED_FOR_
+  ORDER, both null until a human signs — Compose cannot fill them); quote
+  package (3/5/10 qty, bare-PCB recommended, ALL prices PLACEHOLDER,
+  submitted:false, ordered:false).
+- 15-step physical validation workflow (multimeter + current-limited supply;
+  no dangerous voltages; no certification/calibration/thermal claims);
+  evidence ingestion schema (attribution required, measurements require
+  UNITS, photos alone are never electrical validation); promotion gate
+  (physical_evidence.promotion_gate) rejecting simulated evidence, photo-only
+  electrical claims, unitless measurements, and missing adjudication —
+  promotion is SCOPED to the tested article/patterns/packs only.
+- Physical evidence ledger: EMPTY — no fake evidence, no placeholder passes.
+  Fleet next-after-first: USB-C entry -> BME280 -> env-v2 -> QFN LAST.
+
+Regression: phase236 24/24; all suites green; frontend 24/24; board 5/5
+stands (artifact-only). Nothing ordered; nothing claimed.

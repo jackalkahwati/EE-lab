@@ -60,6 +60,8 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
       'compose-benchmark-coverage-scorecard', 'compose-capability-pack-registry',
       'compose-2layer-benchmark-rerun-report', 'compose-2layer-fleet-learning-update',
       'bare-mcu-qfn56-core-sandbox-compose-run', 'compose-qfn56-primitive-acquisition-report',
+      'compose-physical-evidence-ledger', 'compose-first-physical-board-selection',
+      'compose-readiness-ladder-physical-update',
       'compose-qfn56-fleet-learning-update',
       'compose-next-capability-recommendation', 'compose-permanent-pattern-recommendations',
       'compose-general-synthesis-fleet-learning-update',
@@ -141,6 +143,36 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
           {d['cal-board-attempt'].blocker && (
             <p className="mt-1 text-[10px] text-destructive">
               blocker: {d['cal-board-attempt'].blocker}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Phase 23.6: first physical evidence loop */}
+      {d['compose-physical-evidence-ledger'] && (
+        <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3">
+          <p className="mb-1 text-[11px] font-semibold text-amber-500">
+            First Physical Evidence Loop — awaiting the human APPROVED_FOR_QUOTE signature
+          </p>
+          {d['compose-first-physical-board-selection'] && (
+            <p className="text-[10px] text-foreground">
+              selected: {d['compose-first-physical-board-selection'].recommendation}
+            </p>
+          )}
+          <p className="mt-1 text-[9px] text-muted-foreground">
+            ledger: quote {d['compose-physical-evidence-ledger'].quote_status} · order{' '}
+            {d['compose-physical-evidence-ledger'].order_status} · inspection{' '}
+            {d['compose-physical-evidence-ledger'].inspection_status} · electrical{' '}
+            {d['compose-physical-evidence-ledger'].electrical_status} · promotion{' '}
+            {d['compose-physical-evidence-ledger'].promotion_status}
+          </p>
+          <p className="mt-1 text-[9px] text-muted-foreground">
+            {d['compose-physical-evidence-ledger'].honesty}
+          </p>
+          {d['compose-readiness-ladder-physical-update'] && (
+            <p className="mt-1 text-[9px] text-emerald-500">
+              readiness: {d['compose-readiness-ladder-physical-update'].current_position} —
+              quote and order gates require explicit signatures; Compose cannot fill them
             </p>
           )}
         </div>
