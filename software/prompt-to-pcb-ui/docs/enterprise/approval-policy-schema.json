@@ -1,0 +1,104 @@
+{
+ "version": "v1",
+ "approval_types": [
+  "architecture_approval",
+  "part_selection_approval",
+  "bom_approval",
+  "board_review_approval",
+  "package_release_approval",
+  "quote_request_approval",
+  "approved_for_quote",
+  "approved_for_order",
+  "validation_plan_approval",
+  "physical_evidence_acceptance",
+  "production_readiness_approval"
+ ],
+ "approval_statuses": [
+  "not_requested",
+  "requested",
+  "approved",
+  "rejected",
+  "expired",
+  "revoked"
+ ],
+ "record_fields": [
+  "approval_id",
+  "approval_type",
+  "scope (org/workspace/program/board/run)",
+  "requested_by",
+  "approver",
+  "status",
+  "evidence_snapshot",
+  "blocked_claims_snapshot",
+  "diff_since_previous",
+  "risk_summary",
+  "notes",
+  "history (append-only)",
+  "timestamp"
+ ],
+ "policies": {
+  "small_internal_board": {
+   "required": [
+    "board_review_approval",
+    "package_release_approval"
+   ]
+  },
+  "enterprise_external_board": {
+   "required": [
+    "architecture_approval",
+    "bom_approval",
+    "package_release_approval",
+    "approved_for_quote"
+   ]
+  },
+  "fl1_physical_board": {
+   "required": [
+    "board_review_approval",
+    "package_release_approval",
+    "approved_for_quote"
+   ],
+   "note": "APPROVED_FOR_QUOTE remains the human unlock for first physical board execution"
+  },
+  "production_board": {
+   "required": [
+    "architecture_approval",
+    "bom_approval",
+    "package_release_approval",
+    "approved_for_quote",
+    "approved_for_order",
+    "physical_evidence_acceptance",
+    "production_readiness_approval"
+   ]
+  }
+ },
+ "downstream_dependencies": {
+  "approved_for_quote": [
+   "approved_for_quote",
+   "quote_packet_ready",
+   "quote_approval_requested"
+  ],
+  "approved_for_order": [
+   "approved_for_order",
+   "order_submitted_manually",
+   "fab_in_progress"
+  ],
+  "physical_evidence_acceptance": [
+   "physically_validated"
+  ],
+  "production_readiness_approval": [
+   "production_ready"
+  ],
+  "package_release_approval": [
+   "package_ready_with_review"
+  ]
+ },
+ "rules": [
+  "approved_for_quote cannot be inferred — explicit human decision only",
+  "approved_for_order cannot be inferred — explicit human decision only",
+  "physical_evidence_acceptance requires evidence files (store refuses physical items without a real file)",
+  "production_readiness_approval requires physical + yield/manufacturing evidence AND explicit human approval (guardReadiness)",
+  "rejected approvals block downstream states",
+  "revoked approvals invalidate dependent states (visible downgrade + audit entry)",
+  "approval history is immutable — decided approvals cannot be re-decided"
+ ]
+}

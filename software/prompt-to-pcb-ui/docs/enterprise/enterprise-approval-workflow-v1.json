@@ -1,0 +1,19 @@
+{
+ "version": "v1",
+ "milestone": "E2 Enterprise Approval Workflow",
+ "delivered": {
+  "engine": "lib/enterprise/approvals.mjs (request/decide/revoke, snapshots, diff-since-previous, cascade invalidation)",
+  "api": "request_approval / decide_approval / revoke_approval / policy_gaps actions on /api/enterprise",
+  "ui": "Approvals tab on /enterprise board detail (status color-coded; empty state states that quote/order stays locked)",
+  "audit": "every transition appends to the hash-chained audit log with evidence + blocked-claims snapshots",
+  "export": "approvalAuditReport() — full immutable history",
+  "tests": "scripts/test_e2.mjs — 13/13"
+ },
+ "acceptance": {
+  "workflows_configurable": "POLICIES config (4 examples incl. FL-1 physical board and production chain)",
+  "approval_blocks_downstream": "guardReadiness consumes approval records; requested-but-undecided unlocks nothing",
+  "quote_order_human_gated": true,
+  "audit_trail_visible": true,
+  "physical_evidence_gates_intact": true
+ }
+}
