@@ -1,0 +1,210 @@
+{
+ "schema": "evidence-pack/v1",
+ "scope_type": "run",
+ "title": "TXB0102 multi-rail chip-down (M6 domain-aware rails)",
+ "generated_at": "2026-07-08T08:42:38.965Z",
+ "reproducible_from": "public/runs/chipdown-txb0102-v1",
+ "sections": {
+  "01_executive_summary": {
+   "readiness_ladder_highest_proven": "package_ready",
+   "one_line": "TXB0102 multi-rail chip-down (M6 domain-aware rails): highest PROVEN state is 'package_ready'; 2 blocked claim(s); physical evidence ledger EMPTY"
+  },
+  "02_original_prompt": "Level shifter",
+  "03_architecture_summary": {
+   "blocks": [
+    "power",
+    "status led"
+   ],
+   "boardClass": "M6 Multi-Rail Chip-Down: TXB0102DCU",
+   "chipdown": [
+    {
+     "state": "synthesized_review_required",
+     "rails": {
+      "dual_supply_a": {
+       "net": "+3V3",
+       "pins": [
+        "3"
+       ],
+       "review": false
+      },
+      "dual_supply_b": {
+       "net": "+5V",
+       "pins": [
+        "7"
+       ],
+       "review": false
+      }
+     },
+     "analog_pins_requiring_afe": [],
+     "mixed_signal_blocked_claims": [],
+     "support_value_provenance": {
+      "part": "TXB0102DCU",
+      "values": [
+       {
+        "key": "decoupling_nF",
+        "value": null,
+        "units": null,
+        "provenance": "none",
+        "state": "review_required_placeholder",
+        "claims_allowed": [],
+        "claims_blocked": [
+         "calibrated_performance",
+         "timing_correctness",
+         "clock_performance",
+         "sensor_accuracy",
+         "thermal_reliability",
+         "compliance",
+         "value_selection_basis"
+        ]
+       },
+       {
+        "key": "pullup_kohm_range",
+        "value": null,
+        "units": null,
+        "provenance": "none",
+        "state": "review_required_placeholder",
+        "claims_allowed": [],
+        "claims_blocked": [
+         "calibrated_performance",
+         "timing_correctness",
+         "clock_performance",
+         "sensor_accuracy",
+         "thermal_reliability",
+         "compliance",
+         "value_selection_basis"
+        ]
+       }
+      ],
+      "evidence_derived": 0,
+      "placeholders": 2,
+      "rule": "no provenance -> no claim; placeholders stay review-required; nothing invented"
+     },
+     "symbol": "Logic_LevelTranslator:TXB0102DCU (direct)",
+     "footprint": [
+      "Package_TO_SOT_SMD",
+      "SOT-23-8"
+     ],
+     "package": "SOT-23",
+     "pitch_mm": 0.65,
+     "ref": "U40",
+     "pmap": {
+      "2": "GND",
+      "3": "+3V3",
+      "4": "GND",
+      "5": "GND",
+      "7": "+5V"
+     },
+     "decouple_count": 2,
+     "decouple_rails": [
+      "+3V3",
+      "+5V"
+     ],
+     "pullups": [],
+     "straps": [
+      "4",
+      "5"
+     ],
+     "exposed_io": [
+      {
+       "pin": "1",
+       "name": "B2"
+      },
+      {
+       "pin": "6",
+       "name": "OE"
+      },
+      {
+       "pin": "8",
+       "name": "B1"
+      }
+     ],
+     "evidence": {
+      "pins_parsed": 8,
+      "footprint_pads": 8,
+      "mapping": "mapping_verified"
+     },
+     "blocked_claims": [
+      "physically_validated",
+      "production_ready",
+      "functional_verification (no firmware or physical evidence)"
+     ],
+     "honesty": "generic synthesis, review-required; library truth only; no hand block written"
+    }
+   ]
+  },
+  "04_board_class": "M6 Multi-Rail Chip-Down: TXB0102DCU",
+  "05_pcb_artifacts": [
+   "B.Cu.svg",
+   "Edge.Cuts.svg",
+   "F.Cu.svg",
+   "F.SilkS.svg",
+   "In1.Cu.svg",
+   "In2.Cu.svg",
+   "render-bottom.png",
+   "render-top.png"
+  ],
+  "06_bom": "public/runs/chipdown-txb0102-v1/data/bom.json",
+  "07_manufacturing_package": [
+   "assembly-readiness.json",
+   "assembly-readiness.md",
+   "bom.csv",
+   "bom.json",
+   "pick_and_place.csv",
+   "sourcing-report.json"
+  ],
+  "08_drc_erc": {
+   "drc_hard_violations": 0,
+   "unconnected": 0,
+   "erc": "passed"
+  },
+  "09_router_evidence_state": "routed_in_sandbox (all nets)",
+  "10_flroute_fixture_coverage": {
+   "full_suite": "21/21",
+   "realboard": "3/3"
+  },
+  "11_external_eda_summary": "not generated",
+  "12_domain_evidence": "none applicable",
+  "13_missing_model_tool_stackup": {
+   "stackup": "none in repo — controlled impedance blocked",
+   "ibis": "none in repo — SI claims blocked",
+   "openEMS": "not installed — RF solver analyses unavailable"
+  },
+  "14_firmware_state": "passed",
+  "15_validation_workflow": "public/runs/chipdown-txb0102-v1/data/fl1-testplan.json",
+  "16_physical_evidence_ledger": {
+   "artifacts": [],
+   "order_status": "not_ordered",
+   "accepted_physical_evidence_items": 0
+  },
+  "17_human_approvals": [],
+  "18_blocked_claims": [
+   "physical validation (no accepted physical evidence)",
+   "production readiness (no yield/manufacturing evidence)"
+  ],
+  "19_review_required": [],
+  "20_known_risks": [],
+  "21_manual_steps_required": [
+   "human review of the manufacturing package",
+   "quote approval (human decision)",
+   "quote submission is MANUAL — never automatic",
+   "physical evidence upload + review after build"
+  ],
+  "22_readiness_state": "routed_in_sandbox",
+  "23_recommended_next_actions": [
+   "request board_review_approval",
+   "generate quote packet (human-gated)"
+  ]
+ },
+ "state_ladder": {
+  "designed": true,
+  "routed": true,
+  "drc_erc_clean": true,
+  "externally_analyzed": false,
+  "package_ready": true,
+  "quote_approved": false,
+  "physically_built": false,
+  "physically_validated": false,
+  "production_ready": false
+ },
+ "honesty": "this pack reports what artifacts prove; designed != routed != validated != production-ready; blocked claims are load-bearing"
+}

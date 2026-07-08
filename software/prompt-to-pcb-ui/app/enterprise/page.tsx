@@ -168,6 +168,14 @@ export default function EnterprisePage() {
                 <span className="text-sm font-semibold">{board.name}</span>
                 <Badge s={board.readiness} />
                 <span className="text-muted-foreground">{board.board_class}</span>
+                <a
+                  href={`/api/enterprise/evidence-pack?board_id=${board.board_id}&format=md`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="ml-auto rounded-sm border border-border bg-secondary px-2 py-1 font-mono text-[10px] text-muted-foreground hover:text-foreground"
+                >
+                  evidence pack ↓
+                </a>
               </div>
               {(board.blocked_claims.length > 0
                 || board.review_required_items.length > 0) && (

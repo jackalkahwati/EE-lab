@@ -1,0 +1,49 @@
+{
+ "version": "v1",
+ "milestone": "E3 Enterprise Evidence Pack",
+ "delivered": {
+  "generator": "lib/enterprise/evidencepack.mjs (23 sections, state ladder)",
+  "api": "/api/enterprise/evidence-pack?run_dir|board_id&format=json|md",
+  "ui": "evidence pack ↓ button on /enterprise board detail",
+  "benchmarks": [
+   {
+    "name": "power-entry-header",
+    "highest_proven": "package_ready",
+    "blocked_claims": 2,
+    "ledger_empty": true
+   },
+   {
+    "name": "txb0102-multi-rail",
+    "highest_proven": "package_ready",
+    "blocked_claims": 2,
+    "ledger_empty": true
+   },
+   {
+    "name": "bga-architecture-only",
+    "highest_proven": "designed",
+    "blocked_claims": 6,
+    "ledger_empty": true
+   },
+   {
+    "name": "rf-blocked",
+    "highest_proven": "designed",
+    "blocked_claims": 8,
+    "ledger_empty": true
+   },
+   {
+    "name": "m3-physical-quote-pending",
+    "highest_proven": "package_ready",
+    "blocked_claims": 2,
+    "ledger_empty": true
+   }
+  ],
+  "tests": "scripts/test_e3.mjs"
+ },
+ "acceptance": {
+  "packs_generate": true,
+  "blocked_claims_visible": true,
+  "ledger_state_visible": true,
+  "approvals_included": "section 17",
+  "no_production_ready_without_evidence": true
+ }
+}

@@ -1,0 +1,122 @@
+{
+ "schema": "evidence-pack/v1",
+ "scope_type": "quote_packet",
+ "title": "M3 physical loop board — quote PENDING human approval",
+ "generated_at": "2026-07-08T08:42:38.968Z",
+ "reproducible_from": "public/runs/power-entry-header-2l",
+ "sections": {
+  "01_executive_summary": {
+   "readiness_ladder_highest_proven": "package_ready",
+   "one_line": "M3 physical loop board — quote PENDING human approval: highest PROVEN state is 'package_ready'; 2 blocked claim(s); physical evidence ledger EMPTY"
+  },
+  "02_original_prompt": "Power Entry Header (2-LAYER)",
+  "03_architecture_summary": {
+   "layers": 2,
+   "blocks": [
+    "power",
+    "standalone"
+   ],
+   "boardClass": "Simple Power Entry Header Board v1 (2-LAYER)",
+   "subcircuits": [
+    {
+     "kind": "led_indicator",
+     "params": {
+      "name": "PWR",
+      "rail": "+5V",
+      "label": "PWR LED"
+     }
+    },
+    {
+     "kind": "testpoint_cluster",
+     "params": {
+      "nets": [
+       "+5V",
+       "GND"
+      ]
+     }
+    },
+    {
+     "kind": "voltage_monitor",
+     "params": {
+      "rail": "+5V",
+      "tap": "VMON"
+     }
+    }
+   ]
+  },
+  "04_board_class": "Simple Power Entry Header Board v1 (2-LAYER)",
+  "05_pcb_artifacts": [
+   "B.Cu.svg",
+   "Edge.Cuts.svg",
+   "F.Cu.svg",
+   "F.SilkS.svg",
+   "render-bottom.png",
+   "render-top.png"
+  ],
+  "06_bom": "public/runs/power-entry-header-2l/data/bom.json",
+  "07_manufacturing_package": [
+   "assembly-readiness.json",
+   "assembly-readiness.md",
+   "bom.csv",
+   "bom.json",
+   "pick_and_place.csv",
+   "sourcing-report.json"
+  ],
+  "08_drc_erc": {
+   "drc_hard_violations": 0,
+   "unconnected": 0,
+   "erc": "passed"
+  },
+  "09_router_evidence_state": "routed_in_sandbox (all nets)",
+  "10_flroute_fixture_coverage": {
+   "full_suite": "21/21",
+   "realboard": "3/3"
+  },
+  "11_external_eda_summary": "not generated",
+  "12_domain_evidence": "none applicable",
+  "13_missing_model_tool_stackup": {
+   "stackup": "none in repo — controlled impedance blocked",
+   "ibis": "none in repo — SI claims blocked",
+   "openEMS": "not installed — RF solver analyses unavailable"
+  },
+  "14_firmware_state": "passed",
+  "15_validation_workflow": "public/runs/power-entry-header-2l/data/fl1-testplan.json",
+  "16_physical_evidence_ledger": {
+   "artifacts": [],
+   "order_status": "not_ordered",
+   "accepted_physical_evidence_items": 0
+  },
+  "17_human_approvals": [],
+  "18_blocked_claims": [
+   "physical validation (no accepted physical evidence)",
+   "production readiness (no yield/manufacturing evidence)"
+  ],
+  "19_review_required": [
+   "APPROVED_FOR_QUOTE is the human unlock; no approval record exists yet"
+  ],
+  "20_known_risks": [],
+  "21_manual_steps_required": [
+   "human review of the manufacturing package",
+   "quote approval (human decision)",
+   "quote submission is MANUAL — never automatic",
+   "physical evidence upload + review after build"
+  ],
+  "22_readiness_state": "routed_in_sandbox",
+  "23_recommended_next_actions": [
+   "human decision on approved_for_quote",
+   "manual quote submission if approved"
+  ]
+ },
+ "state_ladder": {
+  "designed": true,
+  "routed": true,
+  "drc_erc_clean": true,
+  "externally_analyzed": false,
+  "package_ready": true,
+  "quote_approved": false,
+  "physically_built": false,
+  "physically_validated": false,
+  "production_ready": false
+ },
+ "honesty": "this pack reports what artifacts prove; designed != routed != validated != production-ready; blocked claims are load-bearing"
+}

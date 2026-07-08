@@ -1,0 +1,59 @@
+{
+ "version": "evidence-pack/v1",
+ "scopes": [
+  "run",
+  "board",
+  "program",
+  "quote_packet",
+  "validation_packet",
+  "pilot_report"
+ ],
+ "sections": 23,
+ "section_ids": [
+  "01_executive_summary",
+  "02_original_prompt",
+  "03_architecture_summary",
+  "04_board_class",
+  "05_pcb_artifacts",
+  "06_bom",
+  "07_manufacturing_package",
+  "08_drc_erc",
+  "09_router_evidence_state",
+  "10_flroute_fixture_coverage",
+  "11_external_eda_summary",
+  "12_domain_evidence",
+  "13_missing_model_tool_stackup",
+  "14_firmware_state",
+  "15_validation_workflow",
+  "16_physical_evidence_ledger",
+  "17_human_approvals",
+  "18_blocked_claims",
+  "19_review_required",
+  "20_known_risks",
+  "21_manual_steps_required",
+  "22_readiness_state",
+  "23_recommended_next_actions"
+ ],
+ "state_ladder": [
+  "designed",
+  "routed",
+  "drc_erc_clean",
+  "externally_analyzed",
+  "package_ready",
+  "quote_approved",
+  "physically_built",
+  "physically_validated",
+  "production_ready"
+ ],
+ "rules": [
+  "packs never hide blocked claims (section 18 is mandatory)",
+  "each ladder rung requires artifact/record proof; nothing inferred",
+  "physical ledger state always included (section 16)",
+  "reproducible from run artifacts (path recorded in the pack)",
+  "no fake customer data; synthetic scopes are labeled"
+ ],
+ "formats": [
+  "json",
+  "markdown"
+ ]
+}

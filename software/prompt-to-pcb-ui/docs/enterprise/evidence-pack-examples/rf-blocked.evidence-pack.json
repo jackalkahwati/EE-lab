@@ -1,0 +1,79 @@
+{
+ "schema": "evidence-pack/v1",
+ "scope_type": "board",
+ "title": "RF adapter request — BLOCKED (no solver/stackup/S-parameters/measurement)",
+ "generated_at": "2026-07-08T08:42:38.966Z",
+ "reproducible_from": "enterprise store",
+ "sections": {
+  "01_executive_summary": {
+   "readiness_ladder_highest_proven": "designed",
+   "one_line": "RF adapter request — BLOCKED (no solver/stackup/S-parameters/measurement): highest PROVEN state is 'designed'; 8 blocked claim(s); physical evidence ledger EMPTY"
+  },
+  "02_original_prompt": "SMA RF adapter with antenna path",
+  "03_architecture_summary": null,
+  "04_board_class": null,
+  "05_pcb_artifacts": [],
+  "06_bom": null,
+  "07_manufacturing_package": [],
+  "08_drc_erc": {
+   "drc_hard_violations": null,
+   "unconnected": null,
+   "erc": "unknown"
+  },
+  "09_router_evidence_state": "no run — RF gate returned architecture_only",
+  "10_flroute_fixture_coverage": {
+   "full_suite": "21/21",
+   "realboard": "3/3"
+  },
+  "11_external_eda_summary": "not generated",
+  "12_domain_evidence": "m10r-rf-replay-report: blockers cite recorded M3B states",
+  "13_missing_model_tool_stackup": {
+   "stackup": "none in repo — controlled impedance blocked",
+   "ibis": "none in repo — SI claims blocked",
+   "openEMS": "not installed — RF solver analyses unavailable"
+  },
+  "14_firmware_state": "unknown",
+  "15_validation_workflow": "not generated",
+  "16_physical_evidence_ledger": {
+   "artifacts": [],
+   "order_status": "not_ordered",
+   "accepted_physical_evidence_items": 0
+  },
+  "17_human_approvals": [],
+  "18_blocked_claims": [
+   "impedance_correctness",
+   "antenna_performance",
+   "RF_compliance",
+   "EMC",
+   "link_budget",
+   "radiated_power",
+   "physical validation (no accepted physical evidence)",
+   "production readiness (no yield/manufacturing evidence)"
+  ],
+  "19_review_required": [],
+  "20_known_risks": [],
+  "21_manual_steps_required": [
+   "human review of the manufacturing package",
+   "quote approval (human decision)",
+   "quote submission is MANUAL — never automatic",
+   "physical evidence upload + review after build"
+  ],
+  "22_readiness_state": "architecture_only",
+  "23_recommended_next_actions": [
+   "acquire stackup data (cheapest unlock)",
+   "install openEMS or obtain S-parameters"
+  ]
+ },
+ "state_ladder": {
+  "designed": true,
+  "routed": false,
+  "drc_erc_clean": false,
+  "externally_analyzed": false,
+  "package_ready": false,
+  "quote_approved": false,
+  "physically_built": false,
+  "physically_validated": false,
+  "production_ready": false
+ },
+ "honesty": "this pack reports what artifacts prove; designed != routed != validated != production-ready; blocked claims are load-bearing"
+}

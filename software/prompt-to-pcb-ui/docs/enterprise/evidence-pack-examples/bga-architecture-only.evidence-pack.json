@@ -1,0 +1,78 @@
+{
+ "schema": "evidence-pack/v1",
+ "scope_type": "board",
+ "title": "iCE40HX4K BGA-121 study — ARCHITECTURE ONLY",
+ "generated_at": "2026-07-08T08:42:38.966Z",
+ "reproducible_from": "enterprise store",
+ "sections": {
+  "01_executive_summary": {
+   "readiness_ladder_highest_proven": "designed",
+   "one_line": "iCE40HX4K BGA-121 study — ARCHITECTURE ONLY: highest PROVEN state is 'designed'; 6 blocked claim(s); physical evidence ledger EMPTY"
+  },
+  "02_original_prompt": "FPGA board study around iCE40HX4K-BG121",
+  "03_architecture_summary": {
+   "boardClass": "bga-architecture-study"
+  },
+  "04_board_class": null,
+  "05_pcb_artifacts": [],
+  "06_bom": null,
+  "07_manufacturing_package": [],
+  "08_drc_erc": {
+   "drc_hard_violations": null,
+   "unconnected": null,
+   "erc": "unknown"
+  },
+  "09_router_evidence_state": "M7R bga fixture suite: ring-0 escapes; ring-1 trapped; interior unreachable (no escape emitter)",
+  "10_flroute_fixture_coverage": {
+   "full_suite": "21/21",
+   "realboard": "3/3"
+  },
+  "11_external_eda_summary": "not generated",
+  "12_domain_evidence": "m7r-bga-replay-report / m7r-bga-router-evidence (fixture-proven gap)",
+  "13_missing_model_tool_stackup": {
+   "stackup": "none in repo — controlled impedance blocked",
+   "ibis": "none in repo — SI claims blocked",
+   "openEMS": "not installed — RF solver analyses unavailable"
+  },
+  "14_firmware_state": "unknown",
+  "15_validation_workflow": "not generated",
+  "16_physical_evidence_ledger": {
+   "artifacts": [],
+   "order_status": "not_ordered",
+   "accepted_physical_evidence_items": 0
+  },
+  "17_human_approvals": [],
+  "18_blocked_claims": [
+   "BGA routing support",
+   "BGA board emission",
+   "HDI/microvia/via-in-pad support",
+   "FPGA board support",
+   "physical validation (no accepted physical evidence)",
+   "production readiness (no yield/manufacturing evidence)"
+  ],
+  "19_review_required": [],
+  "20_known_risks": [],
+  "21_manual_steps_required": [
+   "human review of the manufacturing package",
+   "quote approval (human decision)",
+   "quote submission is MANUAL — never automatic",
+   "physical evidence upload + review after build"
+  ],
+  "22_readiness_state": "architecture_only",
+  "23_recommended_next_actions": [
+   "build the ball-grid escape emitter (M7R fixtures are its acceptance tests)"
+  ]
+ },
+ "state_ladder": {
+  "designed": true,
+  "routed": false,
+  "drc_erc_clean": false,
+  "externally_analyzed": false,
+  "package_ready": false,
+  "quote_approved": false,
+  "physically_built": false,
+  "physically_validated": false,
+  "production_ready": false
+ },
+ "honesty": "this pack reports what artifacts prove; designed != routed != validated != production-ready; blocked claims are load-bearing"
+}
