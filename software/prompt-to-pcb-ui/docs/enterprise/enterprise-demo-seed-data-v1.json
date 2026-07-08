@@ -1,0 +1,63 @@
+{
+ "version": "v1",
+ "milestone": "E11 Demo Seed Data",
+ "org": "Acme Robotics Labs (SYNTHETIC DEMO)",
+ "demo_flag": true,
+ "programs": [
+  {
+   "name": "Sensor Controller Pilot",
+   "status": "quote_ready",
+   "boards": 1,
+   "blocked_claims": []
+  },
+  {
+   "name": "FL-1 DUT Power Board Review",
+   "status": "review_required",
+   "boards": 1,
+   "blocked_claims": []
+  },
+  {
+   "name": "BGA Architecture Study",
+   "status": "architecture",
+   "boards": 1,
+   "blocked_claims": [
+    "BGA board emission (no ball-grid escape emitter)",
+    "HDI/microvia/via-in-pad support"
+   ]
+  },
+  {
+   "name": "RF Architecture Study",
+   "status": "blocked",
+   "boards": 1,
+   "blocked_claims": [
+    "RF performance",
+    "antenna performance",
+    "EMC"
+   ]
+  },
+  {
+   "name": "Validation Campaign Example",
+   "status": "validation_in_progress",
+   "boards": 1,
+   "blocked_claims": []
+  }
+ ],
+ "coverage": {
+  "runs_attached": 3,
+  "approvals": 2,
+  "usage_entries": 10,
+  "quote_flows": 1,
+  "validation_sessions": 1,
+  "pilots": 1
+ },
+ "honesty": {
+  "fake_physical_evidence": 0,
+  "fake_orders": 0,
+  "boards_beyond_review": 0
+ },
+ "scripts": {
+  "seed": "node scripts/seed_enterprise_demo.mjs",
+  "reset": "node scripts/seed_enterprise_demo.mjs --reset",
+  "toggle": "org.security_settings.demo drives the SYNTHETIC DEMO DATA chip in /enterprise"
+ }
+}
