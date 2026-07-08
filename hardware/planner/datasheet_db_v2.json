@@ -1,0 +1,395 @@
+{
+ "records": [
+  {
+   "component": "BME280",
+   "manufacturer": "Bosch",
+   "mpn": "BME280",
+   "evidence_type": "recommended_operating_voltage",
+   "value": null,
+   "units": null,
+   "normalized_requirement": "VDD 1.71-3.6 V; VDDIO 1.2-3.6 V",
+   "datasheet_source": "BME280 datasheet (revision unverified)",
+   "datasheet_revision": "unverified",
+   "source_ref": null,
+   "extracted_statement": null,
+   "extraction_method": "model_recall_pending_verification",
+   "human_review_state": "pending_review",
+   "confidence": "medium",
+   "claim_implications": [
+    "value_selection_basis ONLY after human review"
+   ],
+   "blocked_claims_if_missing": [
+    "calibrated_performance",
+    "timing_correctness"
+   ]
+  },
+  {
+   "component": "BME280",
+   "manufacturer": "Bosch",
+   "mpn": "BME280",
+   "evidence_type": "address_strap_requirements",
+   "value": null,
+   "units": null,
+   "normalized_requirement": "I2C address 0x76 (SDO low) / 0x77 (SDO high); SDO must not float",
+   "datasheet_source": "BME280 datasheet (revision unverified)",
+   "datasheet_revision": "unverified",
+   "source_ref": null,
+   "extracted_statement": null,
+   "extraction_method": "model_recall_pending_verification",
+   "human_review_state": "pending_review",
+   "confidence": "medium",
+   "claim_implications": [
+    "value_selection_basis ONLY after human review"
+   ],
+   "blocked_claims_if_missing": [
+    "calibrated_performance",
+    "timing_correctness"
+   ]
+  },
+  {
+   "component": "BME280",
+   "manufacturer": "Bosch",
+   "mpn": "BME280",
+   "evidence_type": "decoupling_recommendation",
+   "value": 100,
+   "units": "nF",
+   "normalized_requirement": "100 nF decoupling at VDD and VDDIO",
+   "datasheet_source": "BME280 datasheet (revision unverified)",
+   "datasheet_revision": "unverified",
+   "source_ref": null,
+   "extracted_statement": null,
+   "extraction_method": "model_recall_pending_verification",
+   "human_review_state": "pending_review",
+   "confidence": "medium",
+   "claim_implications": [
+    "value_selection_basis ONLY after human review"
+   ],
+   "blocked_claims_if_missing": [
+    "calibrated_performance",
+    "timing_correctness"
+   ]
+  },
+  {
+   "component": "PCF8574",
+   "manufacturer": "NXP/TI",
+   "mpn": "PCF8574",
+   "evidence_type": "address_strap_requirements",
+   "value": null,
+   "units": null,
+   "normalized_requirement": "A0-A2 straps select address 0x20-0x27 (PCF8574A: 0x38-0x3F)",
+   "datasheet_source": "PCF8574 datasheet (revision unverified)",
+   "datasheet_revision": "unverified",
+   "source_ref": null,
+   "extracted_statement": null,
+   "extraction_method": "model_recall_pending_verification",
+   "human_review_state": "pending_review",
+   "confidence": "medium",
+   "claim_implications": [
+    "value_selection_basis ONLY after human review"
+   ],
+   "blocked_claims_if_missing": [
+    "calibrated_performance",
+    "timing_correctness"
+   ]
+  },
+  {
+   "component": "PCF8574",
+   "manufacturer": "NXP/TI",
+   "mpn": "PCF8574",
+   "evidence_type": "pullup_pulldown_values",
+   "value": null,
+   "units": null,
+   "normalized_requirement": "I2C SDA/SCL require external pull-ups; quasi-bidirectional IO needs no port pull-ups",
+   "datasheet_source": "PCF8574 datasheet (revision unverified)",
+   "datasheet_revision": "unverified",
+   "source_ref": null,
+   "extracted_statement": null,
+   "extraction_method": "model_recall_pending_verification",
+   "human_review_state": "pending_review",
+   "confidence": "medium",
+   "claim_implications": [
+    "value_selection_basis ONLY after human review"
+   ],
+   "blocked_claims_if_missing": [
+    "calibrated_performance",
+    "timing_correctness"
+   ]
+  },
+  {
+   "component": "24LC02",
+   "manufacturer": "Microchip",
+   "mpn": "24LC02B",
+   "evidence_type": "address_strap_requirements",
+   "value": null,
+   "units": null,
+   "normalized_requirement": "A0-A2 are NOT decoded on 24LC02 (fixed address 0x50); pins may tie to VSS",
+   "datasheet_source": "24LC02B datasheet (revision unverified)",
+   "datasheet_revision": "unverified",
+   "source_ref": null,
+   "extracted_statement": null,
+   "extraction_method": "model_recall_pending_verification",
+   "human_review_state": "pending_review",
+   "confidence": "medium",
+   "claim_implications": [
+    "value_selection_basis ONLY after human review"
+   ],
+   "blocked_claims_if_missing": [
+    "calibrated_performance",
+    "timing_correctness"
+   ]
+  },
+  {
+   "component": "24LC02",
+   "manufacturer": "Microchip",
+   "mpn": "24LC02B",
+   "evidence_type": "write_protect_behavior",
+   "value": null,
+   "units": null,
+   "normalized_requirement": "WP high write-protects the array; tie to VSS for normal writes",
+   "datasheet_source": "24LC02B datasheet (revision unverified)",
+   "datasheet_revision": "unverified",
+   "source_ref": null,
+   "extracted_statement": null,
+   "extraction_method": "model_recall_pending_verification",
+   "human_review_state": "pending_review",
+   "confidence": "medium",
+   "claim_implications": [
+    "value_selection_basis ONLY after human review"
+   ],
+   "blocked_claims_if_missing": [
+    "calibrated_performance",
+    "timing_correctness"
+   ]
+  },
+  {
+   "component": "ADS1115",
+   "manufacturer": "TI",
+   "mpn": "ADS1115",
+   "evidence_type": "recommended_operating_voltage",
+   "value": null,
+   "units": null,
+   "normalized_requirement": "VDD 2.0-5.5 V",
+   "datasheet_source": "ADS1115 datasheet (revision unverified)",
+   "datasheet_revision": "unverified",
+   "source_ref": null,
+   "extracted_statement": null,
+   "extraction_method": "model_recall_pending_verification",
+   "human_review_state": "pending_review",
+   "confidence": "medium",
+   "claim_implications": [
+    "value_selection_basis ONLY after human review"
+   ],
+   "blocked_claims_if_missing": [
+    "calibrated_performance",
+    "timing_correctness"
+   ]
+  },
+  {
+   "component": "ADS1115",
+   "manufacturer": "TI",
+   "mpn": "ADS1115",
+   "evidence_type": "analog_input_range",
+   "value": null,
+   "units": null,
+   "normalized_requirement": "analog inputs must stay within GND-0.3 V to VDD+0.3 V; PGA full-scale settings do not extend beyond supply",
+   "datasheet_source": "ADS1115 datasheet (revision unverified)",
+   "datasheet_revision": "unverified",
+   "source_ref": null,
+   "extracted_statement": null,
+   "extraction_method": "model_recall_pending_verification",
+   "human_review_state": "pending_review",
+   "confidence": "medium",
+   "claim_implications": [
+    "value_selection_basis ONLY after human review"
+   ],
+   "blocked_claims_if_missing": [
+    "calibrated_performance",
+    "timing_correctness"
+   ]
+  },
+  {
+   "component": "ADS1115",
+   "manufacturer": "TI",
+   "mpn": "ADS1115",
+   "evidence_type": "adc_reference_requirements",
+   "value": null,
+   "units": null,
+   "normalized_requirement": "internal reference; no external reference pin",
+   "datasheet_source": "ADS1115 datasheet (revision unverified)",
+   "datasheet_revision": "unverified",
+   "source_ref": null,
+   "extracted_statement": null,
+   "extraction_method": "model_recall_pending_verification",
+   "human_review_state": "pending_review",
+   "confidence": "medium",
+   "claim_implications": [
+    "value_selection_basis ONLY after human review"
+   ],
+   "blocked_claims_if_missing": [
+    "calibrated_performance",
+    "timing_correctness"
+   ]
+  },
+  {
+   "component": "TXB0102",
+   "manufacturer": "TI",
+   "mpn": "TXB0102",
+   "evidence_type": "interface_voltage_requirements",
+   "value": null,
+   "units": null,
+   "normalized_requirement": "VCCA must be less than or equal to VCCB; VCCA 1.2-3.6 V, VCCB 1.65-5.5 V",
+   "datasheet_source": "TXB0102 datasheet (revision unverified)",
+   "datasheet_revision": "unverified",
+   "source_ref": null,
+   "extracted_statement": null,
+   "extraction_method": "model_recall_pending_verification",
+   "human_review_state": "pending_review",
+   "confidence": "medium",
+   "claim_implications": [
+    "value_selection_basis ONLY after human review"
+   ],
+   "blocked_claims_if_missing": [
+    "calibrated_performance",
+    "timing_correctness"
+   ]
+  },
+  {
+   "component": "TXB0102",
+   "manufacturer": "TI",
+   "mpn": "TXB0102",
+   "evidence_type": "power_sequencing",
+   "value": null,
+   "units": null,
+   "normalized_requirement": "OE should be held low during power-up until both rails are stable (outputs disabled)",
+   "datasheet_source": "TXB0102 datasheet (revision unverified)",
+   "datasheet_revision": "unverified",
+   "source_ref": null,
+   "extracted_statement": null,
+   "extraction_method": "model_recall_pending_verification",
+   "human_review_state": "pending_review",
+   "confidence": "medium",
+   "claim_implications": [
+    "value_selection_basis ONLY after human review"
+   ],
+   "blocked_claims_if_missing": [
+    "calibrated_performance",
+    "timing_correctness"
+   ]
+  },
+  {
+   "component": "DS3231M",
+   "manufacturer": "Analog Devices/Maxim",
+   "mpn": "DS3231M",
+   "evidence_type": "backup_battery_requirements",
+   "value": null,
+   "units": null,
+   "normalized_requirement": "VBAT 2.3-5.5 V; battery backup maintains timekeeping when VCC is absent",
+   "datasheet_source": "DS3231M datasheet (revision unverified)",
+   "datasheet_revision": "unverified",
+   "source_ref": null,
+   "extracted_statement": null,
+   "extraction_method": "model_recall_pending_verification",
+   "human_review_state": "pending_review",
+   "confidence": "medium",
+   "claim_implications": [
+    "value_selection_basis ONLY after human review"
+   ],
+   "blocked_claims_if_missing": [
+    "calibrated_performance",
+    "timing_correctness"
+   ]
+  },
+  {
+   "component": "RP2040",
+   "manufacturer": "Raspberry Pi",
+   "mpn": "RP2040",
+   "evidence_type": "boot_strap_requirements",
+   "value": null,
+   "units": null,
+   "normalized_requirement": "boots from external QSPI flash; USB_BOOT/QSPI_SS strapping selects BOOTSEL",
+   "datasheet_source": "RP2040 datasheet (revision unverified)",
+   "datasheet_revision": "unverified",
+   "source_ref": null,
+   "extracted_statement": null,
+   "extraction_method": "model_recall_pending_verification",
+   "human_review_state": "pending_review",
+   "confidence": "medium",
+   "claim_implications": [
+    "value_selection_basis ONLY after human review"
+   ],
+   "blocked_claims_if_missing": [
+    "calibrated_performance",
+    "timing_correctness"
+   ]
+  },
+  {
+   "component": "RP2040",
+   "manufacturer": "Raspberry Pi",
+   "mpn": "RP2040",
+   "evidence_type": "crystal_load_capacitors",
+   "value": null,
+   "units": null,
+   "normalized_requirement": "12 MHz crystal typical; load capacitors per crystal spec (commonly ~15-33 pF class)",
+   "datasheet_source": "RP2040 datasheet (revision unverified)",
+   "datasheet_revision": "unverified",
+   "source_ref": null,
+   "extracted_statement": null,
+   "extraction_method": "model_recall_pending_verification",
+   "human_review_state": "pending_review",
+   "confidence": "medium",
+   "claim_implications": [
+    "value_selection_basis ONLY after human review"
+   ],
+   "blocked_claims_if_missing": [
+    "calibrated_performance",
+    "timing_correctness"
+   ]
+  },
+  {
+   "component": "RP2040",
+   "manufacturer": "Raspberry Pi",
+   "mpn": "RP2040",
+   "evidence_type": "power_domains",
+   "value": null,
+   "units": null,
+   "normalized_requirement": "DVDD 1.1 V core from internal LDO; IOVDD 1.8-3.3 V; USB PHY VDD 3.3 V",
+   "datasheet_source": "RP2040 datasheet (revision unverified)",
+   "datasheet_revision": "unverified",
+   "source_ref": null,
+   "extracted_statement": null,
+   "extraction_method": "model_recall_pending_verification",
+   "human_review_state": "pending_review",
+   "confidence": "medium",
+   "claim_implications": [
+    "value_selection_basis ONLY after human review"
+   ],
+   "blocked_claims_if_missing": [
+    "calibrated_performance",
+    "timing_correctness"
+   ]
+  },
+  {
+   "component": "RP2040",
+   "manufacturer": "Raspberry Pi",
+   "mpn": "RP2040",
+   "evidence_type": "programming_debug_requirements",
+   "value": null,
+   "units": null,
+   "normalized_requirement": "SWD (SWCLK/SWDIO) two-wire debug",
+   "datasheet_source": "RP2040 datasheet (revision unverified)",
+   "datasheet_revision": "unverified",
+   "source_ref": null,
+   "extracted_statement": null,
+   "extraction_method": "model_recall_pending_verification",
+   "human_review_state": "pending_review",
+   "confidence": "medium",
+   "claim_implications": [
+    "value_selection_basis ONLY after human review"
+   ],
+   "blocked_claims_if_missing": [
+    "calibrated_performance",
+    "timing_correctness"
+   ]
+  }
+ ]
+}
