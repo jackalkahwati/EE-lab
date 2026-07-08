@@ -133,9 +133,11 @@ def fanout(board_path):
                        and t[2].GetNetname() != ""]
                 zone = [t for t in g if t[2].GetNetname() in ZONE_NETS]
                 # 23.5: a QFN side may carry ONLY plane pins (all its GPIOs
-                # unwired) — zone dogbones must still run; only the signal
-                # LANE pass needs 2+ signals.
-                if len(sig) < 2 and not zone:
+                # unwired) — zone dogbones must still run. M3A harness catch:
+                # a SINGLE wired signal on a fine-pitch row also needs its
+                # ladder (the router cannot do 0.4mm work directly; fixture
+                # qfn_corner_escape_simple showed a 0.175mm clearance hit).
+                if not sig and not zone:
                     continue
                 fc = f.GetPosition()
                 fcx, fcy = fc.x / 1e6, fc.y / 1e6

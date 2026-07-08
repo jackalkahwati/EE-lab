@@ -1,0 +1,13 @@
+{
+ "fixture_id": "qfn_escape_interleaved_dogbones",
+ "expected_result": "should_route",
+ "routed_net_count": 2,
+ "total_net_count": 2,
+ "via_count": 8,
+ "segment_count": 26,
+ "layer_usage": [
+  "B.Cu",
+  "F.Cu"
+ ],
+ "nondeterminism_allowed": false
+}

@@ -1,0 +1,12 @@
+{
+ "fixture_id": "two_nets_non_intersecting",
+ "expected_result": "should_route",
+ "routed_net_count": 2,
+ "total_net_count": 2,
+ "via_count": 0,
+ "segment_count": 2,
+ "layer_usage": [
+  "F.Cu"
+ ],
+ "nondeterminism_allowed": false
+}

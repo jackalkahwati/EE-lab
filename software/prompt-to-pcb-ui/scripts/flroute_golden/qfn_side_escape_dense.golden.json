@@ -1,0 +1,13 @@
+{
+ "fixture_id": "qfn_side_escape_dense",
+ "expected_result": "should_route",
+ "routed_net_count": 8,
+ "total_net_count": 8,
+ "via_count": 8,
+ "segment_count": 108,
+ "layer_usage": [
+  "F.Cu",
+  "In1.Cu"
+ ],
+ "nondeterminism_allowed": false
+}

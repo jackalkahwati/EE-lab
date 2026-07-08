@@ -1,0 +1,13 @@
+{
+ "fixture_id": "qfn_corner_escape_simple",
+ "expected_result": "should_route",
+ "routed_net_count": 3,
+ "total_net_count": 3,
+ "via_count": 4,
+ "segment_count": 28,
+ "layer_usage": [
+  "B.Cu",
+  "F.Cu"
+ ],
+ "nondeterminism_allowed": false
+}

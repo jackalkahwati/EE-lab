@@ -1,0 +1,15 @@
+{
+ "fixture_id": "rp2040_like_qfn56_stress",
+ "expected_result": "partial_expected",
+ "routed_net_count": 24,
+ "total_net_count": 24,
+ "via_count": 44,
+ "segment_count": 444,
+ "layer_usage": [
+  "B.Cu",
+  "F.Cu",
+  "In1.Cu",
+  "In2.Cu"
+ ],
+ "nondeterminism_allowed": false
+}

@@ -1,0 +1,13 @@
+{
+ "fixture_id": "four_layer_internal_allowed",
+ "expected_result": "should_route",
+ "routed_net_count": 2,
+ "total_net_count": 2,
+ "via_count": 0,
+ "segment_count": 8,
+ "layer_usage": [
+  "F.Cu",
+  "In1.Cu"
+ ],
+ "nondeterminism_allowed": false
+}

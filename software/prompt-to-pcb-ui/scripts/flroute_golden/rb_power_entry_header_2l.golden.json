@@ -1,0 +1,12 @@
+{
+ "fixture_id": "rb_power_entry_header_2l",
+ "expected_result": "should_route",
+ "routed_net_count": 3,
+ "total_net_count": 3,
+ "via_count": 5,
+ "layer_usage": [
+  "F.Cu"
+ ],
+ "nondeterminism_allowed": true,
+ "nondeterminism_reason": "negotiation-order sensitivity observed on real boards (ucs-hub flakes in the board regression history) \u2014 counts may vary; routed/total and DRC must not"
+}

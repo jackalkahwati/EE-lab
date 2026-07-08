@@ -1,0 +1,14 @@
+{
+ "fixture_id": "rp2040_like_qfn56_reduced",
+ "expected_result": "should_route",
+ "routed_net_count": 11,
+ "total_net_count": 11,
+ "via_count": 14,
+ "segment_count": 107,
+ "layer_usage": [
+  "F.Cu",
+  "In1.Cu",
+  "In2.Cu"
+ ],
+ "nondeterminism_allowed": false
+}

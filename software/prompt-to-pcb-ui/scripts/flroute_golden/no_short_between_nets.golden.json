@@ -1,0 +1,12 @@
+{
+ "fixture_id": "no_short_between_nets",
+ "expected_result": "should_route",
+ "routed_net_count": 2,
+ "total_net_count": 2,
+ "via_count": 0,
+ "segment_count": 10,
+ "layer_usage": [
+  "F.Cu"
+ ],
+ "nondeterminism_allowed": false
+}

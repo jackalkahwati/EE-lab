@@ -1,0 +1,10 @@
+{
+ "fixture_id": "impossible_blocked_path",
+ "expected_result": "should_fail",
+ "routed_net_count": 0,
+ "total_net_count": 1,
+ "via_count": 0,
+ "segment_count": 0,
+ "layer_usage": [],
+ "nondeterminism_allowed": false
+}

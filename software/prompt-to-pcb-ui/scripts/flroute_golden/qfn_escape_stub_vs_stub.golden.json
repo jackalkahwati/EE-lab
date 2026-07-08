@@ -1,0 +1,13 @@
+{
+ "fixture_id": "qfn_escape_stub_vs_stub",
+ "expected_result": "should_route",
+ "routed_net_count": 4,
+ "total_net_count": 4,
+ "via_count": 2,
+ "segment_count": 39,
+ "layer_usage": [
+  "F.Cu",
+  "In1.Cu"
+ ],
+ "nondeterminism_allowed": false
+}

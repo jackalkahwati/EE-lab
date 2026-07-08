@@ -1,0 +1,12 @@
+{
+ "fixture_id": "pad_clearance",
+ "expected_result": "should_route",
+ "routed_net_count": 1,
+ "total_net_count": 1,
+ "via_count": 0,
+ "segment_count": 3,
+ "layer_usage": [
+  "F.Cu"
+ ],
+ "nondeterminism_allowed": false
+}

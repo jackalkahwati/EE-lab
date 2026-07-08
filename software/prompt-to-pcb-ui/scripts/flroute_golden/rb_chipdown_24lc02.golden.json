@@ -1,0 +1,13 @@
+{
+ "fixture_id": "rb_chipdown_24lc02",
+ "expected_result": "should_route",
+ "routed_net_count": 5,
+ "total_net_count": 5,
+ "via_count": 20,
+ "layer_usage": [
+  "F.Cu",
+  "In1.Cu"
+ ],
+ "nondeterminism_allowed": true,
+ "nondeterminism_reason": "negotiation-order sensitivity observed on real boards (ucs-hub flakes in the board regression history) \u2014 counts may vary; routed/total and DRC must not"
+}

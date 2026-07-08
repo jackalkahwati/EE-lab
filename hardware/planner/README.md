@@ -1624,3 +1624,67 @@ now real synthesis, and analog pins can no longer masquerade as digital IO.
 Regression: M6 9/9; M4 updated for the supersede (multi-rail now
 synthesizes on distinct nets; unknown domains still block); M5/M2/M1/23.5
 re-verified; board 5/5.
+
+## Infrastructure hardening sprint: M3A flroute regression harness + M3B external EDA evidence
+
+Pause hygiene first: M6 committed (446530a) before any hardening work;
+M7-M12 drafts quarantined in drafts/m7-m12-pre-hardening/ (NOT
+roadmap-complete; to be replayed through these layers).
+
+### M3A — flroute regression harness and router evidence v1
+- Audit (flroute-audit): single-file Rust A*-negotiation router; CLI
+  `flroute in.dsn out.ses [--skip-net]`; hidden assumption found on day one:
+  with no --skip-net args it silently skips the TWO LARGEST nets as assumed
+  planes (a 2-net fixture routes nothing). Diagnostic gaps recorded
+  (per-net failure causes not machine-readable; harness compensates).
+- Harness (scripts/flroute_harness.py, kipython): builds REAL tiny KiCad
+  boards per machine-readable fixture spec, then exercises the actual
+  toolchain path — ExportSpecctraDSN -> flroute -> ImportSpecctraSES ->
+  sidecar copper restore -> zone fill -> (realboard: stitch heal chain) ->
+  connectivity -> kicad-cli DRC. Router pass is ANDed with DRC; expected
+  failures are first-class passes. Per-fixture kipython subprocess
+  isolation turns native aborts into recorded failures.
+- Results: FULL 21/21 (14 core + 7 fanout/escape incl. stub-vs-stub
+  residual-risk, QFN-56 reduced + 24-pin stress, LGA escape);
+  REALBOARD replays 3/3 (power-entry 4L, power-entry 2L with
+  no-inner-copper assert, chip-down 24LC02 through the full heal chain).
+  Goldens: 24 snapshots; synthetic determinism PROVEN (two identical runs);
+  realboard goldens marked nondeterminism-allowed WITH REASON.
+- REAL BUGS caught and fixed during bring-up: (1) single wired signal on a
+  fine-pitch row was skipped by the fanout, leaving the router to do 0.4mm
+  work it cannot do (0.175mm clearance hit — fixed in fine_pitch_fanout);
+  (2) restoring fanout copper from entries alone dropped zone-dive dogbone
+  copper (harness now restores from the sidecar, matching import_ses.py).
+- Board router evidence report: 16 boards with router_evidence_states;
+  failed runs stay visible; nothing physically validated.
+
+### M3B — external open-source electrical EDA evidence layer v1
+- Toolchain inventory (REAL detection): ngspice 45.2 PRESENT; numpy/scipy/
+  matplotlib present; skrf, openEMS, PySpice ABSENT; no IBIS, no
+  Touchstone, no fab stackup anywhere in the repo. Missing tools block
+  only related claims — never board generation.
+- Evidence schema enforced in code (external_eda.make_artifact): numbers
+  without units REFUSED; gate results without threshold provenance REFUSED;
+  9 result statuses; 22 analysis types; missing inputs are first-class.
+- 11 claim gates wired: controlled impedance, diff-pair, high-speed SI,
+  PI, RF, antenna, regulator stability, filter response, current accuracy,
+  calibration, EMC — 10 blocked on missing evidence, RC-filter advisory
+  possible. No external analysis bypasses DRC/ERC or creates physical
+  evidence.
+- REAL ngspice runs: divider .op Vout=2.5V (exact analytic agreement),
+  LED current sanity, RC low-pass AC sweep — all advisory, ideal parts
+  only, no invented models; regulator stability honestly
+  skipped_missing_input. IPC-2141 impedance estimator REFUSES to run
+  without a stackup that names its source. PDN rail/decoupling inventories
+  parsed from four REAL boards; PI blocked (load currents unknown).
+- Runner modes inventory_only/advisory/gated_for_claims; pipeline position
+  documented (after DRC/ERC, optional, never a replacement).
+
+### Environment note (honest)
+The Next.js production build broke tonight from environment drift outside
+this sprint (node v25 + turbopack/webpack worker deaths; user-local package
+changes). Frontend verification ran on the dev server: 24/24. Production
+build repair is tracked as an environment task, not silently patched here.
+
+Regression: M3A 17/17 (includes a LIVE fast-suite run), M3B 22/22,
+frontend 24/24, board 5/5.

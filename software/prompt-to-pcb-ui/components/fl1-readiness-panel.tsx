@@ -64,6 +64,8 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
       'compose-package-capability-registry', 'compose-bga-capability-model-v1',
       'compose-chipdown-synthesis-v1-report', 'compose-chipdown-fleet-learning-update',
       'compose-pico-replacement-board-report', 'compose-core6-combination-report',
+      'flroute-regression-report', 'compose-external-eda-toolchain-inventory',
+      'compose-external-analysis-claim-gates', 'compose-board-router-evidence-report',
       'compose-package-family-benchmark-suite-report',
       'compose-readiness-ladder-physical-update',
       'compose-qfn56-fleet-learning-update',
@@ -147,6 +149,40 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
           {d['cal-board-attempt'].blocker && (
             <p className="mt-1 text-[10px] text-destructive">
               blocker: {d['cal-board-attempt'].blocker}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Hardening sprint M3A/M3B: router + EDA evidence */}
+      {d['flroute-regression-report'] && (
+        <div className="rounded-md border border-border p-3">
+          <p className="mb-1 text-[11px] font-semibold text-foreground">
+            Infrastructure Hardening — router regression + external EDA evidence
+          </p>
+          <p className="text-[10px] text-emerald-500">
+            flroute harness: {d['flroute-regression-report'].full_suite.passed}/
+            {d['flroute-regression-report'].full_suite.fixtures} fixtures ·{' '}
+            realboard replays {d['flroute-regression-report'].realboard_suite.passed}/
+            {d['flroute-regression-report'].realboard_suite.fixtures} · honest failures
+            proven: {d['flroute-regression-report'].honest_failures_proven?.join(', ')}
+          </p>
+          {d['compose-external-eda-toolchain-inventory'] && (
+            <p className="mt-1 text-[9px] text-muted-foreground">
+              EDA tools:{' '}
+              {Object.entries(d['compose-external-eda-toolchain-inventory'].summary || {})
+                .map(([k, v]) => `${k}:${v ? 'yes' : 'NO'}`)
+                .join(' · ')}
+            </p>
+          )}
+          {d['compose-external-analysis-claim-gates'] && (
+            <p className="mt-1 text-[9px] text-amber-500">
+              claim gates blocked:{' '}
+              {Object.entries(d['compose-external-analysis-claim-gates'].gates || {})
+                .filter(([, g]: any) => g.state === 'blocked')
+                .map(([c]) => c.replace('_claim', ''))
+                .join(', ')}{' '}
+              — router pass never overrides DRC; analysis pass is never physical evidence
             </p>
           )}
         </div>
