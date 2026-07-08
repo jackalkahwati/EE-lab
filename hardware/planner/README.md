@@ -1541,3 +1541,24 @@ Regression: M1 16/16; all suites green; frontend 24/24; board 5/5.
   pico_replacement_pack + fl1_monolith_pack, both routed_in_sandbox ONLY.
 
 Regression: M2 16/16; all suites green; frontend 24/24; board 5/5.
+
+## Milestone M3: physical first article execution v1 — HONEST PENDING
+
+No human signature exists, so the executor stopped exactly where it should:
+package_ready_with_review, ledger empty, next action = the human signature.
+
+- physical_execution.execute(run): scans the board run for signed gates in
+  the order-approval checklist and evidence files in data/evidence/*.json;
+  ingests through the 23.6 schema (validate_artifact); advances the state
+  machine only where approval/evidence permits; runs the promotion gate only
+  on real evidence. It cannot sign, submit, order, or spend.
+- Fixture-tested rejection paths (test-only tmp dir, never the live ledger):
+  simulated evidence REFUSED, unitless measurements REFUSED, unattributed
+  artifacts REFUSED, zero ingestion from an all-bad evidence set.
+- Live state: package_ready_with_review; artifacts 0; promotion blocked on
+  physical evidence; next action: sign APPROVED_FOR_QUOTE, upload the fab
+  quote to data/evidence/. When real artifacts appear, this same executor
+  walks them forward.
+
+Regression: M3 11/11; ledger untouched; no UI/composer change (no frontend
+or board rerun required).
