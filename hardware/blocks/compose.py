@@ -873,6 +873,42 @@ def sc_voltage_monitor(x, y, p, n, nets):
                              "bottom": "GND"}, n, nets)
 
 
+def build_chipdown(bx, by, entry, n, nets):
+    """Generic chip-down emitter: place the verified part, decouple every
+    power pin, pull up open-collector outputs, expose IO on a header, and
+    mark the whole structure review-required on silk. The pin map arrives
+    symbol-verified from chipdown_synthesis — no hand transcription."""
+    ref = entry["ref"]
+    fp_lib, fp_name = entry["footprint"]
+    pmap = dict(entry["pmap"])
+    for k, v in list(pmap.items()):
+        if v == "I2C_SDA":
+            pmap[k] = n.get("i2c_sda", "I2C_SDA")
+        elif v == "I2C_SCL":
+            pmap[k] = n.get("i2c_scl", "I2C_SCL")
+    ios = entry.get("exposed_io", [])[:8]
+    for io in ios:
+        pmap[io["pin"]] = "EXP_%s" % io["name"]
+    b = place(fp_lib, fp_name, ref, bx + 8, by + 10, 0, pmap, nets)
+    num = int(ref[1:]) if ref[1:].isdigit() else 0
+    for i in range(entry.get("decouple_count", 1)):
+        b += cap("C%d" % (120 + num + i), bx + 2, by + 4 + 5 * i,
+                 "+3V3", "GND", nets)
+    for i, pu in enumerate(entry.get("pullups", [])):
+        b += res("R%d" % (120 + num + i), bx + 14, by + 4 + 5 * i,
+                 pu, "+3V3", nets)
+        b += tp("TP%d" % (80 + num + i), bx + 19, by + 4 + 5 * i, pu, nets)
+    if ios:
+        hmap = {}
+        for i, io in enumerate(ios):
+            hmap[str(i + 1)] = "EXP_%s" % io["name"]
+        b += place("Connector_PinHeader_2.54mm",
+                   "PinHeader_1x%02d_P2.54mm_Vertical" % len(ios),
+                   "J%d" % (60 + num), bx + 24, by + 4, 90, hmap, nets)
+    label("%s CHIPDOWN (REVIEW REQD)" % ref, bx + 10, by + 1, 0.7)
+    return b, 34, 22 + 4 * max(0, len(ios) - 4)
+
+
 SUBCIRCUITS = {
     "pullup": sc_pullup, "pulldown": sc_pulldown, "divider": sc_divider,
     "led_indicator": sc_led_indicator, "button": sc_button,
@@ -1343,6 +1379,23 @@ def compose(spec, blocks, out_path):
             raise RuntimeError("unknown synthesized subcircuit kind: %r" % kind)
         subs["zsc%02d" % i] = entry
     keys = keys + sorted(subs)
+    # Milestone: generic chip-down synthesis — entries produced by
+    # chipdown_synthesis.synthesize_chipdown (symbol-verified pin maps, no
+    # hand block per chip). Every chip-down is REVIEW-REQUIRED.
+    cds = {}
+    for i, entry in enumerate((spec or {}).get("chipdown") or []):
+        if entry.get("state") != "synthesized_review_required":
+            raise RuntimeError("chipdown entry not in synthesized_review_"
+                               "required state: %r" % entry.get("state"))
+        cds["zcd%02d" % i] = entry
+    keys = keys + sorted(cds)
+    if cds:
+        _DEVICES.append({"ref": ",".join(e["ref"] for e in cds.values()),
+                         "type": "chipdown_synthesized",
+                         "parts": [e["symbol"] for e in cds.values()],
+                         "honesty": "generic chip-down synthesis from library "
+                                    "truth; REVIEW-REQUIRED; no functional or "
+                                    "physical claim"})
     if subs:
         _DEVICES.append({"ref": "(synthesized)", "type": "synthesized_subcircuits",
                          "kinds": [e["kind"] for e in subs.values()],
@@ -1356,8 +1409,11 @@ def compose(spec, blocks, out_path):
         n.update({"spi_sck": "SPI_SCK", "spi_mosi": "SPI_MOSI", "spi_miso": "SPI_MISO",
                   "spi_cs": "LORA_NSS", "ctrl_rst": "LORA_RST", "ctrl_irq": "LORA_DIO0",
                   "ant": "ANT"})
+    _cd_i2c = any(v in ("I2C_SDA", "I2C_SCL")
+                  for e in cds.values() for v in e["pmap"].values())
     if ("imu" in keys or "tempsensor" in keys or "instrument" in keys or dyn
-            or "calref" in keys or "dutmonitor" in keys or "bme280" in keys):
+            or "calref" in keys or "dutmonitor" in keys or "bme280" in keys
+            or _cd_i2c):
         n.update({"i2c_sda": "I2C_SDA", "i2c_scl": "I2C_SCL"})  # shared I2C bus
     # synthesized headers request the matching MCU nets (Phase 23.2): a
     # generated UART/I2C/SPI header must be WIRED, never labels-only copper.
@@ -1413,7 +1469,7 @@ def compose(spec, blocks, out_path):
     # group blocks into bands, then flow each band left->right by COL priority
     bands = {}
     for k in keys:
-        bands.setdefault(ROW.get(k, 0), []).append(k)
+        bands.setdefault(ROW.get(k, 1 if k.startswith("zcd") else 0), []).append(k)
 
     body = ""
     ytop = Y0 + MARGIN
@@ -1429,6 +1485,8 @@ def compose(spec, blocks, out_path):
                 if kk in subs:
                     e = subs[kk]
                     return SUBCIRCUITS[e["kind"]](bx, by, e.get("params", {}), n, nets)
+                if kk in cds:
+                    return build_chipdown(bx, by, cds[kk], n, nets)
                 return BLOCK_TABLE[kk](bx, by, n, nets)
             txt, w, h = build(x, ytop)
             # wrap to a new sub-row if this band overflows the width budget

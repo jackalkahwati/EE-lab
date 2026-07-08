@@ -1480,3 +1480,37 @@ every verdict scoped and every verifier run against REAL footprint files.
 
 Regression: phase237 36/36; all suites green; frontend 24/24; board 5/5
 stands (artifact-only). Nothing ordered; nothing claimed.
+
+## Milestone M1 (autonomous roadmap): chip-down component synthesis v1
+
+First milestone executed under the standing goal (generic evidence-gated
+PCBA generator): the bare-RP2040 pattern GENERALIZED — any symbol+footprint-
+verified tier-1/2 chip gets its chip-down support synthesized from library
+truth, no hand-written block per part.
+
+- chipdown_synthesis.synthesize_chipdown: parse symbol pins with KiCad
+  `extends` INHERITANCE RESOLVED (PCF8574T carries no pins — its base
+  TCA9534 does; a real acquisition lesson) -> classify package (families
+  system) -> verify footprint geometry (pad-count mismatch BLOCKS) ->
+  verify mapping (power ambiguity BLOCKS) -> bus policy (power/GND/I2C/
+  address-straps/INT-pullup/NC/exposed-IO) -> compose {chipdown:[...]}
+  entry. Tier-3 packages return architecture_only. Parser hardened twice
+  during the milestone: string-aware depth scan (parens inside quoted
+  descriptions overran symbol blocks and could silently steal the NEXT
+  symbol's pins) and extends provenance preserved through recursion.
+- compose.py generic emitter: place the verified part + per-power-pin
+  decoupling + open-collector pullups with TPs + exposed-IO header +
+  REVIEW-REQUIRED silk; chip-down entries ride their own band. Compose
+  REFUSES entries not in synthesized_review_required state.
+- PROOF on a never-hand-blocked part: chipdown-pcf8574-v1 (PCF8574 I2C
+  expander, SOIC-16) PASSED 15/15 nets, 0 DRC, 0 unconnected through the
+  full pipeline. No functional claim — the expander is placed and wired,
+  not proven to respond. Nothing physical.
+- Roadmap-to-final-goal artifact updated (9 milestones remaining; physical
+  loop blocked on the human signature). Fleet next: Bare-MCU product board
+  / Pico replacement v1 — chip-down synthesis + QFN-56 escape are both
+  proven, and combining them is the next generality step a signature does
+  not block. Honest gaps: SPI/UART/analog bus policies, datasheet-extracted
+  decoupling values, multi-rail chips, crystal/flash requirement detection.
+
+Regression: M1 16/16; all suites green; frontend 24/24; board 5/5.

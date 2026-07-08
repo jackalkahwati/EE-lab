@@ -62,6 +62,7 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
       'bare-mcu-qfn56-core-sandbox-compose-run', 'compose-qfn56-primitive-acquisition-report',
       'compose-physical-evidence-ledger', 'compose-first-physical-board-selection',
       'compose-package-capability-registry', 'compose-bga-capability-model-v1',
+      'compose-chipdown-synthesis-v1-report', 'compose-chipdown-fleet-learning-update',
       'compose-package-family-benchmark-suite-report',
       'compose-readiness-ladder-physical-update',
       'compose-qfn56-fleet-learning-update',
@@ -145,6 +146,30 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
           {d['cal-board-attempt'].blocker && (
             <p className="mt-1 text-[10px] text-destructive">
               blocker: {d['cal-board-attempt'].blocker}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Milestone M1: chip-down component synthesis */}
+      {d['compose-chipdown-synthesis-v1-report'] && (
+        <div className="rounded-md border border-emerald-500/40 bg-emerald-500/5 p-3">
+          <p className="mb-1 text-[11px] font-semibold text-emerald-500">
+            Chip-Down Component Synthesis v1 — first never-hand-blocked chip:{' '}
+            {d['compose-chipdown-synthesis-v1-report'].proof_part.part} ·{' '}
+            {d['compose-chipdown-synthesis-v1-report'].proof_run.routing} nets · DRC{' '}
+            {d['compose-chipdown-synthesis-v1-report'].proof_run.drc}
+          </p>
+          <p className="text-[9px] text-muted-foreground">
+            {d['compose-chipdown-synthesis-v1-report'].mechanism}
+          </p>
+          <p className="mt-1 text-[9px] text-amber-500">
+            {d['compose-chipdown-synthesis-v1-report'].honesty}
+          </p>
+          {d['compose-chipdown-fleet-learning-update'] && (
+            <p className="mt-1 text-[9px] text-emerald-500">
+              next: {d['compose-chipdown-fleet-learning-update'].next_recommendation.recommendation}{' '}
+              — {d['compose-chipdown-fleet-learning-update'].next_recommendation.reason}
             </p>
           )}
         </div>
