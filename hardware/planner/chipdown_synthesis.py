@@ -13,6 +13,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import package_families as pfam  # noqa: E402
+import datasheet_evidence as de  # noqa: E402
 
 SYM_SHARE = "/Applications/KiCad/KiCad.app/Contents/SharedSupport/symbols"
 
@@ -142,7 +143,10 @@ def synthesize_chipdown(symbol_lib, symbol_name, footprint_lib, footprint_name,
             pullups.append(net)
         elif kind == "io":
             ios.append({"pin": p["number"], "name": p["name"]})
+    prov = de.provenance_report(symbol_name,
+                                keys=("decoupling_nF", "pullup_kohm_range"))
     return {"state": "synthesized_review_required",
+            "support_value_provenance": prov,
             "symbol": "%s:%s (%s)" % (symbol_lib, symbol_name, how),
             "footprint": [footprint_lib, footprint_name],
             "package": cls["family"], "pitch_mm": geo["pitch_mm"],

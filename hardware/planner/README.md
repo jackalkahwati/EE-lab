@@ -1581,3 +1581,21 @@ routed clean, two blocked with exact reasons, zero fake primitives.
 
 Regression: M4 10/10; no composer change (board regression not required);
 suite green.
+
+## Milestone M5: datasheet-driven support circuit synthesis v1
+
+Provenance for every support-circuit value. The evidence DB is empty today,
+so 100% of values are review-required placeholders that SAY SO.
+
+- datasheet_evidence.support_value(part, key): evidence-derived only when
+  value + units + source + source_ref all exist from a trusted source type;
+  anything less is review_required_placeholder with provenance "none".
+  Missing source_ref = unattributable = refused (fixture-tested).
+- No provenance -> no claim: placeholders block ALL claims including
+  value_selection_basis; even evidence-derived values never unblock
+  calibrated-performance/timing/clock/sensor-accuracy/thermal/compliance.
+- Ingestion contract: hardware/planner/datasheet_db.json, human-curated;
+  no web search, nothing invented. Chipdown entries now carry
+  support_value_provenance.
+
+Regression: M5 8/8; M4/M1 re-verified under the chipdown change.
