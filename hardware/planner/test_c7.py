@@ -39,8 +39,12 @@ check("6 blocked variants name their gate: mains -> M9R",
       and "M9R" in B["blocked_variant_mains"]["blocked_by"])
 check("7 impedance coupon -> M3B stackup gate",
       "stackup" in B["blocked_variant_impedance_coupon"]["blocked_by"])
-check("8 RF tuning variant -> module-contained rule",
-      "module-contained" in B["blocked_variant_rf_tuning"]["blocked_by"])
+check("8 RF tuning variant -> M10R gates (antenna design -> "
+      "module-contained)",
+      "M10R" in B["blocked_variant_rf_tuning"]["blocked_by"]
+      and "module-contained" in bt.TEMPLATES[
+          "environmental_telemetry_node"]["blocked_variants"][
+          "custom antenna design"])
 check("9 unknown template blocks",
       B["unknown_template"]["state"] == "blocked")
 check("10 evidence-pack mapping present per instantiable template",
