@@ -1,0 +1,159 @@
+{
+ "version": "v1",
+ "roles": [
+  "org_admin",
+  "workspace_admin",
+  "program_manager",
+  "electrical_engineer",
+  "reviewer",
+  "procurement",
+  "technician",
+  "viewer",
+  "finance_viewer",
+  "security_auditor"
+ ],
+ "permissions": [
+  "create_workspace",
+  "manage_members",
+  "create_program",
+  "edit_program",
+  "create_board",
+  "run_architecture",
+  "run_board_synthesis",
+  "run_routing",
+  "generate_package",
+  "request_approval",
+  "approve_architecture",
+  "approve_bom",
+  "approve_package_release",
+  "approve_quote",
+  "approve_order",
+  "upload_physical_evidence",
+  "accept_physical_evidence",
+  "mark_validation_passed",
+  "view_costs",
+  "adjust_credits",
+  "export_evidence_pack",
+  "manage_security_settings"
+ ],
+ "role_permissions": {
+  "org_admin": [
+   "create_workspace",
+   "manage_members",
+   "create_program",
+   "edit_program",
+   "create_board",
+   "run_architecture",
+   "run_board_synthesis",
+   "run_routing",
+   "generate_package",
+   "request_approval",
+   "approve_architecture",
+   "approve_bom",
+   "approve_package_release",
+   "approve_quote",
+   "approve_order",
+   "upload_physical_evidence",
+   "accept_physical_evidence",
+   "mark_validation_passed",
+   "view_costs",
+   "adjust_credits",
+   "export_evidence_pack",
+   "manage_security_settings"
+  ],
+  "workspace_admin": [
+   "create_workspace",
+   "manage_members",
+   "create_program",
+   "edit_program",
+   "create_board",
+   "request_approval",
+   "view_costs",
+   "export_evidence_pack"
+  ],
+  "program_manager": [
+   "create_program",
+   "edit_program",
+   "create_board",
+   "run_architecture",
+   "request_approval",
+   "view_costs",
+   "export_evidence_pack"
+  ],
+  "electrical_engineer": [
+   "create_board",
+   "run_architecture",
+   "run_board_synthesis",
+   "run_routing",
+   "generate_package",
+   "request_approval",
+   "upload_physical_evidence",
+   "accept_physical_evidence",
+   "export_evidence_pack"
+  ],
+  "reviewer": [
+   "approve_architecture",
+   "approve_bom",
+   "approve_package_release",
+   "accept_physical_evidence",
+   "mark_validation_passed",
+   "export_evidence_pack"
+  ],
+  "procurement": [
+   "approve_quote",
+   "approve_order",
+   "view_costs",
+   "export_evidence_pack"
+  ],
+  "technician": [
+   "upload_physical_evidence",
+   "export_evidence_pack"
+  ],
+  "viewer": [],
+  "finance_viewer": [
+   "view_costs"
+  ],
+  "security_auditor": [
+   "export_evidence_pack"
+  ]
+ },
+ "action_permission_map": {
+  "create_organization": "create_workspace",
+  "create_workspace": "create_workspace",
+  "create_program": "create_program",
+  "create_board": "create_board",
+  "attach_run": "run_board_synthesis",
+  "add_evidence": "upload_physical_evidence",
+  "review_evidence": "accept_physical_evidence",
+  "set_readiness": "edit_program",
+  "request_approval": "request_approval",
+  "decide_approval": null,
+  "revoke_approval": null,
+  "policy_gaps": "export_evidence_pack",
+  "record_usage": "view_costs",
+  "adjust_credits": "adjust_credits",
+  "budget_state": "view_costs",
+  "usage_report": "view_costs",
+  "generate_quote_packet": "generate_package",
+  "advance_quote": null,
+  "manual_quote_entry": "approve_quote",
+  "register_fl1_asset": "manage_members",
+  "plan_validation_session": "request_approval",
+  "advance_session": "upload_physical_evidence",
+  "create_pilot": "create_program",
+  "roi_report": "view_costs",
+  "set_member_role": "manage_members"
+ },
+ "rules": [
+  "quote approval requires procurement (or org admin)",
+  "order approval requires explicit approve_order permission",
+  "physical evidence upload: technician or engineer",
+  "physical evidence acceptance: reviewer or engineer",
+  "production readiness approval: reviewer/admin + evidence prerequisites (guardReadiness)",
+  "viewer cannot mutate runs, approvals, or evidence",
+  "finance views costs; approves no engineering claim",
+  "unknown actions safe-deny for non-admins",
+  "every denial is audited (DENIED:<action> with roles + missing permission)",
+  "dev-admin default keeps the local/dev flow working"
+ ]
+}

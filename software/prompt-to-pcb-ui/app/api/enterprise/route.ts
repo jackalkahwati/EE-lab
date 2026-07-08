@@ -68,6 +68,13 @@ export async function POST(req: Request) {
     add_evidence: (p) => ent.addEvidence(db, { ...p, actor }),
     review_evidence: (p) => ent.reviewEvidence(db, { ...p, actor }),
     set_readiness: (p) => ent.setBoardReadiness(db, { ...p, actor }),
+    set_member_role: (p) => {
+      const r = rbac.setMemberRole(db, { ...p, actor })
+      if (!r.error) ent.appendAudit(db, {
+        actor, action: 'set_member_role', scope: p, after: r })
+      return r
+    },
+    audit_log_report: (p) => rbac.auditLogReport(db, p ?? {}),
   }
   // milestone extensions (approvals E2, credits E4, quotes E7, FL-1 E8,
   // pilots E6) — each module owns its handlers

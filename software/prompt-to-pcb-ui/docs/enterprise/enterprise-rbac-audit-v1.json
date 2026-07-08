@@ -1,0 +1,18 @@
+{
+ "version": "v1",
+ "milestone": "E5 Roles, Permissions, Audit",
+ "delivered": {
+  "engine": "lib/enterprise/rbac.mjs (10 roles x 22 permissions, per-approval-type resolution, per-quote-transition resolution)",
+  "api_gating": "the /api/enterprise dispatcher calls checkAction before every mutation; 403 + audit entry on denial, no partial writes",
+  "audit": "hash-chained log (E1) + auditLogReport (privileged/denied slices); role grants audited",
+  "ui": "audit tail exposed via GET /api/enterprise (audit_tail, audit_chain)",
+  "tests": "scripts/test_e5.mjs — 13/13 incl. denied-action regressions"
+ },
+ "acceptance": {
+  "roles_and_permissions_exist": true,
+  "sensitive_actions_gated": true,
+  "denied_actions_fail_safely": "403 + DENIED audit entry, store untouched",
+  "audit_records_privileged_actions": true,
+  "dev_flow_unaffected": "dev-admin carries org_admin"
+ }
+}
