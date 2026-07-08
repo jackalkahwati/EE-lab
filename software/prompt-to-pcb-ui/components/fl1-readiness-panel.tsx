@@ -61,6 +61,8 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
       'compose-2layer-benchmark-rerun-report', 'compose-2layer-fleet-learning-update',
       'bare-mcu-qfn56-core-sandbox-compose-run', 'compose-qfn56-primitive-acquisition-report',
       'compose-physical-evidence-ledger', 'compose-first-physical-board-selection',
+      'compose-package-capability-registry', 'compose-bga-capability-model-v1',
+      'compose-package-family-benchmark-suite-report',
       'compose-readiness-ladder-physical-update',
       'compose-qfn56-fleet-learning-update',
       'compose-next-capability-recommendation', 'compose-permanent-pattern-recommendations',
@@ -143,6 +145,46 @@ export function FL1ReadinessPanel({ runId }: { runId: string | null }) {
           {d['cal-board-attempt'].blocker && (
             <p className="mt-1 text-[10px] text-destructive">
               blocker: {d['cal-board-attempt'].blocker}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Phase 23.7: package family capability */}
+      {d['compose-package-capability-registry'] && (
+        <div className="rounded-md border border-border p-3">
+          <p className="mb-1 text-[11px] font-semibold text-foreground">
+            Package Family Capability — evidence-scoped, presence ≠ support
+          </p>
+          <div className="flex flex-wrap gap-1">
+            {d['compose-package-capability-registry'].entries?.map((e: any, i: number) => (
+              <span
+                key={i}
+                title={`tier ${e.tier} · ${e.evidence_state} · ${e.escape}`}
+                className={`rounded-sm border px-1.5 py-0.5 font-mono text-[8px] ${
+                  e.evidence_state === 'blocked'
+                    ? 'border-destructive/40 bg-destructive/10 text-destructive'
+                    : e.run_evidence?.length
+                      ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500'
+                      : 'border-sky-500/40 bg-sky-500/10 text-sky-400'
+                }`}
+              >
+                {e.family}
+              </span>
+            ))}
+          </div>
+          {d['compose-bga-capability-model-v1'] && (
+            <p className="mt-1 text-[9px] text-sky-400">
+              BGA: {d['compose-bga-capability-model-v1'].ball_count} balls @{' '}
+              {d['compose-bga-capability-model-v1'].pitch_mm}mm ball-map PARSED —{' '}
+              {d['compose-bga-capability-model-v1'].verdict} (
+              {d['compose-bga-capability-model-v1'].exact_gap})
+            </p>
+          )}
+          {d['compose-package-family-benchmark-suite-report'] && (
+            <p className="mt-1 text-[9px] text-muted-foreground">
+              {d['compose-package-family-benchmark-suite-report'].summary} ·{' '}
+              {d['compose-package-family-benchmark-suite-report'].honesty}
             </p>
           )}
         </div>

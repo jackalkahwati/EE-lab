@@ -1447,3 +1447,36 @@ the ledger starting EMPTY.
 
 Regression: phase236 24/24; all suites green; frontend 24/24; board 5/5
 stands (artifact-only). Nothing ordered; nothing claimed.
+
+## Phase 23.7: package family capability system v1
+
+The QFN-56 win generalized into package-family intelligence — classify,
+verify geometry, verify pin mapping, pick strategies, gate claims — with
+every verdict scoped and every verifier run against REAL footprint files.
+
+- Taxonomy: 28 families across 3 tiers (tier 3 = BGA/WLCSP/high-density/RF,
+  gated architecture_only/blocked until proven). 15-state capability model:
+  presence != verification, sandbox != physical, one validated part never
+  validates a family, state scoped to family+variant+part+footprint+fab class.
+- Classifier + verifiers exercised on 12 REAL footprints (0402/0603 passives,
+  SOT-23/223, SOIC-8, TSSOP-10, QFN-56, LGA-8, USB4125, 2x07 header, BGA-64):
+  geometry parsed from .kicad_mod (modal-pitch computation — min-diff broke
+  on 4-sided packages and float dust nearly flipped a coarse BGA to "fine"),
+  pad-count mismatch BLOCKS, power ambiguity BLOCKS active ICs.
+- BGA modeled HONESTLY from a real parsed ball map (BGA-64, 64 balls @ 0.8mm,
+  rows A-K skipping I): bga_modeled + ball_map_parsed + escape_feasibility_
+  estimated -> ARCHITECTURE_ONLY. Exact gap: no verified BGA component
+  primitive exists; no DDR/PCIe/high-speed/yield implied; no fake sandbox.
+- 9 routing strategies (proven scope marked: nolead=QFN-56 only, LGA=LGA-8
+  only); placement + manufacturing/inspection rules per family (BGA X-ray,
+  0201 review-required, QFN EP paste review).
+- 18-benchmark package suite: 9 families evidenced by existing real runs,
+  9 honestly gapped (MSOP/DFN/other-QFN/JST/b2b missing primitives;
+  regulator blocked; BGA/WLCSP/high-speed/RF architecture_only).
+- Registry (28 entries, ONLY-scoped), planner integration (package gate is
+  ORTHOGONAL to electrical gate — either can block), 16 packs updated with
+  package scope. Fleet next: EXECUTE the physical evidence loop — package
+  intelligence saturates at sandbox evidence like everything else.
+
+Regression: phase237 36/36; all suites green; frontend 24/24; board 5/5
+stands (artifact-only). Nothing ordered; nothing claimed.
