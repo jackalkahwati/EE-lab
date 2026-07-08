@@ -1,0 +1,14 @@
+{
+ "version": "v1",
+ "milestone": "E9 Customer Report Export",
+ "delivered": {
+  "engine": "lib/enterprise/reports.mjs (7 types, honest phrasebook, path scrubbing)",
+  "examples": "docs/enterprise/customer-report-examples (5 types, json+md)",
+  "tests": "scripts/test_e9.mjs — 10/10"
+ },
+ "acceptance": {
+  "reports_generate": true,
+  "readable_by_exec_and_reviewer": "plain-language state + internal state side by side",
+  "blocked_claims_and_evidence_clear": true
+ }
+}

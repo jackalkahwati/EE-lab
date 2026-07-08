@@ -1,0 +1,89 @@
+{
+ "schema": "customer-report/v1",
+ "report_type": "program_status",
+ "customer": "Acme Robotics Labs (SYNTHETIC DEMO)",
+ "program": "Sensor Controller Pilot",
+ "objective": "evidence-gated bench controller boards for the sensor line",
+ "generated_at": "2026-07-08T08:59:27.015Z",
+ "status": {
+  "program_status": "intake",
+  "boards": [
+   {
+    "name": "Power Entry Header",
+    "state_plain_language": "design routed and DRC-checked in software — not built, not physically validated",
+    "internal_state": "routed_in_sandbox"
+   }
+  ]
+ },
+ "work_completed": [
+  {
+   "board": "Power Entry Header",
+   "routing": "routed_in_sandbox",
+   "drc": "drc_clean",
+   "erc": "passed"
+  }
+ ],
+ "evidence_produced": {
+  "items": 0,
+  "accepted_after_review": 0,
+  "physical_evidence_state": "NO physical evidence — nothing has been physically validated"
+ },
+ "blocked_claims": [
+  "physical validation (no evidence)",
+  "production readiness (no yield/manufacturing evidence)"
+ ],
+ "manual_review_required": [
+  "manufacturing package human review (standing requirement)"
+ ],
+ "risks": [],
+ "approval_status": [],
+ "quote_fab_status": [],
+ "validation_status": "no validation sessions",
+ "roi": {
+  "basis": "ESTIMATED",
+  "estimated_vs_measured": "ALL figures below are ESTIMATES from configurable assumptions; no customer-verified savings exist",
+  "scenarios": {
+   "conservative": {
+    "multiplier": 0.5,
+    "hours_saved_per_board": 48,
+    "engineering_saved_per_board_usd": 7200,
+    "fab_avoided_per_board_usd": 750,
+    "instrument_amortization_per_program_year_usd": 8333,
+    "net_estimated_value_per_year_usd": 23467
+   },
+   "base": {
+    "multiplier": 1,
+    "hours_saved_per_board": 96,
+    "engineering_saved_per_board_usd": 14400,
+    "fab_avoided_per_board_usd": 1500,
+    "instrument_amortization_per_program_year_usd": 8333,
+    "net_estimated_value_per_year_usd": 55267
+   },
+   "aggressive": {
+    "multiplier": 1.5,
+    "hours_saved_per_board": 144,
+    "engineering_saved_per_board_usd": 21600,
+    "fab_avoided_per_board_usd": 2250,
+    "instrument_amortization_per_program_year_usd": 8333,
+    "net_estimated_value_per_year_usd": 87067
+   }
+  },
+  "caveats": [
+   "estimates only — no verified savings without customer evidence",
+   "physical validation is a separate evidence track, not an ROI input",
+   "review hours remain mandatory (packages are review-required)",
+   "fab/assembly costs are quote-dependent"
+  ]
+ },
+ "next_steps": [
+  "plan FL-1 validation session to produce physical evidence",
+  "review blocked claims with your engineering reviewer"
+ ],
+ "tone_rules_applied": [
+  "no unsupported claims",
+  "no internal debug noise",
+  "blocked claims included",
+  "estimated vs measured ROI separated",
+  "physical evidence state included"
+ ]
+}
