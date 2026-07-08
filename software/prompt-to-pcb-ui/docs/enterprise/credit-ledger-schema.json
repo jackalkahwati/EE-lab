@@ -1,0 +1,88 @@
+{
+ "version": "v1",
+ "usage_categories": [
+  "architecture_run",
+  "board_synthesis_run",
+  "placement_run",
+  "routing_run",
+  "drc_erc_gate_run",
+  "external_eda_analysis_run",
+  "firmware_bsp_build",
+  "manufacturing_package_generation",
+  "evidence_pack_generation",
+  "validation_plan_generation",
+  "quote_packet_generation",
+  "physical_evidence_ingestion",
+  "fl1_validation_session",
+  "program_report_export",
+  "support_review_event"
+ ],
+ "default_credit_costs": {
+  "architecture_run": 1,
+  "board_synthesis_run": 5,
+  "placement_run": 2,
+  "routing_run": 3,
+  "drc_erc_gate_run": 1,
+  "external_eda_analysis_run": 2,
+  "firmware_bsp_build": 1,
+  "manufacturing_package_generation": 3,
+  "evidence_pack_generation": 1,
+  "validation_plan_generation": 2,
+  "quote_packet_generation": 2,
+  "physical_evidence_ingestion": 1,
+  "fl1_validation_session": 10,
+  "program_report_export": 1,
+  "support_review_event": 0
+ },
+ "tiers_internal_modeling_only": {
+  "pilot": {
+   "annual_platform_credits": 200,
+   "board_program_credits": 2,
+   "note": "pilot pricing is sales-configured"
+  },
+  "team": {
+   "annual_platform_credits": 1000,
+   "board_program_credits": 10
+  },
+  "enterprise": {
+   "annual_platform_credits": 5000,
+   "board_program_credits": 50
+  },
+  "enterprise_fl1_bundle": {
+   "annual_platform_credits": 5000,
+   "board_program_credits": 50,
+   "fl1_assets_included": 1,
+   "note": "FL-1 hardware term tracked in E8; fab-attach is placeholder metadata only"
+  }
+ },
+ "entry_fields": [
+  "usage_id",
+  "org_id",
+  "program_id",
+  "board_id",
+  "run_id",
+  "usage_type",
+  "credits",
+  "estimated_dollar_value",
+  "timestamp",
+  "user",
+  "notes"
+ ],
+ "credit_model": [
+  "organization credit balance",
+  "workspace credit allocation",
+  "program credit allocation (budget.credits_allocated)",
+  "board/run usage entries",
+  "manual adjustment (audited, reason required)",
+  "pilot credits",
+  "annual platform credits",
+  "board-program credits",
+  "fab-attach tracking placeholder (E7 metadata only)"
+ ],
+ "rules": [
+  "no real billing, charging, or payment integration",
+  "manual adjustments require a reason and produce an audit record",
+  "overage flags commercial review; engineering gates are never priced",
+  "pricing is config, never hard-coded into gates"
+ ]
+}

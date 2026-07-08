@@ -1,0 +1,18 @@
+{
+ "version": "v1",
+ "milestone": "E4 Usage/Credit Ledger",
+ "delivered": {
+  "engine": "lib/enterprise/credits.mjs",
+  "api": "record_usage / adjust_credits / budget_state / usage_report actions on /api/enterprise",
+  "ui": "Usage tab on /enterprise board detail; program cards show consumed/allocated credits",
+  "reports": "usageReport (by program/board/user/stage) + pricingAlignmentReport",
+  "tests": "scripts/test_e4.mjs — 12/12"
+ },
+ "acceptance": {
+  "events_recorded_for_major_actions": true,
+  "program_budget_view": true,
+  "ledger_auditable": "hash-chained audit entries per event + adjustment",
+  "no_real_billing": true,
+  "pricing_not_in_gates": "DEFAULT_CREDIT_COSTS/TIERS are config; budgetState explicitly never blocks engineering"
+ }
+}
