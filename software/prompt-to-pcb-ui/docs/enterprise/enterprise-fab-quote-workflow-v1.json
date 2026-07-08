@@ -1,0 +1,19 @@
+{
+ "version": "v1",
+ "milestone": "E7 Fab/Quote Attach Workflow",
+ "delivered": {
+  "engine": "lib/enterprise/quotes.mjs (12-state machine, legal-transition table, approval gates verified at transition time)",
+  "packet": "generateQuotePacket builds from REAL run artifacts with review labels, blocked claims, approval snapshot, and honest stackup assumptions",
+  "api": "generate_quote_packet / advance_quote / quote_workflow_report",
+  "ui": "quote state visible through /api/enterprise state (quotes[])",
+  "audit": "every transition + refusal audited",
+  "tests": "scripts/test_e7.mjs — 14/14"
+ },
+ "acceptance": {
+  "workflow_exists": true,
+  "approval_gates_enforced": "verified at transition time, not cached",
+  "statuses_visible": true,
+  "no_automatic_external_action": "outward steps are manual-entry states requiring a human note",
+  "evidence_pack_links_quote_packet": "evidence pack section 17/21 carry approval + manual steps; packet embeds approval snapshot"
+ }
+}

@@ -1,0 +1,51 @@
+{
+ "version": "quote-packet/v1",
+ "states": [
+  "package_not_ready",
+  "package_ready_with_review",
+  "quote_packet_ready",
+  "quote_approval_requested",
+  "approved_for_quote",
+  "quote_submitted_manually",
+  "quote_received",
+  "approved_for_order",
+  "order_submitted_manually",
+  "fab_in_progress",
+  "boards_received_pending_evidence",
+  "blocked"
+ ],
+ "packet_contents": [
+  "board_files",
+  "gerbers_drill",
+  "bom",
+  "pick_and_place",
+  "step",
+  "stackup_assumptions",
+  "drc_erc",
+  "router_evidence",
+  "review_required_labels",
+  "blocked_claims",
+  "special_fab_requirements",
+  "human_approval_snapshot"
+ ],
+ "approval_gates": {
+  "approved_for_quote": "approved_for_quote approval",
+  "approved_for_order": "approved_for_order approval"
+ },
+ "manual_entry_states": [
+  "quote_submitted_manually",
+  "quote_received",
+  "order_submitted_manually",
+  "fab_in_progress",
+  "boards_received_pending_evidence"
+ ],
+ "rules": [
+  "no automatic quote submission — quote_submitted_manually requires human manual entry with a note",
+  "no automatic order submission — same mechanism",
+  "approved_for_quote / approved_for_order verify an approved approval record at transition time",
+  "quote_received is not physical evidence",
+  "order_submitted is not physical validation",
+  "boards_received_pending_evidence still requires evidence upload + review before any physical claim",
+  "fab attach is internal metadata only"
+ ]
+}
