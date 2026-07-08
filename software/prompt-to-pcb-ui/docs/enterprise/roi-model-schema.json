@@ -1,0 +1,76 @@
+{
+ "version": "roi-model/v1",
+ "pilot_fields": [
+  "pilot_id",
+  "org/workspace/program",
+  "customer_segment",
+  "use_case",
+  "target boards",
+  "baseline_process",
+  "baseline cycle time",
+  "baseline engineering cost",
+  "baseline fab/revision assumptions",
+  "Compose outputs delivered",
+  "credits consumed",
+  "estimated time saved",
+  "estimated cost avoided",
+  "blocked claims",
+  "validation state",
+  "next step",
+  "expansion path"
+ ],
+ "assumptions": {
+  "loaded_ee_cost_per_hour": {
+   "units": "USD/h",
+   "provenance": "placeholder — set from customer loaded-cost data"
+  },
+  "baseline_cycle_time_weeks": {
+   "units": "weeks/revision",
+   "provenance": "placeholder — set from customer baseline interviews"
+  },
+  "baseline_engineering_hours": {
+   "units": "h/board revision",
+   "provenance": "placeholder — set from customer baseline"
+  },
+  "baseline_revisions_per_board": {
+   "units": "revisions",
+   "provenance": "industry-typical placeholder — customer to confirm"
+  },
+  "compose_review_hours": {
+   "units": "h/board (human review of generated package)",
+   "provenance": "internal estimate — review remains mandatory"
+  },
+  "fab_cost_per_revision": {
+   "units": "USD (fab+assembly, small batch)",
+   "provenance": "placeholder — quote-dependent"
+  },
+  "revisions_avoided": {
+   "units": "revisions",
+   "provenance": "CONSERVATIVE default: evidence-gated packages may avoid one respin; NOT customer-verified"
+  },
+  "fl1_instrument_capex": {
+   "units": "USD",
+   "provenance": "placeholder FL-1 bundle price — sales-configured"
+  },
+  "fl1_amortization_years": {
+   "units": "years",
+   "provenance": "placeholder depreciation schedule"
+  }
+ },
+ "outputs": [
+  "conservative/base/aggressive scenarios",
+  "assumption table",
+  "sensitivity table (9 combinations)",
+  "caveats",
+  "not_counted",
+  "physical_evidence_status",
+  "measured_vs_estimated statement"
+ ],
+ "rules": [
+  "ROI never claims verified savings without customer evidence",
+  "basis is ESTIMATED until measured items exist; then reconciliation is demanded, never automatic",
+  "FL-1 capex amortization = capex / years / sharing programs — program/year aware, divided never multiplied, counted once as cost",
+  "physical validation is a separate evidence track, not an ROI input",
+  "all assumptions configurable with provenance notes"
+ ]
+}

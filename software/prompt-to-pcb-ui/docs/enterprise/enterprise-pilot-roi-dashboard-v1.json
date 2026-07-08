@@ -1,0 +1,17 @@
+{
+ "version": "v1",
+ "milestone": "E6 Pilot ROI Dashboard",
+ "delivered": {
+  "engine": "lib/enterprise/pilots.mjs",
+  "api": "create_pilot / roi_report / add_measured_roi_evidence",
+  "example": "roi-example-report.md (synthetic Acme pilot)",
+  "tests": "scripts/test_e6.mjs — 11/11 incl. amortization halving check"
+ },
+ "acceptance": {
+  "pilot_dashboard_exists": "pilot entities + ROI report API; UI surfaces through the enterprise workspace",
+  "configurable_and_conservative": "defaults marked placeholder; conservative scenario is 0.5x",
+  "amortization_not_double_counted": "tested: 2 sharing programs halve the per-program amortization",
+  "estimated_vs_measured_separated": true,
+  "evidence_and_blocked_claims_shown": true
+ }
+}
