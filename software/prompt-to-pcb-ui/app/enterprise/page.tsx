@@ -25,6 +25,14 @@ const READINESS_STYLE: Record<string, string> = {
   production_ready: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500',
 }
 
+const PROG_STATUS_STYLE: Record<string, string> = {
+  quote_ready: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500',
+  validation_in_progress: 'border-sky-500/40 bg-sky-500/10 text-sky-400',
+  review_required: 'border-amber-500/40 bg-amber-500/10 text-amber-500',
+  blocked: 'border-destructive/40 bg-destructive/10 text-destructive',
+  architecture: 'border-border bg-muted/30 text-muted-foreground',
+}
+
 function Badge({ s }: { s: string }) {
   return (
     <span className={cn(
@@ -115,9 +123,62 @@ export default function EnterprisePage() {
         />
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
-        {/* program list */}
+      {!progId ? (
+        /* Portfolio: full-width program grid. When nothing is drilled into,
+           fill the whole width with rich program cards instead of stranding a
+           narrow list beside an empty detail column. */
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+          {programs.map((p: any) => {
+            const pb = (db.boards ?? []).filter((b: any) => b.program_id === p.program_id)
+            const routed = pb.filter((b: any) => ['routed_in_sandbox', 'package_ready_with_review', 'approved_for_quote'].includes(b.readiness)).length
+            const rev = pb.filter((b: any) => b.review_required_items?.length).length
+            const blk = pb.filter((b: any) => b.blocked_claims?.length || b.readiness === 'blocked').length
+            const arch = pb.filter((b: any) => b.readiness === 'architecture_only' && !b.blocked_claims?.length).length
+            return (
+              <button
+                key={p.program_id}
+                type="button"
+                onClick={() => { setProgId(p.program_id); setBoardId(null) }}
+                className="flex flex-col rounded-md border border-border bg-card/40 p-3 text-left transition-colors hover:border-primary/40 hover:bg-primary/5"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <span className="text-sm font-semibold leading-tight">{p.name}</span>
+                  <span className={cn(
+                    'shrink-0 rounded-sm border px-1.5 py-0.5 font-mono text-[9px]',
+                    PROG_STATUS_STYLE[p.status] ?? 'border-border bg-muted/30 text-muted-foreground')}>
+                    {p.status?.replace(/_/g, ' ')}
+                  </span>
+                </div>
+                {p.objective && (
+                  <p className="mt-1 line-clamp-1 text-[11px] text-muted-foreground">{p.objective}</p>
+                )}
+                <div className="mt-2 flex items-center gap-3 font-mono text-[10px] text-muted-foreground">
+                  <span>{p.board_list.length} board(s)</span>
+                  <span>{p.budget.credits_consumed}/{p.budget.credits_allocated} cr</span>
+                </div>
+                {pb.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {routed > 0 && <span className="rounded-sm border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] text-emerald-500">{routed} routed</span>}
+                    {rev > 0 && <span className="rounded-sm border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[9px] text-amber-500">{rev} review</span>}
+                    {blk > 0 && <span className="rounded-sm border border-destructive/40 bg-destructive/10 px-1.5 py-0.5 text-[9px] text-destructive">{blk} blocked</span>}
+                    {arch > 0 && <span className="rounded-sm border border-border bg-muted/30 px-1.5 py-0.5 text-[9px] text-muted-foreground">{arch} arch-only</span>}
+                  </div>
+                )}
+              </button>
+            )
+          })}
+        </div>
+      ) : (
+      <div className="grid gap-4 lg:grid-cols-[260px_1fr]">
+        {/* program sidebar (drill-in) */}
         <div className="space-y-1">
+          <button
+            type="button"
+            onClick={() => { setProgId(null); setBoardId(null) }}
+            className="mb-1 w-full rounded-md border border-border px-2 py-1.5 text-left text-[11px] text-muted-foreground hover:text-foreground"
+          >
+            ← All programs
+          </button>
           {programs.map((p: any) => (
             <button
               key={p.program_id}
@@ -285,6 +346,7 @@ export default function EnterprisePage() {
           )}
         </div>
       </div>
+      )}
     </div>
   )
 }
