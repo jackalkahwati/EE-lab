@@ -183,16 +183,7 @@ export default function Compose2Page() {
       {/* CENTER — the board as hero */}
       <section className="flex min-w-0 flex-1 flex-col">
         <div className="flex items-center gap-3 border-b border-border px-3 py-2">
-          <span className="text-sm font-semibold">{selectedRun.title ?? selectedRun.id}</span>
-          <span className="font-mono text-[10px] text-muted-foreground">
-            {m.nets ? `nets ${m.nets}` : ''} {m.layers ? `· ${m.layers}-layer` : ''} {m.components ? `· ${m.components} parts` : ''}
-          </span>
-          <span className={cn('rounded-sm border px-1.5 py-0.5 font-mono text-[9px]',
-            selectedRun.status === 'PASSED'
-              ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500'
-              : 'border-amber-500/40 bg-amber-500/10 text-amber-500')}>
-            {selectedRun.status}
-          </span>
+          <span className="min-w-0 truncate text-sm font-semibold">{selectedRun.title ?? selectedRun.id}</span>
           {isReal && <ReviewsPill real={real} />}
           {isReal && real?.board?.bomTotal ? (
             <span className="rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground"
