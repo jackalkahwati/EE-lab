@@ -195,9 +195,11 @@ export default function IamPage() {
               <tr className="border-b border-border">
                 <th className="sticky left-0 bg-background px-2 align-bottom pb-2 text-left font-mono font-normal text-muted-foreground">permission</th>
                 {roles.map((r) => (
-                  <th key={r} className="h-28 px-1 align-bottom font-mono font-normal text-muted-foreground">
-                    <div className="mx-auto w-4 whitespace-nowrap text-[9px] leading-none [writing-mode:vertical-rl] rotate-180">
-                      {r.replace(/_/g, ' ')}
+                  <th key={r} className="h-32 p-0 align-bottom font-mono font-normal text-muted-foreground">
+                    <div className="flex h-32 w-full items-end justify-center pb-1">
+                      <span className="whitespace-nowrap text-[9px] leading-none [writing-mode:vertical-rl] rotate-180">
+                        {r.replace(/_/g, ' ')}
+                      </span>
                     </div>
                   </th>
                 ))}
