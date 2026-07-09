@@ -28,6 +28,7 @@ import { IngestPanel } from '@/components/ingest-panel'
 import { PatternsPanel } from '@/components/patterns-panel'
 import { AdvancedRoutingPanel } from '@/components/advanced-routing-panel'
 import { FL1ValidationView } from '@/components/fl1-validation-view'
+import { FL1Loop } from '@/components/fl1-loop'
 import { ErrorBoundary } from '@/components/error-boundary'
 import { ReviewPanel } from '@/components/review-panel'
 import { RunOverview } from '@/components/run-overview'
@@ -36,8 +37,8 @@ import { FL1ReadinessPanel } from '@/components/fl1-readiness-panel'
 import { BoardObjects } from '@/components/board-objects'
 import { ReviewsPill } from '@/components/board-reviews'
 import {
-  BookOpen, ClipboardCheck, Cpu, Eye, LayoutDashboard, ListTree, Maximize2, Package,
-  Receipt, ScrollText, Wrench,
+  Activity, BookOpen, ClipboardCheck, Cpu, Eye, Gauge, LayoutDashboard, ListTree, Maximize2,
+  Package, Receipt, ScrollText, Wrench,
 } from 'lucide-react'
 
 type Run = any
@@ -53,6 +54,8 @@ const VIEWS: { tab: Tab; label: string; Icon: any }[] = [
   { tab: 'Order', label: 'Quote', Icon: Receipt },
   { tab: 'BOM', label: 'BOM', Icon: Package },
   { tab: 'Assembly', label: 'Assembly', Icon: Wrench },
+  { tab: 'FL-1', label: 'FL-1', Icon: Activity },
+  { tab: 'FL-1 Ready', label: 'Ready', Icon: Gauge },
   { tab: 'Artifacts', label: 'Artifacts', Icon: ScrollText },
 ]
 
@@ -65,6 +68,8 @@ export default function Compose2Page() {
   // "+New" clears the stage to a blank slate (no board) while the chat stays
   // active; the board reappears when the new design finishes building.
   const [newDesign, setNewDesign] = useState(false)
+  // an FL-1 loop ECO gets dropped into the chat as a revision (single-pane flow)
+  const [revisePrefill, setRevisePrefill] = useState('')
   const stageRef = useRef<HTMLDivElement>(null)
   const toggleFullscreen = () => {
     const el = stageRef.current
@@ -180,6 +185,8 @@ export default function Compose2Page() {
           activeRunId={!newDesign && selectedRun?.real ? selectedRun.id : undefined}
           activeName={selectedRun?.name}
           newDesign={newDesign}
+          revisePrefill={revisePrefill}
+          onPrefillConsumed={() => setRevisePrefill('')}
           onSelectThread={(id) => { setSelectedId(id); setNewDesign(false) }}
           onNew={() => setNewDesign(true)}
           onRunComplete={onRunComplete}
@@ -291,7 +298,17 @@ export default function Compose2Page() {
                   {tab === 'Recovery' && <RecoveryPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
                   {tab === 'Assembly' && <AssemblyPanel runId={selectedRun.runDir ? selectedRun.id : null} fabZip={null} />}
                   {tab === 'Review' && <ReviewPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
-                  {tab === 'FL-1' && <FL1ValidationView runId={selectedRun.runDir ? selectedRun.id : null} />}
+                  {tab === 'FL-1' && (
+                    <div className="flex h-full flex-col">
+                      <FL1ValidationView runId={selectedRun.runDir ? selectedRun.id : null} />
+                      <div className="border-t border-border">
+                        <FL1Loop
+                          runId={selectedRun.runDir ? selectedRun.id : null}
+                          onRevise={(eco) => setRevisePrefill(eco)}
+                        />
+                      </div>
+                    </div>
+                  )}
                   {tab === 'Order' && <ProcurementPanel real={real} runDir={selectedRunDir ?? null} />}
                 </>
               )}

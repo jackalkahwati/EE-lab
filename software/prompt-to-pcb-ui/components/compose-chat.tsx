@@ -27,16 +27,18 @@ function b64(json: string) {
     String.fromCharCode(parseInt(h, 16))))
 }
 
-export function ComposeChat({ threads, activeId, activeRunId, activeName, newDesign, onSelectThread, onNew, onRunComplete, onRename }: {
+export function ComposeChat({ threads, activeId, activeRunId, activeName, newDesign, revisePrefill, onSelectThread, onNew, onRunComplete, onRename, onPrefillConsumed }: {
   threads: { id: string; label: string }[]
   activeId: string
   activeRunId?: string   // the real run currently on screen (revisable)
   activeName?: string    // its display name, for the revision context line
   newDesign?: boolean
+  revisePrefill?: string // text to drop into the input (e.g. an FL-1 ECO) as a revision
   onSelectThread: (id: string) => void
   onNew: () => void
   onRunComplete: (runDir: string, id: string) => void
   onRename?: (id: string, name: string) => void
+  onPrefillConsumed?: () => void
 }) {
   const [phase, setPhase] = useState<Phase>('idle')
   const [request, setRequest] = useState('')
@@ -52,11 +54,21 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
   const [threadsOpen, setThreadsOpen] = useState(false)
   const esRef = useRef<EventSource | null>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
+  const taRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
     bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight, behavior: 'smooth' })
   }, [answers, current, spec, logs, phase])
   useEffect(() => () => { esRef.current?.close() }, [])
+
+  // An FL-1 ECO (or any external revision text) drops straight into the input,
+  // pre-filled for review; the user edits if needed and presses Send to revise.
+  useEffect(() => {
+    if (!revisePrefill) return
+    setTyped(revisePrefill)
+    taRef.current?.focus()
+    onPrefillConsumed?.()
+  }, [revisePrefill, onPrefillConsumed])
 
   const ask = useCallback(async (req: string, acc: Answer[]) => {
     setLoading(true); setErr(null)
@@ -336,6 +348,7 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
       <div className="border-t border-border p-2">
         <div className="flex items-end gap-2 rounded-md border border-border bg-background p-1.5 focus-within:border-primary/50">
           <textarea
+            ref={taRef}
             value={typed}
             onChange={(e) => setTyped(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() } }}
