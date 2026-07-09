@@ -160,10 +160,18 @@ export async function POST(req: Request) {
 
     const blocks: string[] = Array.isArray(out.blocks) ? out.blocks : []
     const boardClass: string = out.board_class ?? 'custom board'
-    // layer count: honor an explicit request (2/4/8), default 4. Only these are
-    // built by the composer; anything else falls back to 4.
+    // layer count: prefer the model's structured field, but the model often
+    // mentions "8-layer" in prose without setting it — so fall back to parsing
+    // the request. Only 2/4/8 are built; map others to the nearest.
     const rawLayers = Number(out.layers)
-    const layers = [2, 4, 8].includes(rawLayers) ? rawLayers : 4
+    let layers = [2, 4, 8].includes(rawLayers) ? rawLayers : 4
+    if (![2, 4, 8].includes(rawLayers)) {
+      const m = request.match(/(\d+)\s*-?\s*layers?\b/i)
+      if (m) {
+        const n = Number(m[1])
+        layers = n <= 2 ? 2 : n <= 5 ? 4 : 8
+      }
+    }
 
     if (out.enough) {
       return Response.json({
