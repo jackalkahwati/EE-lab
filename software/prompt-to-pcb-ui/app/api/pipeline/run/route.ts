@@ -78,6 +78,41 @@ impl<I2C: I2c, D: DelayNs> Controller<I2C, D> {
 }
 \`\`\``
 
+// Scaffold-fill markers (must match gen_firmware_compose.py emit_app()).
+const FILL_BEGIN = '// >>> FL_APP_FILL_BEGIN'
+const FILL_END = '// >>> FL_APP_FILL_END'
+
+// Splice a rewritten body between the FL_APP_FILL markers, preserving EVERYTHING
+// else (struct, bounds, new/init, control_step signature, trailing Ok(())).
+function spliceFillBody(scaffold: string, body: string, begin: string, end: string): string | null {
+  const b = scaffold.indexOf(begin)
+  const e = scaffold.indexOf(end)
+  if (b < 0 || e < 0 || e < b) return null
+  const afterBegin = scaffold.indexOf('\n', b) + 1
+  return scaffold.slice(0, afterBegin) + body.replace(/\n*$/, '\n') + '        ' + scaffold.slice(e)
+}
+
+// The model is asked for statements only, but tolerate it returning the whole
+// function or the marker block: extract just the inner statements, and drop a
+// trailing Ok(()) (the scaffold already returns one).
+function normalizeFillBody(text: string, begin: string, end: string): string {
+  let t = text
+  if (t.includes(begin) && t.includes(end)) {
+    t = t.slice(t.indexOf(begin) + begin.length, t.indexOf(end)).replace(/^[^\n]*\n/, '')
+  } else if (/fn\s+control_step/.test(t)) {
+    const s = t.indexOf('{', t.search(/fn\s+control_step/))
+    if (s >= 0) {
+      let depth = 0, i = s
+      for (; i < t.length; i++) {
+        if (t[i] === '{') depth++
+        else if (t[i] === '}') { depth--; if (depth === 0) break }
+      }
+      t = t.slice(s + 1, i)
+    }
+  }
+  return t.replace(/\bOk\(\(\)\)\s*;?\s*$/, '').trim()
+}
+
 type PipelineEvent =
   | { type: 'stage'; id: string; state: string; failReason?: string }
   | { type: 'log'; stage: string; text: string; level?: string }
@@ -1031,76 +1066,76 @@ export async function GET(req: Request) {
             // it (a real control loop), gated by cargo build with one self-repair
             // pass. Best-effort: if it can't be made to compile, the crate still
             // ships with the verified BSP/HAL, the app layer is just omitted.
+            // SCAFFOLD-FILL: the generator shipped a compiling Controller scaffold
+            // (struct + bounds + new/init + control_step SIGNATURE are fixed) with
+            // the control logic between FL_APP_FILL markers. The model rewrites ONLY
+            // that body — it cannot touch the generics/imports/bounds, which removes
+            // the entire class of failures. On any failure we restore the scaffold's
+            // own body, so the board always ships a compiling control loop.
             const srcDir = path.join(fwDir, 'src')
             const appPath = path.join(srcDir, 'app.rs')
-            // The generator already shipped a DETERMINISTIC, compiling app.rs
-            // (a correct-by-construction control loop, one step per present
-            // peripheral). Keep it as the baseline so a failed frontier-model
-            // enhancement reverts to a WORKING control loop — never to no app
-            // layer. app is already registered in lib.rs by the generator.
-            let appBaseline: string | null = null
+            let scaffold: string | null = null
             try {
-              appBaseline = fs.existsSync(appPath) ? fs.readFileSync(appPath, 'utf8') : null
-              const mods = fs
-                .readdirSync(srcDir)
-                .filter((f) => f.endsWith('.rs') && f !== 'lib.rs' && f !== 'app.rs')
-              const apiDump = mods
-                .map((f) => `// ===== src/${f} =====\n${fs.readFileSync(path.join(srcDir, f), 'utf8')}`)
-                .join('\n\n')
-              const sys =
-                'You are an expert embedded Rust engineer writing no_std firmware for an RP2040 ' +
-                '(thumbv6m-none-eabi) against embedded-hal 1.0. Output ONLY the Rust source of ' +
-                'src/app.rs — no prose, no markdown fences.\n\n' +
-                `HARD RULES (each is a real, common cause of a failed build):\n${FW_RULES}\n\n` +
-                `GOLDEN EXAMPLE — the correct SHAPE for a board with an I2C sensor. Study the imports, ` +
-                `the generic bounds, and the error handling, then write the equivalent for THIS board's ` +
-                `actual modules:\n${FW_GOLDEN}`
-              const ask =
-                `Board: ${composeMode ? composeSpec?.boardClass : 'FL-1 relay/probe matrix'}.\n\n` +
-                `The crate provides these modules — call ONLY their real public functions:\n\n` +
-                `${apiDump}\n\n` +
-                `A deterministic baseline src/app.rs already compiles (reference for the exact call/bound style):\n\n` +
-                `${(appBaseline ?? '').slice(0, 1400)}\n\n` +
-                `Write an improved src/app.rs following the GOLDEN EXAMPLE's shape: a Controller struct ` +
-                `owning the peripherals that exist above (generic over their concrete HAL types with the ` +
-                `EXACT bounds each module uses), with new(...), init(&mut self) bringing up each peripheral, ` +
-                `and control_step(&mut self) running one realistic iteration. ` +
-                `Only reference crate::{${mods.map((m) => m.replace('.rs', '')).join(', ')}}. ` +
-                `It MUST compile. Return only src/app.rs.`
+              scaffold = fs.existsSync(appPath) ? fs.readFileSync(appPath, 'utf8') : null
+              const bIdx = scaffold?.indexOf(FILL_BEGIN) ?? -1
+              const eIdx = scaffold?.indexOf(FILL_END) ?? -1
+              if (scaffold && bIdx >= 0 && eIdx > bIdx) {
+                const mods = fs
+                  .readdirSync(srcDir)
+                  .filter((f) => f.endsWith('.rs') && f !== 'lib.rs' && f !== 'app.rs')
+                const apiDump = mods
+                  .map((f) => `// ===== src/${f} =====\n${fs.readFileSync(path.join(srcDir, f), 'utf8')}`)
+                  .join('\n\n')
+                const sys =
+                  'You are an expert embedded Rust engineer. You are given ONE method body to rewrite. ' +
+                  'Output ONLY the Rust statements that go inside it — no fn signature, no struct, no ' +
+                  'imports, no prose, no markdown fences.\n\n' +
+                  `HARD RULES (each is a real, common cause of a failed build):\n${FW_RULES}`
+                const ask =
+                  `Board: ${composeMode ? composeSpec?.boardClass : 'FL-1 relay/probe matrix'}.\n\n` +
+                  `The crate provides these modules — call ONLY their real public methods:\n\n${apiDump}\n\n` +
+                  `Here is the full scaffold you are editing (do NOT change anything outside the ` +
+                  `FL_APP_FILL markers — the struct fields tell you exactly what self.<field> you may use):\n\n` +
+                  `${scaffold}\n\n` +
+                  `Rewrite ONLY the body between "${FILL_BEGIN}" and "${FILL_END}": a realistic control ` +
+                  `iteration for THIS board using self.<field> and the modules' real methods (read sensors, ` +
+                  `heartbeat links, motor failsafe). Map every fallible call's error with .map_err(|_| ())? . ` +
+                  `Return ONLY the statements (no fn signature, no braces).`
 
-              log('firmware', `app firmware: ${FW_MODEL} enhancing the control loop…`)
-              let appOk = false
-              let provider = ''
-              let lastErr = ''
-              const MAX_ATTEMPTS = 3
-              for (let attempt = 0; attempt < MAX_ATTEMPTS && !appOk; attempt++) {
-                const user =
-                  attempt === 0
-                    ? ask
-                    : `${ask}\n\nYour previous src/app.rs failed to compile:\n${lastErr.slice(0, 1800)}\n\nReturn a corrected src/app.rs (code only).`
-                const llm = await callLLMText(sys, user, { model: FW_MODEL })
-                provider = llm.provider
-                fs.writeFileSync(appPath, extractRust(llm.text))
-                const ab = await exec('firmware', CARGO, ['build', '--release'], { cwd: fwDir })
-                appOk = ab.code === 0 || ab.out.includes('Finished')
-                lastErr = ab.out
-                if (appOk)
-                  log('firmware', `GATE app firmware: ${provider} control loop compiles, PASS`, 'ok')
-                else
-                  log('firmware', `app firmware: enhancement attempt ${attempt + 1}/${MAX_ATTEMPTS} did not compile, ${attempt < MAX_ATTEMPTS - 1 ? 'self-repair pass…' : 'reverting to deterministic baseline'}`, 'warn')
-              }
-              if (!appOk && appBaseline !== null) {
-                // revert to the deterministic control loop — still a real, compiling
-                // app layer (not just BSP/HAL). lib.rs already references it.
-                fs.writeFileSync(appPath, appBaseline)
-                await exec('firmware', CARGO, ['build', '--release'], { cwd: fwDir })
-                log('firmware', 'app firmware: kept the deterministic control loop (LLM enhancement did not compile)', 'ok')
+                log('firmware', `app firmware: ${FW_MODEL} filling the control loop (scaffold-fill)…`)
+                let appOk = false
+                let provider = ''
+                let lastErr = ''
+                const MAX_ATTEMPTS = 3
+                for (let attempt = 0; attempt < MAX_ATTEMPTS && !appOk; attempt++) {
+                  const user =
+                    attempt === 0
+                      ? ask
+                      : `${ask}\n\nYour previous control_step body failed to compile:\n${lastErr.slice(0, 1600)}\n\nReturn a corrected body (statements only).`
+                  const llm = await callLLMText(sys, user, { model: FW_MODEL })
+                  provider = llm.provider
+                  const body = normalizeFillBody(extractRust(llm.text), FILL_BEGIN, FILL_END)
+                  const filled = spliceFillBody(scaffold, body, FILL_BEGIN, FILL_END)
+                  fs.writeFileSync(appPath, filled ?? scaffold)
+                  const ab = await exec('firmware', CARGO, ['build', '--release'], { cwd: fwDir })
+                  appOk = ab.code === 0 || ab.out.includes('Finished')
+                  lastErr = ab.out
+                  if (appOk)
+                    log('firmware', `GATE app firmware: ${provider} control loop compiles, PASS`, 'ok')
+                  else
+                    log('firmware', `app firmware: fill attempt ${attempt + 1}/${MAX_ATTEMPTS} did not compile, ${attempt < MAX_ATTEMPTS - 1 ? 'self-repair pass…' : 'reverting to scaffold body'}`, 'warn')
+                }
+                if (!appOk) {
+                  // restore the scaffold's own body — still a real, compiling loop
+                  fs.writeFileSync(appPath, scaffold)
+                  await exec('firmware', CARGO, ['build', '--release'], { cwd: fwDir })
+                  log('firmware', 'app firmware: kept the deterministic control loop (model fill did not compile)', 'ok')
+                }
               }
             } catch (e) {
-              // a thrown provider call (e.g. LLM timeout) must not leave a
-              // half-applied app.rs — restore the deterministic baseline.
-              if (appBaseline !== null) {
-                fs.writeFileSync(appPath, appBaseline)
+              // any failure must not leave a broken app.rs — restore the scaffold.
+              if (scaffold !== null) {
+                fs.writeFileSync(appPath, scaffold)
               }
               log('firmware', `app firmware: kept the deterministic control loop (${String(e).slice(0, 80)})`, 'ok')
             }

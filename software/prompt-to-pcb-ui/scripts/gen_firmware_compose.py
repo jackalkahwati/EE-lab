@@ -461,74 +461,107 @@ def emit_selftest(peripherals):
 
 
 def emit_app(peripherals, motors):
-    """Deterministic application control loop, generated from the peripheral set
-    the same way the BSP/HAL is — correct-by-construction, so it ALWAYS compiles
-    and always ships. Each present peripheral gets one realistic control step
-    (calling only the modules' real public methods with the exact embedded-hal
-    bounds). The frontier model may overwrite this with a richer loop; if that
-    fails to compile the pipeline reverts to THIS, so the app layer never
-    silently vanishes."""
-    steps, doc = [], []
+    """Deterministic Controller SCAFFOLD, generated from the peripheral set the
+    same way the BSP/HAL is. The struct, generic bounds, new(), init(), and the
+    control_step() SIGNATURE are correct-by-construction and always compile;
+    ONLY the body between the FL_APP_FILL markers is meant to be rewritten
+    (scaffold-fill: the pipeline lets the frontier model replace just that body,
+    so it can never break the generics/imports/bounds). Left as generated, the
+    body is a working per-peripheral control loop, so a board always ships a
+    compiling app layer even if no model runs."""
+    tparams = []   # (name, bound), ordered + unique
+    fields = []    # (field_name, field_type)
+    init_stmts = []
+    step_stmts = []
+
+    def add_tp(name, bound):
+        if name not in [n for n, _ in tparams]:
+            tparams.append((name, bound))
+
     if "radio" in peripherals:
-        doc.append("//! - radio: link heartbeat (verify the silicon still answers)")
-        steps.append('''    /// Radio control step: confirm the transceiver still answers on SPI.
-    pub fn step_radio<SPI, RST>(lora: &mut crate::radio::Lora<SPI, RST>) -> Result<bool, SPI::Error>
-    where
-        SPI: embedded_hal::spi::SpiDevice,
-        RST: embedded_hal::digital::OutputPin,
-    {
-        lora.probe()
-    }''')
+        add_tp("SPr", "embedded_hal::spi::SpiDevice")
+        add_tp("RSr", "embedded_hal::digital::OutputPin")
+        fields.append(("radio", "crate::radio::Lora<SPr, RSr>"))
+        init_stmts += ["self.radio.reset(&mut self.delay);",
+                       "let _ = self.radio.probe().map_err(|_| ())?;",
+                       "let _ = self.radio.set_lora_mode().map_err(|_| ())?;"]
+        step_stmts.append("let _ = self.radio.probe().map_err(|_| ())?;")
     if "imu" in peripherals:
-        doc.append("//! - imu: read one acceleration sample")
-        steps.append('''    /// IMU control step: read one 3-axis acceleration sample.
-    pub fn step_imu<I2C: embedded_hal::i2c::I2c>(imu: &mut crate::imu::Imu<I2C>)
-        -> Result<[i16; 3], I2C::Error>
-    {
-        imu.read_accel()
-    }''')
+        add_tp("I2Ci", "embedded_hal::i2c::I2c")
+        fields.append(("imu", "crate::imu::Imu<I2Ci>"))
+        init_stmts += ["let _ = self.imu.probe().map_err(|_| ())?;",
+                       "let _ = self.imu.wake().map_err(|_| ())?;"]
+        step_stmts.append("let _ = self.imu.read_accel().map_err(|_| ())?;")
     if "tempsensor" in peripherals:
-        doc.append("//! - tempsensor: read temperature (milli-degrees C)")
-        steps.append('''    /// Temperature control step: read the current temperature in milli-C.
-    pub fn step_tempsensor<I2C: embedded_hal::i2c::I2c>(t: &mut crate::tempsensor::TempSensor<I2C>)
-        -> Result<i32, I2C::Error>
-    {
-        t.read_milli_c()
-    }''')
+        add_tp("I2Ct", "embedded_hal::i2c::I2c")
+        fields.append(("temp", "crate::tempsensor::TempSensor<I2Ct>"))
+        init_stmts.append("let _ = self.temp.probe().map_err(|_| ())?;")
+        step_stmts.append("let _ = self.temp.read_milli_c().map_err(|_| ())?;")
     if "gnss" in peripherals:
-        doc.append("//! - gnss: pull the latest NMEA sentence")
-        steps.append('''    /// GNSS control step: read the latest NMEA sentence into `buf`.
-    pub fn step_gnss<R: embedded_io::Read>(gnss: &mut crate::gnss::Gnss<R>, buf: &mut [u8])
-        -> Result<usize, R::Error>
-    {
-        gnss.read_sentence(buf)
-    }''')
+        add_tp("Rg", "embedded_io::Read")
+        fields.append(("gnss", "crate::gnss::Gnss<Rg>"))
+        step_stmts += ["let mut nmea = [0u8; 96];",
+                       "let _ = self.gnss.read_sentence(&mut nmea).map_err(|_| ())?;"]
     if "cellular" in peripherals:
-        doc.append("//! - cellular: modem heartbeat (AT)")
-        steps.append('''    /// Cellular control step: heartbeat the modem with a bare AT command.
-    pub fn step_cellular<S: embedded_io::Read + embedded_io::Write>(modem: &mut crate::cellular::Modem<S>)
-        -> Result<(), S::Error>
-    {
-        modem.send_at("AT")
-    }''')
+        add_tp("Sc", "embedded_io::Read + embedded_io::Write")
+        fields.append(("modem", "crate::cellular::Modem<Sc>"))
+        init_stmts += ["let _ = self.modem.probe().map_err(|_| ())?;",
+                       "let _ = self.modem.network_attach().map_err(|_| ())?;"]
+        step_stmts.append('let _ = self.modem.send_at("AT").map_err(|_| ())?;')
     if motors:
-        doc.append("//! - motors: failsafe — hold the channel disarmed")
-        steps.append('''    /// Motor control step (failsafe default): hold the output disarmed.
-    pub fn step_motors_failsafe<P: embedded_hal::pwm::SetDutyCycle>(pwm: &mut P, period_us: u32)
-        -> Result<(), P::Error>
-    {
-        crate::motors::disarm(pwm, period_us)
-    }''')
-    body = "\n\n".join(steps) if steps else "    // no controllable peripherals — nothing to drive"
-    header = ("//! Deterministic application control loop, generated from the board's\n"
-              "//! peripheral set (correct-by-construction, like the BSP/HAL). One\n"
-              "//! control step per present peripheral; run each on your schedule.\n"
-              + ("\n".join(doc) + "\n" if doc else "")
-              + "//! Generated — the frontier model may replace this with a richer loop.\n"
-              "#![allow(dead_code)]\n\n")
-    if steps:
-        return header + "pub struct App;\n\nimpl App {\n" + body + "\n}\n"
-    return header + body + "\n"
+        add_tp("Pm", "embedded_hal::pwm::SetDutyCycle")
+        fields.append(("pwm", "Pm"))
+        init_stmts.append("let _ = crate::motors::disarm(&mut self.pwm, 20000).map_err(|_| ())?;")
+        step_stmts.append("let _ = crate::motors::disarm(&mut self.pwm, 20000).map_err(|_| ())?;")
+    if "radio" in peripherals:  # radio.reset() needs a delay; own one
+        add_tp("Dd", "embedded_hal::delay::DelayNs")
+        fields.append(("delay", "Dd"))
+
+    L = ["//! Application control-loop SCAFFOLD, generated from the board's peripheral",
+         "//! set. The struct, generic bounds, new(), init(), and the control_step()",
+         "//! SIGNATURE are correct-by-construction; only the body between the",
+         "//! FL_APP_FILL markers is meant to be rewritten. As generated it is a",
+         "//! working per-peripheral control loop.",
+         "//! Generated — do not edit outside the FL_APP_FILL markers.",
+         "#![allow(dead_code)]", ""]
+
+    if not fields:
+        L += ["pub struct Controller;", "",
+              "impl Controller {",
+              "    pub fn new() -> Self { Self }",
+              "    pub fn init(&mut self) -> Result<(), ()> { Ok(()) }",
+              "    pub fn control_step(&mut self) -> Result<(), ()> {",
+              "        // >>> FL_APP_FILL_BEGIN — control logic (the model rewrites below)",
+              "        // no controllable peripherals on this board",
+              "        // >>> FL_APP_FILL_END",
+              "        Ok(())",
+              "    }",
+              "}"]
+        return "\n".join(L) + "\n"
+
+    tp_names = ", ".join(n for n, _ in tparams)
+    tp_bounds = ", ".join("{}: {}".format(n, b) for n, b in tparams)
+    L.append("pub struct Controller<" + tp_names + "> {")
+    for fn, ft in fields:
+        L.append("    " + fn + ": " + ft + ",")
+    L += ["}", ""]
+    L.append("impl<" + tp_bounds + "> Controller<" + tp_names + "> {")
+    L.append("    pub fn new(" + ", ".join(fn + ": " + ft for fn, ft in fields) + ") -> Self {")
+    L.append("        Self { " + ", ".join(fn for fn, _ in fields) + " }")
+    L += ["    }", ""]
+    L.append("    /// Bring up every peripheral once. Err(()) if one does not answer.")
+    L.append("    pub fn init(&mut self) -> Result<(), ()> {")
+    for s in init_stmts:
+        L.append("        " + s)
+    L += ["        Ok(())", "    }", ""]
+    L.append("    /// One control iteration. Only the body between the FL_APP_FILL")
+    L.append("    /// markers is meant to change; the signature is fixed.")
+    L.append("    pub fn control_step(&mut self) -> Result<(), ()> {")
+    L.append("        // >>> FL_APP_FILL_BEGIN — control logic (the model rewrites below)")
+    for s in (step_stmts or ["// (all peripherals brought up in init)"]):
+        L.append("        " + s)
+    L += ["        // >>> FL_APP_FILL_END", "        Ok(())", "    }", "}"]
+    return "\n".join(L) + "\n"
 
 
 def emit(pins, peripherals, motors):
