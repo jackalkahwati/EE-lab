@@ -17,7 +17,7 @@ import { BoardCanvas } from '@/components/board-canvas'
 import { Board3D } from '@/components/board-3d'
 import { CodeViewer } from '@/components/code-viewer'
 import { BomTable } from '@/components/bom-table'
-import { GatesLogs } from '@/components/gates-logs'
+import { BoardChecks } from '@/components/board-checks'
 import { OrderPanel } from '@/components/order-panel'
 import { RecoveryPanel } from '@/components/recovery-panel'
 import { ConstraintsPanel } from '@/components/constraints-panel'
@@ -183,8 +183,7 @@ export default function Compose2Page() {
       {/* CENTER — the board as hero */}
       <section className="flex min-w-0 flex-1 flex-col">
         <div className="flex items-center gap-3 border-b border-border px-3 py-2">
-          <span className="min-w-0 truncate text-sm font-semibold">{selectedRun.title ?? selectedRun.id}</span>
-          {isReal && <ReviewsPill real={real} />}
+          {isReal && tab !== 'Overview' && <ReviewsPill real={real} />}
           {isReal && real?.board?.bomTotal ? (
             <span className="rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground"
               title="component BOM estimate — not fab, not a quote">
@@ -250,10 +249,7 @@ export default function Compose2Page() {
               {tab === 'Artifacts' && <ArtifactExplorer runId={selectedRun.runDir ? selectedRun.id : null} />}
               {tab === 'Code' && <CodeViewer key={isReal ? 'real' : 'seed'} files={isReal ? real?.ato : null} />}
               {tab === 'BOM' && <BomTable lines={isReal ? real?.bom : null} />}
-              {tab === 'Checks' && (
-                <GatesLogs run={selectedRun} reports={isReal ? real?.reports : null} runDir={selectedRunDir}
-                  onRefresh={() => loadRealBoard(selectedRunDir ?? '').then((d) => d && setRealBoard(d))} />
-              )}
+              {tab === 'Checks' && <BoardChecks real={real} />}
               {tab === 'Constraints' && <ConstraintsPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
               {tab === 'Pinout' && <PinoutPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
               {tab === 'Advanced' && <AdvancedRoutingPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
