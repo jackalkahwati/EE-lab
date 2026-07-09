@@ -32,9 +32,11 @@ import { ReviewPanel } from '@/components/review-panel'
 import { RunOverview } from '@/components/run-overview'
 import { ArtifactExplorer } from '@/components/artifact-explorer'
 import { FL1ReadinessPanel } from '@/components/fl1-readiness-panel'
+import { BoardObjects } from '@/components/board-objects'
+import { ReviewsPill } from '@/components/board-reviews'
 import {
-  Boxes, CircuitBoard, ClipboardCheck, FileCode2, LayoutDashboard,
-  Receipt, ScrollText, Wrench,
+  BookOpen, Boxes, CircuitBoard, ClipboardCheck, FileCode2, LayoutDashboard,
+  ListTree, Maximize2, Receipt, ScrollText, Wrench,
 } from 'lucide-react'
 
 type Run = any
@@ -43,6 +45,7 @@ type Tab = string
 // journey phases → panels (Board lives in the center hero, not here)
 const PHASES: { key: string; label: string; Icon: any; views: Tab[] }[] = [
   { key: 'Overview', label: 'Overview', Icon: LayoutDashboard, views: ['Overview'] },
+  { key: 'Objects', label: 'Objects', Icon: ListTree, views: ['Objects'] },
   { key: 'Design', label: 'Design', Icon: FileCode2, views: ['Code', 'Pinout', 'Constraints', 'Advanced'] },
   { key: 'Review', label: 'Review', Icon: ClipboardCheck, views: ['Checks', 'Review'] },
   { key: 'Quote', label: 'Quote', Icon: Receipt, views: ['Order'] },
@@ -59,6 +62,13 @@ export default function Compose2Page() {
   const [phase, setPhase] = useState('Overview')
   const [tab, setTab] = useState<Tab>('Overview')
   const [view3d, setView3d] = useState(true)
+  const stageRef = useRef<HTMLDivElement>(null)
+  const toggleFullscreen = () => {
+    const el = stageRef.current
+    if (!el) return
+    if (document.fullscreenElement) document.exitFullscreen()
+    else el.requestFullscreen?.()
+  }
 
   const refreshRuns = () =>
     fetch('/api/runs').then((r) => (r.ok ? r.json() : { runs: [] }))
@@ -189,17 +199,35 @@ export default function Compose2Page() {
               : 'border-amber-500/40 bg-amber-500/10 text-amber-500')}>
             {selectedRun.status}
           </span>
-          <div className="ml-auto flex overflow-hidden rounded-sm border border-border">
-            {(['3D', '2D'] as const).map((v) => (
-              <button key={v} type="button" onClick={() => setView3d(v === '3D')}
-                className={cn('px-2.5 py-0.5 text-[11px]',
-                  (view3d ? '3D' : '2D') === v ? 'bg-secondary font-medium text-foreground' : 'text-muted-foreground hover:text-foreground')}>
-                {v}
-              </button>
-            ))}
+          {isReal && <ReviewsPill real={real} />}
+          {isReal && real?.board?.bomTotal ? (
+            <span className="rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground"
+              title="component BOM estimate — not fab, not a quote">
+              ~${Number(real.board.bomTotal).toFixed(2)} BOM
+            </span>
+          ) : null}
+          <button type="button" onClick={() => { setPhase('Learn'); setTab('Patterns') }}
+            className="flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+            title="reusable patterns & ingested knowledge">
+            <BookOpen className="size-3" /> Knowledge
+          </button>
+          <div className="ml-auto flex items-center gap-2">
+            <div className="flex overflow-hidden rounded-sm border border-border">
+              {(['3D', '2D'] as const).map((v) => (
+                <button key={v} type="button" onClick={() => setView3d(v === '3D')}
+                  className={cn('px-2.5 py-0.5 text-[11px]',
+                    (view3d ? '3D' : '2D') === v ? 'bg-secondary font-medium text-foreground' : 'text-muted-foreground hover:text-foreground')}>
+                  {v}
+                </button>
+              ))}
+            </div>
+            <button type="button" onClick={toggleFullscreen} title="fullscreen board"
+              className="rounded-sm border border-border p-1 text-muted-foreground hover:text-foreground">
+              <Maximize2 className="size-3.5" />
+            </button>
           </div>
         </div>
-        <div className="min-h-0 flex-1">
+        <div ref={stageRef} className="min-h-0 flex-1 bg-background">
           <ErrorBoundary>
             {view3d ? (
               <Board3D basePath={boardBase} fallback={
@@ -244,6 +272,7 @@ export default function Compose2Page() {
           <div className="min-h-0 flex-1 overflow-y-auto">
             <ErrorBoundary>
               {tab === 'Overview' && <RunOverview runId={selectedRun.runDir ? selectedRun.id : null} run={selectedRun} />}
+              {tab === 'Objects' && <BoardObjects real={real} />}
               {tab === 'Artifacts' && <ArtifactExplorer runId={selectedRun.runDir ? selectedRun.id : null} />}
               {tab === 'Code' && <CodeViewer key={isReal ? 'real' : 'seed'} files={isReal ? real?.ato : null} />}
               {tab === 'BOM' && <BomTable lines={isReal ? real?.bom : null} />}
