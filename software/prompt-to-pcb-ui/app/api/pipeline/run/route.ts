@@ -24,6 +24,60 @@ const KPY =
   '/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3'
 const RUN_TIMEOUT_MS = 20 * 60 * 1000
 
+// ---- firmware app-code generation (general, board-agnostic) -----------------
+// Writing no_std embedded-hal 1.0 Rust is the hardest codegen target here, so we
+// (1) use the strongest model, (2) show a golden example of the correct SHAPE,
+// (3) encode the exact failure modes we've observed as hard rules, and (4) keep
+// a deterministic baseline as the floor. The model then ENHANCES the baseline;
+// on failure the board still ships the compiling deterministic control loop.
+const FW_MODEL = process.env.FIRMWARE_MODEL || 'claude-opus-4-8'
+
+// Hard rules — each line is a real, observed compile-failure mode.
+const FW_RULES = [
+  'no_std + core only. NO std, NO alloc, NO println!/format!/eprintln!/dbg!.',
+  'embedded-hal 1.0 trait paths ONLY: i2c::I2c, spi::SpiDevice, digital::OutputPin, ' +
+    'pwm::SetDutyCycle, delay::DelayNs; embedded_io::{Read, Write}. ' +
+    'NEVER embedded_hal::digital::v2 — that is the removed 0.2 API and does not exist here.',
+  'Call ONLY the real public functions shown in the crate modules. Do not invent methods or fields.',
+  'Error handling: propagate with `?` or discard with `let _ = ...`. NEVER construct an associated ' +
+    'error variant such as `I2C::Error::Other` — those associated error types have no known variants.',
+  'Only reference peripherals whose module is present below. No `main`, no `#[entry]`, ' +
+    'no panic handler — this is a library module (src/app.rs).',
+].map((r, i) => `${i + 1}. ${r}`).join('\n')
+
+// Golden example — the correct SHAPE (imports, generic bounds, error handling)
+// for a representative peripheral. Board-agnostic: the model adapts it to
+// whatever modules THIS board actually has.
+const FW_GOLDEN = `\`\`\`rust
+#![allow(dead_code)]
+use embedded_hal::i2c::I2c;
+use embedded_hal::delay::DelayNs;
+
+/// Owns the peripherals present on the board, generic over the concrete HAL types.
+pub struct Controller<I2C, D> {
+    sensor: crate::tempsensor::TempSensor<I2C>,
+    delay: D,
+    last_milli_c: i32,
+}
+
+impl<I2C: I2c, D: DelayNs> Controller<I2C, D> {
+    pub fn new(sensor: crate::tempsensor::TempSensor<I2C>, delay: D) -> Self {
+        Self { sensor, delay, last_milli_c: 0 }
+    }
+    /// Bring up every peripheral; false if one does not answer.
+    pub fn init(&mut self) -> Result<bool, I2C::Error> {
+        self.sensor.probe()
+    }
+    /// One control iteration: read the sensor, keep the latest value, pace the loop.
+    pub fn control_step(&mut self) -> Result<(), I2C::Error> {
+        self.last_milli_c = self.sensor.read_milli_c()?;
+        self.delay.delay_ms(100);
+        Ok(())
+    }
+    pub fn latest_milli_c(&self) -> i32 { self.last_milli_c }
+}
+\`\`\``
+
 type PipelineEvent =
   | { type: 'stage'; id: string; state: string; failReason?: string }
   | { type: 'log'; stage: string; text: string; level?: string }
@@ -994,23 +1048,27 @@ export async function GET(req: Request) {
                 .map((f) => `// ===== src/${f} =====\n${fs.readFileSync(path.join(srcDir, f), 'utf8')}`)
                 .join('\n\n')
               const sys =
-                'You are an expert embedded Rust engineer writing no_std firmware. ' +
-                'Output ONLY the Rust source of one module file, no prose, no markdown fences.'
+                'You are an expert embedded Rust engineer writing no_std firmware for an RP2040 ' +
+                '(thumbv6m-none-eabi) against embedded-hal 1.0. Output ONLY the Rust source of ' +
+                'src/app.rs — no prose, no markdown fences.\n\n' +
+                `HARD RULES (each is a real, common cause of a failed build):\n${FW_RULES}\n\n` +
+                `GOLDEN EXAMPLE — the correct SHAPE for a board with an I2C sensor. Study the imports, ` +
+                `the generic bounds, and the error handling, then write the equivalent for THIS board's ` +
+                `actual modules:\n${FW_GOLDEN}`
               const ask =
-                `Target: RP2040 (thumbv6m-none-eabi), no_std, embedded-hal 1.0 only ` +
-                `(NO concrete HAL crate, NO runtime, NO new dependencies).\n` +
                 `Board: ${composeMode ? composeSpec?.boardClass : 'FL-1 relay/probe matrix'}.\n\n` +
-                `The crate provides these modules — use ONLY their real public functions, do not redefine them:\n\n` +
+                `The crate provides these modules — call ONLY their real public functions:\n\n` +
                 `${apiDump}\n\n` +
-                `A working baseline src/app.rs already exists (compiles):\n\n${(appBaseline ?? '').slice(0, 1400)}\n\n` +
-                `Write an IMPROVED src/app.rs: a richer but still-correct control loop over the SAME peripherals. Rules:\n` +
-                `- no_std; reference only crate::{${mods.map((m) => m.replace('.rs', '')).join(', ')}} and embedded-hal 1.0 / embedded-io traits.\n` +
-                `- Use the exact generic bounds shown in the modules above (SPI: SpiDevice, RST: OutputPin, ` +
-                `I2C: I2c, PWM: SetDutyCycle, D: DelayNs, R: embedded_io::Read, S: embedded_io::Read + Write).\n` +
-                `- Do NOT assume peripherals that are not present above (no motors/radio unless a module exists).\n` +
-                `- No main, no #[entry], no panic handler — this is a library module. It MUST compile. Return only src/app.rs.`
+                `A deterministic baseline src/app.rs already compiles (reference for the exact call/bound style):\n\n` +
+                `${(appBaseline ?? '').slice(0, 1400)}\n\n` +
+                `Write an improved src/app.rs following the GOLDEN EXAMPLE's shape: a Controller struct ` +
+                `owning the peripherals that exist above (generic over their concrete HAL types with the ` +
+                `EXACT bounds each module uses), with new(...), init(&mut self) bringing up each peripheral, ` +
+                `and control_step(&mut self) running one realistic iteration. ` +
+                `Only reference crate::{${mods.map((m) => m.replace('.rs', '')).join(', ')}}. ` +
+                `It MUST compile. Return only src/app.rs.`
 
-              log('firmware', 'app firmware: frontier model enhancing the control loop…')
+              log('firmware', `app firmware: ${FW_MODEL} enhancing the control loop…`)
               let appOk = false
               let provider = ''
               let lastErr = ''
@@ -1020,7 +1078,7 @@ export async function GET(req: Request) {
                   attempt === 0
                     ? ask
                     : `${ask}\n\nYour previous src/app.rs failed to compile:\n${lastErr.slice(0, 1800)}\n\nReturn a corrected src/app.rs (code only).`
-                const llm = await callLLMText(sys, user)
+                const llm = await callLLMText(sys, user, { model: FW_MODEL })
                 provider = llm.provider
                 fs.writeFileSync(appPath, extractRust(llm.text))
                 const ab = await exec('firmware', CARGO, ['build', '--release'], { cwd: fwDir })
