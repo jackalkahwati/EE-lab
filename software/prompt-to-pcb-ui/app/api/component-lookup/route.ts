@@ -34,7 +34,7 @@ const QUERY = `query ($q: String!) {
     results { part {
       mpn manufacturer { name }
       medianPrice1000 { price currency }
-      totalAvailQty
+      totalAvail
       sellers(authorizedOnly: true) { company { name } offers { inventoryLevel prices { quantity price currency } } }
       similarParts { mpn manufacturer { name } }
     } }
@@ -57,7 +57,7 @@ async function lookup(token: string, mpn: string) {
   return {
     mpn: part.mpn, found: true,
     manufacturer: part.manufacturer?.name,
-    stock: part.totalAvailQty ?? bestOffer?.stock ?? 0,
+    stock: part.totalAvail ?? bestOffer?.stock ?? 0,
     priceUsd: part.medianPrice1000?.price ?? bestOffer?.price ?? null,
     seller: bestOffer?.seller ?? null,
     alternates: (part.similarParts ?? []).slice(0, 3).map((p: any) => p.mpn),
