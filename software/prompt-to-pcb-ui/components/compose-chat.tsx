@@ -104,7 +104,10 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
       if (d.error) throw new Error(d.error)
       if (d.changed === false) { setErr(d.note || 'No block-level change needed for this request.'); setPhase('idle') }
       else {
-        setRevSpec({ blocks: d.blocks ?? [], boardClass: d.board_class ?? '', note: d.note ?? '', request: req })
+        // /api/revise returns the descriptive name as `boardClass` (camelCase);
+        // reading `board_class` here silently dropped it, so the run stored an
+        // empty boardClass and fell back to the raw request text as its name.
+        setRevSpec({ blocks: d.blocks ?? [], boardClass: d.boardClass ?? '', note: d.note ?? '', request: req })
         setPhase('revReady')
       }
     } catch (e) { setErr(String(e)); setPhase('idle') } finally { setLoading(false) }
