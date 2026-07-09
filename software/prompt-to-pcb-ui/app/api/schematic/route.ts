@@ -34,7 +34,7 @@ function symType(ref: string): string {
   return 'generic'
 }
 
-function toYosys(netlistText: string) {
+function toYosys(netlistText: string, refPart: Record<string, string> = {}) {
   const nets: { name: string; pins: { ref: string; pin: string }[] }[] = []
   for (const raw of netlistText.split('\n')) {
     const m = raw.match(/^(\S+)\s{2,}(.+)$/)
@@ -92,10 +92,27 @@ export async function GET(req: Request) {
     const ato = JSON.parse(fs.readFileSync(atoPath, 'utf8'))
     const netText = (ato.find((f: any) => /netlist/i.test(f.name))?.content) ?? ''
     if (!netText) return Response.json({ error: 'run has no netlist' }, { status: 422 })
-    const yosys = toYosys(netText)
+    // map each ref → its part name from the BOM (grouped refs like "R30, R31")
+    const refPart: Record<string, string> = {}
+    try {
+      const bom = JSON.parse(fs.readFileSync(path.join(RUNS, run, 'data', 'bom.json'), 'utf8'))
+      for (const l of (Array.isArray(bom) ? bom : []))
+        for (const r of String(l.ref).split(/,\s*/)) if (r) refPart[r] = l.part
+    } catch { /* no bom → refs only */ }
+    const yosys = toYosys(netText, refPart)
     const skin = fs.readFileSync(SKIN, 'utf8')
-    const svg: string = await new Promise((resolve, reject) =>
+    let svg: string = await new Promise((resolve, reject) =>
       netlistsvg.render(skin, yosys, (err: any, out: string) => (err ? reject(err) : resolve(out))))
+    // netlistsvg labels every part with its symbol TYPE (resistor_v / generic);
+    // rewrite each label to the real reference (encoded in class="cell_<ref>"),
+    // and the value line to the part name from the BOM.
+    svg = svg.replace(/<text\b([^>]*)>([^<]*)<\/text>/g, (full, attrs) => {
+      const m = attrs.match(/cell_([A-Za-z0-9]+)/)
+      if (!m) return full
+      if (/s:attribute="ref"/.test(attrs)) return `<text${attrs}>${m[1]}</text>`
+      if (/s:attribute="value"/.test(attrs)) return `<text${attrs}>${(refPart[m[1]] ?? '').slice(0, 20)}</text>`
+      return full
+    })
     cache.set(run, { mtime, svg })
     return new Response(svg, { headers: { 'content-type': 'image/svg+xml' } })
   } catch (e: any) {
