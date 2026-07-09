@@ -181,6 +181,13 @@ export default function Compose2Page() {
           onSelectThread={(id) => { setSelectedId(id); setNewDesign(false) }}
           onNew={() => setNewDesign(true)}
           onRunComplete={onRunComplete}
+          onRename={async (id, name) => {
+            await fetch('/api/runs/rename', {
+              method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ id, name }),
+            }).catch(() => {})
+            await refreshRuns()
+          }}
         />
       </aside>
 

@@ -12,7 +12,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { llmHeaders } from '@/components/llm-settings'
 import { STAGE_DEFS, STAGE_PREFIX, type StageId, type StageState } from '@/lib/firstlight'
-import { Plus, Menu, Loader2, Check, X, Circle, Square } from 'lucide-react'
+import { Plus, Menu, Loader2, Check, X, Circle, Square, Pencil } from 'lucide-react'
 
 type Answer = { question: string; answer: string }
 type Question = { type: 'question'; question: string; boardClass?: string; hints?: string[] }
@@ -27,13 +27,14 @@ function b64(json: string) {
     String.fromCharCode(parseInt(h, 16))))
 }
 
-export function ComposeChat({ threads, activeId, newDesign, onSelectThread, onNew, onRunComplete }: {
+export function ComposeChat({ threads, activeId, newDesign, onSelectThread, onNew, onRunComplete, onRename }: {
   threads: { id: string; label: string }[]
   activeId: string
   newDesign?: boolean
   onSelectThread: (id: string) => void
   onNew: () => void
   onRunComplete: (runDir: string, id: string) => void
+  onRename?: (id: string, name: string) => void
 }) {
   const [phase, setPhase] = useState<Phase>('idle')
   const [request, setRequest] = useState('')
@@ -111,6 +112,15 @@ export function ComposeChat({ threads, activeId, newDesign, onSelectThread, onNe
   const activeLabel = newDesign
     ? 'New design'
     : threads.find((t) => t.id === activeId)?.label ?? 'thread'
+
+  const [editing, setEditing] = useState(false)
+  const [editValue, setEditValue] = useState('')
+  const canRename = !newDesign && !!activeId && !!onRename
+  function saveName() {
+    const v = editValue.trim()
+    if (v && v !== activeLabel && onRename && activeId) onRename(activeId, v)
+    setEditing(false)
+  }
   const building = phase === 'building'
 
   const StageIcon = ({ st }: { st: StageState | undefined }) =>
@@ -123,13 +133,28 @@ export function ComposeChat({ threads, activeId, newDesign, onSelectThread, onNe
     <div className="flex h-full flex-col">
       {/* threads header */}
       <div className="relative flex items-center gap-2 border-b border-border px-3 py-2">
-        <button type="button" onClick={() => setThreadsOpen((v) => !v)}
-          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-sm px-1 py-0.5 text-left hover:bg-secondary/50">
-          <Menu className="size-4 shrink-0 text-muted-foreground" />
-          <span className={cn('min-w-0 flex-1 truncate text-[11px]',
-            newDesign ? 'italic text-muted-foreground' : 'font-medium')}>{activeLabel}</span>
-          <span className="shrink-0 font-mono text-[9px] text-muted-foreground">{threads.length}</span>
-        </button>
+        {editing ? (
+          <input autoFocus value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') saveName(); else if (e.key === 'Escape') setEditing(false) }}
+            onBlur={saveName}
+            className="min-w-0 flex-1 rounded-sm border border-primary/50 bg-background px-1.5 py-0.5 text-[11px] outline-none" />
+        ) : (
+          <button type="button" onClick={() => setThreadsOpen((v) => !v)}
+            className="flex min-w-0 flex-1 items-center gap-1.5 rounded-sm px-1 py-0.5 text-left hover:bg-secondary/50">
+            <Menu className="size-4 shrink-0 text-muted-foreground" />
+            <span className={cn('min-w-0 flex-1 truncate text-[11px]',
+              newDesign ? 'italic text-muted-foreground' : 'font-medium')}>{activeLabel}</span>
+            <span className="shrink-0 font-mono text-[9px] text-muted-foreground">{threads.length}</span>
+          </button>
+        )}
+        {!editing && canRename && (
+          <button type="button" title="rename board"
+            onClick={() => { setEditValue(activeLabel); setEditing(true) }}
+            className="shrink-0 rounded-sm p-1 text-muted-foreground hover:text-foreground">
+            <Pencil className="size-3" />
+          </button>
+        )}
         <button type="button" onClick={reset}
           className="flex shrink-0 items-center gap-1 rounded-sm border border-primary/40 bg-primary/10 px-2 py-1 text-[11px] text-primary hover:bg-primary/20">
           <Plus className="size-3" /> New

@@ -99,8 +99,13 @@ export async function GET(req: Request) {
     const src = String(board.source || '')
     const lrRunId = String(lr.runId || '')
     const lrIsThisRun = !lrRunId || lrRunId === id
+    // a user-set name (public/runs/<id>/name.txt) always wins — the board was
+    // explicitly renamed. Otherwise fall back to the derived identity.
+    let customName = ''
+    try { customName = fs.readFileSync(path.join(runsDir, id, 'name.txt'), 'utf8').trim() } catch { /* none */ }
     let name: string
-    if (src.includes('dut-power')) name = 'FL-1 DUT Power + Fast-Trip, Rev A'
+    if (customName) name = customName
+    else if (src.includes('dut-power')) name = 'FL-1 DUT Power + Fast-Trip, Rev A'
     else if (src.includes('rev-a-routed')) name = 'FL-1 Rev A, live board'
     else if (lrIsThisRun) name = String(lr.composeSpec?.boardClass || lr.prompt || id)
     else name = id // report belongs to another run, don't borrow its name
