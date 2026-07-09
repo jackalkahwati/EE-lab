@@ -116,10 +116,14 @@ function toYosys(nets: Net[], refPart: Record<string, string> = {}) {
   for (const n of nets) for (const p of n.pins) (comps[p.ref] ??= []).push({ pin: p.pin, net: n.name })
   const cells: Record<string, any> = {}
   for (const [ref, pins] of Object.entries(comps)) {
-    const t = symType(ref)
+    // a two-terminal symbol (r_v/c_v/d_v…) needs exactly its A/B (or +/-) ports;
+    // if the netlist only connects one pad, render it as the generic box instead
+    // so the cell type and its ports agree (else netlistsvg crashes on the
+    // missing port). e.g. a resistor with a single connected pad.
+    const t = symType(ref) !== 'generic' && pins.length >= 2 ? symType(ref) : 'generic'
     const connections: Record<string, number[]> = {}
     const port_directions: Record<string, string> = {}
-    if (t !== 'generic' && pins.length >= 2) {
+    if (t !== 'generic') {
       // two-terminal symbol: use the port names the skin symbol actually
       // defines (diodes are '+'/'-'; R/C/L/xtal are A/B) or netlistsvg crashes
       const [pa, pb] = TWO_PIN_PORTS[t] ?? ['A', 'B']
