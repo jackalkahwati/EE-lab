@@ -36,7 +36,7 @@ import { FL1ReadinessPanel } from '@/components/fl1-readiness-panel'
 import { BoardObjects } from '@/components/board-objects'
 import { ReviewsPill } from '@/components/board-reviews'
 import {
-  BookOpen, ClipboardCheck, Eye, LayoutDashboard, ListTree, Maximize2, Package,
+  BookOpen, ClipboardCheck, Cpu, Eye, LayoutDashboard, ListTree, Maximize2, Package,
   Receipt, ScrollText, Wrench,
 } from 'lucide-react'
 
@@ -62,6 +62,9 @@ export default function Compose2Page() {
   const [realBoard, setRealBoard] = useState<RealBoard | null>(null)
   const [tab, setTab] = useState<Tab>('Overview')
   const [view, setView] = useState<'3d' | 'layout' | 'schematic'>('3d')
+  // "+New" clears the stage to a blank slate (no board) while the chat stays
+  // active; the board reappears when the new design finishes building.
+  const [newDesign, setNewDesign] = useState(false)
   const stageRef = useRef<HTMLDivElement>(null)
   const toggleFullscreen = () => {
     const el = stageRef.current
@@ -78,6 +81,7 @@ export default function Compose2Page() {
     const disk = await refreshRuns()
     if (Array.isArray(disk) && disk.find((r: Run) => r.id === id)) setSelectedId(id)
     const d = await loadRealBoard(runDir); if (d) setRealBoard(d)
+    setNewDesign(false) // the freshly-built board now takes the stage
   }
 
   // resizable panes (drag the dividers); persisted per browser
@@ -173,8 +177,8 @@ export default function Compose2Page() {
         <ComposeChat
           threads={runs.map((r) => ({ id: r.id, label: r.title ?? r.id }))}
           activeId={selectedId}
-          onSelectThread={setSelectedId}
-          onNew={() => {}}
+          onSelectThread={(id) => { setSelectedId(id); setNewDesign(false) }}
+          onNew={() => setNewDesign(true)}
           onRunComplete={onRunComplete}
         />
       </aside>
@@ -184,8 +188,8 @@ export default function Compose2Page() {
       {/* CENTER — the board as hero */}
       <section className="flex min-w-0 flex-1 flex-col">
         <div className="flex items-center gap-3 border-b border-border px-3 py-2">
-          {isReal && tab !== 'Overview' && <ReviewsPill real={real} />}
-          {isReal && real?.board?.bomTotal ? (
+          {!newDesign && isReal && tab !== 'Overview' && <ReviewsPill real={real} />}
+          {!newDesign && isReal && real?.board?.bomTotal ? (
             <span className="rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground"
               title="component BOM estimate — not fab, not a quote">
               ~${Number(real.board.bomTotal).toFixed(2)} BOM
@@ -214,15 +218,24 @@ export default function Compose2Page() {
         </div>
         <div ref={stageRef} className="min-h-0 flex-1 bg-background">
           <ErrorBoundary>
-            {view === '3d' && (
-              <Board3D basePath={boardBase} fallback={
-                <div className="flex h-full items-center justify-center text-xs text-muted-foreground">no 3D model for this run</div>} />
+            {newDesign ? (
+              <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-muted-foreground">
+                <Cpu className="size-9 opacity-25" />
+                <span className="text-xs">New design — describe a board on the left to begin.</span>
+              </div>
+            ) : (
+              <>
+                {view === '3d' && (
+                  <Board3D basePath={boardBase} fallback={
+                    <div className="flex h-full items-center justify-center text-xs text-muted-foreground">no 3D model for this run</div>} />
+                )}
+                {view === 'layout' && (
+                  <BoardCanvas key={selectedRun.id} run={selectedRun}
+                    realBoard={isReal ? real?.board : null} basePath={boardBase} />
+                )}
+                {view === 'schematic' && <BoardSchematic runDir={selectedRunDir ?? null} />}
+              </>
             )}
-            {view === 'layout' && (
-              <BoardCanvas key={selectedRun.id} run={selectedRun}
-                realBoard={isReal ? real?.board : null} basePath={boardBase} />
-            )}
-            {view === 'schematic' && <BoardSchematic runDir={selectedRunDir ?? null} />}
           </ErrorBoundary>
         </div>
       </section>
@@ -247,23 +260,31 @@ export default function Compose2Page() {
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="min-h-0 flex-1 overflow-y-auto">
             <ErrorBoundary>
-              {tab === 'Overview' && <RunOverview runId={selectedRun.runDir ? selectedRun.id : null} run={selectedRun} />}
-              {tab === 'Objects' && <BoardObjects real={real} />}
-              {tab === 'Artifacts' && <ArtifactExplorer runId={selectedRun.runDir ? selectedRun.id : null} />}
-              {tab === 'Code' && <CodeViewer key={isReal ? 'real' : 'seed'} files={isReal ? real?.ato : null} />}
-              {tab === 'BOM' && <BomTable lines={isReal ? real?.bom : null} />}
-              {tab === 'Checks' && <BoardChecks real={real} />}
-              {tab === 'Constraints' && <ConstraintsPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
-              {tab === 'Pinout' && <PinoutPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
-              {tab === 'Advanced' && <AdvancedRoutingPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
-              {tab === 'Ingest' && <IngestPanel />}
-              {tab === 'Patterns' && <PatternsPanel />}
-              {tab === 'FL-1 Ready' && <FL1ReadinessPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
-              {tab === 'Recovery' && <RecoveryPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
-              {tab === 'Assembly' && <AssemblyPanel runId={selectedRun.runDir ? selectedRun.id : null} fabZip={null} />}
-              {tab === 'Review' && <ReviewPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
-              {tab === 'FL-1' && <FL1ValidationView runId={selectedRun.runDir ? selectedRun.id : null} />}
-              {tab === 'Order' && <ProcurementPanel real={real} runDir={selectedRunDir ?? null} />}
+              {newDesign ? (
+                <div className="flex h-full items-center justify-center p-6 text-center text-xs text-muted-foreground">
+                  No board yet — the overview appears once your new design builds.
+                </div>
+              ) : (
+                <>
+                  {tab === 'Overview' && <RunOverview runId={selectedRun.runDir ? selectedRun.id : null} run={selectedRun} />}
+                  {tab === 'Objects' && <BoardObjects real={real} />}
+                  {tab === 'Artifacts' && <ArtifactExplorer runId={selectedRun.runDir ? selectedRun.id : null} />}
+                  {tab === 'Code' && <CodeViewer key={isReal ? 'real' : 'seed'} files={isReal ? real?.ato : null} />}
+                  {tab === 'BOM' && <BomTable lines={isReal ? real?.bom : null} />}
+                  {tab === 'Checks' && <BoardChecks real={real} />}
+                  {tab === 'Constraints' && <ConstraintsPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
+                  {tab === 'Pinout' && <PinoutPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
+                  {tab === 'Advanced' && <AdvancedRoutingPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
+                  {tab === 'Ingest' && <IngestPanel />}
+                  {tab === 'Patterns' && <PatternsPanel />}
+                  {tab === 'FL-1 Ready' && <FL1ReadinessPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
+                  {tab === 'Recovery' && <RecoveryPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
+                  {tab === 'Assembly' && <AssemblyPanel runId={selectedRun.runDir ? selectedRun.id : null} fabZip={null} />}
+                  {tab === 'Review' && <ReviewPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
+                  {tab === 'FL-1' && <FL1ValidationView runId={selectedRun.runDir ? selectedRun.id : null} />}
+                  {tab === 'Order' && <ProcurementPanel real={real} runDir={selectedRunDir ?? null} />}
+                </>
+              )}
             </ErrorBoundary>
           </div>
         </div>
