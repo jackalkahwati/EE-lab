@@ -118,7 +118,7 @@ export default function IntegrationsPage() {
       {/* CAD export — real handoff via neutral formats (Altium · OrCAD/Allegro · CAM) */}
       <div className="mb-4 rounded-md border border-primary/30 bg-primary/[0.03]">
         <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-          <span className="text-xs font-semibold">Export to Altium / OrCAD / Allegro</span>
+          <span className="text-xs font-semibold">Export to Altium / OrCAD · Allegro / Xpedition / Fusion</span>
           <span className="rounded-sm border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[9px] text-emerald-500">
             live
           </span>
@@ -144,11 +144,11 @@ export default function IntegrationsPage() {
         </div>
         <p className="border-t border-border px-3 py-2 text-[9px] text-muted-foreground">
           Generates real files with kicad-cli and streams them to you: IPC-2581
-          and ODB++ import into both Altium (File → Import Wizard) and Cadence
-          Allegro. Native <span className="font-mono">.PcbDoc</span> / Allegro <span className="font-mono">.brd</span> write is
-          not offered — those are proprietary binaries with no reliable open
-          format, and faking one would be dishonest. Import back via KiCad's
-          built-in Altium importer (GUI).
+          and ODB++ import into Altium (Import Wizard), Cadence OrCAD/Allegro,
+          Siemens Xpedition, and Autodesk Fusion Electronics. Native vendor
+          binaries (<span className="font-mono">.PcbDoc</span>, Allegro <span className="font-mono">.brd</span>, Xpedition <span className="font-mono">.pcb</span>) write is
+          not offered — those are proprietary with no reliable open format, and
+          faking one would be dishonest. Import back via KiCad's Altium importer (GUI).
         </p>
       </div>
 

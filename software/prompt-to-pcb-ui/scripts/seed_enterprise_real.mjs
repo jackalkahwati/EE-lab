@@ -90,6 +90,8 @@ org.integrations = {
     { name: 'KiCad', kind: 'native', status: 'native', io: 'design · route · DRC · fab package' },
     { name: 'Altium Designer', kind: 'connector', status: 'supported', io: 'export → IPC-2581 / ODB++ (Import Wizard); import via KiCad Altium plugin' },
     { name: 'Cadence OrCAD / Allegro', kind: 'connector', status: 'supported', io: 'export → IPC-2581 / ODB++ (Allegro import)' },
+    { name: 'Siemens Xpedition', kind: 'connector', status: 'supported', io: 'export → IPC-2581 / ODB++ (native import)' },
+    { name: 'Autodesk Fusion Electronics', kind: 'connector', status: 'supported', io: 'export → IPC-2581 / ODB++ (import)' },
     { name: 'Specctra DSN / SES', kind: 'format', status: 'supported', io: 'router interchange (flroute)' },
     { name: 'IPC-2581', kind: 'format', status: 'supported', io: 'export (kicad-cli) — Altium / most CAM' },
     { name: 'ODB++', kind: 'format', status: 'supported', io: 'export (kicad-cli) — Altium / most CAM' },
