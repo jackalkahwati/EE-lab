@@ -27,9 +27,10 @@ function b64(json: string) {
     String.fromCharCode(parseInt(h, 16))))
 }
 
-export function ComposeChat({ threads, activeId, onSelectThread, onNew, onRunComplete }: {
+export function ComposeChat({ threads, activeId, newDesign, onSelectThread, onNew, onRunComplete }: {
   threads: { id: string; label: string }[]
   activeId: string
+  newDesign?: boolean
   onSelectThread: (id: string) => void
   onNew: () => void
   onRunComplete: (runDir: string, id: string) => void
@@ -106,7 +107,10 @@ export function ComposeChat({ threads, activeId, onSelectThread, onNew, onRunCom
 
   function stop() { esRef.current?.close(); esRef.current = null; setPhase('done') }
 
-  const activeLabel = threads.find((t) => t.id === activeId)?.label ?? 'thread'
+  // A brand-new design has no board yet, so show no run name until it builds.
+  const activeLabel = newDesign
+    ? 'New design'
+    : threads.find((t) => t.id === activeId)?.label ?? 'thread'
   const building = phase === 'building'
 
   const StageIcon = ({ st }: { st: StageState | undefined }) =>
@@ -122,7 +126,8 @@ export function ComposeChat({ threads, activeId, onSelectThread, onNew, onRunCom
         <button type="button" onClick={() => setThreadsOpen((v) => !v)}
           className="flex min-w-0 flex-1 items-center gap-1.5 rounded-sm px-1 py-0.5 text-left hover:bg-secondary/50">
           <Menu className="size-4 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1 truncate text-[11px] font-medium">{activeLabel}</span>
+          <span className={cn('min-w-0 flex-1 truncate text-[11px]',
+            newDesign ? 'italic text-muted-foreground' : 'font-medium')}>{activeLabel}</span>
           <span className="shrink-0 font-mono text-[9px] text-muted-foreground">{threads.length}</span>
         </button>
         <button type="button" onClick={reset}

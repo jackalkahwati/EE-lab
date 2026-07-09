@@ -175,8 +175,9 @@ export default function Compose2Page() {
       {/* LEFT — conversation (real interview + live agent step feed) */}
       <aside style={{ width: leftW }} className="flex shrink-0 flex-col border-r border-border">
         <ComposeChat
-          threads={runs.map((r) => ({ id: r.id, label: r.title ?? r.id }))}
+          threads={runs.map((r) => ({ id: r.id, label: r.name || r.id }))}
           activeId={selectedId}
+          newDesign={newDesign}
           onSelectThread={(id) => { setSelectedId(id); setNewDesign(false) }}
           onNew={() => setNewDesign(true)}
           onRunComplete={onRunComplete}
