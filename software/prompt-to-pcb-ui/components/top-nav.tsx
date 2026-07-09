@@ -12,7 +12,6 @@ import { cn } from '@/lib/utils'
 const LINKS: { href: string; label: string; hint: string }[] = [
   { href: '/', label: 'Programs', hint: 'board-program portfolio' },
   { href: '/compose', label: 'Compose', hint: 'design tool' },
-  { href: '/compose2', label: 'Compose 2', hint: 'new three-pane layout (preview)' },
 ]
 
 export function TopNav() {
@@ -27,7 +26,7 @@ export function TopNav() {
     <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur">
       <div className="flex h-11 items-center gap-4 px-4">
         <Link href="/" className="flex items-center">
-          <span className="text-sm font-semibold tracking-tight">FirstLight Compose</span>
+          <span className="text-sm font-semibold tracking-tight">Firstlight</span>
         </Link>
         <nav className="flex items-center gap-1" aria-label="Primary">
           {LINKS.map((l) => (

@@ -12,7 +12,7 @@ const jetbrainsMono = JetBrains_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'FirstLight Compose, Prompt to PCBA',
+  title: 'Firstlight, Prompt to PCBA',
   description:
     'Turn a natural-language hardware request into a fabrication-ready PCB through a fixed 4-stage pipeline with hard quality gates.',
   generator: 'v0.app',

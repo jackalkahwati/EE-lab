@@ -20,6 +20,13 @@ const nextConfig = {
   // build, and a stale document pointing at deleted chunks throws
   // "SyntaxError: Unexpected token '<'" (HTML served where JS was expected).
   // Hashed /_next/static assets stay immutable-cacheable as usual.
+  // /compose2 was the preview route that became the primary /compose page
+  // (2026-07-09). Keep old links/bookmarks working.
+  async redirects() {
+    return [
+      { source: '/compose2', destination: '/compose', permanent: true },
+    ]
+  },
   async headers() {
     return [
       {

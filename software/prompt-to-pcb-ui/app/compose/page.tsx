@@ -1,24 +1,26 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+/**
+ * Compose — the three-pane design tool (Flux-informed). This is the product's
+ * primary workspace; it superseded the older tabbed /compose page (deprecated
+ * 2026-07-09, the /compose2 preview promoted in its place).
+ *   LEFT   conversation: interview → build a new board, or revise the one on
+ *          screen; thread switcher + live step feed
+ *   CENTER the board as the hero: 3D by default, 2D/layers/schematic a toggle
+ *   RIGHT  the journey collapsed to a vertical phase rail + phase panel
+ * Backed by the real panels + loadRealBoard + /api/runs.
+ */
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
-import {
-  STAGE_DEFS,
-  STAGE_PREFIX,
-  type Run,
-  type StageId,
-  type StageState,
-} from '@/lib/firstlight'
 import { loadRealBoard, type RealBoard } from '@/lib/real-board'
-import { RunHistory } from '@/components/run-history'
-import { PromptComposer } from '@/components/prompt-composer'
-import { PipelineTracker } from '@/components/pipeline-tracker'
+import { ComposeChat } from '@/components/compose-chat'
 import { BoardCanvas } from '@/components/board-canvas'
+import { Board3D } from '@/components/board-3d'
 import { CodeViewer } from '@/components/code-viewer'
 import { BomTable } from '@/components/bom-table'
-import { GatesLogs } from '@/components/gates-logs'
-import { MetricsRail } from '@/components/metrics-rail'
-import { OrderPanel } from '@/components/order-panel'
+import { BoardChecks } from '@/components/board-checks'
+import { BoardSchematic } from '@/components/board-schematic'
+import { ProcurementPanel } from '@/components/procurement-panel'
 import { RecoveryPanel } from '@/components/recovery-panel'
 import { ConstraintsPanel } from '@/components/constraints-panel'
 import { AssemblyPanel } from '@/components/assembly-panel'
@@ -27,695 +29,309 @@ import { IngestPanel } from '@/components/ingest-panel'
 import { PatternsPanel } from '@/components/patterns-panel'
 import { AdvancedRoutingPanel } from '@/components/advanced-routing-panel'
 import { FL1ValidationView } from '@/components/fl1-validation-view'
-import { BuildStatus } from '@/components/build-status'
-import { ErrorBoundary } from '@/components/error-boundary'
-import { InterviewPanel } from '@/components/interview-panel'
-import { WelcomeHero } from '@/components/welcome-hero'
-import { ReviewPanel } from '@/components/review-panel'
-import { ReviseDialog } from '@/components/revise-dialog'
 import { FL1Loop } from '@/components/fl1-loop'
+import { ErrorBoundary } from '@/components/error-boundary'
+import { ReviewPanel } from '@/components/review-panel'
 import { RunOverview } from '@/components/run-overview'
 import { ArtifactExplorer } from '@/components/artifact-explorer'
 import { FL1ReadinessPanel } from '@/components/fl1-readiness-panel'
+import { BoardObjects } from '@/components/board-objects'
+import { ReviewsPill } from '@/components/board-reviews'
+import {
+  Activity, BookOpen, ClipboardCheck, Cpu, Eye, Gauge, LayoutDashboard, ListTree, Maximize2,
+  Package, Receipt, ScrollText, Wrench,
+} from 'lucide-react'
 
-const TABS = ['Overview', 'Board', 'Code', 'Pinout', 'Constraints', 'Advanced', 'BOM', 'Assembly', 'Order', 'Checks', 'FL-1', 'Recovery', 'Review', 'Ingest', 'Patterns', 'FL-1 Ready', 'Artifacts'] as const
-type Tab = (typeof TABS)[number]
+type Run = any
+type Tab = string
 
-// Grouped workspace navigation, ordered as the enterprise board journey:
-// Design -> Review -> Quote -> Build -> Validate -> Learn. Review (design
-// gates + human review) and Quote (fab quote/order) are now first-class steps
-// rather than buried under Build/Validate. Every view is preserved and lives
-// in exactly one group, so the nav scales without overflow.
-const GROUPS: { name: string; views: Tab[] }[] = [
-  { name: 'Overview', views: ['Overview'] },
-  { name: 'Design', views: ['Board', 'Code', 'Pinout', 'Constraints', 'Advanced'] },
-  { name: 'Review', views: ['Checks', 'Review'] },
-  { name: 'Quote', views: ['Order'] },
-  { name: 'Build', views: ['BOM', 'Assembly'] },
-  { name: 'Validate', views: ['FL-1', 'Recovery'] },
-  { name: 'Learn', views: ['Ingest', 'Patterns', 'FL-1 Ready'] },
-  { name: 'Artifacts', views: ['Artifacts'] },
-]
-// Future phases — shown as disabled/not_generated so the roadmap is honest and
-// the structure scales, without ever implying the capability exists yet.
-const FUTURE_PHASES = [
-  'High-Speed Routing', 'Compute / RF', 'Benchmarks', 'Simulation / Signoff',
-  'Instrument Adapters', 'FL-1 Auto-Validation', 'Calibration', 'Manufacturing',
-  'Certification', 'Architecture Search', 'Multi-board', 'Production', 'Fleet Learning',
+// flat view list: one icon → one panel (Board lives in the center hero).
+// Two columns only — icons left, content right, no sub-tabs.
+const VIEWS: { tab: Tab; label: string; Icon: any }[] = [
+  { tab: 'Overview', label: 'Overview', Icon: LayoutDashboard },
+  { tab: 'Objects', label: 'Objects', Icon: ListTree },
+  { tab: 'Checks', label: 'Checks', Icon: ClipboardCheck },
+  { tab: 'Review', label: 'Review', Icon: Eye },
+  { tab: 'Order', label: 'Quote', Icon: Receipt },
+  { tab: 'BOM', label: 'BOM', Icon: Package },
+  { tab: 'Assembly', label: 'Assembly', Icon: Wrench },
+  { tab: 'FL-1', label: 'FL-1', Icon: Activity },
+  { tab: 'FL-1 Ready', label: 'Ready', Icon: Gauge },
+  { tab: 'Artifacts', label: 'Artifacts', Icon: ScrollText },
 ]
 
-interface PipelineEvent {
-  type: 'stage' | 'log' | 'design' | 'done' | 'error'
-  id?: StageId
-  state?: StageState
-  failReason?: string
-  stage?: StageId
-  text?: string
-  level?: 'info' | 'ok' | 'warn' | 'err'
-  status?: 'PASSED' | 'GATE FAILED'
-  message?: string
-  spec?: Record<string, unknown>
-  fabZip?: string
-  fwZip?: string
-  runDir?: string
-}
-
-export default function FirstLightPage() {
+export default function Compose2Page() {
   const [runs, setRuns] = useState<Run[]>([])
   const [selectedId, setSelectedId] = useState('')
-  const [collapsed, setCollapsed] = useState(false)
-  const [tab, setTab] = useState<Tab>('Overview')
-  const [group, setGroup] = useState('Overview')
-  const [roadmapOpen, setRoadmapOpen] = useState(false)
-  const [liveRunId, setLiveRunId] = useState<string | null>(null)
-  const [liveElapsed, setLiveElapsed] = useState<Record<string, number>>({})
   const [realBoard, setRealBoard] = useState<RealBoard | null>(null)
-  const [designSpec, setDesignSpec] = useState<Record<string, unknown> | null>(null)
-  const [fabZip, setFabZip] = useState<string | null>(null)
-  const [fwZip, setFwZip] = useState<string | null>(null)
-  const [interviewRequest, setInterviewRequest] = useState<string | null>(null)
-  const [showWelcome, setShowWelcome] = useState(false)
-  const [reviseRequest, setReviseRequest] = useState<string | null>(null)
-  const esRef = useRef<EventSource | null>(null)
-  const stageStartRef = useRef<Record<string, number>>({})
-  const currentStageRef = useRef<string | null>(null)
+  const [tab, setTab] = useState<Tab>('Overview')
+  const [view, setView] = useState<'3d' | 'layout' | 'schematic'>('3d')
+  // "+New" clears the stage to a blank slate (no board) while the chat stays
+  // active; the board reappears when the new design finishes building.
+  const [newDesign, setNewDesign] = useState(false)
+  // an FL-1 loop ECO gets dropped into the chat as a revision (single-pane flow)
+  const [revisePrefill, setRevisePrefill] = useState('')
+  const stageRef = useRef<HTMLDivElement>(null)
+  const toggleFullscreen = () => {
+    const el = stageRef.current
+    if (!el) return
+    if (document.fullscreenElement) document.exitFullscreen()
+    else el.requestFullscreen?.()
+  }
 
-  // restore persisted runs on mount (client-only, avoids hydration mismatch).
-  // Only restore runs WITHOUT a runDir: disk-backed runs (those with a runDir)
-  // are authoritative from /api/runs below, restoring them from localStorage is
-  // exactly what resurrected stale runs pointing at deleted snapshot dirs, which
-  // then rendered the wrong (shared-fallback) board under their unique id.
+  const refreshRuns = () =>
+    fetch('/api/runs').then((r) => (r.ok ? r.json() : { runs: [] }))
+      .then(({ runs: disk }: { runs: Run[] }) => { if (Array.isArray(disk)) setRuns(disk); return disk })
+      .catch(() => [])
+  const onRunComplete = async (runDir: string, id: string) => {
+    const disk = await refreshRuns()
+    if (Array.isArray(disk) && disk.find((r: Run) => r.id === id)) setSelectedId(id)
+    const d = await loadRealBoard(runDir); if (d) setRealBoard(d)
+    setNewDesign(false) // the freshly-built board now takes the stage
+  }
+
+  // resizable panes (drag the dividers); persisted per browser
+  const [leftW, setLeftW] = useState(288)
+  const [rightW, setRightW] = useState(480)
+  const dragRef = useRef<null | 'left' | 'right'>(null)
+
   useEffect(() => {
-    // deep link from the marketing site: /?prompt=<board description>
-    const qp = new URLSearchParams(window.location.search)
-    const deepPrompt = qp.get('prompt')
-    if (deepPrompt) {
-      window.history.replaceState({}, '', '/')
-      localStorage.setItem('fl-welcomed', '1')
-      setInterviewRequest(deepPrompt)
-    } else if (localStorage.getItem('fl-welcomed') !== '1') setShowWelcome(true)
-    try {
-      const saved = JSON.parse(localStorage.getItem('fl-runs') || 'null')
-      if (Array.isArray(saved) && saved.length) {
-        const transient = saved.filter(
-          (r: Run) => !r.runDir && /^run-\d{13}-\w+$/.test(r.id),
-        )
-        if (transient.length)
-          setRuns(
-            transient.map((r: Run) =>
-              r.status === 'RUNNING' ? { ...r, status: 'GATE FAILED' } : r,
-            ),
-          )
-      }
-    } catch {
-      /* ignore corrupt storage */
+    const l = Number(localStorage.getItem('c2-leftW'))
+    const r = Number(localStorage.getItem('c2-rightW'))
+    if (l >= 200) setLeftW(l)
+    if (r >= 280) setRightW(r)
+    const onMove = (e: MouseEvent) => {
+      if (!dragRef.current) return
+      if (dragRef.current === 'left') setLeftW(Math.min(600, Math.max(200, e.clientX)))
+      else setRightW(Math.min(760, Math.max(280, window.innerWidth - e.clientX)))
     }
-  }, [])
-
-  // disk is the source of truth for real runs: load every run that actually has
-  // a snapshot on disk (public/runs/<id>), each with its OWN id + board. Drop any
-  // prior run whose dir no longer exists so a unique id can never show a board
-  // that isn't its own.
-  useEffect(() => {
-    let cancelled = false
-    fetch('/api/runs')
-      .then((r) => (r.ok ? r.json() : { runs: [] }))
-      .then(({ runs: disk }: { runs: Run[] }) => {
-        if (cancelled || !Array.isArray(disk)) return
-        const ids = new Set(disk.map((r) => r.id))
-        setRuns((prev) => [
-          ...disk,
-          ...prev.filter((r) => !r.runDir && !ids.has(r.id)),
-        ])
-        if (disk.length > 0) setSelectedId(disk[0].id)
-      })
-      .catch(() => {})
+    const onUp = () => {
+      if (!dragRef.current) return
+      dragRef.current = null
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      // persist current widths
+      setLeftW((w) => { localStorage.setItem('c2-leftW', String(w)); return w })
+      setRightW((w) => { localStorage.setItem('c2-rightW', String(w)); return w })
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
     return () => {
-      cancelled = true
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
     }
   }, [])
 
-  // persist runs (skip while a run is live, its partial state is transient)
+  const startDrag = (which: 'left' | 'right') => (e: React.MouseEvent) => {
+    e.preventDefault()
+    dragRef.current = which
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+  }
+  const Handle = ({ which }: { which: 'left' | 'right' }) => (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      onMouseDown={startDrag(which)}
+      onDoubleClick={() => which === 'left' ? setLeftW(288) : setRightW(480)}
+      title="drag to resize · double-click to reset"
+      className="w-1 shrink-0 cursor-col-resize bg-border transition-colors hover:bg-primary/60"
+    />
+  )
+
+  // load real runs from disk (same source as /compose)
   useEffect(() => {
-    if (liveRunId) return
-    try {
-      localStorage.setItem('fl-runs', JSON.stringify(runs.slice(0, 30)))
-    } catch {
-      /* ignore quota / private mode */
-    }
-  }, [runs, liveRunId])
+    fetch('/api/runs').then((r) => (r.ok ? r.json() : { runs: [] }))
+      .then(({ runs: disk }: { runs: Run[] }) => {
+        if (Array.isArray(disk) && disk.length) {
+          setRuns(disk)
+          setSelectedId((cur) => cur || disk.find((r) => r.real)?.id || disk[0].id)
+        }
+      }).catch(() => {})
+  }, [])
 
-
-  const selectedRun = runs.find((r) => r.id === selectedId) ?? runs[0]
-
+  const selectedRun = useMemo(
+    () => runs.find((r) => r.id === selectedId) ?? runs[0], [runs, selectedId])
   const selectedRunDir = selectedRun?.runDir
   const selectedReal = selectedRun?.real
-  // Single source of truth: only treat the loaded board as the selected run's
-  // when it was loaded from THIS run's snapshot. Until the new run's snapshot
-  // finishes loading, `real` is null, so we never render one run's board, BOM,
-  // metrics or artifacts under a different run.
-  const real =
-    realBoard && realBoard.base === (selectedRunDir ?? '') ? realBoard : null
-  const isReal = selectedRun?.real === true && real !== null
-  // images for the selected run come from ITS snapshot, not the shared latest
-  const boardBase = selectedRunDir ? `${selectedRunDir}/board` : '/board'
 
-  // when the user switches to a real run, load THAT run's own artifact snapshot
-  // so the board view / metrics reflect the selected run (not the latest one)
+  // load the selected run's own snapshot
   useEffect(() => {
-    if (!selectedReal) return
+    if (!selectedReal) { setRealBoard(null); return }
     let cancelled = false
-    loadRealBoard(selectedRunDir ?? '').then((data) => {
-      if (data && !cancelled) setRealBoard(data)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [selectedId, selectedReal, selectedRunDir])
+    loadRealBoard(selectedRunDir ?? '').then((d) => { if (!cancelled) setRealBoard(d) })
+    return () => { cancelled = true }
+  }, [selectedReal, selectedRunDir])
 
-  /** REAL pipeline: placement → routing → validation via /api/pipeline/run */
-  const handleGenerate = useCallback(
-    (
-      prompt: string,
-      compose?: { blocks: string[]; boardClass: string },
-      rev?: { parentId: string; revNote: string },
-    ) => {
-      // unique per run: timestamp + random suffix so two runs started in the same
-      // millisecond can never collide on an id (and thus never share a run dir).
-      const id = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-      const base: Run = {
-        id,
-        name: compose
-          ? `${compose.boardClass} ${new Date().toTimeString().slice(0, 5)}`
-          : `FL-1 pipeline run ${new Date().toTimeString().slice(0, 5)}`,
-        parentId: rev?.parentId,
-        revNote: rev?.revNote,
-        timestamp: new Date().toISOString().slice(0, 16).replace('T', ' '),
-        status: 'RUNNING',
-        prompt,
-        stages: STAGE_DEFS.map((d) => ({
-          id: d.id,
-          state: 'pending' as StageState,
-          elapsedMs: 0,
-        })),
-        // a brand-new run starts with neutral metrics, never seeded from the
-        // previously selected board. Its real numbers arrive from its OWN
-        // snapshot when the pipeline finishes (metrics: data.run.metrics).
-        metrics: {
-          netsRouted: 0,
-          netsTotal: 0,
-          copperDefects: 0,
-          hpwl: 0,
-          hpwlHistory: [],
-          components: 0,
-          bomLines: 0,
-          boardSize: ', ',
-          layers: 0,
-          routeTimeSec: 0,
-        },
-        logs: [
-          {
-            stage: 'design',
-            prefix: 'run',
-            text: 'REAL run: placement → flroute → KiCad DRC on an isolated board copy',
-          },
-        ],
-      }
-      stageStartRef.current = {}
-      currentStageRef.current = null
-      setDesignSpec(null)
-      setFabZip(null)
-      setFwZip(null)
-      setRuns((prev) => [base, ...prev])
-      setSelectedId(id)
-      setLiveRunId(id)
-      setTab('Gates & Logs')
-
-      const update = (fn: (r: Run) => Run) =>
-        setRuns((prev) => prev.map((r) => (r.id === id ? fn(r) : r)))
-
-      let url = `/api/pipeline/run?prompt=${encodeURIComponent(prompt)}&runId=${encodeURIComponent(id)}`
-      if (rev) {
-        url += `&parent=${encodeURIComponent(rev.parentId)}&revNote=${encodeURIComponent(rev.revNote)}`
-      }
-      if (compose) {
-        const json = JSON.stringify({
-          blocks: compose.blocks,
-          boardClass: compose.boardClass,
-        })
-        // UTF-8-safe base64: btoa() only accepts Latin1, but interview-generated
-        // specs can contain non-ASCII (µ, ×, em-dash, curly quotes). Encode the
-        // UTF-8 bytes; the server decodes base64 -> utf8 to match.
-        const payload = btoa(
-          encodeURIComponent(json).replace(/%([0-9A-F]{2})/g, (_, h) =>
-            String.fromCharCode(parseInt(h, 16)),
-          ),
-        )
-        url += `&compose=1&spec=${encodeURIComponent(payload)}`
-      }
-      const es = new EventSource(url)
-      esRef.current = es
-
-      es.onmessage = (e) => {
-        const ev = JSON.parse(e.data) as PipelineEvent
-        if (ev.type === 'log' && ev.stage && ev.text) {
-          const { stage, text, level } = ev
-          update((r) => ({
-            ...r,
-            logs: [
-              ...r.logs,
-              { stage, prefix: STAGE_PREFIX[stage] ?? stage, text, level },
-            ],
-          }))
-        } else if (ev.type === 'stage' && ev.id) {
-          if (ev.state === 'running') {
-            stageStartRef.current[ev.id] = Date.now()
-            currentStageRef.current = ev.id
-          } else if (currentStageRef.current === ev.id) {
-            currentStageRef.current = null
-          }
-          update((r) => ({
-            ...r,
-            stages: r.stages.map((s) =>
-              s.id === ev.id
-                ? {
-                    ...s,
-                    state: ev.state as StageState,
-                    failReason: ev.failReason,
-                    elapsedMs:
-                      ev.state === 'running'
-                        ? 0
-                        : Date.now() - (stageStartRef.current[ev.id!] ?? Date.now()),
-                  }
-                : s,
-            ),
-          }))
-        } else if (ev.type === 'design') {
-          if (ev.spec) setDesignSpec(ev.spec)
-        } else if (ev.type === 'done') {
-          es.close()
-          esRef.current = null
-          setLiveRunId(null)
-          setLiveElapsed({})
-          setFabZip(ev.fabZip ?? null)
-          setFwZip(ev.fwZip ?? null)
-          update((r) => ({ ...r, status: ev.status ?? 'GATE FAILED' }))
-          // load THIS run's own artifact snapshot (/runs/<id>) so every run keeps
-          // its own board instead of all runs sharing the latest public/board
-          loadRealBoard(ev.runDir ?? '').then((data) => {
-            if (!data) return
-            setRealBoard(data)
-            setRuns((prev) =>
-              prev.map((r) =>
-                r.id === id
-                  ? { ...r, real: true, runDir: ev.runDir, metrics: data.run.metrics }
-                  : r,
-              ),
-            )
-          })
-        } else if (ev.type === 'error') {
-          update((r) => ({
-            ...r,
-            logs: [
-              ...r.logs,
-              {
-                stage: 'validation',
-                prefix: 'err',
-                text: ev.message ?? 'unknown pipeline error',
-                level: 'err',
-              },
-            ],
-          }))
-        }
-      }
-
-      es.onerror = () => {
-        if (esRef.current !== es) return
-        es.close()
-        esRef.current = null
-        setLiveRunId(null)
-        setLiveElapsed({})
-        update((r) =>
-          r.status === 'RUNNING'
-            ? {
-                ...r,
-                status: 'GATE FAILED',
-                logs: [
-                  ...r.logs,
-                  {
-                    stage: 'design',
-                    prefix: 'err',
-                    text: 'pipeline stream lost, the runner needs the local dev server with KiCad + flroute installed',
-                    level: 'err',
-                  },
-                ],
-              }
-            : r,
-        )
-      }
-    },
-    [],
-  )
-
-  const handleDelete = useCallback(
-    (id: string) => {
-      if (id === liveRunId) return // never delete a live run
-      setRuns((prev) => {
-        if (prev.length <= 1) return prev // always keep at least one run
-        const next = prev.filter((r) => r.id !== id)
-        if (id === selectedId && next.length) setSelectedId(next[0].id)
-        return next
-      })
-    },
-    [liveRunId, selectedId],
-  )
-
-  // tick the elapsed timer for whichever stage is running
-  useEffect(() => {
-    if (!liveRunId) return
-    const interval = setInterval(() => {
-      const stage = currentStageRef.current
-      if (stage) {
-        const start = stageStartRef.current[stage]
-        if (start) setLiveElapsed({ [stage]: Date.now() - start })
-      }
-    }, 250)
-    return () => clearInterval(interval)
-  }, [liveRunId])
-
-  // close the stream if the page unmounts mid-run
-  useEffect(() => () => esRef.current?.close(), [])
-
+  // Zero-run install (fresh state): no board to show yet, so render just the
+  // conversation pane — describing a board there builds the first one, and the
+  // full three-pane layout takes over once it finishes.
   if (!selectedRun) {
     return (
-      <main className="flex h-[calc(100dvh-2.75rem)] items-center justify-center bg-background text-sm text-muted-foreground">
-        Loading your workspace…
+      <main className="flex h-[calc(100dvh-2.75rem)] bg-background text-foreground">
+        <aside className="flex w-96 shrink-0 flex-col border-r border-border">
+          <ComposeChat
+            threads={[]}
+            activeId=""
+            newDesign
+            onSelectThread={() => {}}
+            onNew={() => {}}
+            onRunComplete={onRunComplete}
+          />
+        </aside>
+        <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-muted-foreground">
+          Describe a board on the left to design your first one.
+        </div>
       </main>
     )
   }
+
+  const real = realBoard && realBoard.base === (selectedRunDir ?? '') ? realBoard : null
+  const isReal = selectedRun?.real === true && real !== null
+  const boardBase = selectedRunDir ? `${selectedRunDir}/board` : '/board'
+  const m = selectedRun.metrics ?? {}
+
   return (
-    <main className="relative flex h-[calc(100dvh-2.75rem)] overflow-hidden bg-background text-foreground">
-      <RunHistory
-        runs={runs}
-        selectedId={selectedId}
-        onSelect={setSelectedId}
-        onDelete={handleDelete}
-        collapsed={collapsed}
-        onToggleCollapsed={() => setCollapsed((v) => !v)}
-      />
+    <main className="flex h-[calc(100dvh-2.75rem)] overflow-hidden bg-background text-foreground">
+      {/* LEFT — conversation (real interview + live agent step feed) */}
+      <aside style={{ width: leftW }} className="flex shrink-0 flex-col border-r border-border">
+        <ComposeChat
+          threads={runs.map((r) => ({ id: r.id, label: r.name || r.id }))}
+          activeId={selectedId}
+          activeRunId={!newDesign && selectedRun?.real ? selectedRun.id : undefined}
+          activeName={selectedRun?.name}
+          newDesign={newDesign}
+          revisePrefill={revisePrefill}
+          onPrefillConsumed={() => setRevisePrefill('')}
+          onSelectThread={(id) => { setSelectedId(id); setNewDesign(false) }}
+          onNew={() => setNewDesign(true)}
+          onRunComplete={onRunComplete}
+          onRename={async (id, name) => {
+            await fetch('/api/runs/rename', {
+              method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ id, name }),
+            }).catch(() => {})
+            await refreshRuns()
+          }}
+        />
+      </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between border-b border-border px-4 py-2.5">
-          <div className="flex items-baseline gap-3">
-            <h1 className="text-sm font-semibold tracking-tight text-foreground">
-              FirstLight
-            </h1>
-            <button
-              type="button"
-              onClick={() => setShowWelcome(true)}
-              className="text-[11px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-            >
-              How it works
-            </button>
-            {selectedRun.runDir && liveRunId === null && (
-              <button
-                type="button"
-                onClick={() => setReviseRequest('')}
-                className="rounded-sm border border-primary/50 px-2 py-0.5 text-[11px] font-medium text-primary hover:bg-primary/10"
-              >
-                Revise board
-              </button>
-            )}
-          </div>
-          <div className="flex items-center gap-3">
-            {fabZip && (
-              <a
-                href={fabZip}
-                download
-                className="rounded border border-primary px-2 py-1 font-mono text-[10px] font-medium text-primary hover:bg-primary hover:text-primary-foreground"
-              >
-                ↓ Fab package (.zip)
-              </a>
-            )}
-            {fwZip && (
-              <a
-                href={fwZip}
-                download
-                className="rounded border border-primary px-2 py-1 font-mono text-[10px] font-medium text-primary hover:bg-primary hover:text-primary-foreground"
-              >
-                ↓ Firmware (.zip)
-              </a>
-            )}
-          </div>
-        </header>
+      <Handle which="left" />
 
-        <div className="flex flex-col gap-3 border-b border-border p-3">
-          <PromptComposer
-            onInterview={(p) => setInterviewRequest(p || 'design a custom board')}
-            disabled={liveRunId !== null}
-          />
-          <PipelineTracker run={selectedRun} liveElapsed={liveElapsed} />
-        </div>
-
-        <div className="flex min-h-0 flex-1 flex-col">
-          {/* top-level workspace groups (scales without horizontal overflow) */}
-          <div
-            role="tablist"
-            aria-label="Workspace groups"
-            className="flex items-center gap-1 border-b border-border px-2"
-          >
-            {GROUPS.map((g) => {
-              const active = group === g.name
-              return (
-                <button
-                  key={g.name}
-                  role="tab"
-                  aria-selected={active}
-                  type="button"
-                  onClick={() => {
-                    setGroup(g.name)
-                    setRoadmapOpen(false)
-                    if (!g.views.includes(tab)) setTab(g.views[0])
-                  }}
-                  className={cn(
-                    'rounded-t-md border-b-2 px-3 py-2 text-xs font-semibold transition-colors',
-                    active
-                      ? 'border-primary text-primary'
-                      : 'border-transparent text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  {g.name}
-                </button>
-              )
-            })}
-            {/* Roadmap: future phases as disabled/not_generated (honest structure) */}
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setRoadmapOpen((o) => !o)}
-                className="rounded-t-md border-b-2 border-transparent px-3 py-2 text-xs font-medium text-muted-foreground/70 hover:text-foreground"
-              >
-                Roadmap ▾
-              </button>
-              {roadmapOpen && (
-                <div className="absolute left-0 top-full z-20 mt-1 w-56 rounded-md border border-border bg-card p-1 shadow-lg">
-                  <p className="px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">
-                    Future phases · not generated
-                  </p>
-                  {FUTURE_PHASES.map((f) => (
-                    <div
-                      key={f}
-                      className="flex cursor-not-allowed items-center justify-between px-2 py-1 text-[11px] text-muted-foreground/50"
-                      title="Future phase — not yet available"
-                    >
-                      {f}
-                      <span className="rounded-sm border border-border bg-muted/30 px-1 text-[9px]">
-                        soon
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            {selectedRun.runDir && (
-              <div className="ml-auto pr-3">
-                <BuildStatus runId={selectedRun.id} status={selectedRun.status} />
-              </div>
-            )}
-          </div>
-          {/* sub-views within the current group */}
-          {(GROUPS.find((g) => g.name === group)?.views.length ?? 0) > 1 && (
-            <div
-              role="tablist"
-              aria-label="Views"
-              className="flex items-center gap-1 border-b border-border bg-muted/20 px-2"
-            >
-              {GROUPS.find((g) => g.name === group)?.views.map((t) => (
-                <button
-                  key={t}
-                  role="tab"
-                  aria-selected={tab === t}
-                  type="button"
-                  onClick={() => setTab(t)}
-                  className={cn(
-                    'border-b-2 px-3 py-1.5 text-xs font-medium transition-colors',
-                    tab === t
-                      ? 'border-primary text-primary'
-                      : 'border-transparent text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  {t}
+      {/* CENTER — the board as hero */}
+      <section className="flex min-w-0 flex-1 flex-col">
+        <div className="flex items-center gap-3 border-b border-border px-3 py-2">
+          {!newDesign && isReal && tab !== 'Overview' && <ReviewsPill real={real} />}
+          {!newDesign && isReal && real?.board?.bomTotal ? (
+            <span className="rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground"
+              title="component BOM estimate — not fab, not a quote">
+              ~${Number(real.board.bomTotal).toFixed(2)} BOM
+            </span>
+          ) : null}
+          <button type="button" onClick={() => setTab('Patterns')}
+            className="flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+            title="reusable patterns & ingested knowledge">
+            <BookOpen className="size-3" /> Knowledge
+          </button>
+          <div className="ml-auto flex items-center gap-2">
+            <div className="flex overflow-hidden rounded-sm border border-border">
+              {([['3d', '3D'], ['layout', 'Layout'], ['schematic', 'Schematic']] as const).map(([v, label]) => (
+                <button key={v} type="button" onClick={() => setView(v)}
+                  className={cn('px-2.5 py-0.5 text-[11px]',
+                    view === v ? 'bg-secondary font-medium text-foreground' : 'text-muted-foreground hover:text-foreground')}>
+                  {label}
                 </button>
               ))}
             </div>
-          )}
-          <div className="min-h-0 flex-1">
-            <ErrorBoundary key={tab} label={`The ${tab} panel`}>
-            {tab === 'Overview' && (
-              <RunOverview runId={selectedRun.runDir ? selectedRun.id : null} run={selectedRun} />
-            )}
-            {tab === 'Artifacts' && (
-              <ArtifactExplorer runId={selectedRun.runDir ? selectedRun.id : null} />
-            )}
-            {tab === 'Board' && (
-              <BoardCanvas
-                key={selectedRun.id}
-                run={selectedRun}
-                realBoard={isReal ? real?.board : null}
-                basePath={boardBase}
-              />
-            )}
-            {tab === 'Code' && (
-              <CodeViewer
-                key={isReal ? 'real' : 'seed'}
-                files={isReal ? real?.ato : null}
-              />
-            )}
-            {tab === 'BOM' && <BomTable lines={isReal ? real?.bom : null} />}
-            {tab === 'Checks' && (
-              <GatesLogs
-                run={selectedRun}
-                reports={isReal ? real?.reports : null}
-                runDir={selectedRunDir}
-                onRefresh={() => {
-                  // a repair rewrote this run's artifacts, reload its board and
-                  // refresh statuses/metrics from disk without changing selection
-                  loadRealBoard(selectedRunDir ?? '').then((d) => d && setRealBoard(d))
-                  fetch('/api/runs')
-                    .then((r) => (r.ok ? r.json() : { runs: [] }))
-                    .then(({ runs: disk }: { runs: Run[] }) => {
-                      if (!Array.isArray(disk)) return
-                      setRuns((prev) =>
-                        prev.map((r) => {
-                          const u = disk.find((d) => d.id === r.id)
-                          return u ? { ...r, status: u.status, metrics: u.metrics } : r
-                        }),
-                      )
-                    })
-                    .catch(() => {})
-                }}
-              />
-            )}
-            {tab === 'Constraints' && (
-              <ConstraintsPanel runId={selectedRun.runDir ? selectedRun.id : null} />
-            )}
-            {tab === 'Pinout' && (
-              <PinoutPanel runId={selectedRun.runDir ? selectedRun.id : null} />
-            )}
-            {tab === 'Advanced' && (
-              <AdvancedRoutingPanel runId={selectedRun.runDir ? selectedRun.id : null} />
-            )}
-            {tab === 'Ingest' && <IngestPanel />}
-            {tab === 'Patterns' && <PatternsPanel />}
-            {tab === 'FL-1 Ready' && (
-              <FL1ReadinessPanel runId={selectedRun.runDir ? selectedRun.id : null} />
-            )}
-            {tab === 'Recovery' && (
-              <RecoveryPanel runId={selectedRun.runDir ? selectedRun.id : null} />
-            )}
-            {tab === 'Assembly' && (
-              <AssemblyPanel runId={selectedRun.runDir ? selectedRun.id : null} fabZip={fabZip} />
-            )}
-            {tab === 'Review' && (
-              <ReviewPanel runId={selectedRun.runDir ? selectedRun.id : null} />
-            )}
-            {tab === 'FL-1' && (
-              <div className="flex h-full flex-col overflow-y-auto">
-                <FL1ValidationView runId={selectedRun.runDir ? selectedRun.id : null} />
-                <div className="border-t border-border">
-                  <FL1Loop
-                    runId={selectedRun.runDir ? selectedRun.id : null}
-                    onRevise={(eco) => setReviseRequest(eco)}
-                  />
-                </div>
+            <button type="button" onClick={toggleFullscreen} title="fullscreen board"
+              className="rounded-sm border border-border p-1 text-muted-foreground hover:text-foreground">
+              <Maximize2 className="size-3.5" />
+            </button>
+          </div>
+        </div>
+        <div ref={stageRef} className="min-h-0 flex-1 bg-background">
+          <ErrorBoundary>
+            {newDesign ? (
+              <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-muted-foreground">
+                <Cpu className="size-9 opacity-25" />
+                <span className="text-xs">New design — describe a board on the left to begin.</span>
               </div>
+            ) : (
+              <>
+                {view === '3d' && (
+                  <Board3D basePath={boardBase} fallback={
+                    <div className="flex h-full items-center justify-center text-xs text-muted-foreground">no 3D model for this run</div>} />
+                )}
+                {view === 'layout' && (
+                  <BoardCanvas key={selectedRun.id} run={selectedRun}
+                    realBoard={isReal ? real?.board : null} basePath={boardBase} />
+                )}
+                {view === 'schematic' && <BoardSchematic runDir={selectedRunDir ?? null} />}
+              </>
             )}
-            {tab === 'Order' && (
-              <OrderPanel
-                boardW={(isReal ? real?.board.boardSize.wMm : null) ?? 200}
-                boardH={(isReal ? real?.board.boardSize.hMm : null) ?? 146}
-                layers={
-                  (isReal ? real?.board.layers : null) ?? selectedRun.metrics.layers
-                }
-                components={
-                  (isReal ? real?.board.components : null) ??
-                  selectedRun.metrics.components
-                }
-                bomTotal={
-                  (isReal ? real?.board.bomTotal : null) ??
-                  (isReal ? real?.bom : null)?.reduce(
-                    (s, l) => s + (l.lineTotal ?? l.unitPrice * l.qty),
-                    0,
-                  ) ??
-                  55
-                }
-                fabZip={fabZip}
-              />
-            )}
+          </ErrorBoundary>
+        </div>
+      </section>
+
+      <Handle which="right" />
+
+      {/* RIGHT — journey spine + phase panel */}
+      <section style={{ width: rightW }} className="flex shrink-0 border-l border-border">
+        <nav className="flex w-16 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border bg-card/30 py-2">
+          {VIEWS.map((v) => {
+            const on = tab === v.tab
+            return (
+              <button key={v.tab} type="button" onClick={() => setTab(v.tab)} title={v.label}
+                className={cn('mx-1.5 flex flex-col items-center gap-0.5 rounded-md px-1 py-1.5 text-[8px]',
+                  on ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground')}>
+                <v.Icon className={cn('size-4', on && 'text-primary')} />
+                <span className="leading-none">{v.label}</span>
+              </button>
+            )
+          })}
+        </nav>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <ErrorBoundary>
+              {newDesign ? (
+                <div className="flex h-full items-center justify-center p-6 text-center text-xs text-muted-foreground">
+                  No board yet — the overview appears once your new design builds.
+                </div>
+              ) : (
+                <>
+                  {tab === 'Overview' && <RunOverview runId={selectedRun.runDir ? selectedRun.id : null} run={selectedRun} />}
+                  {tab === 'Objects' && <BoardObjects real={real} />}
+                  {tab === 'Artifacts' && <ArtifactExplorer runId={selectedRun.runDir ? selectedRun.id : null} />}
+                  {tab === 'Code' && <CodeViewer key={isReal ? 'real' : 'seed'} files={isReal ? real?.ato : null} />}
+                  {tab === 'BOM' && <BomTable lines={isReal ? real?.bom : null} />}
+                  {tab === 'Checks' && <BoardChecks real={real} />}
+                  {tab === 'Constraints' && <ConstraintsPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
+                  {tab === 'Pinout' && <PinoutPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
+                  {tab === 'Advanced' && <AdvancedRoutingPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
+                  {tab === 'Ingest' && <IngestPanel />}
+                  {tab === 'Patterns' && <PatternsPanel />}
+                  {tab === 'FL-1 Ready' && <FL1ReadinessPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
+                  {tab === 'Recovery' && <RecoveryPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
+                  {tab === 'Assembly' && <AssemblyPanel runId={selectedRun.runDir ? selectedRun.id : null} fabZip={null} />}
+                  {tab === 'Review' && <ReviewPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
+                  {tab === 'FL-1' && (
+                    <div className="flex h-full flex-col">
+                      <FL1ValidationView runId={selectedRun.runDir ? selectedRun.id : null} />
+                      <div className="border-t border-border">
+                        <FL1Loop
+                          runId={selectedRun.runDir ? selectedRun.id : null}
+                          onRevise={(eco) => setRevisePrefill(eco)}
+                        />
+                      </div>
+                    </div>
+                  )}
+                  {tab === 'Order' && <ProcurementPanel real={real} runDir={selectedRunDir ?? null} />}
+                </>
+              )}
             </ErrorBoundary>
           </div>
         </div>
-      </div>
-
-      <MetricsRail
-        run={isReal && real ? { ...selectedRun, metrics: real.run.metrics } : selectedRun}
-      />
-
-      {reviseRequest !== null && selectedRun.runDir && (
-        <ReviseDialog
-          runId={selectedRun.id}
-          runName={selectedRun.name}
-          currentBlocks={null}
-          initialRequest={reviseRequest || undefined}
-          onLaunch={(prompt, compose, rev) => {
-            setReviseRequest(null)
-            handleGenerate(prompt, compose, rev)
-          }}
-          onClose={() => setReviseRequest(null)}
-        />
-      )}
-
-      {showWelcome && !interviewRequest && (
-        <WelcomeHero
-          onStart={(p) => {
-            localStorage.setItem('fl-welcomed', '1')
-            setShowWelcome(false)
-            setInterviewRequest(p || 'design a custom board')
-          }}
-          onExplore={() => {
-            localStorage.setItem('fl-welcomed', '1')
-            setShowWelcome(false)
-          }}
-        />
-      )}
-
-      {interviewRequest && (
-        <InterviewPanel
-          request={interviewRequest}
-          onGenerate={handleGenerate}
-          onClose={() => setInterviewRequest(null)}
-        />
-      )}
+      </section>
     </main>
   )
 }

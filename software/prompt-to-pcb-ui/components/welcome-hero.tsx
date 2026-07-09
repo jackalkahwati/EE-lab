@@ -50,7 +50,7 @@ export function WelcomeHero({
       <div className="w-full max-w-2xl">
         <div className="mb-8 text-center">
           <p className="mb-3 font-mono text-[11px] uppercase tracking-[0.18em] text-primary">
-            FirstLight Compose
+            Firstlight
           </p>
           <h1 className="mb-3 text-3xl font-bold tracking-tight text-foreground">
             Describe a board. Get a board.
