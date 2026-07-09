@@ -14,6 +14,7 @@ const nextConfig = {
   // explicitly or run history comes back empty in production.
   outputFileTracingIncludes: {
     '/api/runs': ['./public/runs/**', './public/data/**'],
+    '/api/schematic': ['./public/runs/**', './lib/schematic-skin.svg'],
   },
   // HTML documents must never be browser-cached: chunk filenames change every
   // build, and a stale document pointing at deleted chunks throws

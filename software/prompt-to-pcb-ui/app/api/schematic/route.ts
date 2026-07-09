@@ -22,8 +22,30 @@ const require = createRequire(import.meta.url)
 const netlistsvg = require('netlistsvg')
 
 const RUNS = path.join(process.cwd(), 'public', 'runs')
-const SKIN = path.join(process.cwd(), 'node_modules', 'netlistsvg', 'lib', 'analog.svg')
+// custom skin: tuned ELK layout (wraps instead of one wide strip) + a value
+// line on the generic IC symbol so parts can show their real name
+const SKIN = path.join(process.cwd(), 'lib', 'schematic-skin.svg')
 const cache = new Map<string, { mtime: number; svg: string }>()
+
+// map each ref → BOM part name, handling comma lists ("K1, K2"), singles ("U30")
+// and ranges ("R20…R91 (19)") expanded against the real ref set
+function buildRefPart(bom: any[], allRefs: string[]): Record<string, string> {
+  const map: Record<string, string> = {}
+  for (const l of bom) {
+    const raw = String(l.ref ?? ''); const part = String(l.part ?? '')
+    const rng = raw.match(/^([A-Za-z]+)(\d+)\s*(?:…|\.\.\.|\.\.)\s*[A-Za-z]*(\d+)/)
+    if (rng) {
+      const pre = rng[1], lo = +rng[2], hi = +rng[3]
+      for (const r of allRefs) {
+        const rm = r.match(/^([A-Za-z]+)(\d+)$/)
+        if (rm && rm[1] === pre && +rm[2] >= lo && +rm[2] <= hi) map[r] = part
+      }
+    } else {
+      for (const r of raw.split(/,\s*/)) { const t = r.trim(); if (/^[A-Za-z]+\d+$/.test(t)) map[t] = part }
+    }
+  }
+  return map
+}
 
 function symType(ref: string): string {
   if (/^R/.test(ref)) return 'resistor_v'
@@ -92,14 +114,13 @@ export async function GET(req: Request) {
     const ato = JSON.parse(fs.readFileSync(atoPath, 'utf8'))
     const netText = (ato.find((f: any) => /netlist/i.test(f.name))?.content) ?? ''
     if (!netText) return Response.json({ error: 'run has no netlist' }, { status: 422 })
-    // map each ref → its part name from the BOM (grouped refs like "R30, R31")
-    const refPart: Record<string, string> = {}
+    const yosys = toYosys(netText)
+    const allRefs = Object.keys(yosys.modules.top.cells)
+    let refPart: Record<string, string> = {}
     try {
       const bom = JSON.parse(fs.readFileSync(path.join(RUNS, run, 'data', 'bom.json'), 'utf8'))
-      for (const l of (Array.isArray(bom) ? bom : []))
-        for (const r of String(l.ref).split(/,\s*/)) if (r) refPart[r] = l.part
+      if (Array.isArray(bom)) refPart = buildRefPart(bom, allRefs)
     } catch { /* no bom → refs only */ }
-    const yosys = toYosys(netText, refPart)
     const skin = fs.readFileSync(SKIN, 'utf8')
     let svg: string = await new Promise((resolve, reject) =>
       netlistsvg.render(skin, yosys, (err: any, out: string) => (err ? reject(err) : resolve(out))))
