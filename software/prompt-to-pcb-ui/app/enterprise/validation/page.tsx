@@ -44,6 +44,7 @@ export default function ValidationPage() {
   const [eBoard, setEBoard] = useState('')
   const [eType, setEType] = useState(EVIDENCE_TYPES[0])
   const [eSource, setESource] = useState('')
+  const [eFile, setEFile] = useState<File | null>(null)
   const [me, setMe] = useState('')
 
   const refresh = useCallback(() => {
@@ -57,6 +58,24 @@ export default function ValidationPage() {
     setBusy(false)
     if (r.error) setMsg({ tone: 'err', text: `${r.error}${r.detail ? ` — ${r.detail}` : ''}` })
     else { setMsg({ tone: 'ok', text: okText }); refresh() }
+  }
+
+  async function uploadEvidence() {
+    if (!eBoard || !eFile) return
+    setBusy(true); setMsg(null)
+    const fd = new FormData()
+    fd.append('file', eFile)
+    fd.append('board_id', eBoard)
+    fd.append('evidence_type', eType)
+    fd.append('source', eSource || eFile.name)
+    fd.append('actor', me)
+    try {
+      const res = await fetch('/api/evidence-upload', { method: 'POST', body: fd })
+      const j = await res.json()
+      if (j.error) setMsg({ tone: 'err', text: `${j.error}${j.detail ? ` — ${j.detail}` : ''}` })
+      else { setMsg({ tone: 'ok', text: `uploaded ${j.result?.file} (${j.result?.status})` }); setEFile(null); setESource(''); refresh() }
+    } catch (e: any) { setMsg({ tone: 'err', text: String(e?.message ?? e) }) }
+    setBusy(false)
   }
 
   if (!db) return <div className="p-6 text-xs text-muted-foreground">Loading validation…</div>
@@ -185,14 +204,16 @@ export default function ValidationPage() {
           <select value={eType} onChange={(e) => setEType(e.target.value)} className="rounded-sm border border-border bg-background px-1.5 py-1 font-mono text-[10px]">
             {EVIDENCE_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
           </select>
-          <input value={eSource} onChange={(e) => setESource(e.target.value)} placeholder="artifact file path (on server)"
-            className="w-56 rounded-sm border border-border bg-background px-1.5 py-1 text-[11px]" />
-          <button type="button" disabled={busy || !eBoard || !eSource}
-            onClick={() => run('add_evidence', { scope_type: 'board', scope_id: eBoard, evidence_type: eType, source: eSource, artifact_path: eSource }, 'evidence recorded (review-required)').then(() => setESource(''))}
+          <input type="file" onChange={(e) => setEFile(e.target.files?.[0] ?? null)}
+            className="max-w-[13rem] text-[10px] file:mr-2 file:rounded-sm file:border file:border-border file:bg-background file:px-2 file:py-0.5 file:text-[10px]" />
+          <input value={eSource} onChange={(e) => setESource(e.target.value)} placeholder="note (optional)"
+            className="w-40 rounded-sm border border-border bg-background px-1.5 py-1 text-[11px]" />
+          <button type="button" disabled={busy || !eBoard || !eFile}
+            onClick={uploadEvidence}
             className="rounded-sm border border-primary/40 bg-primary/10 px-2.5 py-1 text-[11px] text-primary hover:bg-primary/20 disabled:opacity-50">
-            Record
+            Upload
           </button>
-          <span className="font-mono text-[9px] text-amber-500">physical evidence needs a REAL artifact file — the backend refuses otherwise; enters review-required, never auto-validated</span>
+          <span className="font-mono text-[9px] text-amber-500">uploads a REAL file (≤20MB) · enters review-required · a reviewer must accept before it counts</span>
         </div>
         <div className="divide-y divide-border">
           {evidence.length === 0 && <p className="px-3 py-3 text-muted-foreground">No physical evidence on file.</p>}

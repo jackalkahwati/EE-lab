@@ -28,3 +28,11 @@ data/
 # generated 3D board models (kicad-cli glb export, 20-40 MB binaries —
 # also excluded from Tailwind's source scanner, which crashes on them)
 *.glb
+
+# scratch run outputs (regenerated; never commit)
+scripts/eda_runs/
+scripts/flroute_runs/
+# TS build cache
+tsconfig.tsbuildinfo
+# uploaded evidence files (user data)
+data/evidence-artifacts/
