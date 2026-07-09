@@ -18,11 +18,33 @@ Usage:
 """
 import json
 import os
+import ssl
 import sys
 import urllib.parse
 import urllib.request
 
 APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _make_ssl_context():
+    """KiCad's bundled Python 3.9 has no working CA store, so HTTPS verification
+    fails with 'self signed certificate in certificate chain'. Build a context
+    from a real CA bundle: SSL_CERT_FILE if set, else certifi, else the macOS
+    system bundle, so live DigiKey sourcing works instead of falling back."""
+    cafile = os.environ.get("SSL_CERT_FILE")
+    if cafile and os.path.exists(cafile):
+        return ssl.create_default_context(cafile=cafile)
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        pass
+    if os.path.exists("/etc/ssl/cert.pem"):
+        return ssl.create_default_context(cafile="/etc/ssl/cert.pem")
+    return ssl.create_default_context()
+
+
+_SSL = _make_ssl_context()
 
 
 def load_env():
@@ -53,7 +75,7 @@ def get_token():
     req = urllib.request.Request(
         _base() + "/v1/oauth2/token", data=body,
         headers={"content-type": "application/x-www-form-urlencoded"})
-    with urllib.request.urlopen(req, timeout=30) as r:
+    with urllib.request.urlopen(req, timeout=30, context=_SSL) as r:
         return json.loads(r.read())["access_token"]
 
 
@@ -71,14 +93,14 @@ def _headers(token):
 
 def _get(url, token):
     req = urllib.request.Request(url, headers=_headers(token))
-    with urllib.request.urlopen(req, timeout=30) as r:
+    with urllib.request.urlopen(req, timeout=30, context=_SSL) as r:
         return json.loads(r.read())
 
 
 def _post(url, token, payload):
     req = urllib.request.Request(url, data=json.dumps(payload).encode(),
                                  headers=_headers(token))
-    with urllib.request.urlopen(req, timeout=30) as r:
+    with urllib.request.urlopen(req, timeout=30, context=_SSL) as r:
         return json.loads(r.read())
 
 

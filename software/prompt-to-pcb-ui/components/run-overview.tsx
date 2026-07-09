@@ -102,8 +102,16 @@ export function RunOverview({ runId, run }: { runId: string | null; run?: Run | 
     ],
     [
       'Recovery',
-      rec ? (rec.final_status?.includes('passed') ? 'recovered' : 'failed') : 'not_generated',
-      rec ? rec.final_status : 'no recovery needed',
+      // recovery only runs when a gate fails. On a clean pass it is genuinely
+      // not needed — show that as healthy, not an ambiguous "not generated".
+      rec
+        ? rec.final_status?.includes('passed')
+          ? 'recovered'
+          : 'failed'
+        : verdict === 'passed'
+          ? 'passed'
+          : 'not_generated',
+      rec ? rec.final_status : verdict === 'passed' ? 'not needed (clean build)' : 'not generated',
     ],
     [
       'Advanced routing',
@@ -121,7 +129,11 @@ export function RunOverview({ runId, run }: { runId: string | null; run?: Run | 
           ? 'passed'
           : 'warning'
         : 'not_generated',
-      a['sourcing-report'] ? 'fallback mode (no live supplier data)' : 'not generated',
+      a['sourcing-report']
+        ? a['sourcing-report'].live_sourcing?.available
+          ? 'live supplier data'
+          : 'fallback mode (no live supplier data)'
+        : 'not generated',
     ],
     [
       'Assembly readiness',

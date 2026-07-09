@@ -257,7 +257,16 @@ export async function GET(req: Request) {
           let out = ''
           child = spawn(cmd, args, {
             cwd: opts.cwd ?? hwDir,
-            env: { ...process.env, ...opts.env },
+            // KiCad's bundled Python has no CA store; point HTTPS at the system
+            // bundle so live sourcing / datasheet fetches verify instead of
+            // failing on "self signed certificate in certificate chain".
+            env: {
+              ...process.env,
+              ...(process.env.SSL_CERT_FILE || !fs.existsSync('/etc/ssl/cert.pem')
+                ? {}
+                : { SSL_CERT_FILE: '/etc/ssl/cert.pem' }),
+              ...opts.env,
+            },
           })
           const feed = (chunk: Buffer, level?: string) => {
             const text = chunk.toString()

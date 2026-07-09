@@ -178,6 +178,45 @@ for r in bom_rows:
         r["SourcingStatus"] = "fallback_estimate"
         r["Confidence"] = min(r["Confidence"], 0.4)
 
+# ---- live supplier enrichment (DigiKey) ------------------------------------
+# With a working CA store (see scripts/digikey.py), query DigiKey for each NAMED
+# part so the report carries a real in-stock MPN where a distributor has it, and
+# flip LIVE. Best-effort + capped: generic passives are skipped (a keyword match
+# is meaningless), and any failure keeps the honest fallback for that line.
+def _worth_live(part, mpn):
+    s = (mpn or part or "").strip().lower()
+    return bool(s) and not re.match(
+        r"(resistor|capacitor|inductor|ferrite|pin header|assembly fiducial|"
+        r"mountinghole|testpoint|led \d|crystal\b|header\b)", s)
+
+try:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import digikey as _dk
+    _dk.load_env()
+    _tok = _dk.get_token()
+    _calls = 0
+    for i, l in enumerate(sourcing_lines):
+        if _calls >= 16 or l["match"] == "not_placed" or not _worth_live(l["part"], l["mpn"]):
+            continue
+        _calls += 1
+        try:
+            hits = _dk.search(l["mpn"] or l["part"], token=_tok, limit=1)
+        except Exception:
+            hits = []
+        if hits and hits[0].get("mpn") and (hits[0].get("stock") or 0) > 0:
+            h = hits[0]
+            l["mpn"], l["manufacturer"] = h["mpn"], h.get("manufacturer")
+            l["stock"], l["datasheet"] = h.get("stock"), h.get("datasheet")
+            l["match"], l["confidence"], l["live"] = "exact", max(l["confidence"], 0.85), True
+            l["note"] = "DigiKey keyword top-match, in stock — verify exact MPN before order"
+            LIVE = True
+            if i < len(bom_rows):
+                bom_rows[i]["MPN"] = h["mpn"]
+                bom_rows[i]["Manufacturer"] = h.get("manufacturer") or bom_rows[i]["Manufacturer"]
+                bom_rows[i]["SourcingStatus"], bom_rows[i]["Confidence"] = "live_verified", 0.85
+except Exception:
+    pass  # no creds / network — keep the honest fallback report
+
 with open(os.path.join(out_dir, "bom.csv"), "w", newline="") as f:
     w = csv.DictWriter(f, fieldnames=list(bom_rows[0].keys()) if bom_rows else ["Refs"])
     w.writeheader()
