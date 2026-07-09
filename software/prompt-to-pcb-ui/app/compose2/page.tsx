@@ -35,31 +35,40 @@ import { FL1ReadinessPanel } from '@/components/fl1-readiness-panel'
 import { BoardObjects } from '@/components/board-objects'
 import { ReviewsPill } from '@/components/board-reviews'
 import {
-  BookOpen, Boxes, CircuitBoard, ClipboardCheck, FileCode2, LayoutDashboard,
-  ListTree, Maximize2, Receipt, ScrollText, Wrench,
+  BookOpen, Boxes, Cable, CheckCircle2, CircuitBoard, ClipboardCheck, Download,
+  Eye, FileCode2, GitBranch, LayoutDashboard, ListTree, Maximize2, Package,
+  Receipt, RotateCcw, Ruler, ScrollText, Wrench,
 } from 'lucide-react'
 
 type Run = any
 type Tab = string
 
-// journey phases → panels (Board lives in the center hero, not here)
-const PHASES: { key: string; label: string; Icon: any; views: Tab[] }[] = [
-  { key: 'Overview', label: 'Overview', Icon: LayoutDashboard, views: ['Overview'] },
-  { key: 'Objects', label: 'Objects', Icon: ListTree, views: ['Objects'] },
-  { key: 'Design', label: 'Design', Icon: FileCode2, views: ['Code', 'Pinout', 'Constraints', 'Advanced'] },
-  { key: 'Review', label: 'Review', Icon: ClipboardCheck, views: ['Checks', 'Review'] },
-  { key: 'Quote', label: 'Quote', Icon: Receipt, views: ['Order'] },
-  { key: 'Build', label: 'Build', Icon: Wrench, views: ['BOM', 'Assembly'] },
-  { key: 'Validate', label: 'Validate', Icon: CircuitBoard, views: ['FL-1', 'Recovery'] },
-  { key: 'Learn', label: 'Learn', Icon: Boxes, views: ['Ingest', 'Patterns', 'FL-1 Ready'] },
-  { key: 'Artifacts', label: 'Artifacts', Icon: ScrollText, views: ['Artifacts'] },
+// flat view list: one icon → one panel (Board lives in the center hero).
+// Two columns only — icons left, content right, no sub-tabs.
+const VIEWS: { tab: Tab; label: string; Icon: any }[] = [
+  { tab: 'Overview', label: 'Overview', Icon: LayoutDashboard },
+  { tab: 'Objects', label: 'Objects', Icon: ListTree },
+  { tab: 'Code', label: 'Code', Icon: FileCode2 },
+  { tab: 'Pinout', label: 'Pinout', Icon: Cable },
+  { tab: 'Constraints', label: 'Rules', Icon: Ruler },
+  { tab: 'Advanced', label: 'Routing', Icon: GitBranch },
+  { tab: 'Checks', label: 'Checks', Icon: ClipboardCheck },
+  { tab: 'Review', label: 'Review', Icon: Eye },
+  { tab: 'Order', label: 'Quote', Icon: Receipt },
+  { tab: 'BOM', label: 'BOM', Icon: Package },
+  { tab: 'Assembly', label: 'Assembly', Icon: Wrench },
+  { tab: 'FL-1', label: 'FL-1', Icon: CircuitBoard },
+  { tab: 'Recovery', label: 'Recovery', Icon: RotateCcw },
+  { tab: 'Ingest', label: 'Ingest', Icon: Download },
+  { tab: 'Patterns', label: 'Patterns', Icon: Boxes },
+  { tab: 'FL-1 Ready', label: 'FL-1 Ready', Icon: CheckCircle2 },
+  { tab: 'Artifacts', label: 'Artifacts', Icon: ScrollText },
 ]
 
 export default function Compose2Page() {
   const [runs, setRuns] = useState<Run[]>([])
   const [selectedId, setSelectedId] = useState('')
   const [realBoard, setRealBoard] = useState<RealBoard | null>(null)
-  const [phase, setPhase] = useState('Overview')
   const [tab, setTab] = useState<Tab>('Overview')
   const [view3d, setView3d] = useState(true)
   const stageRef = useRef<HTMLDivElement>(null)
@@ -166,11 +175,6 @@ export default function Compose2Page() {
   const boardBase = selectedRunDir ? `${selectedRunDir}/board` : '/board'
   const m = selectedRun.metrics ?? {}
 
-  const selectPhase = (p: typeof PHASES[number]) => {
-    setPhase(p.key)
-    setTab(p.views[0])
-  }
-
   return (
     <main className="flex h-[calc(100dvh-2.75rem)] overflow-hidden bg-background text-foreground">
       {/* LEFT — conversation (real interview + live agent step feed) */}
@@ -206,7 +210,7 @@ export default function Compose2Page() {
               ~${Number(real.board.bomTotal).toFixed(2)} BOM
             </span>
           ) : null}
-          <button type="button" onClick={() => { setPhase('Learn'); setTab('Patterns') }}
+          <button type="button" onClick={() => setTab('Patterns')}
             className="flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
             title="reusable patterns & ingested knowledge">
             <BookOpen className="size-3" /> Knowledge
@@ -244,31 +248,20 @@ export default function Compose2Page() {
 
       {/* RIGHT — journey spine + phase panel */}
       <section style={{ width: rightW }} className="flex shrink-0 border-l border-border">
-        <nav className="flex w-14 shrink-0 flex-col gap-0.5 border-r border-border bg-card/30 py-2">
-          {PHASES.map((p) => {
-            const on = phase === p.key
+        <nav className="flex w-16 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border bg-card/30 py-2">
+          {VIEWS.map((v) => {
+            const on = tab === v.tab
             return (
-              <button key={p.key} type="button" onClick={() => selectPhase(p)} title={p.label}
+              <button key={v.tab} type="button" onClick={() => setTab(v.tab)} title={v.label}
                 className={cn('mx-1.5 flex flex-col items-center gap-0.5 rounded-md px-1 py-1.5 text-[8px]',
                   on ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground')}>
-                <p.Icon className={cn('size-4', on && 'text-primary')} />
-                <span className="leading-none">{p.label}</span>
+                <v.Icon className={cn('size-4', on && 'text-primary')} />
+                <span className="leading-none">{v.label}</span>
               </button>
             )
           })}
         </nav>
         <div className="flex min-w-0 flex-1 flex-col">
-          {(PHASES.find((p) => p.key === phase)?.views.length ?? 0) > 1 && (
-            <div className="flex gap-1 border-b border-border px-2 py-1.5">
-              {PHASES.find((p) => p.key === phase)?.views.map((t) => (
-                <button key={t} type="button" onClick={() => setTab(t)}
-                  className={cn('rounded-sm px-2 py-0.5 text-[11px]',
-                    tab === t ? 'bg-secondary font-medium text-foreground' : 'text-muted-foreground hover:text-foreground')}>
-                  {t}
-                </button>
-              ))}
-            </div>
-          )}
           <div className="min-h-0 flex-1 overflow-y-auto">
             <ErrorBoundary>
               {tab === 'Overview' && <RunOverview runId={selectedRun.runDir ? selectedRun.id : null} run={selectedRun} />}
