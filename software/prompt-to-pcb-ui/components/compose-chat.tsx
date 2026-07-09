@@ -134,13 +134,7 @@ export function ComposeChat({ threads, activeId, onSelectThread, onNew, onRunCom
           <>
             <div className="fixed inset-0 z-20" onClick={() => setThreadsOpen(false)} />
             <div className="absolute left-2 top-full z-30 mt-1 max-h-80 w-64 overflow-y-auto rounded-md border border-border bg-card p-1 shadow-xl">
-              <div className="flex items-center justify-between px-2 py-1">
-                <span className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">Threads</span>
-                <button type="button" onClick={() => { setThreadsOpen(false); reset() }}
-                  className="flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[10px] text-primary hover:bg-primary/10">
-                  <Plus className="size-3" /> New
-                </button>
-              </div>
+              <div className="px-2 py-1 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">Threads</div>
               {threads.length === 0 && <p className="px-2 py-2 text-[11px] text-muted-foreground">No threads yet — start one with New.</p>}
               {threads.map((t) => (
                 <button key={t.id} type="button"
