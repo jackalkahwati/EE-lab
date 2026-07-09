@@ -44,6 +44,13 @@ export default function IntegrationsPage() {
   const [whUrl, setWhUrl] = useState('')
   const [whEvents, setWhEvents] = useState<string[]>([])
   const [newSecret, setNewSecret] = useState<{ url: string; secret: string } | null>(null)
+  // SSO / SCIM config form
+  const [ssoProvider, setSsoProvider] = useState('oidc')
+  const [ssoForm, setSsoForm] = useState<Record<string, string>>({})
+  const [scimEnabled, setScimEnabled] = useState(false)
+  const [newScim, setNewScim] = useState<string | null>(null)
+  const sf = (k: string) => ssoForm[k] ?? ''
+  const setF = (k: string, v: string) => setSsoForm((s) => ({ ...s, [k]: v }))
 
   const refresh = useCallback(() => {
     fetch('/api/enterprise', { cache: 'no-store' }).then((r) => r.json()).then(setDb).catch(() => {})
@@ -286,21 +293,109 @@ export default function IntegrationsPage() {
         </div>
       </div>
 
-      {/* SSO / SCIM */}
+      {/* SSO / SCIM — real config surface (admin-gated, secrets redacted) */}
       <div>
-        <h2 className="mb-2 text-xs font-semibold">SSO / SCIM</h2>
-        <div className="rounded-md border border-border p-3">
-          <div className="flex items-center gap-2">
-            <span className={cn('rounded-sm border px-1.5 py-0.5 font-mono text-[10px]',
-              sso.status === 'configured' ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500'
-                : 'border-amber-500/40 bg-amber-500/10 text-amber-500')}>
-              {sso.status?.replace(/_/g, ' ') ?? 'not configured'}
+        <h2 className="mb-2 flex items-center gap-2 text-xs font-semibold">
+          SSO / SCIM
+          <span className={cn('rounded-sm border px-1.5 py-0.5 font-mono text-[9px]',
+            sso.status === 'configured' ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500'
+              : 'border-amber-500/40 bg-amber-500/10 text-amber-500')}>
+            {sso.status?.replace(/_/g, ' ') ?? 'not configured'}
+          </span>
+          {sso.status === 'configured' && (
+            <span className="rounded-sm border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 font-mono text-[9px] text-amber-500">
+              login enforcement not active
             </span>
-            <span className="text-[11px] text-muted-foreground">
-              {(sso.protocols ?? []).join(' · ')} · SCIM {sso.scim ? 'on' : 'off'}
-            </span>
+          )}
+        </h2>
+        <div className="rounded-md border border-border">
+          {sso.status === 'configured' && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border bg-card/30 px-3 py-2 text-[10px] text-muted-foreground">
+              <span>provider: <span className="font-mono text-foreground">{sso.provider}</span></span>
+              {sso.oidc && <span>issuer: <span className="font-mono">{sso.oidc.issuer}</span></span>}
+              {sso.oidc && <span>client: <span className="font-mono">{sso.oidc.client_id}</span></span>}
+              {sso.oidc && <span>secret: <span className="font-mono">{sso.oidc.client_secret ?? '—'}</span></span>}
+              {sso.saml && <span>entity: <span className="font-mono">{sso.saml.entity_id}</span></span>}
+              {sso.saml && <span>SSO URL: <span className="font-mono">{sso.saml.sso_url}</span></span>}
+              {sso.saml && <span>cert: <span className="font-mono">{sso.saml.certificate ?? '—'}</span></span>}
+              <span>SCIM: <span className="font-mono">{sso.scim?.enabled ? `on (${sso.scim.token_masked ?? 'token set'})` : 'off'}</span></span>
+              <button type="button" disabled={busy} onClick={() => act('disable_sso', {})}
+                className="ml-auto rounded-sm border border-destructive/40 bg-destructive/10 px-2 py-0.5 text-[10px] text-destructive hover:bg-destructive/20 disabled:opacity-50">
+                Disable
+              </button>
+            </div>
+          )}
+
+          {newScim && (
+            <div className="border-b border-border bg-emerald-500/10 px-3 py-2">
+              <div className="font-mono text-[9px] uppercase tracking-wide text-emerald-500">SCIM token — shown once</div>
+              <div className="mt-0.5 flex items-center gap-2">
+                <code className="min-w-0 flex-1 truncate rounded-sm bg-background px-1.5 py-1 font-mono text-[10px]">{newScim}</code>
+                <button type="button" onClick={() => navigator.clipboard?.writeText(newScim)}
+                  className="shrink-0 rounded-sm border border-border px-2 py-1 text-[10px] hover:text-foreground">copy</button>
+                <button type="button" onClick={() => setNewScim(null)}
+                  className="shrink-0 rounded-sm border border-border px-2 py-1 text-[10px] hover:text-foreground">done</button>
+              </div>
+            </div>
+          )}
+
+          {/* config form */}
+          <div className="space-y-2 p-3">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-medium">Provider</span>
+              {['oidc', 'saml'].map((p) => (
+                <button key={p} type="button" onClick={() => setSsoProvider(p)}
+                  className={cn('rounded-sm border px-2 py-0.5 font-mono text-[10px]',
+                    ssoProvider === p ? 'border-primary/40 bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:text-foreground')}>
+                  {p === 'oidc' ? 'OIDC' : 'SAML 2.0'}
+                </button>
+              ))}
+            </div>
+
+            {ssoProvider === 'oidc' ? (
+              <div className="grid gap-2 sm:grid-cols-3">
+                <input value={sf('issuer')} onChange={(e) => setF('issuer', e.target.value)} placeholder="issuer (https://acme.okta.com)"
+                  className="rounded-sm border border-border bg-background px-1.5 py-1 font-mono text-[10px]" />
+                <input value={sf('client_id')} onChange={(e) => setF('client_id', e.target.value)} placeholder="client ID"
+                  className="rounded-sm border border-border bg-background px-1.5 py-1 font-mono text-[10px]" />
+                <input value={sf('client_secret')} onChange={(e) => setF('client_secret', e.target.value)} placeholder="client secret" type="password"
+                  className="rounded-sm border border-border bg-background px-1.5 py-1 font-mono text-[10px]" />
+              </div>
+            ) : (
+              <div className="grid gap-2 sm:grid-cols-3">
+                <input value={sf('entity_id')} onChange={(e) => setF('entity_id', e.target.value)} placeholder="IdP entity ID"
+                  className="rounded-sm border border-border bg-background px-1.5 py-1 font-mono text-[10px]" />
+                <input value={sf('sso_url')} onChange={(e) => setF('sso_url', e.target.value)} placeholder="SSO URL (https://…)"
+                  className="rounded-sm border border-border bg-background px-1.5 py-1 font-mono text-[10px]" />
+                <input value={sf('certificate')} onChange={(e) => setF('certificate', e.target.value)} placeholder="X.509 signing certificate (PEM)"
+                  className="rounded-sm border border-border bg-background px-1.5 py-1 font-mono text-[10px]" />
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="flex items-center gap-1.5 text-[11px]">
+                <input type="checkbox" checked={scimEnabled} onChange={(e) => setScimEnabled(e.target.checked)} />
+                Enable SCIM provisioning
+              </label>
+              <button type="button" disabled={busy}
+                onClick={async () => {
+                  const params: Record<string, any> = { provider: ssoProvider, scim_enabled: scimEnabled, ...ssoForm }
+                  const r = await act('configure_sso', params)
+                  if (r.status === 'configured') { setSsoForm({}); if (r.scim_token) setNewScim(r.scim_token) }
+                }}
+                className="rounded-sm border border-primary/40 bg-primary/10 px-2.5 py-1 text-[11px] text-primary hover:bg-primary/20 disabled:opacity-50">
+                {sso.status === 'configured' ? 'Update SSO' : 'Save SSO config'}
+              </button>
+              <span className="font-mono text-[9px] text-muted-foreground">admin-only · audited · secrets stored redacted</span>
+            </div>
+
+            <p className="text-[9px] text-muted-foreground">
+              Stores the IdP connection. Login enforcement is a separate, verified
+              step: it needs the callback/ACS endpoints wired against your live IdP.
+              Nothing here logs a user in via SSO until that is done — the status
+              stays honest ("configured — login enforcement not active").
+            </p>
           </div>
-          <p className="mt-1.5 text-[10px] text-muted-foreground">{sso.note ?? 'Single sign-on is available on Enterprise / Defense tiers.'}</p>
         </div>
       </div>
     </div>

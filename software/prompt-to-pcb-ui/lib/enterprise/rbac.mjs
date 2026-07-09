@@ -87,6 +87,8 @@ export const ACTION_PERMISSIONS = {
   revoke_api_key: 'manage_security_settings',
   create_webhook: 'manage_security_settings',
   delete_webhook: 'manage_security_settings',
+  configure_sso: 'manage_security_settings',
+  disable_sso: 'manage_security_settings',
 }
 
 const APPROVAL_PERMISSION = {
