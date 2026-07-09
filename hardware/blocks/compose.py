@@ -133,16 +133,31 @@ def with_body(fp_text, w, d, h):
     return s[:idx] + model + s[idx:] + "\n"
 
 
-def cap(ref, x, y, a, b, nets):
-    """0402 decoupling/bulk cap between nets a and b."""
-    return place("Capacitor_SMD", "C_0402_1005Metric", ref, x, y, 0,
-                 {"1": a, "2": b}, nets)
+def _set_value(fp_text, value):
+    """Capture a real electrical value at design time by writing it into the
+    footprint's Value property. It rides through renumber_duplicate_refs (which
+    only rewrites Reference), and lets classify_role tell bulk from decoupling.
+    Use ASCII 'u' for microfarads ('10uF') so that regex matches."""
+    if not value:
+        return fp_text
+    return re.sub(r'(\(property "Value" ")[^"]*(")',
+                  lambda m: m.group(1) + value + m.group(2), fp_text, count=1)
 
 
-def res(ref, x, y, a, b, nets):
-    """0402 resistor between nets a and b."""
-    return place("Resistor_SMD", "R_0402_1005Metric", ref, x, y, 0,
-                 {"1": a, "2": b}, nets)
+def cap(ref, x, y, a, b, nets, value="100nF"):
+    """0402 cap between nets a and b. Default 100nF = the standard decoupling
+    value (real design intent for a 0402 bypass cap); pass value= for bulk or
+    filter caps, e.g. cap(..., value="10uF")."""
+    return _set_value(place("Capacitor_SMD", "C_0402_1005Metric", ref, x, y, 0,
+                            {"1": a, "2": b}, nets), value)
+
+
+def res(ref, x, y, a, b, nets, value=None):
+    """0402 resistor between nets a and b. Pass value= (e.g. "4.7k") to capture
+    the real value — resistors have no universal default, so an unspecified one
+    stays unlabeled rather than guessing."""
+    return _set_value(place("Resistor_SMD", "R_0402_1005Metric", ref, x, y, 0,
+                            {"1": a, "2": b}, nets), value)
 
 
 def tp(ref, x, y, net, nets):
@@ -222,8 +237,8 @@ def block_mcu_pico(x, y, n, nets):
     # I2C bus pull-ups (4.7k to 3V3) — the bus master carries them; an open-drain
     # I2C bus is non-functional without them. Only when the board has an I2C bus.
     if "i2c_sda" in n:
-        b += res("R10", x + 26, y + 38, n["i2c_sda"], "+3V3", nets)
-        b += res("R11", x + 26, y + 44, n["i2c_scl"], "+3V3", nets)
+        b += res("R10", x + 26, y + 38, n["i2c_sda"], "+3V3", nets, value="4.7k")
+        b += res("R11", x + 26, y + 44, n["i2c_scl"], "+3V3", nets, value="4.7k")
     _DEVICES.append({"ref": "U1", "type": "mcu"})
     return b, 30, 56
 
@@ -271,9 +286,9 @@ def block_usbc(x, y, n, nets):
     b = place("Connector_USB", "USB_C_Receptacle_GCT_USB4085", "J1",
               x + 6, y + 6, 0, pmap, nets)
     # passives below the receptacle courtyard (extends to ~y+15.1)
-    b += res("R1", x + 4, y + 18, "USB_CC1", "GND", nets)   # CC1 5.1k Rd
-    b += res("R2", x + 8, y + 18, "USB_CC2", "GND", nets)   # CC2 5.1k Rd
-    b += cap("C1", x + 12, y + 18, "+5V", "GND", nets)      # VBUS bulk
+    b += res("R1", x + 4, y + 18, "USB_CC1", "GND", nets, value="5.1k")   # CC1 5.1k Rd
+    b += res("R2", x + 8, y + 18, "USB_CC2", "GND", nets, value="5.1k")   # CC2 5.1k Rd
+    b += cap("C1", x + 12, y + 18, "+5V", "GND", nets, value="10uF")      # VBUS bulk
     return b, 16, 22
 
 
@@ -417,7 +432,7 @@ def block_comms_can(x, y, n, nets):
         "can_txd": n["can_txd"], "can_rxd": n["can_rxd"],
         "canh": "CANH", "canl": "CANL"}, "U7", x + 6, y + 7, 0, nets)
     b += cap("C20", x + 6, y + 14, "+3V3", "GND", nets)      # transceiver decoupling
-    b += res("R20", x + 13, y + 10, "CANH", "CANL", nets)    # 120-ohm bus termination
+    b += res("R20", x + 13, y + 10, "CANH", "CANL", nets, value="120R")    # 120-ohm bus termination
     b += place("Connector_PinHeader_2.54mm", "PinHeader_1x03_P2.54mm_Vertical",
                "J7", x + 13, y + 16, 0, {"1": "CANH", "2": "CANL", "3": "GND"}, nets)
     label("CAN H/L/G", x + 13, y + 24, 0.7)
@@ -635,8 +650,8 @@ def block_mcu_bare(x, y, n, nets):
     b += tp("TP51", x + 80, y + 44, "RP_USB_DP", nets)
     # I2C pull-ups (the Pico block carries these when it is the MCU)
     if "i2c_sda" in n:
-        b += res("R32", x + 90, y + 20, n["i2c_sda"], "+3V3", nets)
-        b += res("R33", x + 90, y + 26, n["i2c_scl"], "+3V3", nets)
+        b += res("R32", x + 90, y + 20, n["i2c_sda"], "+3V3", nets, value="4.7k")
+        b += res("R33", x + 90, y + 26, n["i2c_scl"], "+3V3", nets, value="4.7k")
     label("BARE RP2040 (STRESS TEST)", x + 60, y + 2, 0.8)
     label("J30 BOOTSEL  J31 RESET  J32 SWD", x + 18, y + 50, 0.6)
     label("USB pads ADVISORY ONLY no impedance claim", x + 58, y + 50, 0.6)
@@ -686,8 +701,8 @@ def block_backplane6(x, y, n, nets):
     # cards inserted). Known Rev B item recorded in the pinout compatibility
     # report: populated cards stack their own pull-ups (see fl1-pinout-
     # compatibility-report) — card-side DNP option planned.
-    b += res("R94", x + 40, y + 34, n.get("i2c_sda", "I2C_SDA"), "+3V3", nets)
-    b += res("R95", x + 48, y + 34, n.get("i2c_scl", "I2C_SCL"), "+3V3", nets)
+    b += res("R94", x + 40, y + 34, n.get("i2c_sda", "I2C_SDA"), "+3V3", nets, value="4.7k")
+    b += res("R95", x + 48, y + 34, n.get("i2c_scl", "I2C_SCL"), "+3V3", nets, value="4.7k")
     b += tp("TP60", x + 6, y + 34, "FAULT", nets)
     b += tp("TP61", x + 14, y + 34, "INTERLOCK", nets)
     b += tp("TP62", x + 22, y + 34, "TRIG", nets)
@@ -705,7 +720,7 @@ def block_status_led(x, y, n, nets):
     GPIO-driven status LED is a future generic primitive."""
     b = place("LED_SMD", "LED_0603_1608Metric", "D1", x + 3, y + 4, 0,
               {"1": "LED_K", "2": "+3V3"}, nets)
-    b += res("R96", x + 3, y + 9, "LED_K", "GND", nets)
+    b += res("R96", x + 3, y + 9, "LED_K", "GND", nets, value="1k")
     label("PWR LED", x + 3, y + 1, 0.6)
     return b, 8, 12
 
@@ -753,8 +768,8 @@ def block_bme280_breakout(x, y, n, nets):
                {"1": "+3V3", "2": "GND",
                 "3": n.get("i2c_sda", "I2C_SDA"), "4": n.get("i2c_scl", "I2C_SCL")}, nets)
     # breakout OWNS its pull-ups (no MCU on board; explicit single owner)
-    b += res("R97", x + 27, y + 5, n.get("i2c_sda", "I2C_SDA"), "+3V3", nets)
-    b += res("R98", x + 27, y + 10, n.get("i2c_scl", "I2C_SCL"), "+3V3", nets)
+    b += res("R97", x + 27, y + 5, n.get("i2c_sda", "I2C_SDA"), "+3V3", nets, value="4.7k")
+    b += res("R98", x + 27, y + 10, n.get("i2c_scl", "I2C_SCL"), "+3V3", nets, value="4.7k")
     b += tp("TP46", x + 5, y + 16, n.get("i2c_sda", "I2C_SDA"), nets)
     b += tp("TP47", x + 11, y + 16, n.get("i2c_scl", "I2C_SCL"), nets)
     label("BME280 BREAKOUT 0x76", x + 14, y + 1, 0.7)
@@ -955,8 +970,8 @@ def block_usbc_sink(x, y, n, nets):
               "J25", x + 6, y + 8, 0,
               {"A9": "+5V", "B9": "+5V", "A12": "GND", "B12": "GND",
                "A5": "USB_CC1", "B5": "USB_CC2", "SH": "GND"}, nets)
-    b += res("R99", x + 14, y + 4, "USB_CC1", "GND", nets)
-    b += res("R100", x + 14, y + 9, "USB_CC2", "GND", nets)
+    b += res("R99", x + 14, y + 4, "USB_CC1", "GND", nets, value="5.1k")
+    b += res("R100", x + 14, y + 9, "USB_CC2", "GND", nets, value="5.1k")
     b += cap("C35", x + 14, y + 14, "+5V", "GND", nets)
     b += tp("TP55", x + 3, y + 18, "+5V", nets)
     label("USB-C 5V SINK ONLY (no PD, no data)", x + 10, y + 1, 0.6)
@@ -989,7 +1004,7 @@ def block_relay_matrix(x, y, n, nets):
         "sr_q0": "SR_Q0", "sr_q1": "SR_Q1", "sr_q2": "SR_Q2", "sr_q3": "SR_Q3"},
         "U7", x + 8, y + 10, 0, nets)
     b += cap("C20", x + 8, y + 18, "+5V", "GND", nets)
-    b += res("R21", x + 2, y + 10, n.get("sr_oe", "SR_OE"), "+5V", nets)  # OE pull-up: off at boot
+    b += res("R21", x + 2, y + 10, n.get("sr_oe", "SR_OE"), "+5V", nets, value="10k")  # OE pull-up: off at boot
     # ULN2803: buffer the select bits to relay-coil sinks (COM -> +5V flyback)
     b2, _ = sourced_ic("ULN2803 octal darlington driver", "darlington_array", {
         "gnd": "GND", "drv_com": "+5V",
@@ -1648,6 +1663,20 @@ def compose(spec, blocks, out_path):
 
     # device manifest sidecar — firmware reads this to drive the actual parts
     open(os.path.splitext(out_path)[0] + ".devices.json", "w").write(json.dumps(_DEVICES))
+
+    # real electrical values captured at design time (ref -> value). Extract
+    # from the FINAL board so refs are post-renumber. Only keep genuine
+    # electrical values (e.g. "100nF", "4.7k"); footprint strings like
+    # "C_0402_1005Metric" and un-set placeholders are skipped, so nothing is
+    # invented — a part with no captured value simply isn't listed.
+    vals = {}
+    for m in re.finditer(
+            r'\(footprint "[^"]+"[\s\S]*?\(property "Reference" "([^"]+)"'
+            r'[\s\S]*?\(property "Value" "([^"]+)"', p):
+        ref, val = m.group(1), m.group(2)
+        if re.match(r'^[\d.]+\s*[pnuµmkKMGR]?[FHΩ]?$', val):
+            vals[ref] = val
+    open(os.path.splitext(out_path)[0] + ".values.json", "w").write(json.dumps(vals))
 
     print("COMPOSE: blocks {} -> {} components placed, {:.0f}x{:.0f}mm, {} nets".format(
         keys, p.count("(footprint "), BW, BH, len(nets.order) - 1))

@@ -170,6 +170,14 @@ export async function GET(req: Request) {
     const bom = JSON.parse(fs.readFileSync(path.join(RUNS, run, 'data', 'bom.json'), 'utf8'))
     if (Array.isArray(bom)) refPart = buildRefPart(bom, allRefs)
   } catch { /* refs only */ }
+  // real electrical values captured at design time (ref -> "100nF"/"4.7k"),
+  // written by compose.py. Present on runs generated after value capture; the
+  // schematic prefers these over the package name, and falls back when absent.
+  let refValue: Record<string, string> = {}
+  try {
+    const v = JSON.parse(fs.readFileSync(path.join(RUNS, run, 'data', 'values.json'), 'utf8'))
+    if (v && typeof v === 'object' && !Array.isArray(v)) refValue = v
+  } catch { /* no captured values — fall back to part name */ }
 
   const blocks = deriveBlocks(nets)
 
@@ -208,7 +216,8 @@ export async function GET(req: Request) {
       const m = attrs.match(/cell_([A-Za-z0-9]+)/)
       if (!m) return full
       if (/s:attribute="ref"/.test(attrs)) return `<text${attrs}>${m[1]}</text>`
-      if (/s:attribute="value"/.test(attrs)) return `<text${attrs}>${(refPart[m[1]] ?? '').slice(0, 20)}</text>`
+      // prefer the real electrical value (10k/100nF); fall back to part name
+      if (/s:attribute="value"/.test(attrs)) return `<text${attrs}>${(refValue[m[1]] ?? refPart[m[1]] ?? '').slice(0, 20)}</text>`
       return full
     })
     cache.set(cacheKey, { mtime, svg })

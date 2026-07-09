@@ -319,6 +319,7 @@ export async function GET(req: Request) {
           // + the MCU selection & pin-assignment artifacts (MCU engine)
           for (const [suffix, dst] of [
             ['.devices.json', 'devices.json'],
+            ['.values.json', 'values.json'], // real electrical values (ref -> "100nF"/"4.7k")
             ['.recovery.json', 'recovery.json'],
             ['.mcu-selection.json', 'mcu-selection.json'],
             ['.mcu-recovery.json', 'mcu-recovery.json'],
