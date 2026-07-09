@@ -19,7 +19,7 @@ import { CodeViewer } from '@/components/code-viewer'
 import { BomTable } from '@/components/bom-table'
 import { BoardChecks } from '@/components/board-checks'
 import { BoardSchematic } from '@/components/board-schematic'
-import { OrderPanel } from '@/components/order-panel'
+import { ProcurementPanel } from '@/components/procurement-panel'
 import { RecoveryPanel } from '@/components/recovery-panel'
 import { ConstraintsPanel } from '@/components/constraints-panel'
 import { AssemblyPanel } from '@/components/assembly-panel'
@@ -263,16 +263,7 @@ export default function Compose2Page() {
               {tab === 'Assembly' && <AssemblyPanel runId={selectedRun.runDir ? selectedRun.id : null} fabZip={null} />}
               {tab === 'Review' && <ReviewPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
               {tab === 'FL-1' && <FL1ValidationView runId={selectedRun.runDir ? selectedRun.id : null} />}
-              {tab === 'Order' && (
-                <OrderPanel
-                  boardW={(isReal ? real?.board.boardSize.wMm : null) ?? 200}
-                  boardH={(isReal ? real?.board.boardSize.hMm : null) ?? 146}
-                  layers={(isReal ? real?.board.layers : null) ?? m.layers}
-                  components={(isReal ? real?.board.components : null) ?? m.components}
-                  bomTotal={(isReal ? real?.board.bomTotal : null)
-                    ?? (isReal ? real?.bom : null)?.reduce((s, l) => s + (l.lineTotal ?? l.unitPrice * l.qty), 0) ?? 55}
-                  fabZip={null} />
-              )}
+              {tab === 'Order' && <ProcurementPanel real={real} runDir={selectedRunDir ?? null} />}
             </ErrorBoundary>
           </div>
         </div>
