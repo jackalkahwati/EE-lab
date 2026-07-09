@@ -44,6 +44,7 @@ export function ComposeChat({ threads, activeId, onSelectThread, onNew, onRunCom
   const [err, setErr] = useState<string | null>(null)
   const [stages, setStages] = useState<Record<string, StageState>>({})
   const [logs, setLogs] = useState<{ stage: string; text: string; level?: string }[]>([])
+  const [threadsOpen, setThreadsOpen] = useState(false)
   const esRef = useRef<EventSource | null>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
 
@@ -117,16 +118,42 @@ export function ComposeChat({ threads, activeId, onSelectThread, onNew, onRunCom
   return (
     <div className="flex h-full flex-col">
       {/* threads header */}
-      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-        <Menu className="size-4 text-muted-foreground" />
-        <select value={activeId} onChange={(e) => onSelectThread(e.target.value)}
-          className="min-w-0 flex-1 truncate rounded-sm border border-border bg-secondary px-1.5 py-1 text-[11px]">
-          {threads.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
-        </select>
+      <div className="relative flex items-center gap-2 border-b border-border px-3 py-2">
+        <button type="button" onClick={() => setThreadsOpen((v) => !v)}
+          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-sm px-1 py-0.5 text-left hover:bg-secondary/50">
+          <Menu className="size-4 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1 truncate text-[11px] font-medium">{activeLabel}</span>
+          <span className="shrink-0 font-mono text-[9px] text-muted-foreground">{threads.length}</span>
+        </button>
         <button type="button" onClick={reset}
-          className="flex items-center gap-1 rounded-sm border border-primary/40 bg-primary/10 px-2 py-1 text-[11px] text-primary hover:bg-primary/20">
+          className="flex shrink-0 items-center gap-1 rounded-sm border border-primary/40 bg-primary/10 px-2 py-1 text-[11px] text-primary hover:bg-primary/20">
           <Plus className="size-3" /> New
         </button>
+
+        {threadsOpen && (
+          <>
+            <div className="fixed inset-0 z-20" onClick={() => setThreadsOpen(false)} />
+            <div className="absolute left-2 top-full z-30 mt-1 max-h-80 w-64 overflow-y-auto rounded-md border border-border bg-card p-1 shadow-xl">
+              <div className="flex items-center justify-between px-2 py-1">
+                <span className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">Threads</span>
+                <button type="button" onClick={() => { setThreadsOpen(false); reset() }}
+                  className="flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[10px] text-primary hover:bg-primary/10">
+                  <Plus className="size-3" /> New
+                </button>
+              </div>
+              {threads.length === 0 && <p className="px-2 py-2 text-[11px] text-muted-foreground">No threads yet — start one with New.</p>}
+              {threads.map((t) => (
+                <button key={t.id} type="button"
+                  onClick={() => { onSelectThread(t.id); setThreadsOpen(false) }}
+                  className={cn('flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[11px]',
+                    t.id === activeId ? 'bg-secondary font-medium text-foreground' : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground')}>
+                  <span className="min-w-0 flex-1 truncate">{t.label}</span>
+                  {t.id === activeId && <span className="size-1.5 shrink-0 rounded-full bg-primary" />}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
       </div>
 
       {/* thread body */}
