@@ -222,7 +222,7 @@ export default function Compose2Page() {
               <BoardCanvas key={selectedRun.id} run={selectedRun}
                 realBoard={isReal ? real?.board : null} basePath={boardBase} />
             )}
-            {view === 'schematic' && <BoardSchematic real={real} />}
+            {view === 'schematic' && <BoardSchematic runDir={selectedRunDir ?? null} />}
           </ErrorBoundary>
         </div>
       </section>
