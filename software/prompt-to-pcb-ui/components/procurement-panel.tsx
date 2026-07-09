@@ -42,19 +42,20 @@ export function ProcurementPanel({ real, runDir }: { real: RealBoard | null; run
     () => (wMm && hMm ? quoteAll(wMm, hMm, layers, qty) : []),
     [wMm, hMm, layers, qty])
 
-  // live JLCPCB quote (real API) — overlays the JLCPCB estimate row when available
-  type JlcLive = { live: boolean; priceUsd?: number | null; leadDays?: number | null; reason?: string; message?: string }
-  const [jlc, setJlc] = useState<JlcLive | null>(null)
+  // live fab quotes (real APIs: JLCPCB + PCBWay) — overlay their estimate rows
+  type FabLive = { live: boolean; priceUsd?: number | null; leadDays?: number | null; reason?: string; message?: string }
+  const [liveFabs, setLiveFabs] = useState<Record<string, FabLive> | null>(null)
   useEffect(() => {
-    if (!wMm || !hMm) { setJlc(null); return }
+    if (!wMm || !hMm) { setLiveFabs(null); return }
     let cancelled = false
-    setJlc(null)
+    setLiveFabs(null)
     fetch('/api/fab-quote', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ width: wMm, height: hMm, layers, qty }),
-    }).then((r) => r.json()).then((j) => { if (!cancelled) setJlc(j) }).catch(() => { if (!cancelled) setJlc(null) })
+    }).then((r) => r.json()).then((j) => { if (!cancelled) setLiveFabs(j?.fabs ?? null) }).catch(() => { if (!cancelled) setLiveFabs(null) })
     return () => { cancelled = true }
   }, [wMm, hMm, layers, qty])
+  const anyLive = liveFabs ? Object.values(liveFabs).some((f) => f.live) : false
   const sourcing = useMemo(() => resolveSourcing(real?.bom ?? []), [real?.bom])
   const needs = sourcing.filter((s) => !s.ok)
 
@@ -91,6 +92,11 @@ export function ProcurementPanel({ real, runDir }: { real: RealBoard | null; run
   const CONF: Record<string, string> = {
     'drop-in': 'text-emerald-500', series: 'text-sky-400', review: 'text-amber-500',
   }
+  // per-fab live-quote gate → short badge on the row
+  const REASON_BADGE: Record<string, string> = {
+    ip_not_allowed: 'allowlist IP', permission_denied: 'PCB API pending',
+    auth: 'key needed', unconfigured: 'add API key', error: 'api error',
+  }
 
   return (
     <div className="flex h-full flex-col overflow-y-auto text-xs">
@@ -121,27 +127,25 @@ export function ProcurementPanel({ real, runDir }: { real: RealBoard | null; run
         <div className="divide-y divide-border">
           {quotes.length === 0 && <p className="px-3 py-2 text-muted-foreground">Board size unknown — can't estimate.</p>}
           {quotes.map((q, i) => {
-            const isJlc = q.id === 'jlcpcb'
-            const jlcLive = isJlc && jlc?.live && jlc.priceUsd != null
+            const f = liveFabs?.[q.id]
+            const fabLive = !!(f?.live && f.priceUsd != null)
+            const badge = !f || f.live ? '' : REASON_BADGE[f.reason ?? 'error'] ?? ''
             return (
             <div key={q.id} className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-x-3 px-3 py-1.5">
               <span className="min-w-0">
                 <span className="text-[11px] font-medium">{q.name}</span>
                 <span className="ml-1.5 rounded-sm border border-border px-1 font-mono text-[8px] text-muted-foreground">{q.region}</span>
                 {i === 0 && <span className="ml-1 rounded-sm bg-emerald-500/15 px-1 font-mono text-[8px] text-emerald-500">cheapest</span>}
-                {jlcLive && <span className="ml-1 rounded-sm bg-sky-500/15 px-1 font-mono text-[8px] text-sky-400">live</span>}
-                {isJlc && jlc && !jlc.live && jlc.reason === 'ip_not_allowed' &&
-                  <span className="ml-1 rounded-sm bg-amber-500/15 px-1 font-mono text-[8px] text-amber-500">allowlist IP</span>}
-                {isJlc && jlc && !jlc.live && jlc.reason === 'permission_denied' &&
-                  <span className="ml-1 rounded-sm bg-amber-500/15 px-1 font-mono text-[8px] text-amber-500">PCB API pending</span>}
+                {fabLive && <span className="ml-1 rounded-sm bg-sky-500/15 px-1 font-mono text-[8px] text-sky-400">live</span>}
+                {badge && <span className="ml-1 rounded-sm bg-amber-500/15 px-1 font-mono text-[8px] text-amber-500">{badge}</span>}
                 <span className="block truncate text-[9px] text-muted-foreground">{q.note} · min {q.minQty}</span>
               </span>
               <span className="text-right font-mono text-[11px] tabular-nums">
-                {jlcLive
-                  ? <span className="text-sky-400">${jlc!.priceUsd!.toFixed(2)}</span>
+                {fabLive
+                  ? <span className="text-sky-400">${f!.priceUsd!.toFixed(2)}</span>
                   : `~$${q.estUsd.toFixed(2)}`}
               </span>
-              <span className="text-right font-mono text-[10px] text-muted-foreground">{(jlcLive && jlc!.leadDays) || q.leadDays}d</span>
+              <span className="text-right font-mono text-[10px] text-muted-foreground">{(fabLive && f!.leadDays) || q.leadDays}d</span>
               <a href={q.url} target="_blank" rel="noopener noreferrer"
                 className="flex items-center justify-end gap-0.5 text-[10px] text-primary hover:underline">
                 open <ExternalLink className="size-2.5" />
@@ -150,13 +154,9 @@ export function ProcurementPanel({ real, runDir }: { real: RealBoard | null; run
           )})}
         </div>
         <p className="px-3 py-1.5 font-mono text-[9px] text-amber-500">
-          {jlc?.live
-            ? 'JLCPCB is a live API price; other fabs are estimates from published pricing. Compose never auto-orders.'
-            : jlc && jlc.reason === 'ip_not_allowed'
-            ? `JLCPCB live quote is wired — add this server's IP to your JLCPCB API allowlist to enable it. All rows are estimates until then.`
-            : jlc && jlc.reason === 'permission_denied'
-            ? `JLCPCB live quote is wired + IP-allowlisted, but the account's PCB API permission needs JLCPCB approval (Console → Manage Apps → Permission). All rows are estimates until then.`
-            : 'estimates from published pricing — get a binding quote on the fab\'s site. Compose never auto-orders.'}
+          {anyLive
+            ? 'rows badged “live” are real API prices; the rest are estimates from published pricing. Compose never auto-orders.'
+            : 'JLCPCB + PCBWay live quotes are wired (badged when a key/approval is pending); other fabs have no quote API, so they stay estimates. Compose never auto-orders.'}
         </p>
       </div>
 

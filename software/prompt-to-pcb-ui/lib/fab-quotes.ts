@@ -1,7 +1,8 @@
 /**
  * Fab-house quote ESTIMATES. These are parametric estimates from each fab's
  * PUBLISHED pricing (board area × layer factor × quantity) — NOT live API
- * quotes (except JLCPCB, which has a real API wired in lib/jlcpcb.ts). Use them
+ * quotes (except JLCPCB + PCBWay, which have real APIs wired in lib/jlcpcb.ts
+ * and lib/pcbway.ts — overlaid live in the Quote tab when keyed). Use them
  * to shortlist, then get a binding quote on the fab's own site via `url` — each
  * `url` is verified to land on that fab's actual instant-quote / gerber-upload
  * page (checked live for HTTP 200), not a homepage. None of these fabs document
