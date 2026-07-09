@@ -237,6 +237,10 @@ export interface BomLine {
   unitPrice: number
   lineTotal?: number
   lineType: 'ordered' | 'buyer-furnished'
+  // real distributor data captured at sourcing time (present on synced runs)
+  stock?: number
+  sourcedMpn?: string
+  sourcingStatus?: 'in-stock' | 'generic' | 'no-stock' | string
 }
 
 export const BOM_LINES: BomLine[] = [
