@@ -177,6 +177,8 @@ export default function Compose2Page() {
         <ComposeChat
           threads={runs.map((r) => ({ id: r.id, label: r.name || r.id }))}
           activeId={selectedId}
+          activeRunId={!newDesign && selectedRun?.real ? selectedRun.id : undefined}
+          activeName={selectedRun?.name}
           newDesign={newDesign}
           onSelectThread={(id) => { setSelectedId(id); setNewDesign(false) }}
           onNew={() => setNewDesign(true)}

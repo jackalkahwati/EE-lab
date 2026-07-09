@@ -19,7 +19,7 @@ type Question = { type: 'question'; question: string; boardClass?: string; hints
 type Spec = { type: 'spec'; boardClass: string; blocks: string[]; summary: string; request: string; layers?: number }
 type Ev = { type: string; id?: StageId; state?: StageState; stage?: StageId; text?: string
   level?: string; spec?: any; runDir?: string; status?: string }
-type Phase = 'idle' | 'interview' | 'ready' | 'building' | 'done' | 'error'
+type Phase = 'idle' | 'interview' | 'ready' | 'revReady' | 'building' | 'done' | 'error'
 
 // UTF-8-safe base64 (spec can contain µ, ×, em-dash…) — matches the compose page
 function b64(json: string) {
@@ -27,9 +27,11 @@ function b64(json: string) {
     String.fromCharCode(parseInt(h, 16))))
 }
 
-export function ComposeChat({ threads, activeId, newDesign, onSelectThread, onNew, onRunComplete, onRename }: {
+export function ComposeChat({ threads, activeId, activeRunId, activeName, newDesign, onSelectThread, onNew, onRunComplete, onRename }: {
   threads: { id: string; label: string }[]
   activeId: string
+  activeRunId?: string   // the real run currently on screen (revisable)
+  activeName?: string    // its display name, for the revision context line
   newDesign?: boolean
   onSelectThread: (id: string) => void
   onNew: () => void
@@ -41,6 +43,7 @@ export function ComposeChat({ threads, activeId, newDesign, onSelectThread, onNe
   const [answers, setAnswers] = useState<Answer[]>([])
   const [current, setCurrent] = useState<Question | null>(null)
   const [spec, setSpec] = useState<Spec | null>(null)
+  const [revSpec, setRevSpec] = useState<{ blocks: string[]; boardClass: string; note: string; request: string } | null>(null)
   const [typed, setTyped] = useState('')
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -72,17 +75,58 @@ export function ComposeChat({ threads, activeId, newDesign, onSelectThread, onNe
   function reset() {
     esRef.current?.close(); esRef.current = null
     setPhase('idle'); setRequest(''); setAnswers([]); setCurrent(null); setSpec(null)
-    setTyped(''); setErr(null); setStages({}); setLogs([]); onNew()
+    setRevSpec(null); setTyped(''); setErr(null); setStages({}); setLogs([]); onNew()
   }
+
+  // With a built board on screen (not a fresh +New), a chat message REVISES it.
+  const reviseMode = !newDesign && !!activeRunId && (phase === 'idle' || phase === 'done')
+
+  const revise = useCallback(async (req: string, runId: string) => {
+    setLoading(true); setErr(null)
+    try {
+      const r = await fetch('/api/revise', {
+        method: 'POST', headers: { 'content-type': 'application/json', ...llmHeaders() },
+        body: JSON.stringify({ runId, request: req }),
+      })
+      const d = await r.json()
+      if (d.error) throw new Error(d.error)
+      if (d.changed === false) { setErr(d.note || 'No block-level change needed for this request.'); setPhase('idle') }
+      else {
+        setRevSpec({ blocks: d.blocks ?? [], boardClass: d.board_class ?? '', note: d.note ?? '', request: req })
+        setPhase('revReady')
+      }
+    } catch (e) { setErr(String(e)); setPhase('idle') } finally { setLoading(false) }
+  }, [])
 
   function submit() {
     const v = typed.trim(); if (!v) return
     setTyped('')
-    if (phase === 'idle') { setRequest(v); ask(v, []) }
+    if (reviseMode && activeRunId) { setRequest(v); revise(v, activeRunId) }
+    else if (phase === 'idle') { setRequest(v); ask(v, []) }
     else if (phase === 'interview' && current) {
       const next = [...answers, { question: current.question, answer: v }]
       setAnswers(next); setCurrent(null); ask(request, next)
     }
+  }
+
+  function startRev() {
+    if (!revSpec || !activeRunId) return
+    setPhase('building'); setStages({}); setLogs([])
+    const id = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const payload = b64(JSON.stringify({ blocks: revSpec.blocks, boardClass: revSpec.boardClass }))
+    const url = `/api/pipeline/run?prompt=${encodeURIComponent(revSpec.request)}`
+      + `&runId=${encodeURIComponent(id)}&compose=1&spec=${encodeURIComponent(payload)}`
+      + `&parent=${encodeURIComponent(activeRunId)}&revNote=${encodeURIComponent(revSpec.note || revSpec.request)}`
+    const es = new EventSource(url); esRef.current = es
+    es.onmessage = (e) => {
+      const ev = JSON.parse(e.data) as Ev
+      if (ev.type === 'stage' && ev.id) setStages((s) => ({ ...s, [ev.id!]: ev.state as StageState }))
+      else if (ev.type === 'log' && ev.stage && ev.text)
+        setLogs((l) => [...l.slice(-60), { stage: ev.stage!, text: ev.text!, level: ev.level }])
+      else if (ev.type === 'done') { es.close(); esRef.current = null; setPhase('done'); if (ev.runDir) onRunComplete(ev.runDir, id) }
+      else if (ev.type === 'error') { es.close(); esRef.current = null; setErr(ev.text ?? 'pipeline error'); setPhase('error') }
+    }
+    es.onerror = () => { es.close(); esRef.current = null; setErr('connection lost'); setPhase('error') }
   }
 
   function start() {
@@ -182,10 +226,16 @@ export function ComposeChat({ threads, activeId, newDesign, onSelectThread, onNe
 
       {/* thread body */}
       <div ref={bodyRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 text-sm">
-        {phase === 'idle' && (
+        {phase === 'idle' && !reviseMode && (
           <p className="text-muted-foreground">
             Describe the board you want and I&apos;ll ask a few questions, then build it.
             <span className="mt-1 block text-[11px]">e.g. &ldquo;8-probe relay test matrix, RP2040, 24V&rdquo;</span>
+          </p>
+        )}
+        {phase === 'idle' && reviseMode && (
+          <p className="text-muted-foreground">
+            Describe a change to revise <span className="font-medium text-foreground">{activeName || 'this board'}</span> into a new revision, or click <span className="font-medium">New</span> for a fresh board.
+            <span className="mt-1 block text-[11px]">e.g. &ldquo;swap the RP2040 for an STM32&rdquo; · &ldquo;add a pressure sensor&rdquo; · &ldquo;drop the CAN transceiver&rdquo;</span>
           </p>
         )}
 
@@ -218,6 +268,27 @@ export function ComposeChat({ threads, activeId, newDesign, onSelectThread, onNe
               className="ml-8 rounded-md bg-primary px-3 py-1.5 text-[13px] font-medium text-primary-foreground hover:bg-primary/90">
               Yes, build it →
             </button>
+          </div>
+        )}
+
+        {/* revision plan ready */}
+        {phase === 'revReady' && revSpec && (
+          <div className="space-y-2">
+            <div className="ml-8 rounded-lg rounded-tr-sm bg-primary/15 px-3 py-2 text-[13px] text-foreground">{revSpec.request}</div>
+            <div className="rounded-lg rounded-tl-sm bg-secondary/60 px-3 py-2 text-[13px]">
+              Revision of <span className="font-medium">{activeName || 'the board'}</span>: {revSpec.note}
+              {revSpec.blocks?.length ? <span className="mt-1 block font-mono text-[10px] text-muted-foreground">new blocks: {revSpec.blocks.join(' · ')}</span> : null}
+            </div>
+            <div className="ml-8 flex gap-2">
+              <button type="button" onClick={startRev}
+                className="rounded-md bg-primary px-3 py-1.5 text-[13px] font-medium text-primary-foreground hover:bg-primary/90">
+                Build revision →
+              </button>
+              <button type="button" onClick={() => { setRevSpec(null); setPhase('done') }}
+                className="rounded-md border border-border px-3 py-1.5 text-[13px] text-muted-foreground hover:text-foreground">
+                Cancel
+              </button>
+            </div>
           </div>
         )}
 
@@ -268,14 +339,16 @@ export function ComposeChat({ threads, activeId, newDesign, onSelectThread, onNe
             value={typed}
             onChange={(e) => setTyped(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() } }}
-            disabled={building || loading || phase === 'ready'}
+            disabled={building || loading || phase === 'ready' || phase === 'revReady'}
             rows={1}
-            placeholder={phase === 'idle' ? 'Describe the board…'
-              : phase === 'interview' ? 'type your answer…'
-                : phase === 'ready' ? 'press “Yes, build it” above' : 'start a new thread with + New'}
+            placeholder={phase === 'ready' ? 'press “Yes, build it” above'
+              : phase === 'revReady' ? 'press “Build revision” above'
+                : phase === 'interview' ? 'type your answer…'
+                  : reviseMode ? 'Describe a change to revise this board…'
+                    : phase === 'idle' ? 'Describe the board…' : 'start a new thread with + New'}
             className="max-h-24 min-h-[1.5rem] flex-1 resize-none bg-transparent text-[13px] outline-none placeholder:text-muted-foreground disabled:opacity-50"
           />
-          <button type="button" onClick={submit} disabled={!typed.trim() || building || loading || phase === 'ready'}
+          <button type="button" onClick={submit} disabled={!typed.trim() || building || loading || phase === 'ready' || phase === 'revReady'}
             className="shrink-0 rounded-md bg-primary px-2.5 py-1 text-[12px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-40">
             Send ↵
           </button>
