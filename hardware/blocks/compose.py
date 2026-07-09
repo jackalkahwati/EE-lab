@@ -1145,7 +1145,7 @@ SENSOR_PAT = re.compile(
     r"pressure|baro|humidity|hygro|moisture|lux|ambient light|light sensor|als\b|"
     r"proximity|tof|time.of.flight|distance sensor|color sensor|uv\b|co2|voc|"
     r"air quality|gas sensor|magnetometer|compass|hall\b|current sens|power monitor|"
-    r"sht\d|bme\d|bmp\d|opt3|veml|apds|vl53|tsl2|ccs811|sgp\d|ina2\d|\bsensor\b",
+    r"sht\d|bme\d|bmp\d|opt3|veml|apds|vl53|tsl2|ccs811|sgp\d|ina2\d|\bsensors?\b",
     re.IGNORECASE)
 
 
@@ -1181,6 +1181,39 @@ BLOCK_TABLE = {
     "spibus": block_spibus,
     "uartbridge": block_uart_bridge,
 }
+
+
+# The buildable-block menu the interview LLM is shown, so it proposes blocks the
+# library can actually build (named with the real part/function) instead of
+# generic categories it then drops. SINGLE SOURCE OF TRUTH: keep in step with
+# _block_keys / BLOCK_TABLE. Emitted via `compose.py --capabilities`.
+CAPABILITIES = [
+    {"key": "power", "label": "Power inlet + regulation (USB-C 5V → 3.3V, or Vin/battery/LDO/buck)"},
+    {"key": "mcu", "label": "RP2040 MCU on a Raspberry Pi Pico module"},
+    {"key": "baremcu", "label": "Bare RP2040 (QFN-56) MCU, no Pico module"},
+    {"key": "radio", "label": "LoRa radio (RFM95 / SX127x) — auto-adds a U.FL antenna"},
+    {"key": "cellular", "label": "Cellular modem (LTE / NB-IoT / GSM)"},
+    {"key": "gnss", "label": "GNSS / GPS receiver"},
+    {"key": "imu", "label": "6-axis IMU (accelerometer + gyro)"},
+    {"key": "tempsensor", "label": "I2C temperature sensor (LM75 / TMP102 / TMP117 / MCP9808)"},
+    {"key": "bme280", "label": "BME280 environmental sensor (temperature + humidity + pressure)"},
+    {"key": "i2c-sensor", "label": "ANY other I2C sensor named in the request — pressure, humidity, "
+        "light/ALS, proximity/ToF, CO2/VOC/air-quality/gas, magnetometer/compass, current-sense (INA-class). "
+        "Name the specific part or measurand and it is synthesized."},
+    {"key": "motors", "label": "Brushed motor / servo / ESC drivers (only if the board drives motors)"},
+    {"key": "motion", "label": "Stepper driver (TMC2209 / TMC5160)"},
+    {"key": "comms", "label": "CAN bus transceiver"},
+    {"key": "instrument", "label": "DC current/voltage measurement front-end (INA-class shunt monitor)"},
+    {"key": "statusled", "label": "Status / indicator LED"},
+    {"key": "spibus", "label": "SPI peripheral header / bus break-out"},
+    {"key": "boardid", "label": "Board-ID EEPROM (24LCxx)"},
+    {"key": "gpiobank", "label": "Protected GPIO bank / header"},
+]
+
+
+def capabilities_json():
+    import json as _json
+    return _json.dumps({"blocks": CAPABILITIES}, indent=2)
 
 
 # ---- composer ---------------------------------------------------------------
@@ -1690,6 +1723,9 @@ def compose(spec, blocks, out_path):
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--capabilities":
+        print(capabilities_json())
+        return
     spec = json.load(open(sys.argv[1])) if len(sys.argv) > 1 and os.path.exists(sys.argv[1]) else {}
     out_path = sys.argv[2] if len(sys.argv) > 2 else "/tmp/composed.kicad_pcb"
     blocks = spec.get("blocks", ["power", "mcu", "lora radio", "antenna"])

@@ -1,0 +1,76 @@
+{
+  "blocks": [
+    {
+      "key": "power",
+      "label": "Power inlet + regulation (USB-C 5V \u2192 3.3V, or Vin/battery/LDO/buck)"
+    },
+    {
+      "key": "mcu",
+      "label": "RP2040 MCU on a Raspberry Pi Pico module"
+    },
+    {
+      "key": "baremcu",
+      "label": "Bare RP2040 (QFN-56) MCU, no Pico module"
+    },
+    {
+      "key": "radio",
+      "label": "LoRa radio (RFM95 / SX127x) \u2014 auto-adds a U.FL antenna"
+    },
+    {
+      "key": "cellular",
+      "label": "Cellular modem (LTE / NB-IoT / GSM)"
+    },
+    {
+      "key": "gnss",
+      "label": "GNSS / GPS receiver"
+    },
+    {
+      "key": "imu",
+      "label": "6-axis IMU (accelerometer + gyro)"
+    },
+    {
+      "key": "tempsensor",
+      "label": "I2C temperature sensor (LM75 / TMP102 / TMP117 / MCP9808)"
+    },
+    {
+      "key": "bme280",
+      "label": "BME280 environmental sensor (temperature + humidity + pressure)"
+    },
+    {
+      "key": "i2c-sensor",
+      "label": "ANY other I2C sensor named in the request \u2014 pressure, humidity, light/ALS, proximity/ToF, CO2/VOC/air-quality/gas, magnetometer/compass, current-sense (INA-class). Name the specific part or measurand and it is synthesized."
+    },
+    {
+      "key": "motors",
+      "label": "Brushed motor / servo / ESC drivers (only if the board drives motors)"
+    },
+    {
+      "key": "motion",
+      "label": "Stepper driver (TMC2209 / TMC5160)"
+    },
+    {
+      "key": "comms",
+      "label": "CAN bus transceiver"
+    },
+    {
+      "key": "instrument",
+      "label": "DC current/voltage measurement front-end (INA-class shunt monitor)"
+    },
+    {
+      "key": "statusled",
+      "label": "Status / indicator LED"
+    },
+    {
+      "key": "spibus",
+      "label": "SPI peripheral header / bus break-out"
+    },
+    {
+      "key": "boardid",
+      "label": "Board-ID EEPROM (24LCxx)"
+    },
+    {
+      "key": "gpiobank",
+      "label": "Protected GPIO bank / header"
+    }
+  ]
+}

@@ -6,8 +6,18 @@
  * next question or a finalized spec.
  */
 import { callLLMText, overrideFromHeaders, type LLMOverride } from '@/lib/llm'
+import capabilities from '@/lib/block-capabilities.json'
 
 export const dynamic = 'force-dynamic'
+
+// The builder's real block menu (generated from compose.py --capabilities). We
+// show it to the interviewer so it proposes ONLY blocks the library can build,
+// named with the actual part/function — instead of generic categories
+// ("sensors", "connectors", "protection") or hallucinated blocks (imu, motors
+// on a board with neither) that the composer then silently drops.
+const BLOCK_MENU = (capabilities.blocks as { key: string; label: string }[])
+  .map((b) => `- ${b.label}`)
+  .join('\n')
 
 const NVIDIA_URL = 'https://integrate.api.nvidia.com/v1/chat/completions'
 const MAX_QUESTIONS = 4
@@ -28,14 +38,29 @@ function generatorFor(boardClass: string, blocks: string[]): 'matrix' | 'compose
 
 const SYSTEM = `detailed thinking off.
 You are an expert PCB design interviewer for an automated prompt-to-PCB tool.
-Given a board request, identify the functional blocks the board needs (power,
-compute/MCU, radio, sensors, actuators/drivers, connectors, protection) and run
-a short clarifying interview to pin down the critical unknowns.
+Given a board request, run a short clarifying interview, then output the
+functional blocks the board needs.
 
-Ask about the highest-impact unknowns first, ONE at a time, e.g.: MCU family,
-radio band + module, power source/voltage, motor/actuator count + interface,
-which sensors, connectors. Always give 2-4 concrete options and a sensible
-default. Keep questions short.
+The downstream builder can ONLY build these blocks — this is the exact menu:
+${BLOCK_MENU}
+
+BLOCK RULES (critical — the builder silently drops anything it can't map):
+- Every entry in "blocks" MUST correspond to something on the menu above.
+- Name each block with the SPECIFIC part or measurand from the request, e.g.
+  "BME280 environmental sensor", "RP2040 MCU", "USB-C power", "LoRa radio 915MHz"
+  — NOT generic words like "sensors", "connectors", or "protection".
+- Preserve any part number the user gave (BME280, MAX31855, INA219, RP2040…).
+- Include ONLY blocks the request actually needs. Do NOT add IMU, motors, radio,
+  GNSS, cellular, etc. unless the user asked for them.
+- Do NOT emit "connectors" or "protection" as standalone blocks — connectors and
+  protection are built into the power / bus / header blocks automatically.
+- For any sensor not explicitly on the menu, name the specific I2C part or
+  measurand (e.g. "SHT31 humidity sensor", "VL53L0X time-of-flight") — the
+  builder synthesizes I2C sensors by name.
+
+Ask about the highest-impact unknowns first, ONE at a time (MCU family, power
+source/voltage, radio band, which specific sensors/parts). Always give 2-4
+concrete options and a sensible default. Keep questions short.
 
 Output ONLY one JSON object, no prose, no markdown fences.
 To ask the next question:
