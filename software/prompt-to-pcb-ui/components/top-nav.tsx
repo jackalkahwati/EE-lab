@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils'
 const LINKS: { href: string; label: string; hint: string }[] = [
   { href: '/', label: 'Programs', hint: 'board-program portfolio' },
   { href: '/compose', label: 'Compose', hint: 'design tool' },
+  { href: '/compose2', label: 'Compose 2', hint: 'new three-pane layout (preview)' },
 ]
 
 export function TopNav() {
