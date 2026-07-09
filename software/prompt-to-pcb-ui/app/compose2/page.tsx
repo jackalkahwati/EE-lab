@@ -18,6 +18,7 @@ import { Board3D } from '@/components/board-3d'
 import { CodeViewer } from '@/components/code-viewer'
 import { BomTable } from '@/components/bom-table'
 import { BoardChecks } from '@/components/board-checks'
+import { BoardSchematic } from '@/components/board-schematic'
 import { OrderPanel } from '@/components/order-panel'
 import { RecoveryPanel } from '@/components/recovery-panel'
 import { ConstraintsPanel } from '@/components/constraints-panel'
@@ -60,7 +61,7 @@ export default function Compose2Page() {
   const [selectedId, setSelectedId] = useState('')
   const [realBoard, setRealBoard] = useState<RealBoard | null>(null)
   const [tab, setTab] = useState<Tab>('Overview')
-  const [view3d, setView3d] = useState(true)
+  const [view, setView] = useState<'3d' | 'layout' | 'schematic'>('3d')
   const stageRef = useRef<HTMLDivElement>(null)
   const toggleFullscreen = () => {
     const el = stageRef.current
@@ -197,11 +198,11 @@ export default function Compose2Page() {
           </button>
           <div className="ml-auto flex items-center gap-2">
             <div className="flex overflow-hidden rounded-sm border border-border">
-              {(['3D', '2D'] as const).map((v) => (
-                <button key={v} type="button" onClick={() => setView3d(v === '3D')}
+              {([['3d', '3D'], ['layout', 'Layout'], ['schematic', 'Schematic']] as const).map(([v, label]) => (
+                <button key={v} type="button" onClick={() => setView(v)}
                   className={cn('px-2.5 py-0.5 text-[11px]',
-                    (view3d ? '3D' : '2D') === v ? 'bg-secondary font-medium text-foreground' : 'text-muted-foreground hover:text-foreground')}>
-                  {v}
+                    view === v ? 'bg-secondary font-medium text-foreground' : 'text-muted-foreground hover:text-foreground')}>
+                  {label}
                 </button>
               ))}
             </div>
@@ -213,13 +214,15 @@ export default function Compose2Page() {
         </div>
         <div ref={stageRef} className="min-h-0 flex-1 bg-background">
           <ErrorBoundary>
-            {view3d ? (
+            {view === '3d' && (
               <Board3D basePath={boardBase} fallback={
                 <div className="flex h-full items-center justify-center text-xs text-muted-foreground">no 3D model for this run</div>} />
-            ) : (
+            )}
+            {view === 'layout' && (
               <BoardCanvas key={selectedRun.id} run={selectedRun}
                 realBoard={isReal ? real?.board : null} basePath={boardBase} />
             )}
+            {view === 'schematic' && <BoardSchematic real={real} />}
           </ErrorBoundary>
         </div>
       </section>
