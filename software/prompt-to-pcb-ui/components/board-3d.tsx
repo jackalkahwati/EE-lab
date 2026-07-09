@@ -74,25 +74,41 @@ export function Board3D({ basePath, fallback }: { basePath: string; fallback: Re
       renderer.shadowMap.enabled = true
       renderer.shadowMap.type = THREE.PCFSoftShadowMap
       renderer.toneMapping = THREE.ACESFilmicToneMapping
-      renderer.toneMappingExposure = 1.05
+      renderer.toneMappingExposure = 0.92
       renderer.outputColorSpace = THREE.SRGBColorSpace
       mount.appendChild(renderer.domElement)
 
-      // image-based lighting → glossy soldermask + metal highlights (the Flux look)
+      // image-based lighting → glossy highlights, but keep it subtle so it
+      // doesn't wash the soldermask out
       try {
         const { RoomEnvironment } = await import(
           'three/examples/jsm/environments/RoomEnvironment.js')
         const pmrem = new THREE.PMREMGenerator(renderer)
         scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
+        ;(scene as any).environmentIntensity = 0.4
       } catch { /* analytic lights alone still render fine */ }
 
-      // real geometry casts + receives shadows
+      // real geometry casts + receives shadows; darken + saturate the soldermask
+      // (KiCad greens render pale) so the board reads as a rich dark green
       gltf.scene.traverse((o: any) => {
-        if (o.isMesh) { o.castShadow = true; o.receiveShadow = true }
+        if (!o.isMesh) return
+        o.castShadow = true
+        o.receiveShadow = true
+        const mats = Array.isArray(o.material) ? o.material : [o.material]
+        mats.forEach((mm: any) => {
+          const c = mm?.color
+          if (!c) return
+          if (c.g > c.r * 1.06 && c.g > c.b * 1.06) { // greenish → soldermask
+            const hsl = { h: 0, s: 0, l: 0 }
+            c.getHSL(hsl)
+            c.setHSL(hsl.h, Math.min(1, hsl.s * 1.6), hsl.l * 0.38)
+            if ('roughness' in mm) mm.roughness = Math.min(1, (mm.roughness ?? 0.5) + 0.1)
+          }
+        })
       })
 
-      scene.add(new THREE.AmbientLight(0xffffff, 0.35))
-      const key = new THREE.DirectionalLight(0xffffff, 2.4)
+      scene.add(new THREE.AmbientLight(0xffffff, 0.22))
+      const key = new THREE.DirectionalLight(0xffffff, 2.9)
       key.position.set(center.x + span * 0.5, center.y + span * 1.4, center.z + span * 0.7)
       key.target.position.copy(center)
       key.castShadow = true
