@@ -1,9 +1,14 @@
 /**
  * Fab-house quote ESTIMATES. These are parametric estimates from each fab's
  * PUBLISHED pricing (board area × layer factor × quantity) — NOT live API
- * quotes (we hold no fab accounts/keys, and several fabs have no public quote
- * API). Use them to shortlist, then get a binding quote on the fab's own site
- * via the provided link. Compose never places an order.
+ * quotes (except JLCPCB, which has a real API wired in lib/jlcpcb.ts). Use them
+ * to shortlist, then get a binding quote on the fab's own site via `url` — each
+ * `url` is verified to land on that fab's actual instant-quote / gerber-upload
+ * page (checked live for HTTP 200), not a homepage. None of these fabs document
+ * URL-parameter prefill, so we deliberately DON'T append board specs to the
+ * link (a fabricated ?size= param would silently fail); the operator uploads
+ * the fab packet and confirms size/layers/qty (shown in the panel header).
+ * Compose never places an order.
  */
 export type FabQuote = {
   id: string; name: string; region: string; url: string
@@ -18,7 +23,7 @@ type FabDef = {
 
 // published-pricing-derived coefficients (order-of-magnitude, for comparison)
 const FABS: FabDef[] = [
-  { id: 'jlcpcb', name: 'JLCPCB', region: 'CN', url: 'https://jlcpcb.com/quote', minQty: 5, leadDays: 7,
+  { id: 'jlcpcb', name: 'JLCPCB', region: 'CN', url: 'https://cart.jlcpcb.com/quote', minQty: 5, leadDays: 7,
     note: 'lowest cost, fast; PCBA available', base: 2, perCm2: 0.06, layerMult: { 2: 1, 4: 2.6, 6: 5 } },
   { id: 'nextpcb', name: 'NextPCB', region: 'CN', url: 'https://www.nextpcb.com/pcb-quote', minQty: 5, leadDays: 7,
     note: 'low-cost China alternative', base: 2, perCm2: 0.06, layerMult: { 2: 1, 4: 2.5, 6: 5 } },
@@ -26,13 +31,13 @@ const FABS: FabDef[] = [
     note: 'China; assembly + enclosure', base: 4.9, perCm2: 0.07, layerMult: { 2: 1, 4: 2.4, 6: 4.5 } },
   { id: 'pcbway', name: 'PCBWay', region: 'CN', url: 'https://www.pcbway.com/orderonline.aspx', minQty: 5, leadDays: 7,
     note: 'broad options, advanced stackups', base: 5, perCm2: 0.07, layerMult: { 2: 1, 4: 2.4, 6: 4.5 } },
-  { id: 'lion', name: 'LION Circuits', region: 'IN', url: 'https://www.lioncircuits.com/', minQty: 5, leadDays: 9,
+  { id: 'lion', name: 'LION Circuits', region: 'IN', url: 'https://www.lioncircuits.com/quote', minQty: 5, leadDays: 9,
     note: 'India; quick-turn prototyping', base: 6, perCm2: 0.12, layerMult: { 2: 1, 4: 2.3, 6: 4 } },
-  { id: 'aisler', name: 'AISLER', region: 'EU', url: 'https://aisler.net/', minQty: 3, leadDays: 10,
+  { id: 'aisler', name: 'AISLER', region: 'EU', url: 'https://aisler.net/p/new', minQty: 3, leadDays: 10,
     note: 'EU-made, quality, 3-up', base: 0, perCm2: 0.55, layerMult: { 2: 1, 4: 2, 6: 3 } },
   { id: 'oshpark', name: 'OSH Park', region: 'US', url: 'https://oshpark.com/', minQty: 3, leadDays: 12,
     note: 'US-made, purple, 3-up; premium', base: 0, perCm2: 0.78, layerMult: { 2: 1, 4: 2, 6: 3 } },
-  { id: 'macrofab', name: 'MacroFab', region: 'US', url: 'https://macrofab.com/', minQty: 1, leadDays: 12,
+  { id: 'macrofab', name: 'MacroFab', region: 'US', url: 'https://www.macrofab.com/platform', minQty: 1, leadDays: 12,
     note: 'US; turnkey assembly focus', base: 20, perCm2: 0.9, layerMult: { 2: 1, 4: 1.8, 6: 3 } },
 ]
 
