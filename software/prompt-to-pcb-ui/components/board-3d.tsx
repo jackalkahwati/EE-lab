@@ -71,15 +71,55 @@ export function Board3D({ basePath, fallback }: { basePath: string; fallback: Re
       const renderer = new THREE.WebGLRenderer({ antialias: true })
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
       renderer.setSize(mount.clientWidth, mount.clientHeight)
+      renderer.shadowMap.enabled = true
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap
+      renderer.toneMapping = THREE.ACESFilmicToneMapping
+      renderer.toneMappingExposure = 1.05
+      renderer.outputColorSpace = THREE.SRGBColorSpace
       mount.appendChild(renderer.domElement)
 
-      scene.add(new THREE.AmbientLight(0xffffff, 1.1))
-      const key = new THREE.DirectionalLight(0xffffff, 2.2)
-      key.position.set(1, 2, 1.5)
-      scene.add(key)
-      const rim = new THREE.DirectionalLight(0xbfd4ff, 0.9)
-      rim.position.set(-1.5, -1, -1)
-      scene.add(rim)
+      // image-based lighting → glossy soldermask + metal highlights (the Flux look)
+      try {
+        const { RoomEnvironment } = await import(
+          'three/examples/jsm/environments/RoomEnvironment.js')
+        const pmrem = new THREE.PMREMGenerator(renderer)
+        scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
+      } catch { /* analytic lights alone still render fine */ }
+
+      // real geometry casts + receives shadows
+      gltf.scene.traverse((o: any) => {
+        if (o.isMesh) { o.castShadow = true; o.receiveShadow = true }
+      })
+
+      scene.add(new THREE.AmbientLight(0xffffff, 0.35))
+      const key = new THREE.DirectionalLight(0xffffff, 2.4)
+      key.position.set(center.x + span * 0.5, center.y + span * 1.4, center.z + span * 0.7)
+      key.target.position.copy(center)
+      key.castShadow = true
+      key.shadow.mapSize.set(2048, 2048)
+      key.shadow.bias = -0.0004
+      const sc: any = key.shadow.camera
+      const d = span * 0.8
+      sc.left = -d; sc.right = d; sc.top = d; sc.bottom = -d
+      sc.near = span * 0.05; sc.far = span * 8
+      sc.updateProjectionMatrix()
+      scene.add(key, key.target)
+      const fill = new THREE.DirectionalLight(0xbfd4ff, 0.55)
+      fill.position.set(center.x - span, center.y + span * 0.4, center.z - span)
+      scene.add(fill)
+
+      // soft contact shadow on a faint stage floor
+      const floorY = box.min.y - span * 0.012
+      const ground = new THREE.Mesh(
+        new THREE.PlaneGeometry(span * 8, span * 8),
+        new THREE.ShadowMaterial({ opacity: 0.4 }))
+      ground.rotation.x = -Math.PI / 2
+      ground.position.set(center.x, floorY, center.z)
+      ground.receiveShadow = true
+      scene.add(ground)
+      const grid = new THREE.GridHelper(span * 8, 32, 0x1b2530, 0x0f141b)
+      grid.position.set(center.x, floorY, center.z)
+      scene.add(grid)
 
       const controls = new OrbitControls(camera, renderer.domElement)
       controls.target.copy(center)
@@ -88,12 +128,20 @@ export function Board3D({ basePath, fallback }: { basePath: string; fallback: Re
       controls.minDistance = span * 0.05
       controls.maxDistance = span * 6
 
-      // near-overhead view of one side, tilted slightly so the up vector
-      // never degenerates and the board still reads as 3D
+      // front-facing hero: the component side square to the camera, tilted ~30°
+      // for depth. Distance fits the board's bounding sphere to the FOV so any
+      // board size frames the same way.
+      const sphere = box.getBoundingSphere(new THREE.Sphere())
+      const fitDist = sphere.radius / Math.sin((camera.fov / 2) * Math.PI / 180) * 1.15
       const goto = (side: 'top' | 'bottom') => {
         const dir = side === 'top' ? 1 : -1
-        camera.position.set(center.x, center.y + dir * span * 1.35, center.z + span * 0.45)
-        camera.up.set(0, 1, 0)
+        const theta = (30 * Math.PI) / 180 // tilt from straight-on
+        camera.position.set(
+          center.x,
+          center.y + dir * fitDist * Math.cos(theta),
+          center.z + fitDist * Math.sin(theta),
+        )
+        camera.up.set(0, dir, 0)
         controls.target.copy(center)
         controls.update()
       }
