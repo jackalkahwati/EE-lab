@@ -73,7 +73,9 @@ function toYosys(netlistText: string) {
 }
 
 export async function GET(req: Request) {
-  const run = (new URL(req.url).searchParams.get('run') ?? '').trim()
+  // runDir arrives as "/runs/<name>" (or a bare name) — take the basename
+  const raw = (new URL(req.url).searchParams.get('run') ?? '').trim()
+  const run = raw.split('/').filter(Boolean).pop() ?? ''
   if (!run || !/^[A-Za-z0-9._-]+$/.test(run)) {
     return Response.json({ error: 'invalid run' }, { status: 400 })
   }
