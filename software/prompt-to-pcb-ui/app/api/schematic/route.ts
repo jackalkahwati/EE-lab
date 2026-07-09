@@ -13,6 +13,7 @@
 import fs from 'fs'
 import path from 'path'
 import { createRequire } from 'module'
+import { pinName } from '@/lib/ic-pinmaps'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -94,7 +95,7 @@ function symType(ref: string): string {
   return 'generic'
 }
 
-function toYosys(nets: Net[]) {
+function toYosys(nets: Net[], refPart: Record<string, string> = {}) {
   let bit = 2
   const netBit: Record<string, number> = {}
   nets.forEach((n) => (netBit[n.name] = bit++))
@@ -110,7 +111,9 @@ function toYosys(nets: Net[]) {
       connections.B = [netBit[pins[1].net]]; port_directions.B = 'output'
     } else {
       pins.forEach((p, i) => {
-        const port = `P${p.pin || i + 1}`
+        // functional pin name for recognized ICs (SDA/SCL/VDD…), else the number
+        let port = pinName(refPart[ref] ?? '', p.pin) || `P${p.pin || i + 1}`
+        if (connections[port]) port = `${port}_${p.pin || i}` // dedup safety
         connections[port] = [netBit[p.net]]
         port_directions[port] = i % 2 ? 'output' : 'input'
       })
@@ -180,7 +183,7 @@ export async function GET(req: Request) {
     return new Response(hit.svg, { headers: { 'content-type': 'image/svg+xml' } })
   }
   try {
-    const yosys = toYosys(renderNets)
+    const yosys = toYosys(renderNets, refPart)
     const skin = fs.readFileSync(SKIN, 'utf8')
     let svg: string = await new Promise((resolve, reject) =>
       netlistsvg.render(skin, yosys, (err: any, out: string) => (err ? reject(err) : resolve(out))))
