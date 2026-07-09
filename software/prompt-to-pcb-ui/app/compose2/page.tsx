@@ -12,8 +12,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { loadRealBoard, type RealBoard } from '@/lib/real-board'
-import { PromptComposer } from '@/components/prompt-composer'
-import { PipelineTracker } from '@/components/pipeline-tracker'
+import { ComposeChat } from '@/components/compose-chat'
 import { BoardCanvas } from '@/components/board-canvas'
 import { Board3D } from '@/components/board-3d'
 import { CodeViewer } from '@/components/code-viewer'
@@ -60,7 +59,16 @@ export default function Compose2Page() {
   const [phase, setPhase] = useState('Overview')
   const [tab, setTab] = useState<Tab>('Overview')
   const [view3d, setView3d] = useState(true)
-  const [note, setNote] = useState<string | null>(null)
+
+  const refreshRuns = () =>
+    fetch('/api/runs').then((r) => (r.ok ? r.json() : { runs: [] }))
+      .then(({ runs: disk }: { runs: Run[] }) => { if (Array.isArray(disk)) setRuns(disk); return disk })
+      .catch(() => [])
+  const onRunComplete = async (runDir: string, id: string) => {
+    const disk = await refreshRuns()
+    if (Array.isArray(disk) && disk.find((r: Run) => r.id === id)) setSelectedId(id)
+    const d = await loadRealBoard(runDir); if (d) setRealBoard(d)
+  }
 
   // resizable panes (drag the dividers); persisted per browser
   const [leftW, setLeftW] = useState(288)
@@ -155,30 +163,15 @@ export default function Compose2Page() {
 
   return (
     <main className="flex h-[calc(100dvh-2.75rem)] overflow-hidden bg-background text-foreground">
-      {/* LEFT — conversation */}
+      {/* LEFT — conversation (real interview + live agent step feed) */}
       <aside style={{ width: leftW }} className="flex shrink-0 flex-col border-r border-border">
-        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-          <span className="text-xs font-semibold">Conversation</span>
-          <select
-            value={selectedId}
-            onChange={(e) => setSelectedId(e.target.value)}
-            className="ml-auto max-w-[9rem] rounded-sm border border-border bg-secondary px-1.5 py-1 text-[11px]">
-            {runs.map((r) => (
-              <option key={r.id} value={r.id}>{r.title ?? r.id}</option>
-            ))}
-          </select>
-        </div>
-        <div className="border-b border-border p-3">
-          <PromptComposer
-            onInterview={() => setNote('New-board creation is in Compose (classic) for now — this preview is for dialing in the layout on existing runs.')}
-            disabled={false}
-          />
-          {note && <p className="mt-2 text-[10px] text-amber-500">{note}</p>}
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-3">
-          <div className="mb-1 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">agent steps</div>
-          <PipelineTracker run={selectedRun} liveElapsed={{}} />
-        </div>
+        <ComposeChat
+          threads={runs.map((r) => ({ id: r.id, label: r.title ?? r.id }))}
+          activeId={selectedId}
+          onSelectThread={setSelectedId}
+          onNew={() => {}}
+          onRunComplete={onRunComplete}
+        />
       </aside>
 
       <Handle which="left" />
