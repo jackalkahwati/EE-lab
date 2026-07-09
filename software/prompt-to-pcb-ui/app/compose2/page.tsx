@@ -35,9 +35,8 @@ import { FL1ReadinessPanel } from '@/components/fl1-readiness-panel'
 import { BoardObjects } from '@/components/board-objects'
 import { ReviewsPill } from '@/components/board-reviews'
 import {
-  BookOpen, Boxes, Cable, CheckCircle2, CircuitBoard, ClipboardCheck, Download,
-  Eye, FileCode2, GitBranch, LayoutDashboard, ListTree, Maximize2, Package,
-  Receipt, RotateCcw, Ruler, ScrollText, Wrench,
+  BookOpen, ClipboardCheck, Eye, LayoutDashboard, ListTree, Maximize2, Package,
+  Receipt, ScrollText, Wrench,
 } from 'lucide-react'
 
 type Run = any
@@ -48,20 +47,11 @@ type Tab = string
 const VIEWS: { tab: Tab; label: string; Icon: any }[] = [
   { tab: 'Overview', label: 'Overview', Icon: LayoutDashboard },
   { tab: 'Objects', label: 'Objects', Icon: ListTree },
-  { tab: 'Code', label: 'Code', Icon: FileCode2 },
-  { tab: 'Pinout', label: 'Pinout', Icon: Cable },
-  { tab: 'Constraints', label: 'Rules', Icon: Ruler },
-  { tab: 'Advanced', label: 'Routing', Icon: GitBranch },
   { tab: 'Checks', label: 'Checks', Icon: ClipboardCheck },
   { tab: 'Review', label: 'Review', Icon: Eye },
   { tab: 'Order', label: 'Quote', Icon: Receipt },
   { tab: 'BOM', label: 'BOM', Icon: Package },
   { tab: 'Assembly', label: 'Assembly', Icon: Wrench },
-  { tab: 'FL-1', label: 'FL-1', Icon: CircuitBoard },
-  { tab: 'Recovery', label: 'Recovery', Icon: RotateCcw },
-  { tab: 'Ingest', label: 'Ingest', Icon: Download },
-  { tab: 'Patterns', label: 'Patterns', Icon: Boxes },
-  { tab: 'FL-1 Ready', label: 'FL-1 Ready', Icon: CheckCircle2 },
   { tab: 'Artifacts', label: 'Artifacts', Icon: ScrollText },
 ]
 
