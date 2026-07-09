@@ -9,7 +9,7 @@
  * distributor key is configured, otherwise it says so instead of faking. Nothing
  * is auto-ordered — the operator picks a fab and confirms substitutions.
  */
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { cn } from '@/lib/utils'
 import type { RealBoard } from '@/lib/real-board'
 import { quoteAll } from '@/lib/fab-quotes'
@@ -41,6 +41,20 @@ export function ProcurementPanel({ real, runDir }: { real: RealBoard | null; run
   const quotes = useMemo(
     () => (wMm && hMm ? quoteAll(wMm, hMm, layers, qty) : []),
     [wMm, hMm, layers, qty])
+
+  // live JLCPCB quote (real API) — overlays the JLCPCB estimate row when available
+  type JlcLive = { live: boolean; priceUsd?: number | null; leadDays?: number | null; reason?: string; message?: string }
+  const [jlc, setJlc] = useState<JlcLive | null>(null)
+  useEffect(() => {
+    if (!wMm || !hMm) { setJlc(null); return }
+    let cancelled = false
+    setJlc(null)
+    fetch('/api/fab-quote', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ width: wMm, height: hMm, layers, qty }),
+    }).then((r) => r.json()).then((j) => { if (!cancelled) setJlc(j) }).catch(() => { if (!cancelled) setJlc(null) })
+    return () => { cancelled = true }
+  }, [wMm, hMm, layers, qty])
   const sourcing = useMemo(() => resolveSourcing(real?.bom ?? []), [real?.bom])
   const needs = sourcing.filter((s) => !s.ok)
 
@@ -106,25 +120,39 @@ export function ProcurementPanel({ real, runDir }: { real: RealBoard | null; run
         </div>
         <div className="divide-y divide-border">
           {quotes.length === 0 && <p className="px-3 py-2 text-muted-foreground">Board size unknown — can't estimate.</p>}
-          {quotes.map((q, i) => (
+          {quotes.map((q, i) => {
+            const isJlc = q.id === 'jlcpcb'
+            const jlcLive = isJlc && jlc?.live && jlc.priceUsd != null
+            return (
             <div key={q.id} className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-x-3 px-3 py-1.5">
               <span className="min-w-0">
                 <span className="text-[11px] font-medium">{q.name}</span>
                 <span className="ml-1.5 rounded-sm border border-border px-1 font-mono text-[8px] text-muted-foreground">{q.region}</span>
                 {i === 0 && <span className="ml-1 rounded-sm bg-emerald-500/15 px-1 font-mono text-[8px] text-emerald-500">cheapest</span>}
+                {jlcLive && <span className="ml-1 rounded-sm bg-sky-500/15 px-1 font-mono text-[8px] text-sky-400">live</span>}
+                {isJlc && jlc && !jlc.live && jlc.reason === 'ip_not_allowed' &&
+                  <span className="ml-1 rounded-sm bg-amber-500/15 px-1 font-mono text-[8px] text-amber-500">allowlist IP</span>}
                 <span className="block truncate text-[9px] text-muted-foreground">{q.note} · min {q.minQty}</span>
               </span>
-              <span className="text-right font-mono text-[11px] tabular-nums">~${q.estUsd.toFixed(2)}</span>
-              <span className="text-right font-mono text-[10px] text-muted-foreground">{q.leadDays}d</span>
+              <span className="text-right font-mono text-[11px] tabular-nums">
+                {jlcLive
+                  ? <span className="text-sky-400">${jlc!.priceUsd!.toFixed(2)}</span>
+                  : `~$${q.estUsd.toFixed(2)}`}
+              </span>
+              <span className="text-right font-mono text-[10px] text-muted-foreground">{(jlcLive && jlc!.leadDays) || q.leadDays}d</span>
               <a href={q.url} target="_blank" rel="noopener noreferrer"
                 className="flex items-center justify-end gap-0.5 text-[10px] text-primary hover:underline">
                 open <ExternalLink className="size-2.5" />
               </a>
             </div>
-          ))}
+          )})}
         </div>
         <p className="px-3 py-1.5 font-mono text-[9px] text-amber-500">
-          estimates from published pricing — get a binding quote on the fab's site. Compose never auto-orders.
+          {jlc?.live
+            ? 'JLCPCB is a live API price; other fabs are estimates from published pricing. Compose never auto-orders.'
+            : jlc && jlc.reason === 'ip_not_allowed'
+            ? `JLCPCB live quote is wired — add this server's IP to your JLCPCB API allowlist to enable it. All rows are estimates until then.`
+            : 'estimates from published pricing — get a binding quote on the fab\'s site. Compose never auto-orders.'}
         </p>
       </div>
 
