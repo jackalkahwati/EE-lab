@@ -31,6 +31,7 @@ export function ProcurementPanel({ real, runDir }: { real: RealBoard | null; run
   const [live, setLive] = useState<Record<string, Live>>({})
   const [liveState, setLiveState] = useState<'idle' | 'loading' | 'unconfigured' | 'done' | 'error'>('idle')
   const [liveNote, setLiveNote] = useState('')
+  const [liveMeta, setLiveMeta] = useState<{ spent: number; cached: number } | null>(null)
 
   const b: any = real?.board ?? {}
   const wMm = b.boardSize?.wMm ?? 0
@@ -49,12 +50,13 @@ export function ProcurementPanel({ real, runDir }: { real: RealBoard | null; run
     [real?.bom])
   const packUrl = runDir ? `/api/cad-export?run=${encodeURIComponent(runDir)}&format=pack` : ''
 
-  async function refreshLive() {
+  // force=true bypasses the server cache for a genuinely-fresh pull (spends quota)
+  async function refreshLive(force = false) {
     const mpns = [...new Set(sourced.map((l: any) => l.sourcedMpn).filter(Boolean))]
     if (!mpns.length) return
     setLiveState('loading'); setLiveNote('')
     try {
-      const res = await fetch('/api/component-lookup', {
+      const res = await fetch(`/api/component-lookup${force ? '?force=1' : ''}`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ mpns }),
       })
@@ -64,6 +66,7 @@ export function ProcurementPanel({ real, runDir }: { real: RealBoard | null; run
       const map: Record<string, Live> = {}
       for (const r of j.results) if (r?.mpn) map[r.mpn] = r
       setLive(map); setLiveState('done')
+      setLiveMeta({ spent: j.quotaSpent ?? 0, cached: j.servedFromCache ?? 0 })
     } catch (e: any) {
       setLiveState('error'); setLiveNote(String(e?.message ?? e).slice(0, 120))
     }
@@ -133,10 +136,18 @@ export function ProcurementPanel({ real, runDir }: { real: RealBoard | null; run
             <span className="font-mono text-[9px] text-muted-foreground">
               {sourced.length} sourced {liveState === 'done' ? '· live' : '· as captured'}
             </span>
-            <button onClick={refreshLive} disabled={liveState === 'loading'}
-              className="ml-auto flex items-center gap-1 rounded-sm border border-border px-2 py-0.5 text-[10px] hover:bg-muted disabled:opacity-50">
-              <RefreshCw className={cn('size-3', liveState === 'loading' && 'animate-spin')} /> Refresh live
-            </button>
+            <div className="ml-auto flex items-center gap-1">
+              <button onClick={() => refreshLive(false)} disabled={liveState === 'loading'}
+                className="flex items-center gap-1 rounded-sm border border-border px-2 py-0.5 text-[10px] hover:bg-muted disabled:opacity-50">
+                <RefreshCw className={cn('size-3', liveState === 'loading' && 'animate-spin')} /> Refresh live
+              </button>
+              {liveState === 'done' && (
+                <button onClick={() => refreshLive(true)} title="bypass cache — spends one query per part"
+                  className="rounded-sm border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted">
+                  force
+                </button>
+              )}
+            </div>
           </div>
           <div className="grid grid-cols-[auto_1fr_auto_auto] gap-x-3 border-b border-border px-3 py-1 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
             <span>ref</span><span>mpn</span><span className="text-right">stock</span><span className="text-right">unit</span>
@@ -177,7 +188,7 @@ export function ProcurementPanel({ real, runDir }: { real: RealBoard | null; run
               : liveState === 'error'
               ? <span className="text-red-400">live lookup failed: {liveNote}</span>
               : liveState === 'done'
-              ? 'live stock + pricing from Nexar (Octopart). Nothing ordered.'
+              ? `live from Nexar (Octopart) — ${liveMeta?.spent ?? 0} quer${(liveMeta?.spent ?? 0) === 1 ? 'y' : 'ies'} spent${liveMeta?.cached ? `, ${liveMeta.cached} cached (free)` : ''}. Cached ~6h; “force” re-queries. Nothing ordered.`
               : 'stock + price as captured when the BOM was sourced — Refresh live for current numbers.'}
           </p>
         </div>

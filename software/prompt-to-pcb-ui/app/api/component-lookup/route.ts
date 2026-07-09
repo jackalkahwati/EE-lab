@@ -13,6 +13,12 @@ export const runtime = 'nodejs'
 
 let cachedToken: { token: string; exp: number } | null = null
 
+// per-MPN result cache — the free Nexar tier is 100 queries/month, so a repeat
+// "Refresh live" on the same board must NOT re-spend quota. Successful lookups
+// are cached for CACHE_TTL_MS; errors are never cached (they retry next time).
+const CACHE_TTL_MS = Number(process.env.NEXAR_CACHE_TTL_MS) || 6 * 60 * 60 * 1000 // 6h
+const resultCache = new Map<string, { data: any; exp: number }>()
+
 async function nexarToken(): Promise<string | null> {
   if (process.env.NEXAR_TOKEN) return process.env.NEXAR_TOKEN
   const id = process.env.NEXAR_CLIENT_ID, secret = process.env.NEXAR_CLIENT_SECRET
@@ -70,14 +76,35 @@ export async function POST(req: Request) {
   mpns = (Array.isArray(mpns) ? mpns : []).filter(Boolean).slice(0, 40)
   if (!mpns.length) return Response.json({ error: 'no mpns' }, { status: 400 })
 
-  const token = await nexarToken()
-  if (!token) {
+  // force=1 bypasses the cache for a genuinely-fresh pull (still caches the result)
+  const force = new URL(req.url).searchParams.get('force') === '1'
+  const now = Date.now()
+
+  // serve fresh cache hits without spending quota; only fetch the misses
+  const hits: any[] = []
+  const misses: string[] = []
+  for (const m of mpns) {
+    const c = resultCache.get(m)
+    if (!force && c && c.exp > now) hits.push({ ...c.data, cached: true })
+    else misses.push(m)
+  }
+
+  const token = misses.length ? await nexarToken() : ''
+  if (misses.length && !token) {
     return Response.json({ configured: false,
       note: 'live lookup not configured — set NEXAR_CLIENT_ID + NEXAR_CLIENT_SECRET (or NEXAR_TOKEN) in .env.local' })
   }
   try {
-    const results = await Promise.all(mpns.map((m) => lookup(token, m).catch((e) => ({ mpn: m, error: String(e?.message ?? e).slice(0, 80) }))))
-    return Response.json({ configured: true, results })
+    const fetched = await Promise.all(misses.map((m) =>
+      lookup(token as string, m).catch((e) => ({ mpn: m, error: String(e?.message ?? e).slice(0, 80) }))))
+    // cache only clean results (found or a definitive not-found), never errors
+    for (const r of fetched) if (r && !('error' in r)) resultCache.set(r.mpn, { data: r, exp: now + CACHE_TTL_MS })
+    // return in the requested order
+    const byMpn = new Map<string, any>()
+    for (const h of hits) byMpn.set(h.mpn, h)
+    for (const f of fetched) byMpn.set(f.mpn, f)
+    const results = mpns.map((m) => byMpn.get(m)).filter(Boolean)
+    return Response.json({ configured: true, results, quotaSpent: misses.length, servedFromCache: hits.length })
   } catch (e: any) {
     return Response.json({ error: 'lookup failed', detail: String(e?.message ?? e).slice(0, 200) }, { status: 500 })
   }
