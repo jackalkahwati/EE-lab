@@ -9,7 +9,7 @@
  * Reuses the real panels + loadRealBoard + /api/runs. New-board CREATION still
  * lives in /compose for now (heaviest state); this is for layout, on real runs.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { loadRealBoard, type RealBoard } from '@/lib/real-board'
 import { PromptComposer } from '@/components/prompt-composer'
@@ -62,6 +62,55 @@ export default function Compose2Page() {
   const [view3d, setView3d] = useState(true)
   const [note, setNote] = useState<string | null>(null)
 
+  // resizable panes (drag the dividers); persisted per browser
+  const [leftW, setLeftW] = useState(288)
+  const [rightW, setRightW] = useState(480)
+  const dragRef = useRef<null | 'left' | 'right'>(null)
+
+  useEffect(() => {
+    const l = Number(localStorage.getItem('c2-leftW'))
+    const r = Number(localStorage.getItem('c2-rightW'))
+    if (l >= 200) setLeftW(l)
+    if (r >= 280) setRightW(r)
+    const onMove = (e: MouseEvent) => {
+      if (!dragRef.current) return
+      if (dragRef.current === 'left') setLeftW(Math.min(600, Math.max(200, e.clientX)))
+      else setRightW(Math.min(760, Math.max(280, window.innerWidth - e.clientX)))
+    }
+    const onUp = () => {
+      if (!dragRef.current) return
+      dragRef.current = null
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      // persist current widths
+      setLeftW((w) => { localStorage.setItem('c2-leftW', String(w)); return w })
+      setRightW((w) => { localStorage.setItem('c2-rightW', String(w)); return w })
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [])
+
+  const startDrag = (which: 'left' | 'right') => (e: React.MouseEvent) => {
+    e.preventDefault()
+    dragRef.current = which
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+  }
+  const Handle = ({ which }: { which: 'left' | 'right' }) => (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      onMouseDown={startDrag(which)}
+      onDoubleClick={() => which === 'left' ? setLeftW(288) : setRightW(480)}
+      title="drag to resize · double-click to reset"
+      className="w-1 shrink-0 cursor-col-resize bg-border transition-colors hover:bg-primary/60"
+    />
+  )
+
   // load real runs from disk (same source as /compose)
   useEffect(() => {
     fetch('/api/runs').then((r) => (r.ok ? r.json() : { runs: [] }))
@@ -107,7 +156,7 @@ export default function Compose2Page() {
   return (
     <main className="flex h-[calc(100dvh-2.75rem)] overflow-hidden bg-background text-foreground">
       {/* LEFT — conversation */}
-      <aside className="flex w-72 shrink-0 flex-col border-r border-border">
+      <aside style={{ width: leftW }} className="flex shrink-0 flex-col border-r border-border">
         <div className="flex items-center gap-2 border-b border-border px-3 py-2">
           <span className="text-xs font-semibold">Conversation</span>
           <select
@@ -131,6 +180,8 @@ export default function Compose2Page() {
           <PipelineTracker run={selectedRun} liveElapsed={{}} />
         </div>
       </aside>
+
+      <Handle which="left" />
 
       {/* CENTER — the board as hero */}
       <section className="flex min-w-0 flex-1 flex-col">
@@ -168,8 +219,10 @@ export default function Compose2Page() {
         </div>
       </section>
 
+      <Handle which="right" />
+
       {/* RIGHT — journey spine + phase panel */}
-      <section className="flex w-[30rem] shrink-0 border-l border-border">
+      <section style={{ width: rightW }} className="flex shrink-0 border-l border-border">
         <nav className="flex w-14 shrink-0 flex-col gap-0.5 border-r border-border bg-card/30 py-2">
           {PHASES.map((p) => {
             const on = phase === p.key
