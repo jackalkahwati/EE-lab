@@ -152,11 +152,11 @@ export default function Home() {
       <section className="section section-dark" id="pricing">
         <div className="container">
           <p className="kicker">Pricing</p>
-          <h2>Start free. Upgrade when you ship.</h2>
+          <h2>Start free. Go to production with us.</h2>
           <p className="pricing-note">
-            A credit buys a board run. Simple boards cost one; complex boards
-            cost more, so you only pay for what you design. Buy top-up credits
-            anytime, the bigger the pack, the lower the per-credit price.
+            Evaluate Compose free, every account gets the full design pipeline.
+            Production teams license the platform annually: board-program
+            bundles, seats for the whole lab, and support that answers.
           </p>
           <div className="pricing-grid">
             <div className="price-card">
@@ -175,19 +175,22 @@ export default function Home() {
               </a>
             </div>
             <div className="price-card price-card-pro">
-              <span className="price-badge">Pro</span>
-              <h3>Pro</h3>
+              <span className="price-badge">Production</span>
+              <h3>Teams &amp; Enterprise</h3>
               <p className="price">
-                $49<span>/month</span>
+                Custom<span>/year</span>
               </p>
               <ul>
-                <li>100 credits per month</li>
-                <li>Buy more anytime, volume discounts</li>
-                <li>Principal-EE design reviews</li>
-                <li>Bring-your-own AI provider key</li>
+                <li>90-day paid pilot, credited toward Year 1</li>
+                <li>Board-program bundles + seats for your team</li>
+                <li>Principal-EE design reviews, SLA, SSO</li>
+                <li>ITAR-ready deployment for defense &amp; space</li>
               </ul>
-              <a href={COMPOSE_URL} className="btn price-cta">
-                Go Pro
+              <a
+                href={`mailto:${CONTACT}?subject=Compose%20for%20production`}
+                className="btn price-cta"
+              >
+                Talk to us
               </a>
             </div>
           </div>

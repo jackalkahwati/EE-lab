@@ -38,12 +38,14 @@ export default function Terms() {
         <h2>3. Plans, Billing, and Cancellation</h2>
         <p>
           The free plan includes a limited number of board-generation runs per month.
-          Paid subscriptions (&ldquo;Pro&rdquo;) are billed in advance on a monthly
-          basis through our payment processor, Stripe; we do not store your card
-          details. Subscriptions renew automatically until cancelled. You may cancel at
-          any time, effective at the end of the current billing period; fees already
-          paid are non-refundable except where required by law. We may change pricing
-          with at least 30 days&rsquo; notice.
+          Paid plans are billed in advance, monthly or annually per your order form
+          or checkout selection, through our payment processor, Stripe; we do not
+          store your card details. Team and enterprise licenses are governed by the
+          applicable order form or master agreement. Subscriptions renew
+          automatically until cancelled. You may cancel at any time, effective at
+          the end of the current billing period; fees already paid are
+          non-refundable except where required by law. We may change pricing with at
+          least 30 days&rsquo; notice.
         </p>
 
         <h2>4. Your Content and Designs</h2>

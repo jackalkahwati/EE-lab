@@ -243,8 +243,8 @@ export default function FL1Page() {
             <ReserveButton label="Reserve an FL-1, $2,500 refundable" />
           </div>
           <p className="reserve-fine">
-            Founding price from $49,500 · software from $1,500/mo · expand with
-            packs as you grow.
+            Founding price from $49,500, including 12 months of Compose Team ·
+            expand with packs as you grow.
           </p>
         </div>
       </section>
