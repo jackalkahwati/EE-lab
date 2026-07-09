@@ -978,10 +978,15 @@ export async function GET(req: Request) {
             // pass. Best-effort: if it can't be made to compile, the crate still
             // ships with the verified BSP/HAL, the app layer is just omitted.
             const srcDir = path.join(fwDir, 'src')
-            const libPath = path.join(srcDir, 'lib.rs')
-            let libOrig: string | null = null
+            const appPath = path.join(srcDir, 'app.rs')
+            // The generator already shipped a DETERMINISTIC, compiling app.rs
+            // (a correct-by-construction control loop, one step per present
+            // peripheral). Keep it as the baseline so a failed frontier-model
+            // enhancement reverts to a WORKING control loop — never to no app
+            // layer. app is already registered in lib.rs by the generator.
+            let appBaseline: string | null = null
             try {
-              libOrig = fs.readFileSync(libPath, 'utf8')
+              appBaseline = fs.existsSync(appPath) ? fs.readFileSync(appPath, 'utf8') : null
               const mods = fs
                 .readdirSync(srcDir)
                 .filter((f) => f.endsWith('.rs') && f !== 'lib.rs' && f !== 'app.rs')
@@ -995,61 +1000,51 @@ export async function GET(req: Request) {
                 `Target: RP2040 (thumbv6m-none-eabi), no_std, embedded-hal 1.0 only ` +
                 `(NO concrete HAL crate, NO runtime, NO new dependencies).\n` +
                 `Board: ${composeMode ? composeSpec?.boardClass : 'FL-1 relay/probe matrix'}.\n\n` +
-                `The crate already provides these modules, use them, do not redefine them:\n\n` +
+                `The crate provides these modules — use ONLY their real public functions, do not redefine them:\n\n` +
                 `${apiDump}\n\n` +
-                `Write src/app.rs: a generic application controller that drives this board ` +
-                `using the modules above. Rules:\n` +
-                `- no_std; reference only crate::{${mods.map((m) => m.replace('.rs', '')).join(', ')}} and embedded-hal 1.0 traits.\n` +
-                `- A struct owning ONLY the peripherals that exist above, generic over concrete types with ` +
-                `EXACTLY these embedded-hal/embedded-io bounds where used: ` +
-                `SPI: embedded_hal::spi::SpiDevice, RST: embedded_hal::digital::OutputPin, ` +
-                `I2C: embedded_hal::i2c::I2c, PWM: embedded_hal::pwm::SetDutyCycle, D: embedded_hal::delay::DelayNs, ` +
-                `R: embedded_io::Read, S: embedded_io::Read + embedded_io::Write.\n` +
-                `- new(...), init(&mut self) that probes/brings up each present peripheral, and control_step(&mut self) ` +
-                `running ONE realistic iteration that fits THIS board's peripherals, derive the behavior from what ` +
-                `exists, do not assume motors or a radio. Examples by peripheral: GNSS -> read a fix sentence; ` +
-                `cellular modem -> send the latest reading via an AT command; IMU -> read accel; motors -> apply a ` +
-                `throttle with failsafe-disarm. Use only the modules above and only their real public functions.\n` +
-                `- No main, no #[entry], no panic handler, this is a library module. It MUST compile. Return only src/app.rs.`
+                `A working baseline src/app.rs already exists (compiles):\n\n${(appBaseline ?? '').slice(0, 1400)}\n\n` +
+                `Write an IMPROVED src/app.rs: a richer but still-correct control loop over the SAME peripherals. Rules:\n` +
+                `- no_std; reference only crate::{${mods.map((m) => m.replace('.rs', '')).join(', ')}} and embedded-hal 1.0 / embedded-io traits.\n` +
+                `- Use the exact generic bounds shown in the modules above (SPI: SpiDevice, RST: OutputPin, ` +
+                `I2C: I2c, PWM: SetDutyCycle, D: DelayNs, R: embedded_io::Read, S: embedded_io::Read + Write).\n` +
+                `- Do NOT assume peripherals that are not present above (no motors/radio unless a module exists).\n` +
+                `- No main, no #[entry], no panic handler — this is a library module. It MUST compile. Return only src/app.rs.`
 
-              log('firmware', 'app firmware: frontier model writing the control loop…')
+              log('firmware', 'app firmware: frontier model enhancing the control loop…')
               let appOk = false
               let provider = ''
               let lastErr = ''
-              for (let attempt = 0; attempt < 2 && !appOk; attempt++) {
+              const MAX_ATTEMPTS = 3
+              for (let attempt = 0; attempt < MAX_ATTEMPTS && !appOk; attempt++) {
                 const user =
                   attempt === 0
                     ? ask
                     : `${ask}\n\nYour previous src/app.rs failed to compile:\n${lastErr.slice(0, 1800)}\n\nReturn a corrected src/app.rs (code only).`
                 const llm = await callLLMText(sys, user)
                 provider = llm.provider
-                fs.writeFileSync(path.join(srcDir, 'app.rs'), extractRust(llm.text))
-                if (!libOrig.includes('pub mod app;'))
-                  fs.writeFileSync(libPath, libOrig.replace(/\n*$/, '\n') + 'pub mod app;\n')
+                fs.writeFileSync(appPath, extractRust(llm.text))
                 const ab = await exec('firmware', CARGO, ['build', '--release'], { cwd: fwDir })
                 appOk = ab.code === 0 || ab.out.includes('Finished')
                 lastErr = ab.out
                 if (appOk)
                   log('firmware', `GATE app firmware: ${provider} control loop compiles, PASS`, 'ok')
-                else if (attempt === 0)
-                  log('firmware', 'app firmware: draft failed to compile, self-repair pass…', 'warn')
+                else
+                  log('firmware', `app firmware: enhancement attempt ${attempt + 1}/${MAX_ATTEMPTS} did not compile, ${attempt < MAX_ATTEMPTS - 1 ? 'self-repair pass…' : 'reverting to deterministic baseline'}`, 'warn')
               }
-              if (!appOk) {
-                // revert: ship the verified BSP/HAL crate without the app layer
-                fs.rmSync(path.join(srcDir, 'app.rs'), { force: true })
-                fs.writeFileSync(libPath, libOrig)
+              if (!appOk && appBaseline !== null) {
+                // revert to the deterministic control loop — still a real, compiling
+                // app layer (not just BSP/HAL). lib.rs already references it.
+                fs.writeFileSync(appPath, appBaseline)
                 await exec('firmware', CARGO, ['build', '--release'], { cwd: fwDir })
-                log('firmware', 'app firmware: did not compile after repair, shipping BSP/HAL only', 'warn')
+                log('firmware', 'app firmware: kept the deterministic control loop (LLM enhancement did not compile)', 'ok')
               }
             } catch (e) {
-              // a thrown provider call (e.g. the LLM timeout) must not leave a
-              // half-applied, non-compiling app.rs in the shipped crate after the
-              // BSP/HAL gate already passed — revert to the verified crate.
-              if (libOrig !== null) {
-                fs.rmSync(path.join(srcDir, 'app.rs'), { force: true })
-                fs.writeFileSync(libPath, libOrig)
+              // a thrown provider call (e.g. LLM timeout) must not leave a
+              // half-applied app.rs — restore the deterministic baseline.
+              if (appBaseline !== null) {
+                fs.writeFileSync(appPath, appBaseline)
               }
-              log('firmware', `app firmware skipped: ${String(e)}`, 'warn')
+              log('firmware', `app firmware: kept the deterministic control loop (${String(e).slice(0, 80)})`, 'ok')
             }
 
             // zip the crate (exclude target/) for download

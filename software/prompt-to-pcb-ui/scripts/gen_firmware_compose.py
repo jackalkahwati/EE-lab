@@ -65,8 +65,12 @@ def load():
     # I2C temp sensor gets a temp-sensor driver instead of being guessed as an
     # IMU (both share the I2C bus). Fall back to net-based guessing if absent.
     manifest = os.path.splitext(BOARD)[0] + ".devices.json"
+    # Map each composed device type to a firmware peripheral driver. I2C
+    # environmental / generic sensors (BME280 etc.) get the I2C sensor driver so
+    # the board ships a real bring-up + control step instead of no driver at all.
     type_to_periph = {"radio": "radio", "imu": "imu", "gnss": "gnss",
-                      "cellular": "cellular", "i2c_tempsensor": "tempsensor"}
+                      "cellular": "cellular", "i2c_tempsensor": "tempsensor",
+                      "i2c_envsensor": "tempsensor", "i2c_sensor": "tempsensor"}
     if os.path.exists(manifest):
         try:
             devs = json.load(open(manifest))
@@ -456,6 +460,77 @@ def emit_selftest(peripherals):
     return header + body + "\n"
 
 
+def emit_app(peripherals, motors):
+    """Deterministic application control loop, generated from the peripheral set
+    the same way the BSP/HAL is — correct-by-construction, so it ALWAYS compiles
+    and always ships. Each present peripheral gets one realistic control step
+    (calling only the modules' real public methods with the exact embedded-hal
+    bounds). The frontier model may overwrite this with a richer loop; if that
+    fails to compile the pipeline reverts to THIS, so the app layer never
+    silently vanishes."""
+    steps, doc = [], []
+    if "radio" in peripherals:
+        doc.append("//! - radio: link heartbeat (verify the silicon still answers)")
+        steps.append('''    /// Radio control step: confirm the transceiver still answers on SPI.
+    pub fn step_radio<SPI, RST>(lora: &mut crate::radio::Lora<SPI, RST>) -> Result<bool, SPI::Error>
+    where
+        SPI: embedded_hal::spi::SpiDevice,
+        RST: embedded_hal::digital::OutputPin,
+    {
+        lora.probe()
+    }''')
+    if "imu" in peripherals:
+        doc.append("//! - imu: read one acceleration sample")
+        steps.append('''    /// IMU control step: read one 3-axis acceleration sample.
+    pub fn step_imu<I2C: embedded_hal::i2c::I2c>(imu: &mut crate::imu::Imu<I2C>)
+        -> Result<[i16; 3], I2C::Error>
+    {
+        imu.read_accel()
+    }''')
+    if "tempsensor" in peripherals:
+        doc.append("//! - tempsensor: read temperature (milli-degrees C)")
+        steps.append('''    /// Temperature control step: read the current temperature in milli-C.
+    pub fn step_tempsensor<I2C: embedded_hal::i2c::I2c>(t: &mut crate::tempsensor::TempSensor<I2C>)
+        -> Result<i32, I2C::Error>
+    {
+        t.read_milli_c()
+    }''')
+    if "gnss" in peripherals:
+        doc.append("//! - gnss: pull the latest NMEA sentence")
+        steps.append('''    /// GNSS control step: read the latest NMEA sentence into `buf`.
+    pub fn step_gnss<R: embedded_io::Read>(gnss: &mut crate::gnss::Gnss<R>, buf: &mut [u8])
+        -> Result<usize, R::Error>
+    {
+        gnss.read_sentence(buf)
+    }''')
+    if "cellular" in peripherals:
+        doc.append("//! - cellular: modem heartbeat (AT)")
+        steps.append('''    /// Cellular control step: heartbeat the modem with a bare AT command.
+    pub fn step_cellular<S: embedded_io::Read + embedded_io::Write>(modem: &mut crate::cellular::Modem<S>)
+        -> Result<(), S::Error>
+    {
+        modem.send_at("AT")
+    }''')
+    if motors:
+        doc.append("//! - motors: failsafe — hold the channel disarmed")
+        steps.append('''    /// Motor control step (failsafe default): hold the output disarmed.
+    pub fn step_motors_failsafe<P: embedded_hal::pwm::SetDutyCycle>(pwm: &mut P, period_us: u32)
+        -> Result<(), P::Error>
+    {
+        crate::motors::disarm(pwm, period_us)
+    }''')
+    body = "\n\n".join(steps) if steps else "    // no controllable peripherals — nothing to drive"
+    header = ("//! Deterministic application control loop, generated from the board's\n"
+              "//! peripheral set (correct-by-construction, like the BSP/HAL). One\n"
+              "//! control step per present peripheral; run each on your schedule.\n"
+              + ("\n".join(doc) + "\n" if doc else "")
+              + "//! Generated — the frontier model may replace this with a richer loop.\n"
+              "#![allow(dead_code)]\n\n")
+    if steps:
+        return header + "pub struct App;\n\nimpl App {\n" + body + "\n}\n"
+    return header + body + "\n"
+
+
 def emit(pins, peripherals, motors):
     os.makedirs(os.path.join(OUT, "src"), exist_ok=True)
     os.makedirs(os.path.join(OUT, ".cargo"), exist_ok=True)
@@ -492,6 +567,10 @@ def emit(pins, peripherals, motors):
         mods.append("cellular")
     open(os.path.join(OUT, "src", "selftest.rs"), "w").write(emit_selftest(peripherals))
     mods.append("selftest")
+    # deterministic application control loop (always compiles + ships; the
+    # frontier model enhances it best-effort in the pipeline)
+    open(os.path.join(OUT, "src", "app.rs"), "w").write(emit_app(peripherals, motors))
+    mods.append("app")
 
     lib = ["//! Composed-board firmware support crate (no_std). BSP + per-peripheral",
            "//! HAL + bring-up self-test, generated from the routed board netlist by",
