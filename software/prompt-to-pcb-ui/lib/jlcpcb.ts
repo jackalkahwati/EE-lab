@@ -24,7 +24,7 @@ export type JlcParams = {
 
 export type JlcResult =
   | { ok: true; priceUsd: number | null; leadDays: number | null; currency: string; raw: any }
-  | { ok: false; reason: 'unconfigured' | 'ip_not_allowed' | 'error'; message: string; httpStatus?: number }
+  | { ok: false; reason: 'unconfigured' | 'ip_not_allowed' | 'permission_denied' | 'error'; message: string; httpStatus?: number }
 
 export function jlcConfigured(): boolean {
   return Boolean(process.env.JLCPCB_APP_ID && process.env.JLCPCB_ACCESS_KEY && process.env.JLCPCB_SECRET_KEY)
@@ -100,8 +100,12 @@ export async function jlcCalculate(p: JlcParams): Promise<JlcResult> {
   try { j = JSON.parse(text) } catch { /* non-JSON */ }
 
   if (res.status === 403 || j?.code === 403) {
-    return { ok: false, reason: 'ip_not_allowed', httpStatus: 403,
-      message: j?.message || 'JLCPCB rejected this server IP — add it to your JLCPCB API console allowlist.' }
+    const msg = (j?.message || '').toString()
+    // JLCPCB gates by IP allowlist AND per-app service permission (PCB must be
+    // approved by JLCPCB support). Distinguish the two so the UI is accurate.
+    const isPerm = /permission|access denied|not (authoriz|allow).*(service|api)|insufficient/i.test(msg) && !/ip/i.test(msg)
+    return { ok: false, reason: isPerm ? 'permission_denied' : 'ip_not_allowed', httpStatus: 403,
+      message: msg || 'JLCPCB rejected the request (IP allowlist or PCB service permission).' }
   }
   if (!res.ok || j?.success === false) {
     return { ok: false, reason: 'error', httpStatus: res.status,

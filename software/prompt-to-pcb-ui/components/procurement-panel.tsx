@@ -132,6 +132,8 @@ export function ProcurementPanel({ real, runDir }: { real: RealBoard | null; run
                 {jlcLive && <span className="ml-1 rounded-sm bg-sky-500/15 px-1 font-mono text-[8px] text-sky-400">live</span>}
                 {isJlc && jlc && !jlc.live && jlc.reason === 'ip_not_allowed' &&
                   <span className="ml-1 rounded-sm bg-amber-500/15 px-1 font-mono text-[8px] text-amber-500">allowlist IP</span>}
+                {isJlc && jlc && !jlc.live && jlc.reason === 'permission_denied' &&
+                  <span className="ml-1 rounded-sm bg-amber-500/15 px-1 font-mono text-[8px] text-amber-500">PCB API pending</span>}
                 <span className="block truncate text-[9px] text-muted-foreground">{q.note} · min {q.minQty}</span>
               </span>
               <span className="text-right font-mono text-[11px] tabular-nums">
@@ -152,6 +154,8 @@ export function ProcurementPanel({ real, runDir }: { real: RealBoard | null; run
             ? 'JLCPCB is a live API price; other fabs are estimates from published pricing. Compose never auto-orders.'
             : jlc && jlc.reason === 'ip_not_allowed'
             ? `JLCPCB live quote is wired — add this server's IP to your JLCPCB API allowlist to enable it. All rows are estimates until then.`
+            : jlc && jlc.reason === 'permission_denied'
+            ? `JLCPCB live quote is wired + IP-allowlisted, but the account's PCB API permission needs JLCPCB approval (Console → Manage Apps → Permission). All rows are estimates until then.`
             : 'estimates from published pricing — get a binding quote on the fab\'s site. Compose never auto-orders.'}
         </p>
       </div>
