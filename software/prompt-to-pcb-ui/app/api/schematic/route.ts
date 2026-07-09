@@ -51,12 +51,19 @@ function isPowerNet(n: Net): boolean {
 function deriveBlocks(nets: Net[]): { id: string; refs: string[] }[] {
   const allRefs = [...new Set(nets.flatMap((n) => n.pins.map((p) => p.ref)))]
   const ics = allRefs.filter((r) => /^U/.test(r)).sort((a, b) => (+a.slice(1) || 0) - (+b.slice(1) || 0))
-  const signal = nets.filter((n) => !isPowerNet(n))
   return ics.map((ic) => {
     const members = new Set([ic])
-    for (const n of signal) {
+    for (const n of nets) {
       const refs = n.pins.map((p) => p.ref)
-      if (refs.includes(ic)) refs.forEach((r) => members.add(r))
+      if (!refs.includes(ic)) continue
+      if (isPowerNet(n)) {
+        // on the IC's power/ground rails, pull in local passives (decoupling
+        // caps, pull-ups) so they show on the sheet — but NOT other ICs or
+        // connectors, which would drag the whole board into one block
+        refs.forEach((r) => { if (/^(R|C|L|FB|D)/.test(r)) members.add(r) })
+      } else {
+        refs.forEach((r) => members.add(r)) // signal net: everything on it
+      }
     }
     return { id: ic, refs: [...members] }
   })
@@ -86,14 +93,20 @@ function buildRefPart(bom: any[], allRefs: string[]): Record<string, string> {
   return map
 }
 
+// NOTE: netlistsvg matches a cell's `type` against the skin symbol's
+// <s:alias val="…">, NOT its s:type. So these MUST be the skin aliases
+// (r_v, c_v, l_v, d_v, xtal) or the cell falls back to the generic box.
 function symType(ref: string): string {
-  if (/^R/.test(ref)) return 'resistor_v'
-  if (/^C/.test(ref)) return 'capacitor_v'
-  if (/^(L|FB)/.test(ref)) return 'inductor_v'
-  if (/^D/.test(ref)) return 'diode_v'
+  if (/^R/.test(ref)) return 'r_v'
+  if (/^C/.test(ref)) return 'c_v'
+  if (/^(L|FB)/.test(ref)) return 'l_v'
+  if (/^D/.test(ref)) return 'd_v'
   if (/^Y/.test(ref)) return 'xtal'
   return 'generic'
 }
+
+// port names per two-terminal skin symbol (default A/B; diode is +/-)
+const TWO_PIN_PORTS: Record<string, [string, string]> = { d_v: ['+', '-'] }
 
 function toYosys(nets: Net[], refPart: Record<string, string> = {}) {
   let bit = 2
@@ -107,8 +120,11 @@ function toYosys(nets: Net[], refPart: Record<string, string> = {}) {
     const connections: Record<string, number[]> = {}
     const port_directions: Record<string, string> = {}
     if (t !== 'generic' && pins.length >= 2) {
-      connections.A = [netBit[pins[0].net]]; port_directions.A = 'input'
-      connections.B = [netBit[pins[1].net]]; port_directions.B = 'output'
+      // two-terminal symbol: use the port names the skin symbol actually
+      // defines (diodes are '+'/'-'; R/C/L/xtal are A/B) or netlistsvg crashes
+      const [pa, pb] = TWO_PIN_PORTS[t] ?? ['A', 'B']
+      connections[pa] = [netBit[pins[0].net]]; port_directions[pa] = 'input'
+      connections[pb] = [netBit[pins[1].net]]; port_directions[pb] = 'output'
     } else {
       pins.forEach((p, i) => {
         // functional pin name for recognized ICs (SDA/SCL/VDD…), else the number
