@@ -36,3 +36,5 @@ scripts/flroute_runs/
 tsconfig.tsbuildinfo
 # uploaded evidence files (user data)
 data/evidence-artifacts/
+# Next auto-generated type shim
+next-env.d.ts
