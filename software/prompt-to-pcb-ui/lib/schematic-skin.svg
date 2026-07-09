@@ -6,10 +6,10 @@
     splitsAndJoins="false"
     genericsLaterals="true">
     <s:layoutEngine
-        org.eclipse.elk.layered.spacing.nodeNodeBetweenLayers="5"
-        org.eclipse.elk.layered.compaction.postCompaction.strategy="4"
-        org.eclipse.elk.spacing.nodeNode="35"
-        org.eclipse.elk.direction="DOWN"/>
+        org.eclipse.elk.layered.spacing.nodeNodeBetweenLayers="14"
+        org.eclipse.elk.spacing.nodeNode="18"
+        org.eclipse.elk.direction="DOWN"
+        org.eclipse.elk.layered.wrapping.strategy="MULTI_EDGE"/>
   </s:properties>
 <style>
 svg {

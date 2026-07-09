@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  elkjs: 0.9.3
+
 importers:
 
   .:
@@ -1027,8 +1030,8 @@ packages:
   electron-to-chromium@1.5.286:
     resolution: {integrity: sha512-9tfDXhJ4RKFNerfjdCcZfufu49vg620741MNs26a9+bhLThdB+plgMeou98CAaHu/WATj2iHOOHTp1hWtABj2A==}
 
-  elkjs@0.3.0:
-    resolution: {integrity: sha512-bcO8RCIssdly316ou76QLsiuu1NCLbhhZwK/iuOdKTyQzKdCeX7sdIJOUdSsjlIDB203TN4NBpTiq4ugmLjR+Q==}
+  elkjs@0.9.3:
+    resolution: {integrity: sha512-f/ZeWvW/BCXbhGEf1Ujp29EASo/lk1FDnETgNKwJrsVvGZhUWCZyg3xLJjAsxfOmt8KjswHmI5EwCQcPMpOYhQ==}
 
   emoji-regex@10.6.0:
     resolution: {integrity: sha512-toUI84YS5YmxW219erniWD0CIVOo46xGKColeNQRgOzDorgBi1v4D71/OFzgD9GO2UGKIv1C3Sp8DAn0+j5w7A==}
@@ -3130,7 +3133,7 @@ snapshots:
 
   electron-to-chromium@1.5.286: {}
 
-  elkjs@0.3.0: {}
+  elkjs@0.9.3: {}
 
   emoji-regex@10.6.0: {}
 
@@ -3682,7 +3685,7 @@ snapshots:
       ajv: 6.15.0
       ajv-errors: 1.0.1(ajv@6.15.0)
       clone: 2.1.2
-      elkjs: 0.3.0
+      elkjs: 0.9.3
       fs-extra: 1.0.0
       json5: 0.5.1
       lodash: 4.18.1
