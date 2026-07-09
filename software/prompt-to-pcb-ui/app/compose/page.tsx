@@ -218,22 +218,26 @@ export default function Compose2Page() {
 
       <Handle which="left" />
 
-      {/* CENTER — the board as hero */}
-      <section className="flex min-w-0 flex-1 flex-col">
+      {/* CENTER — the board as hero. overflow-hidden so a narrow middle pane
+          clips its own toolbar instead of bleeding it into the right pane. */}
+      <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <div className="flex items-center gap-3 border-b border-border px-3 py-2">
-          {!newDesign && isReal && tab !== 'Overview' && <ReviewsPill real={real} />}
-          {!newDesign && isReal && real?.board?.bomTotal ? (
-            <span className="rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground"
-              title="component BOM estimate — not fab, not a quote">
-              ~${Number(real.board.bomTotal).toFixed(2)} BOM
-            </span>
-          ) : null}
-          <button type="button" onClick={() => setTab('Patterns')}
-            className="flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
-            title="reusable patterns & ingested knowledge">
-            <BookOpen className="size-3" /> Knowledge
-          </button>
-          <div className="ml-auto flex items-center gap-2">
+          {/* left cluster shrinks + clips first, keeping the view toggle in view */}
+          <div className="flex min-w-0 flex-1 items-center gap-3 overflow-hidden">
+            {!newDesign && isReal && tab !== 'Overview' && <ReviewsPill real={real} />}
+            {!newDesign && isReal && real?.board?.bomTotal ? (
+              <span className="shrink-0 rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground"
+                title="component BOM estimate — not fab, not a quote">
+                ~${Number(real.board.bomTotal).toFixed(2)} BOM
+              </span>
+            ) : null}
+            <button type="button" onClick={() => setTab('Patterns')}
+              className="flex shrink-0 items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+              title="reusable patterns & ingested knowledge">
+              <BookOpen className="size-3" /> Knowledge
+            </button>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
             <div className="flex overflow-hidden rounded-sm border border-border">
               {([['3d', '3D'], ['layout', 'Layout'], ['schematic', 'Schematic']] as const).map(([v, label]) => (
                 <button key={v} type="button" onClick={() => setView(v)}
