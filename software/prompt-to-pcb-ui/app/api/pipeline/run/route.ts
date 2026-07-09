@@ -248,6 +248,11 @@ export async function GET(req: Request) {
             if (fs.existsSync(devSrc)) {
               fs.copyFileSync(devSrc, path.join(pubData, 'devices.json'))
             }
+            // real electrical values (ref -> "100nF"/"4.7k") for the schematic
+            const valSrc = variantBoard.replace(/\.kicad_pcb$/, '.values.json')
+            if (fs.existsSync(valSrc)) {
+              fs.copyFileSync(valSrc, path.join(pubData, 'values.json'))
+            }
           } catch {
             /* BOM just falls back to the footprint heuristic */
           }

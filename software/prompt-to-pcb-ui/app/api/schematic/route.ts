@@ -158,7 +158,11 @@ export async function GET(req: Request) {
   if (!fs.existsSync(atoPath)) {
     return Response.json({ error: `no netlist for run ${run}` }, { status: 404 })
   }
+  // cache key tracks BOTH the netlist and the captured values, so adding/
+  // updating values.json after a first render invalidates the cached SVG.
+  const valPath = path.join(RUNS, run, 'data', 'values.json')
   const mtime = fs.statSync(atoPath).mtimeMs
+    + (fs.existsSync(valPath) ? fs.statSync(valPath).mtimeMs : 0)
 
   let ato: any, netText = ''
   try {
