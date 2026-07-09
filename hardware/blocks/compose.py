@@ -1241,8 +1241,8 @@ def _block_keys(s):
     if any(k in s for k in ("mcu", "soc", "microcontroller", "rp2040", "stm32",
                             "compute", "flight controller", "fc ", "processor")):
         add("mcu")
-    if any(k in s for k in ("lora", "radio", "transceiver", "sx12", "telemetry", "rfm", "433", "915", "868")):
-        add("radio")
+    if any(k in s for k in ("lora", "radio", "sx12", "sx127", "telemetry", "rfm", "433mhz", "915mhz", "868mhz")):
+        add("radio")  # NOT bare "transceiver" — that also means CAN/RS485, not a radio
     if "antenna" in s:
         add("antenna")
     if any(k in s for k in ("temperature", "temp sensor", "thermometer", "thermal sensor",
@@ -1377,6 +1377,17 @@ LAYERS = '''  (layers
 # spec {"layers": 2}; the proven 4-layer path is untouched otherwise.
 LAYERS2 = '''  (layers
     (0 "F.Cu" signal) (31 "B.Cu" signal)
+    (34 "B.Paste" user) (35 "F.Paste" user) (36 "B.SilkS" user) (37 "F.SilkS" user)
+    (38 "B.Mask" user) (39 "F.Mask" user) (44 "Edge.Cuts" user) (46 "B.CrtYd" user) (47 "F.CrtYd" user)
+  )
+'''
+
+# 8-layer stackup: Sig-GND-Sig-PWR-GND-Sig-GND-Sig — three GND reference planes
+# (In1/In4/In6) and one +3V3 power plane (In3), leaving F/In2/In5/B for routing.
+# Selected ONLY by spec {"layers": 8}; the 2/4-layer paths are untouched.
+LAYERS8 = '''  (layers
+    (0 "F.Cu" signal) (1 "In1.Cu" signal "GND") (2 "In2.Cu" signal) (3 "In3.Cu" signal "PWR")
+    (4 "In4.Cu" signal "GND") (5 "In5.Cu" signal) (6 "In6.Cu" signal "GND") (31 "B.Cu" signal)
     (34 "B.Paste" user) (35 "F.Paste" user) (36 "B.SilkS" user) (37 "F.SilkS" user)
     (38 "B.Mask" user) (39 "F.Mask" user) (44 "Edge.Cuts" user) (46 "B.CrtYd" user) (47 "F.CrtYd" user)
   )
@@ -1637,9 +1648,12 @@ def compose(spec, blocks, out_path):
     # of blocks the classifier produced.
     body = _unique_refs(body)
 
-    two_layer = (spec or {}).get("layers") == 2
+    nlayers = (spec or {}).get("layers")
+    two_layer = nlayers == 2
+    eight_layer = nlayers == 8
+    stack = LAYERS2 if two_layer else LAYERS8 if eight_layer else LAYERS
     p = '(kicad_pcb (version 20240108) (generator "ee-lab-compose") (generator_version "8.0")\n'
-    p += '  (general (thickness 1.6))\n  (paper "A4")\n' + (LAYERS2 if two_layer else LAYERS)
+    p += '  (general (thickness 1.6))\n  (paper "A4")\n' + stack
     p += '  (setup (pad_to_mask_clearance 0))\n'
     for i, name in enumerate(nets.order):
         p += '  (net {} "{}")\n'.format(i, name)
@@ -1653,6 +1667,13 @@ def compose(spec, blocks, out_path):
         p += gzone("GND", "F.Cu", X0, Y0, X0 + BW, Y0 + BH, nets)
         p += gzone("GND", "B.Cu", X0, Y0, X0 + BW, Y0 + BH, nets)
         print("COMPOSE: 2-LAYER profile (F/B only, +3V3 routed, GND pours F+B)")
+    elif eight_layer:
+        # 8-layer: GND reference planes on In1/In4/In6 (+ F/B outer pours),
+        # +3V3 power plane on In3. In2/In5 stay free for routing.
+        for lyr in ("F.Cu", "B.Cu", "In1.Cu", "In4.Cu", "In6.Cu"):
+            p += gzone("GND", lyr, X0, Y0, X0 + BW, Y0 + BH, nets)
+        p += gzone("+3V3", "In3.Cu", X0, Y0, X0 + BW, Y0 + BH, nets)
+        print("COMPOSE: 8-LAYER profile (GND In1/In4/In6, PWR In3)")
     else:
         # GND pours on F/B/In1, PWR on In2 (the proven 4-layer flow)
         p += gzone("GND", "F.Cu", X0, Y0, X0 + BW, Y0 + BH, nets)

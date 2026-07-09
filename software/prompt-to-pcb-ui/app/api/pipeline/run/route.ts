@@ -169,7 +169,7 @@ export async function GET(req: Request) {
   const revNote = (qp.get('revNote') ?? '').slice(0, 300)
   // Layer-2 compose mode: the interview passes a base64 {blocks, boardClass}
   const composeMode = qp.get('compose') === '1'
-  let composeSpec: { blocks: string[]; boardClass: string } | null = null
+  let composeSpec: { blocks: string[]; boardClass: string; layers?: number } | null = null
   if (composeMode) {
     try {
       composeSpec = JSON.parse(
@@ -1250,7 +1250,7 @@ function writeRunReport(
     finishedAt: string
     mode: string
     prompt: string
-    composeSpec: { blocks: string[]; boardClass: string } | null
+    composeSpec: { blocks: string[]; boardClass: string; layers?: number } | null
     parentId?: string
     revNote?: string
     events: PipelineEvent[]

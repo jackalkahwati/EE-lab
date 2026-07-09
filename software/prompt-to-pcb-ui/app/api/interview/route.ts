@@ -62,6 +62,10 @@ Ask about the highest-impact unknowns first, ONE at a time (MCU family, power
 source/voltage, radio band, which specific sensors/parts). Always give 2-4
 concrete options and a sensible default. Keep questions short.
 
+LAYER COUNT: if the user asks for a specific PCB layer count, include it as a
+top-level integer "layers" field in the final JSON. Only 2, 4, and 8 are built;
+map anything else to the nearest of those. Default is 4 (omit the field).
+
 Output ONLY one JSON object, no prose, no markdown fences.
 To ask the next question:
 {"enough":false,"board_class":"<short name>","blocks":["..."],"question":"...","options":["...","..."],"default":"..."}
@@ -156,12 +160,17 @@ export async function POST(req: Request) {
 
     const blocks: string[] = Array.isArray(out.blocks) ? out.blocks : []
     const boardClass: string = out.board_class ?? 'custom board'
+    // layer count: honor an explicit request (2/4/8), default 4. Only these are
+    // built by the composer; anything else falls back to 4.
+    const rawLayers = Number(out.layers)
+    const layers = [2, 4, 8].includes(rawLayers) ? rawLayers : 4
 
     if (out.enough) {
       return Response.json({
         type: 'spec',
         boardClass,
         blocks,
+        layers,
         spec: out.spec ?? {},
         summary: out.summary ?? '',
         method: generatorFor(boardClass, blocks),

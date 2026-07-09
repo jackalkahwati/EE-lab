@@ -16,7 +16,7 @@ import { Plus, Menu, Loader2, Check, X, Circle, Square } from 'lucide-react'
 
 type Answer = { question: string; answer: string }
 type Question = { type: 'question'; question: string; boardClass?: string; hints?: string[] }
-type Spec = { type: 'spec'; boardClass: string; blocks: string[]; summary: string; request: string }
+type Spec = { type: 'spec'; boardClass: string; blocks: string[]; summary: string; request: string; layers?: number }
 type Ev = { type: string; id?: StageId; state?: StageState; stage?: StageId; text?: string
   level?: string; spec?: any; runDir?: string; status?: string }
 type Phase = 'idle' | 'interview' | 'ready' | 'building' | 'done' | 'error'
@@ -87,7 +87,7 @@ export function ComposeChat({ threads, activeId, onSelectThread, onNew, onRunCom
     if (!spec) return
     setPhase('building'); setStages({}); setLogs([])
     const id = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-    const payload = b64(JSON.stringify({ blocks: spec.blocks, boardClass: spec.boardClass }))
+    const payload = b64(JSON.stringify({ blocks: spec.blocks, boardClass: spec.boardClass, ...(spec.layers ? { layers: spec.layers } : {}) }))
     const url = `/api/pipeline/run?prompt=${encodeURIComponent(request)}`
       + `&runId=${encodeURIComponent(id)}&compose=1&spec=${encodeURIComponent(payload)}`
     const es = new EventSource(url); esRef.current = es
