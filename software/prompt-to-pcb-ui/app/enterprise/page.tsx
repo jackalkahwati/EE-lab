@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils'
 import { PortfolioSummary } from '@/components/portfolio-summary'
 import { StatusStrip } from '@/components/status-strip'
 import { ConsoleWidgets } from '@/components/console-widgets'
+import { AccessGate } from '@/components/access-gate'
 
 type Db = Record<string, any>
 
@@ -64,6 +65,7 @@ export default function EnterprisePage() {
   useEffect(() => { refresh() }, [refresh])
 
   if (!db) return <div className="p-6 text-xs text-muted-foreground">Loading enterprise workspace…</div>
+  if (db.error) return <AccessGate error={db.error} />
 
   const workspaces = db.workspaces ?? []
   const ws = workspaces.find((w: any) => w.workspace_id === wsId)

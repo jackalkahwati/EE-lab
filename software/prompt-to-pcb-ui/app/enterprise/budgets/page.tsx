@@ -6,7 +6,7 @@
  * $0 until real orders exist (see Cost & Usage). No spend is implied.
  */
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
+import { AccessGate } from '@/components/access-gate'
 import { cn } from '@/lib/utils'
 
 type Any = Record<string, any>
@@ -18,7 +18,7 @@ export default function BudgetsPage() {
     fetch('/api/enterprise', { cache: 'no-store' }).then((r) => r.json()).then(setDb).catch(() => {})
   }, [])
   if (!db) return <div className="p-6 text-xs text-muted-foreground">Loading budgets…</div>
-  if (db.error) return <div className="p-6 text-xs text-muted-foreground">Sign in required.</div>
+  if (db.error) return <AccessGate error={db.error} />
 
   const programs: Any[] = db.programs ?? []
   const boards: Any[] = db.boards ?? []

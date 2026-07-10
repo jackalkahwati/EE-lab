@@ -6,7 +6,7 @@
  * timeline; every item traces to a real audited action or a real run.
  */
 import { useEffect, useMemo, useState } from 'react'
-import Link from 'next/link'
+import { AccessGate } from '@/components/access-gate'
 import { cn } from '@/lib/utils'
 
 type Any = Record<string, any>
@@ -36,7 +36,7 @@ export default function ActivityPage() {
   }, [db])
 
   if (!db) return <div className="p-6 text-xs text-muted-foreground">Loading activity…</div>
-  if (db.error) return <div className="p-6 text-xs text-muted-foreground">Sign in required.</div>
+  if (db.error) return <AccessGate error={db.error} />
 
   const TONE: Record<string, string> = {
     emerald: 'text-emerald-500', amber: 'text-amber-500',

@@ -8,6 +8,7 @@
  * explicit decision, and the ledger stays empty until that happens.
  */
 import { useCallback, useEffect, useState } from 'react'
+import { AccessGate } from '@/components/access-gate'
 import { cn } from '@/lib/utils'
 import { currentActor, enterpriseAction } from '@/lib/enterprise-actions'
 
@@ -68,7 +69,6 @@ export default function ValidationPage() {
     fd.append('board_id', eBoard)
     fd.append('evidence_type', eType)
     fd.append('source', eSource || eFile.name)
-    fd.append('actor', me)
     try {
       const res = await fetch('/api/evidence-upload', { method: 'POST', body: fd })
       const j = await res.json()
@@ -79,7 +79,7 @@ export default function ValidationPage() {
   }
 
   if (!db) return <div className="p-6 text-xs text-muted-foreground">Loading validation…</div>
-  if (db.error) return <div className="p-6 text-xs text-muted-foreground">Sign in required.</div>
+  if (db.error) return <AccessGate error={db.error} />
 
   const org = db.organizations?.[0]
   const boards: Any[] = db.boards ?? []

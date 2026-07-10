@@ -8,6 +8,7 @@
  * dispatcher; this view is read-first.
  */
 import { useCallback, useEffect, useState } from 'react'
+import { AccessGate } from '@/components/access-gate'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
 import { enterpriseAction } from '@/lib/enterprise-actions'
@@ -62,7 +63,7 @@ export default function IamPage() {
     run(actor_name, 'remove_member', { actor_name }, `removed ${actor_name}`)
 
   if (!db) return <div className="p-6 text-xs text-muted-foreground">Loading IAM…</div>
-  if (db.error) return <div className="p-6 text-xs text-muted-foreground">Sign in required.</div>
+  if (db.error) return <AccessGate error={db.error} />
 
   const org = db.organizations?.[0]
   const members: Any[] = db.members ?? []

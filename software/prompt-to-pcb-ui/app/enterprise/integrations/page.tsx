@@ -8,6 +8,7 @@
  * until wired.
  */
 import { useCallback, useEffect, useState } from 'react'
+import { AccessGate } from '@/components/access-gate'
 import { cn } from '@/lib/utils'
 import { enterpriseAction } from '@/lib/enterprise-actions'
 
@@ -67,7 +68,7 @@ export default function IntegrationsPage() {
   }
 
   if (!db) return <div className="p-6 text-xs text-muted-foreground">Loading integrations…</div>
-  if (db.error) return <div className="p-6 text-xs text-muted-foreground">Sign in required.</div>
+  if (db.error) return <AccessGate error={db.error} />
 
   const ig = db.organizations?.[0]?.integrations ?? {}
   const connectors: Any[] = ig.eda_connectors ?? []

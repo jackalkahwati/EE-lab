@@ -9,7 +9,7 @@
  * that did not occur.
  */
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
+import { AccessGate } from '@/components/access-gate'
 import { cn } from '@/lib/utils'
 
 type Any = Record<string, any>
@@ -44,7 +44,7 @@ export default function SettingsPage() {
   }, [])
 
   if (!db) return <div className="p-6 text-xs text-muted-foreground">Loading settings…</div>
-  if (db.error) return <div className="p-6 text-xs text-muted-foreground">Sign in required.</div>
+  if (db.error) return <AccessGate error={db.error} />
 
   const org = db.organizations?.[0]
   const members: Any[] = db.members ?? []

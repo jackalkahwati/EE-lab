@@ -7,6 +7,7 @@
  * it never places an order or submits a quote automatically.
  */
 import { useCallback, useEffect, useState } from 'react'
+import { AccessGate } from '@/components/access-gate'
 import { cn } from '@/lib/utils'
 import { enterpriseAction } from '@/lib/enterprise-actions'
 
@@ -50,7 +51,7 @@ export default function QuotesPage() {
   useEffect(() => { refresh() }, [refresh])
 
   if (!db) return <div className="p-6 text-xs text-muted-foreground">Loading quotes…</div>
-  if (db.error) return <div className="p-6 text-xs text-muted-foreground">Sign in required.</div>
+  if (db.error) return <AccessGate error={db.error} />
 
   const boards: Any[] = db.boards ?? []
   const boardName = (id: string) => boards.find((b) => b.board_id === id)?.name ?? id

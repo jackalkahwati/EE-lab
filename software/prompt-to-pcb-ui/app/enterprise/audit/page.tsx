@@ -6,7 +6,7 @@
  * chain-verification status is shown so a viewer knows the log is intact.
  */
 import { useEffect, useMemo, useState } from 'react'
-import Link from 'next/link'
+import { AccessGate } from '@/components/access-gate'
 import { cn } from '@/lib/utils'
 
 type Any = Record<string, any>
@@ -31,7 +31,7 @@ export default function AuditPage() {
   }, [db, q, deniedOnly])
 
   if (!db) return <div className="p-6 text-xs text-muted-foreground">Loading audit log…</div>
-  if (db.error) return <div className="p-6 text-xs text-muted-foreground">Sign in required.</div>
+  if (db.error) return <AccessGate error={db.error} />
 
   const chainOk = db.audit_chain?.ok
   const denied = (db.audit_tail ?? []).filter((a: Any) => String(a.action).startsWith('DENIED')).length
