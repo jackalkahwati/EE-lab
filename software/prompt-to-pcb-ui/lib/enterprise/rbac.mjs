@@ -135,7 +135,7 @@ export function setMemberRole(db, { actor_name, role, workspace_id = null,
   return { ok: true, actor_name, role }
 }
 
-export function removeMember(db, { actor_name, workspace_id = null, actor }) {
+export function removeMember(db, { actor_name, workspace_id = null }) {
   if (!actor_name) return { error: 'actor_name required' }
   db.members = db.members ?? []
   // last-admin safety: never remove the final org_admin

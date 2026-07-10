@@ -20,12 +20,13 @@ export async function currentActor(): Promise<string> {
 }
 
 export async function enterpriseAction(action: string, params: Record<string, any>): Promise<ActionResult> {
-  const actor = await currentActor()
   try {
     const res = await fetch('/api/enterprise', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ action, params, actor }),
+      // The server derives the actor from the signed session cookie. Never let
+      // a client-provided identity participate in authorization or auditing.
+      body: JSON.stringify({ action, params }),
     })
     return await res.json()
   } catch (e: any) {

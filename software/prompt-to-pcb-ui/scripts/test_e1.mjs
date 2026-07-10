@@ -38,11 +38,24 @@ const r2 = ent.attachRun(db, { board_id: b2.board_id,
   run_dir: 'fl1-core6-bare-rp2040-combination-v1', actor })
 const r2b = ent.attachRun(db, { board_id: b2.board_id,
   run_dir: 'fl1-core6-mono-bare', actor })
+const unsafeRun = ent.attachRun(db, { board_id: b2.board_id,
+  run_dir: '..', actor })
 check('2 real run artifacts attach; board carries multiple runs',
   r1.route_evidence_state === 'routed_in_sandbox'
   && db.runs.filter((r) => r.board_id === b2.board_id).length === 2)
-check('3 run states come from REAL artifacts (drc_clean read, not asserted)',
-  r1.drc_state === 'drc_clean' && r2.drc_state === 'drc_clean')
+const expectedDrcState = (runDir) => {
+  const drc = JSON.parse(fs.readFileSync(path.join(
+    ent.APP_ROOT, 'public', 'runs', runDir, 'data', 'drc.json'), 'utf8'))
+  const hard = (drc.violations ?? [])
+    .filter((v) => v.type !== 'solder_mask_bridge').length
+  return hard === 0 ? 'drc_clean' : `drc_violations:${hard}`
+}
+check('3 run states match the current real DRC artifacts',
+  r1.drc_state === expectedDrcState('power-entry-header-v1')
+  && r2.drc_state === expectedDrcState('fl1-core6-bare-rp2040-combination-v1')
+  && r2b.drc_state === expectedDrcState('fl1-core6-mono-bare'))
+check('3b run attachment rejects parent-directory traversal',
+  unsafeRun.error === 'invalid run_dir')
 check('4 honest warnings inherited as blocked claims (FL-1 usb pair)',
   db.boards.find((b) => b.board_id === b2.board_id)
     .blocked_claims.some((c) => c.includes('unsupported')))

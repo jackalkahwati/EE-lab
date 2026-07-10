@@ -215,6 +215,9 @@ export function createBoard(db, { program_id, name, board_class = '',
  *  claims. Never fabricates: missing artifacts -> 'unknown'. */
 export function attachRun(db, { board_id, run_dir, prompt = null,
                                 created_by = 'system', actor }) {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(run_dir ?? '')) {
+    return { error: 'invalid run_dir' }
+  }
   const dataDir = path.join(APP_ROOT, 'public', 'runs', run_dir, 'data')
   const readJson = (f) => {
     try { return JSON.parse(fs.readFileSync(path.join(dataDir, f), 'utf8')) }

@@ -1,9 +1,8 @@
 'use client'
 
 import { cn } from '@/lib/utils'
-import { ARTIFACTS, type Run } from '@/lib/firstlight'
-import { realArtifacts } from '@/lib/real-board'
-import { Download, Cpu, Layers, Ruler, Activity } from 'lucide-react'
+import type { Run } from '@/lib/firstlight'
+import { Cpu, Layers, Ruler, Activity } from 'lucide-react'
 
 function RoutingRadial({ run }: { run: Run }) {
   const pct =
@@ -76,46 +75,6 @@ function RoutingRadial({ run }: { run: Run }) {
   )
 }
 
-function Sparkline({ values }: { values: number[] }) {
-  if (values.length < 2) return null
-  const min = Math.min(...values)
-  const max = Math.max(...values)
-  const range = max - min || 1
-  const w = 96
-  const h = 24
-  const pts = values
-    .map(
-      (v, i) =>
-        `${((i / (values.length - 1)) * w).toFixed(1)},${(h - ((v - min) / range) * h).toFixed(1)}`,
-    )
-    .join(' ')
-
-  return (
-    <svg
-      viewBox={`0 0 ${w} ${h}`}
-      className="h-6 w-24"
-      aria-hidden="true"
-      preserveAspectRatio="none"
-    >
-      <polyline
-        points={pts}
-        fill="none"
-        stroke="var(--primary)"
-        strokeWidth="1.5"
-      />
-      <circle
-        cx={w}
-        cy={
-          h -
-          ((values[values.length - 1] - min) / range) * h
-        }
-        r="2"
-        fill="var(--primary)"
-      />
-    </svg>
-  )
-}
-
 function Section({
   title,
   children,
@@ -134,8 +93,6 @@ function Section({
 }
 
 export function MetricsRail({ run }: { run: Run }) {
-  const routingDone = run.stages[2].state === 'passed'
-
   return (
     <aside className="flex w-80 shrink-0 flex-col overflow-y-auto border-l border-border bg-card">
       <div className="border-b border-border px-4 py-2.5">

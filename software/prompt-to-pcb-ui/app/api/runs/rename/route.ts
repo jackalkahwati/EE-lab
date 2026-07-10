@@ -7,7 +7,7 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import { getUser, sessionEmail } from '@/lib/auth'
+import { getUser, isValidRunId, sessionEmail } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -20,7 +20,7 @@ export async function POST(req: Request) {
   try { body = await req.json() } catch { /* */ }
   const id = String(body.id ?? '')
   const name = String(body.name ?? '').replace(/[\r\n]+/g, ' ').trim().slice(0, 80)
-  if (!/^[A-Za-z0-9._-]+$/.test(id)) return Response.json({ error: 'invalid run id' }, { status: 400 })
+  if (!isValidRunId(id)) return Response.json({ error: 'invalid run id' }, { status: 400 })
   if (!name) return Response.json({ error: 'name required' }, { status: 400 })
 
   // ownership: a user may only rename runs they own (never a shared demo board)

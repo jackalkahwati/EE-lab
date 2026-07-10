@@ -14,7 +14,17 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { callLLMText, extractRust } from '@/lib/llm'
-import { canRun, chargeCredits, creditsAvailable, creditsForRun, getUser, recordRun, sessionEmail } from '@/lib/auth'
+import {
+  canRun,
+  chargeCredits,
+  creditsAvailable,
+  creditsForRun,
+  getUser,
+  isValidRunId,
+  recordRun,
+  runAccess,
+  sessionEmail,
+} from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 1800
@@ -157,15 +167,20 @@ export async function GET(req: Request) {
   if (globalState.__pipelineRunning) {
     return new Response('a pipeline run is already in progress', { status: 409 })
   }
-  globalState.__pipelineRunning = true
 
   const qp = new URL(req.url).searchParams
   const prompt = qp.get('prompt') ?? ''
   // per-run artifact snapshot id (so each run keeps its OWN board/renders/data
   // instead of all runs sharing the latest write to public/board)
-  const runId = (qp.get('runId') ?? '').replace(/[^a-zA-Z0-9_-]/g, '')
+  const runId = qp.get('runId') ?? ''
+  if (!isValidRunId(runId)) {
+    return new Response('a valid runId is required', { status: 400 })
+  }
   // rev lineage (revise flow): parent run id + one-line reason
-  const parentId = (qp.get('parent') ?? '').replace(/[^a-zA-Z0-9_-]/g, '')
+  const parentId = qp.get('parent') ?? ''
+  if (parentId && !isValidRunId(parentId)) {
+    return new Response('invalid parent run id', { status: 400 })
+  }
   const revNote = (qp.get('revNote') ?? '').slice(0, 300)
   // Layer-2 compose mode: the interview passes a base64 {blocks, boardClass}
   const composeMode = qp.get('compose') === '1'
@@ -201,18 +216,22 @@ export async function GET(req: Request) {
   const flroute = path.join(hwDir, 'tools/flroute/target/release/flroute')
   const ATO = process.env.ATO_BIN || `${process.env.HOME}/.local/bin/ato`
   const CARGO = process.env.CARGO_BIN || `${process.env.HOME}/.cargo/bin/cargo`
-  // Each run owns an id-scoped output dir (public/runs/<id>/{data,board}); nothing
-  // is shared between runs, so one run's board/BOM/renders can NEVER leak into
-  // another. With no runId we fall back to the shared public/data + public/board
-  // (the default "latest" view). At the end we also publish a run's outputs to
-  // that shared location so the no-id default view shows the most recent board.
-  const runRoot = runId ? path.join(appDir, 'public/runs', runId) : null
-  const pubData = runRoot
-    ? path.join(runRoot, 'data')
-    : path.join(appDir, 'public/data')
-  const pubBoard = runRoot
-    ? path.join(runRoot, 'board')
-    : path.join(appDir, 'public/board')
+  // Each run owns an id-scoped output dir (public/runs/<id>/{data,board}). A
+  // caller may resume its own id, but can never claim or erase another user's
+  // run (or an unowned shared demo) by guessing the directory name.
+  const runRoot = path.join(appDir, 'public/runs', runId)
+  const access = runAccess(req, runId)
+  if (access.access === 'forbidden') {
+    return new Response('run id belongs to another account', { status: 403 })
+  }
+  if (access.access !== 'owner' && fs.existsSync(runRoot)) {
+    return new Response('run id already exists', { status: 409 })
+  }
+  if (parentId && runAccess(req, parentId).access === 'forbidden') {
+    return new Response('parent run belongs to another account', { status: 403 })
+  }
+  const pubData = path.join(runRoot, 'data')
+  const pubBoard = path.join(runRoot, 'board')
   const encoder = new TextEncoder()
   let child: ChildProcess | null = null
   let cancelled = false
@@ -225,6 +244,7 @@ export async function GET(req: Request) {
   // count the run + attach ownership up front (a crashed run still consumed
   // pipeline time; artifact filtering keys off this ownership record)
   recordRun(userEmail, runId)
+  globalState.__pipelineRunning = true
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -1099,7 +1119,8 @@ export async function GET(req: Request) {
                   'You are an expert embedded Rust engineer. You are given ONE method body to rewrite. ' +
                   'Output ONLY the Rust statements that go inside it — no fn signature, no struct, no ' +
                   'imports, no prose, no markdown fences.\n\n' +
-                  `HARD RULES (each is a real, common cause of a failed build):\n${FW_RULES}`
+                  `HARD RULES (each is a real, common cause of a failed build):\n${FW_RULES}\n\n` +
+                  `REFERENCE SHAPE (adapt it to the real modules below):\n${FW_GOLDEN}`
                 const ask =
                   `Board: ${composeMode ? composeSpec?.boardClass : 'FL-1 relay/probe matrix'}.\n\n` +
                   `The crate provides these modules — call ONLY their real public methods:\n\n${apiDump}\n\n` +

@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { isValidRunId, runAccess } from '@/lib/auth'
 
 /**
  * Serves a binary glTF (GLB) of a run's routed board for the 3D viewer,
@@ -64,6 +65,19 @@ async function ensureGlb(pcb: string, glb: string): Promise<void> {
 
 export async function GET(req: Request) {
   const base = new URL(req.url).searchParams.get('base') ?? ''
+  const runMatch = base.match(/^\/runs\/([A-Za-z0-9._-]+)\/board$/)
+  if (runMatch) {
+    if (!isValidRunId(runMatch[1])) {
+      return Response.json({ error: 'invalid base' }, { status: 400 })
+    }
+    const auth = runAccess(req, runMatch[1])
+    if (auth.access === 'unauthenticated') {
+      return Response.json({ error: 'sign in required' }, { status: 401 })
+    }
+    if (auth.access === 'forbidden') {
+      return Response.json({ error: 'not your board' }, { status: 403 })
+    }
+  }
   const pcb = resolvePcb(base)
   if (!pcb) return Response.json({ error: 'invalid base' }, { status: 400 })
   if (!fs.existsSync(pcb))

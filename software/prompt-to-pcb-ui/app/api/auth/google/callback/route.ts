@@ -4,7 +4,7 @@
  * code exchange, so its payload is trusted after aud + email_verified checks.
  */
 import { NextRequest, NextResponse } from 'next/server'
-import { makeSession, sessionCookieHeader, upsertOAuthUser } from '@/lib/auth'
+import { authSecret, makeSession, sessionCookieHeader, upsertOAuthUser } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,6 +16,11 @@ function fail(req: NextRequest, code: string) {
 }
 
 export async function GET(req: NextRequest) {
+  try {
+    authSecret()
+  } catch {
+    return fail(req, 'auth-not-configured')
+  }
   const clientId = process.env.GOOGLE_CLIENT_ID
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET
   if (!clientId || !clientSecret) return fail(req, 'google-not-configured')
@@ -43,7 +48,13 @@ export async function GET(req: NextRequest) {
   if (!tokenRes.ok || !tokens.id_token) return fail(req, 'google-exchange-failed')
 
   // decode the id_token payload (JWT middle segment)
-  let claims: { aud?: string; email?: string; email_verified?: boolean }
+  let claims: {
+    aud?: string | string[]
+    email?: string
+    email_verified?: boolean
+    exp?: number
+    iss?: string
+  }
   try {
     const payload = String(tokens.id_token).split('.')[1]
     claims = JSON.parse(
@@ -52,12 +63,22 @@ export async function GET(req: NextRequest) {
   } catch {
     return fail(req, 'google-bad-token')
   }
-  if (claims.aud !== clientId || !claims.email || claims.email_verified === false) {
+  const audienceOk = Array.isArray(claims.aud)
+    ? claims.aud.includes(clientId)
+    : claims.aud === clientId
+  const issuerOk = claims.iss === 'accounts.google.com' || claims.iss === 'https://accounts.google.com'
+  const expiryOk = typeof claims.exp === 'number' && claims.exp * 1000 > Date.now()
+  if (!audienceOk || !issuerOk || !expiryOk || !claims.email || claims.email_verified !== true) {
     return fail(req, 'google-identity-rejected')
   }
 
   const rec = upsertOAuthUser(claims.email, 'google')
-  const rawNext = decodeURIComponent(req.cookies.get('fl_next')?.value ?? '/')
+  let rawNext = '/'
+  try {
+    rawNext = decodeURIComponent(req.cookies.get('fl_next')?.value ?? '/')
+  } catch {
+    // Ignore a malformed navigation cookie and return to the app root.
+  }
   const nextPath = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/'
   const qIdx = nextPath.indexOf('?')
   const url = req.nextUrl.clone()

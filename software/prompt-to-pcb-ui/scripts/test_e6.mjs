@@ -20,8 +20,6 @@ const org = ent.createOrganization(db, { name: 'T', actor })
 const ws = ent.createWorkspace(db, { org_id: org.org_id, name: 'W', actor })
 const p1 = ent.createProgram(db, { workspace_id: ws.workspace_id,
   name: 'P1', actor })
-const p2 = ent.createProgram(db, { workspace_id: ws.workspace_id,
-  name: 'P2', actor })
 
 // assumptions are config with provenance
 check('1 every default assumption carries value+units+provenance',

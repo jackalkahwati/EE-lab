@@ -1,7 +1,6 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { cn } from '@/lib/utils'
 import { BOM_LINES, type BomLine } from '@/lib/firstlight'
 import { Search, Download } from 'lucide-react'
 

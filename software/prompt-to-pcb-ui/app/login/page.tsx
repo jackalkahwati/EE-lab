@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 
 const OAUTH_ERRORS: Record<string, string> = {
+  'auth-not-configured': 'Sign-in is not configured on this deployment.',
   'google-not-configured':
     'Google sign-in is not configured on this deployment yet, use email and password.',
   'google-state-mismatch': 'Google sign-in session expired, try again.',
@@ -75,8 +76,9 @@ export default function LoginPage() {
     >
       <form
         onSubmit={submit}
+        aria-busy={busy}
         style={{
-          width: 360,
+          width: 'min(360px, calc(100vw - 32px))',
           padding: '36px 32px',
           background: '#16181d',
           border: '1px solid #2a2e37',
@@ -84,7 +86,7 @@ export default function LoginPage() {
           textAlign: 'center',
         }}
       >
-        <div
+        <h1
           style={{
             fontFamily: 'ui-monospace, Menlo, monospace',
             fontSize: 18,
@@ -94,25 +96,36 @@ export default function LoginPage() {
           }}
         >
           <span style={{ color: '#ff6e00' }}>✳</span> firstlight compose
-        </div>
+        </h1>
         <p style={{ color: '#a7a49c', fontSize: 13, marginBottom: 24 }}>
           {mode === 'signin'
             ? 'Sign in to your workspace.'
             : 'Create your account, 5 free board runs a month.'}
         </p>
+        <label htmlFor="email" className="sr-only">Email</label>
         <input
+          id="email"
+          name="email"
           type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="Email"
+          autoComplete="email"
+          required
           autoFocus
           style={input}
         />
+        <label htmlFor="password" className="sr-only">Password</label>
         <input
+          id="password"
+          name="password"
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           placeholder={mode === 'signup' ? 'Password (8+ characters)' : 'Password'}
+          autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+          minLength={mode === 'signup' ? 8 : undefined}
+          required
           style={input}
         />
         <button
@@ -177,7 +190,9 @@ export default function LoginPage() {
           Continue with Google
         </button>
         {error && (
-          <p style={{ color: '#e05252', fontSize: 13, marginTop: 12 }}>{error}</p>
+          <p role="alert" aria-live="polite" style={{ color: '#e05252', fontSize: 13, marginTop: 12 }}>
+            {error}
+          </p>
         )}
         <button
           type="button"

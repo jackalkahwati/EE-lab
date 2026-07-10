@@ -10,7 +10,7 @@
  * this becomes a no-op belt-and-suspenders.
  */
 import { NextRequest, NextResponse } from 'next/server'
-import { getUser, grantCredits, sessionEmail, updateUser } from '@/lib/auth'
+import { getUser, grantCreditsOnce, sessionEmail, updateUser } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -52,15 +52,20 @@ export async function POST(req: NextRequest) {
   // session grants once (guarded by a marker below).
   const credits = Number(s.metadata?.credits ?? 0)
   if (s.mode === 'payment' && credits > 0) {
-    // guard double-grant on repeat confirms of the same session
-    const marker = `credited:${sid}`
-    const rec0 = getUser(email)
-    if (rec0 && !rec0.runIds.includes(marker)) {
-      grantCredits(email, credits)
-      updateUser(email, (u) => u.runIds.push(marker))
-    }
+    const granted = grantCreditsOnce(email, sid, credits)
     const rec = getUser(email)
-    return NextResponse.json({ creditsAdded: credits, plan: rec?.plan })
+    return NextResponse.json({
+      creditsAdded: granted ? credits : 0,
+      alreadyProcessed: !granted,
+      plan: rec?.plan,
+    })
+  }
+
+  if (s.mode !== 'subscription') {
+    return NextResponse.json({
+      upgraded: false,
+      reason: 'unsupported checkout mode',
+    }, { status: 400 })
   }
 
   updateUser(email, (u) => {

@@ -14,6 +14,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { callLLMText, overrideFromHeaders } from '@/lib/llm'
+import { isValidRunId, runAccess } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120
@@ -74,10 +75,17 @@ export async function POST(req: Request) {
   } catch {
     return Response.json({ error: 'invalid JSON body' }, { status: 400 })
   }
-  const id = String(body.runId ?? '').replace(/[^a-zA-Z0-9_-]/g, '')
+  const id = String(body.runId ?? '')
   const request = String(body.request ?? '').trim()
-  if (!id || !request) {
+  if (!isValidRunId(id) || !request) {
     return Response.json({ error: 'runId and request required' }, { status: 400 })
+  }
+  const auth = runAccess(req, id)
+  if (auth.access === 'unauthenticated') {
+    return Response.json({ error: 'sign in required' }, { status: 401 })
+  }
+  if (auth.access === 'forbidden') {
+    return Response.json({ error: 'not your board' }, { status: 403 })
   }
 
   const lastRunPath = path.join(process.cwd(), 'public/runs', id, 'data/last-run.json')

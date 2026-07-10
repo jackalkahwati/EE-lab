@@ -28,6 +28,9 @@ export interface UserRecord {
   /** purchased credits, never expire, roll over, spent after plan credits */
   extraCredits: number
   stripeCustomerId?: string
+  /** Stripe Checkout session ids already applied; prevents webhook retries
+   * and confirmation retries from granting the same purchase twice. */
+  processedCheckoutSessions?: string[]
   /** 'google' accounts have no usable password hash */
   provider?: 'google'
 }
@@ -57,18 +60,31 @@ export function creditsForRun(nets: number, components: number): number {
 export const FREE_RUNS_PER_MONTH = 5 // legacy export; superseded by credits
 export const SESSION_COOKIE = 'fl_session'
 const SESSION_TTL_MS = 30 * 24 * 3600 * 1000
+const DEV_AUTH_SECRET = 'firstlight-dev-secret'
 
 export function authSecret(): string {
-  return process.env.AUTH_SECRET || process.env.FL_PASSWORD || 'firstlight-dev-secret'
+  const configured = process.env.AUTH_SECRET || process.env.FL_PASSWORD
+  if (configured) return configured
+  // A checked-in fallback is convenient for local preview work, but accepting
+  // it in production would let anyone forge an arbitrary account session.
+  if (process.env.NODE_ENV !== 'production') return DEV_AUTH_SECRET
+  throw new Error('AUTH_SECRET is required in production')
 }
 
 // ---- store ------------------------------------------------------------------
 
 function load(): Record<string, UserRecord> {
   try {
-    return JSON.parse(fs.readFileSync(STORE, 'utf8'))
-  } catch {
-    return {}
+    const parsed: unknown = JSON.parse(fs.readFileSync(STORE, 'utf8'))
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('user store root must be an object')
+    }
+    return parsed as Record<string, UserRecord>
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {}
+    // Never reinterpret a corrupt/unreadable account store as an empty one:
+    // a subsequent signup or update would otherwise overwrite every account.
+    throw new Error('user store is unreadable', { cause: error })
   }
 }
 
@@ -220,6 +236,21 @@ export function grantCredits(email: string, credits: number) {
   })
 }
 
+/** Grant a paid credit pack exactly once for a verified Stripe session. */
+export function grantCreditsOnce(email: string, sessionId: string, credits: number): boolean {
+  if (!sessionId || !Number.isFinite(credits) || credits <= 0) return false
+  let granted = false
+  updateUser(email, (u) => {
+    u.processedCheckoutSessions ??= []
+    if (u.processedCheckoutSessions.includes(sessionId)) return
+    if (typeof u.extraCredits !== 'number') u.extraCredits = 0
+    u.extraCredits += credits
+    u.processedCheckoutSessions.push(sessionId)
+    granted = true
+  })
+  return granted
+}
+
 // ---- sessions -------------------------------------------------------------------
 
 function b64url(buf: Buffer): string {
@@ -236,12 +267,32 @@ export function readSession(token: string | undefined): string | null {
   if (!token) return null
   const parts = token.split('|')
   if (parts.length !== 3) return null
+  if (!/^\d+$/.test(parts[1])) return null
+  const expiresAt = Number(parts[1])
+  if (!Number.isSafeInteger(expiresAt) || expiresAt <= Date.now()) return null
+  if (!/^[A-Za-z0-9_-]{43}$/.test(parts[2])) return null
   const payload = `${parts[0]}|${parts[1]}`
-  const expect = b64url(createHmac('sha256', authSecret()).update(payload).digest())
-  if (expect !== parts[2]) return null
-  if (Number(parts[1]) < Date.now()) return null
+  let expect: Buffer
   try {
-    return Buffer.from(parts[0].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8')
+    expect = createHmac('sha256', authSecret()).update(payload).digest()
+  } catch {
+    // Missing production configuration fails closed for verification. Session
+    // creation still throws so a deployment cannot silently issue bad tokens.
+    return null
+  }
+  let supplied: Buffer
+  try {
+    supplied = Buffer.from(parts[2].replace(/-/g, '+').replace(/_/g, '/'), 'base64')
+  } catch {
+    return null
+  }
+  if (expect.length !== supplied.length || !timingSafeEqual(expect, supplied)) return null
+  try {
+    const email = Buffer.from(
+      parts[0].replace(/-/g, '+').replace(/_/g, '/'),
+      'base64',
+    ).toString('utf8')
+    return email && norm(email) === email ? email : null
   } catch {
     return null
   }
@@ -254,11 +305,42 @@ export function sessionEmail(req: Request): string | null {
   return readSession(m?.[1])
 }
 
+export type RunAccess = 'owner' | 'shared' | 'forbidden' | 'unauthenticated'
+
+/** A single safe filesystem segment for public/runs/<id>. */
+export function isValidRunId(value: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value)
+}
+
+/**
+ * Resolve access to an id-scoped run without trusting a client-provided actor.
+ * Unowned runs are shared demos; owned runs are visible only to their owner.
+ * Mutation routes must require `owner`, while read routes may allow `shared`.
+ */
+export function runAccess(req: Request, runId: string): {
+  access: RunAccess
+  email: string | null
+} {
+  const email = sessionEmail(req)
+  if (!email) return { access: 'unauthenticated', email: null }
+  const users = load()
+  const owners = Object.values(users).filter((rec) => rec.runIds?.includes(runId))
+  if (owners.length === 0) return { access: 'shared', email }
+  return {
+    // Duplicate ownership is corrupt state and fails closed for every account.
+    access: owners.length === 1 && norm(owners[0].email) === norm(email)
+      ? 'owner'
+      : 'forbidden',
+    email,
+  }
+}
+
 export function sessionCookieHeader(token: string): string {
   const secure = process.env.NODE_ENV === 'production' ? '; Secure' : ''
   return `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_MS / 1000}${secure}`
 }
 
 export function clearCookieHeader(): string {
-  return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : ''
+  return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`
 }

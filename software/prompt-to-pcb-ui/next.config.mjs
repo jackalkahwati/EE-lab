@@ -1,8 +1,5 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  typescript: {
-    ignoreBuildErrors: true,
-  },
   // netlistsvg + its elkjs dep are CommonJS bundles that break under webpack;
   // keep them external so /api/schematic require()s them at runtime (works).
   serverExternalPackages: ['netlistsvg', 'elkjs'],

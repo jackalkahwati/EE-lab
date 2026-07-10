@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import { Waves, AlertTriangle, ShieldAlert, Ruler, Download } from 'lucide-react'
+import { Waves, ShieldAlert, Ruler, Download } from 'lucide-react'
 
 export function AdvancedRoutingPanel({ runId }: { runId: string | null }) {
   const [m, setM] = useState<any | null | undefined>(undefined)

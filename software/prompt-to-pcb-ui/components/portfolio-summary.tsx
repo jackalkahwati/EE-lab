@@ -27,8 +27,6 @@ export function PortfolioSummary({
   const progIds = new Set(programs.map((p) => p.program_id))
   const boards = (db.boards ?? []).filter((b: Any) => progIds.has(b.program_id))
   const boardIds = new Set(boards.map((b: Any) => b.board_id))
-  const boardName = (id: string) =>
-    boards.find((b: Any) => b.board_id === id)?.name ?? id
 
   const activePrograms = programs.filter(
     (p) => p.status !== 'archived' && p.status !== 'closed')

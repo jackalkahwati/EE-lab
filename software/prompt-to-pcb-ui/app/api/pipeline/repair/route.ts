@@ -12,6 +12,7 @@
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
+import { isValidRunId, runAccess } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 600
@@ -48,6 +49,23 @@ function sh(cmd: string, args: string[], cwd?: string): Promise<{ code: number; 
 }
 
 export async function POST(req: Request) {
+  let body: { runId?: string; op?: string }
+  try {
+    body = await req.json()
+  } catch {
+    return Response.json({ error: 'invalid JSON body' }, { status: 400 })
+  }
+  const id = String(body.runId ?? '')
+  const op = body.op as Op
+  if (!isValidRunId(id) || !OPS.includes(op))
+    return Response.json({ error: 'runId and a valid op are required' }, { status: 400 })
+  const auth = runAccess(req, id)
+  if (auth.access === 'unauthenticated') {
+    return Response.json({ error: 'sign in required' }, { status: 401 })
+  }
+  if (auth.access !== 'owner') {
+    return Response.json({ error: 'not your board' }, { status: 403 })
+  }
   // Repairs re-run KiCad/Python locally, lab workstation only.
   if (!fs.existsSync(KCLI)) {
     return Response.json(
@@ -55,16 +73,6 @@ export async function POST(req: Request) {
       { status: 503 },
     )
   }
-  let body: { runId?: string; op?: string }
-  try {
-    body = await req.json()
-  } catch {
-    return Response.json({ error: 'invalid JSON body' }, { status: 400 })
-  }
-  const id = String(body.runId ?? '').replace(/[^a-zA-Z0-9_-]/g, '')
-  const op = body.op as Op
-  if (!id || !OPS.includes(op))
-    return Response.json({ error: 'runId and a valid op are required' }, { status: 400 })
 
   if (globalState.__pipelineRunning)
     return Response.json({ error: 'a pipeline run or repair is already in progress' }, { status: 409 })

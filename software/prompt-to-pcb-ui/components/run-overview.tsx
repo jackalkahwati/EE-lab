@@ -28,7 +28,7 @@ const STYLE: Record<S, string> = {
   not_generated: 'border-border bg-muted/30 text-muted-foreground',
 }
 function Icon({ s }: { s: S }) {
-  if (s === 'passed' || s === 'recovered') return <CheckCircle2 className="size-3.5" />
+  if (s === 'passed') return <CheckCircle2 className="size-3.5" />
   if (s === 'failed' || s === 'unsupported') return <XCircle className="size-3.5" />
   if (s === 'recovered') return <Wrench className="size-3.5" />
   if (s === 'not_generated') return <MinusCircle className="size-3.5" />

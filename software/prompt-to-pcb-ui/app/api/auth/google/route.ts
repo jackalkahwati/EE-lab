@@ -13,10 +13,19 @@
  */
 import { randomBytes } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
+import { authSecret } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
+  try {
+    authSecret()
+  } catch {
+    const url = req.nextUrl.clone()
+    url.pathname = '/login'
+    url.search = '?error=auth-not-configured'
+    return NextResponse.redirect(url)
+  }
   const clientId = process.env.GOOGLE_CLIENT_ID
   if (!clientId || !process.env.GOOGLE_CLIENT_SECRET) {
     const url = req.nextUrl.clone()
@@ -39,13 +48,14 @@ export async function GET(req: NextRequest) {
   const safeNext =
     nextParam.startsWith('/') && !nextParam.startsWith('//') ? nextParam : '/'
   const res = NextResponse.redirect(auth)
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : ''
   res.headers.append(
     'Set-Cookie',
-    `fl_oauth_state=${state}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600`,
+    `fl_oauth_state=${state}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600${secure}`,
   )
   res.headers.append(
     'Set-Cookie',
-    `fl_next=${encodeURIComponent(safeNext)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600`,
+    `fl_next=${encodeURIComponent(safeNext)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600${secure}`,
   )
   return res
 }

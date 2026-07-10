@@ -100,15 +100,26 @@ function boardFromRun(run: Run): RealBoardJson {
     components: run.metrics.components ?? 0,
     boardSize: { wMm, hMm },
     layers: run.metrics.layers || 4,
-    variantNets: run.metrics.netsTotal ?? 0,
     netsRouted: run.metrics.netsRouted ?? 0,
     netsTotal: run.metrics.netsTotal ?? 0,
+    unroutedNets: [],
+    zoneServedNets: [],
     hpwlMm: run.metrics.hpwl ?? 0,
     tracks: 0,
     vias: 0,
     bomTotal: 0,
-    drc: { violations: run.metrics.copperDefects ?? 0, unconnectedItems: 0 },
-  } as RealBoardJson
+    placement: { overlaps: 0, overlapPairs: [], offBoard: [] },
+    drc: {
+      violations: run.metrics.copperDefects ?? 0,
+      violationSummaries: [],
+      unconnectedItems: Math.max(
+        0,
+        (run.metrics.netsTotal ?? 0) - (run.metrics.netsRouted ?? 0),
+      ),
+      kicadVersion: '',
+      date: run.timestamp,
+    },
+  }
 }
 
 export function BoardCanvas({

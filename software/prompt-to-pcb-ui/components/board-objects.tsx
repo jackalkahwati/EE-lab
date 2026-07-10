@@ -23,7 +23,7 @@ export function BoardObjects({ real }: { real: RealBoard | null }) {
   const [sel, setSel] = useState<number | null>(null)
   const [q, setQ] = useState('')
 
-  const bom = real?.bom ?? []
+  const bom = useMemo(() => real?.bom ?? [], [real?.bom])
   const b: any = real?.board ?? {}
   const rows = useMemo(() => {
     const ql = q.trim().toLowerCase()

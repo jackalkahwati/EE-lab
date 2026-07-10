@@ -7,10 +7,15 @@
 import { buildEvidencePack, packToMarkdown } from '@/lib/enterprise/evidencepack.mjs'
 // @ts-ignore
 import { loadDb } from '@/lib/enterprise/store.mjs'
+// @ts-ignore
+import { rolesOf } from '@/lib/enterprise/rbac.mjs'
+import { isValidRunId, sessionEmail } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: Request) {
+  const actor = sessionEmail(req)
+  if (!actor) return Response.json({ error: 'sign in required' }, { status: 401 })
   const url = new URL(req.url)
   const run_dir = url.searchParams.get('run_dir')
   const board_id = url.searchParams.get('board_id')
@@ -20,10 +25,13 @@ export async function GET(req: Request) {
                          { status: 400 })
   }
   // path safety: run_dir must be a bare directory name
-  if (run_dir && !/^[A-Za-z0-9._-]+$/.test(run_dir)) {
+  if (run_dir && !isValidRunId(run_dir)) {
     return Response.json({ error: 'invalid run_dir' }, { status: 400 })
   }
   const db = loadDb()
+  if (rolesOf(db, actor).length === 0) {
+    return Response.json({ error: 'enterprise membership required' }, { status: 403 })
+  }
   let effRunDir = run_dir
   if (!effRunDir && board_id) {
     const b = db.boards.find((x: any) => x.board_id === board_id)

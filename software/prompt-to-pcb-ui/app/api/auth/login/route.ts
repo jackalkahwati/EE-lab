@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { makeSession, sessionCookieHeader, verifyUser } from '@/lib/auth'
+import { authSecret, makeSession, sessionCookieHeader, verifyUser } from '@/lib/auth'
 
 export async function POST(req: NextRequest) {
+  try {
+    authSecret()
+  } catch {
+    return NextResponse.json({ error: 'authentication is not configured' }, { status: 503 })
+  }
   let body: { email?: string; password?: string }
   try {
     body = await req.json()

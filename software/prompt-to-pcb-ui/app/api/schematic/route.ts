@@ -14,12 +14,12 @@ import fs from 'fs'
 import path from 'path'
 import { createRequire } from 'module'
 import { pinName } from '@/lib/ic-pinmaps'
+import { isValidRunId, runAccess } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
 const require = createRequire(import.meta.url)
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 const netlistsvg = require('netlistsvg')
 
 const RUNS = path.join(process.cwd(), 'public', 'runs')
@@ -151,8 +151,15 @@ export async function GET(req: Request) {
   const run = raw.split('/').filter(Boolean).pop() ?? ''
   const block = (url.searchParams.get('block') ?? '').trim()
   const wantList = url.searchParams.get('blocks') === '1'
-  if (!run || !/^[A-Za-z0-9._-]+$/.test(run)) {
+  if (!isValidRunId(run)) {
     return Response.json({ error: 'invalid run' }, { status: 400 })
+  }
+  const auth = runAccess(req, run)
+  if (auth.access === 'unauthenticated') {
+    return Response.json({ error: 'sign in required' }, { status: 401 })
+  }
+  if (auth.access === 'forbidden') {
+    return Response.json({ error: 'not your board' }, { status: 403 })
   }
   const atoPath = path.join(RUNS, run, 'data', 'ato.json')
   if (!fs.existsSync(atoPath)) {

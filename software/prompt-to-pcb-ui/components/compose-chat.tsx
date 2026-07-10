@@ -127,7 +127,7 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
   function startRev() {
     if (!revSpec || !activeRunId) return
     setPhase('building'); setStages({}); setLogs([])
-    const id = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const id = `run-${crypto.randomUUID()}`
     const payload = b64(JSON.stringify({ blocks: revSpec.blocks, boardClass: revSpec.boardClass }))
     const url = `/api/pipeline/run?prompt=${encodeURIComponent(revSpec.request)}`
       + `&runId=${encodeURIComponent(id)}&compose=1&spec=${encodeURIComponent(payload)}`
@@ -147,7 +147,7 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
   function start() {
     if (!spec) return
     setPhase('building'); setStages({}); setLogs([])
-    const id = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const id = `run-${crypto.randomUUID()}`
     const payload = b64(JSON.stringify({ blocks: spec.blocks, boardClass: spec.boardClass, ...(spec.layers ? { layers: spec.layers } : {}) }))
     const url = `/api/pipeline/run?prompt=${encodeURIComponent(request)}`
       + `&runId=${encodeURIComponent(id)}&compose=1&spec=${encodeURIComponent(payload)}`

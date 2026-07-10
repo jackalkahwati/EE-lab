@@ -17,6 +17,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { execFileSync } from 'child_process'
+import { isValidRunId, runAccess } from '@/lib/auth'
 
 const KICAD_CLI = process.env.KICAD_CLI
   ?? '/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli'
@@ -36,8 +37,15 @@ export async function GET(req: Request) {
   const run = (url.searchParams.get('run') ?? '').trim()
   const format = (url.searchParams.get('format') ?? 'ipc2581').trim()
 
-  if (!run || !/^[A-Za-z0-9._-]+$/.test(run)) {
+  if (!isValidRunId(run)) {
     return Response.json({ error: 'invalid run' }, { status: 400 })
+  }
+  const auth = runAccess(req, run)
+  if (auth.access === 'unauthenticated') {
+    return Response.json({ error: 'sign in required' }, { status: 401 })
+  }
+  if (auth.access === 'forbidden') {
+    return Response.json({ error: 'not your board' }, { status: 403 })
   }
   const pcb = findPcb(run)
   if (!pcb) return Response.json({ error: `no .kicad_pcb for run ${run}` }, { status: 404 })

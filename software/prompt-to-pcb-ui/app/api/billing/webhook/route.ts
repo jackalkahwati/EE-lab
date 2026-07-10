@@ -7,22 +7,25 @@
  */
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
-import { grantCredits, updateUser } from '@/lib/auth'
+import { grantCreditsOnce, updateUser } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
 function verify(payload: string, sigHeader: string | null, secret: string): boolean {
   if (!sigHeader) return false
-  const parts = Object.fromEntries(
-    sigHeader.split(',').map((kv) => kv.split('=') as [string, string]),
-  )
-  const t = parts.t
-  const v1 = parts.v1
-  if (!t || !v1) return false
+  const pairs = sigHeader.split(',').map((kv) => kv.trim().split('=', 2))
+  const t = pairs.find(([key]) => key === 't')?.[1]
+  const signatures = pairs.filter(([key]) => key === 'v1').map(([, value]) => value)
+  const timestamp = Number(t)
+  if (!t || !Number.isSafeInteger(timestamp) || signatures.length === 0) return false
+  // Stripe recommends rejecting old signed payloads to limit replay attacks.
+  if (Math.abs(Math.floor(Date.now() / 1000) - timestamp) > 5 * 60) return false
   const expect = createHmac('sha256', secret).update(`${t}.${payload}`).digest('hex')
   const a = Buffer.from(expect)
-  const b = Buffer.from(v1)
-  return a.length === b.length && timingSafeEqual(a, b)
+  return signatures.some((signature) => {
+    const b = Buffer.from(signature)
+    return a.length === b.length && timingSafeEqual(a, b)
+  })
 }
 
 export async function POST(req: NextRequest) {
@@ -42,7 +45,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'bad payload' }, { status: 400 })
   }
 
-  if (event.type === 'checkout.session.completed') {
+  if (
+    event.type === 'checkout.session.completed'
+    || event.type === 'checkout.session.async_payment_succeeded'
+  ) {
     const obj = event.data?.object ?? {}
     const email =
       (obj.client_reference_id as string) ||
@@ -50,9 +56,15 @@ export async function POST(req: NextRequest) {
       (obj.customer_email as string)
     const meta = (obj.metadata as Record<string, unknown>) ?? {}
     const credits = Number(meta.credits ?? 0)
-    if (email && obj.mode === 'payment' && credits > 0) {
-      grantCredits(email, credits) // one-time credit top-up
-    } else if (email) {
+    const sessionId = String(obj.id ?? '')
+    const paid = obj.payment_status === 'paid' || event.type === 'checkout.session.async_payment_succeeded'
+    if (email && obj.mode === 'payment' && paid && credits > 0 && sessionId) {
+      grantCreditsOnce(email, sessionId, credits)
+    } else if (
+      email
+      && obj.mode === 'subscription'
+      && (paid || obj.payment_status === 'no_payment_required')
+    ) {
       updateUser(email, (u) => {
         u.plan = 'pro'
         u.stripeCustomerId = (obj.customer as string) || u.stripeCustomerId

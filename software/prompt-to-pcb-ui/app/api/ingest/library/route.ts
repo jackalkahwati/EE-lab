@@ -9,7 +9,7 @@ import { NextResponse } from 'next/server'
  */
 export async function GET() {
   const libDir = path.resolve(process.cwd(), '../../hardware/planner/library')
-  let parts: any[] = []
+  const parts: any[] = []
   try {
     for (const fn of fs.readdirSync(libDir)) {
       if (!fn.endsWith('.json')) continue

@@ -19,7 +19,6 @@ const BLOCK_MENU = (capabilities.blocks as { key: string; label: string }[])
   .map((b) => `- ${b.label}`)
   .join('\n')
 
-const NVIDIA_URL = 'https://integrate.api.nvidia.com/v1/chat/completions'
 const MAX_QUESTIONS = 4
 
 interface Answer {

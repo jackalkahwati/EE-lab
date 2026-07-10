@@ -11,6 +11,7 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { callLLMText, overrideFromHeaders } from '@/lib/llm'
+import { isValidRunId, runAccess } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -103,8 +104,17 @@ export async function POST(req: Request) {
   } catch {
     return Response.json({ error: 'invalid JSON body' }, { status: 400 })
   }
-  const id = String(body.runId ?? '').replace(/[^a-zA-Z0-9_-]/g, '')
-  if (!id) return Response.json({ error: 'runId required' }, { status: 400 })
+  const id = String(body.runId ?? '')
+  if (!isValidRunId(id)) {
+    return Response.json({ error: 'valid runId required' }, { status: 400 })
+  }
+  const auth = runAccess(req, id)
+  if (auth.access === 'unauthenticated') {
+    return Response.json({ error: 'sign in required' }, { status: 401 })
+  }
+  if (auth.access === 'forbidden') {
+    return Response.json({ error: 'not your board' }, { status: 403 })
+  }
 
   const appDir = process.cwd()
   const runRoot = path.join(appDir, 'public/runs', id)
@@ -119,6 +129,12 @@ export async function POST(req: Request) {
     } catch {
       /* regenerate */
     }
+  }
+
+  // Shared demos may expose an existing cached review, but only an owner may
+  // spend an LLM call and create/replace persisted review artifacts.
+  if (auth.access !== 'owner') {
+    return Response.json({ error: 'only the board owner can generate a review' }, { status: 403 })
   }
 
   if (!fs.existsSync(board)) {

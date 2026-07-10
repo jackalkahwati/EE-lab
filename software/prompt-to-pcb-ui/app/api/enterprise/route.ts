@@ -23,6 +23,7 @@ import * as fl1 from '@/lib/enterprise/fl1.mjs'
 import * as pilots from '@/lib/enterprise/pilots.mjs'
 // @ts-ignore
 import * as integrations from '@/lib/enterprise/integrations.mjs'
+import { sessionEmail } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,8 +36,14 @@ const WEBHOOK_FOR: Record<string, string> = {
   review_evidence: 'evidence.reviewed',
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  const actor = sessionEmail(req)
+  if (!actor) return Response.json({ error: 'sign in required' }, { status: 401 })
   const db = ent.loadDb()
+  if (rbac.rolesOf(db, actor).length === 0) {
+    return Response.json({ error: 'enterprise membership required' }, { status: 403 })
+  }
+  const rolePermissions = rbac.ROLE_PERMISSIONS as Record<string, Set<string>>
   return Response.json({
     // never leak API-key hashes or webhook secrets through the read API
     organizations: (db.organizations ?? []).map((o: any) => ({
@@ -61,13 +68,23 @@ export async function GET() {
       roles: rbac.ROLES,
       permissions: rbac.PERMISSIONS,
       role_permissions: Object.fromEntries(
-        rbac.ROLES.map((r: string) => [r, [...(rbac.ROLE_PERMISSIONS[r] ?? [])]])),
+        rbac.ROLES.map((r: string) => [r, [...(rolePermissions[r] ?? [])]])),
     },
   })
 }
 
 export async function POST(req: Request) {
-  const { action, params = {}, actor = 'dev-admin' } = await req.json()
+  const actor = sessionEmail(req)
+  if (!actor) return Response.json({ error: 'sign in required' }, { status: 401 })
+  let body: { action?: string; params?: Record<string, unknown> }
+  try {
+    body = await req.json()
+  } catch {
+    return Response.json({ error: 'invalid JSON body' }, { status: 400 })
+  }
+  const action = body.action ?? ''
+  const params = body.params ?? {}
+  if (!action) return Response.json({ error: 'action required' }, { status: 400 })
   const db = ent.loadDb()
 
   const gate = rbac.checkAction(db, actor, action, params)

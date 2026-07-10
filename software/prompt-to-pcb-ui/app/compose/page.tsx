@@ -189,7 +189,6 @@ export default function Compose2Page() {
   const real = realBoard && realBoard.base === (selectedRunDir ?? '') ? realBoard : null
   const isReal = selectedRun?.real === true && real !== null
   const boardBase = selectedRunDir ? `${selectedRunDir}/board` : '/board'
-  const m = selectedRun.metrics ?? {}
 
   return (
     <main className="flex h-[calc(100dvh-2.75rem)] overflow-hidden bg-background text-foreground">

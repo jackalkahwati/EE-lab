@@ -21,7 +21,7 @@ const PATTERNS = [
   [/ghp_[A-Za-z0-9]{20,}/, 'github token'],
   [/xox[baprs]-[A-Za-z0-9-]{10,}/, 'slack token'],
   [/AIza[0-9A-Za-z_-]{30,}/, 'google api key'],
-  [/(api[_-]?key|secret|password)\s*[:=]\s*['"][A-Za-z0-9+/_-]{16,}['"]/i,
+  [/\b(api[_-]?key|secret|password)\b\s*[:=]\s*['"][A-Za-z0-9+/_-]{16,}['"]/i,
    'inline credential assignment'],
 ]
 

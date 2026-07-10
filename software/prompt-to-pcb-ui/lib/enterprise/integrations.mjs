@@ -218,15 +218,23 @@ export function redactIntegrations(ig) {
     if (sso.oidc) sso.oidc = { ...sso.oidc, client_secret: sso.oidc.client_secret ? '••••••••' : null }
     if (sso.saml) sso.saml = { ...sso.saml, certificate: sso.saml.certificate ? '(stored)' : null }
     if (sso.scim && typeof sso.scim === 'object' && sso.scim.token_hash) {
-      const { token_hash, ...rest } = sso.scim
-      sso.scim = rest
+      sso.scim = { ...sso.scim }
+      delete sso.scim.token_hash
     }
   }
   return {
     ...ig,
     sso,
-    api_keys: (ig.api_keys ?? []).map(({ hash, ...k }) => k),
-    webhooks: (ig.webhooks ?? []).map(({ secret, ...w }) => w),
+    api_keys: (ig.api_keys ?? []).map((key) => {
+      const redacted = { ...key }
+      delete redacted.hash
+      return redacted
+    }),
+    webhooks: (ig.webhooks ?? []).map((webhook) => {
+      const redacted = { ...webhook }
+      delete redacted.secret
+      return redacted
+    }),
   }
 }
 
