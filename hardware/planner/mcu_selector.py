@@ -17,16 +17,48 @@ Rules (honesty):
 from mcu_specs import MCU_SEEDS
 
 
+def _active_interfaces(spec):
+    """Interfaces wired in this design, excluding advertised alternatives."""
+    active = []
+    for iface in spec.get("interfaces") or []:
+        if isinstance(iface, str):
+            active.append({"type": iface})
+        elif isinstance(iface, dict) and iface.get("role") != "alt":
+            active.append(iface)
+    return active
+
+
+def _as_list(value):
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, (list, tuple, set)):
+        return list(value)
+    return [value]
+
+
+def _intent_buses(intent):
+    raw = intent.get("buses") or []
+    if isinstance(raw, dict):
+        raw = [name for name, enabled in raw.items() if enabled]
+    else:
+        raw = _as_list(raw)
+    return {str(name).lower() for name in raw}
+
+
 def requirements_from_design(intent, specs):
     """Derive hard MCU requirements from the design intent + the resolved UCS
     component specs. `specs` is the list of component UCS dicts."""
+    intent = intent or {}
     ifaces = set()
     i2c_devices = spi_devices = uart_ports = adc_ch = pwm_ch = 0
     for s in specs or []:
-        for it in s.get("interfaces", []):
-            t = it.get("type") if isinstance(it, dict) else it
+        for it in _active_interfaces(s):
+            t = it.get("type")
             if not t:
                 continue
+            t = t.lower()
             ifaces.add(t)
             if t in ("i2c", "i2c_device"):
                 i2c_devices += 1
@@ -39,19 +71,34 @@ def requirements_from_design(intent, specs):
             elif t in ("pwm", "motor_output"):
                 pwm_ch += 1
     # normalise interface names to the capability vocabulary
+    buses = _intent_buses(intent)
     need_i2c = any(x.startswith("i2c") for x in ifaces)
     need_spi = any(x.startswith("spi") for x in ifaces)
-    need_uart = "uart" in ifaces or bool(intent.get("buses", {}).get("uart")) if isinstance(intent.get("buses"), dict) else "uart" in ifaces
-    need_can = "can" in ifaces or "can" in (intent.get("buses") or [])
+    need_i2c = need_i2c or "i2c" in buses
+    need_spi = need_spi or "spi" in buses
+    need_uart = "uart" in ifaces or "uart" in buses
+    need_can = "can" in ifaces or "can" in buses
     # intent-level flags
-    caps = " ".join(intent.get("capabilities", []) + [intent.get("product_goal", "")]).lower()
+    cap_items = _as_list(intent.get("required_capabilities"))
+    cap_items += _as_list(intent.get("capabilities"))  # legacy callers
+    caps = " ".join(str(c) for c in cap_items + [intent.get("product_goal", "")]).lower()
     wireless = []
     if "wifi" in caps or "wi-fi" in caps:
         wireless.append("wifi")
     if "ble" in caps or "bluetooth" in caps:
         wireless.append("ble")
-    low_power = "low power" in caps or "low-power" in caps or "battery" in caps or "coin cell" in caps
-    need_usb = intent.get("power", {}).get("source") == "usb_c" or "usb" in caps
+    battery = intent.get("battery") or {}
+    battery_required = (bool(battery.get("required")) if isinstance(battery, dict)
+                        else bool(battery))
+    low_power = ("low power" in caps or "low-power" in caps or "battery" in caps
+                 or "coin cell" in caps or battery_required)
+    # USB-C as a power source does not imply that the MCU must expose USB data.
+    # Require USB only when a wired component, bus, or explicit data capability
+    # asks for it.
+    usb_caps = {"usb", "usb_data", "usb_device", "usb_host", "usb_fs", "usb_hs"}
+    need_usb = ("usb" in ifaces or "usb" in buses
+                or bool(usb_caps.intersection(str(c).lower() for c in cap_items))
+                or "usb data" in caps or "usb device" in caps or "usb host" in caps)
 
     return {
         "interfaces": [x for x in ("i2c", "spi", "uart", "can") if
@@ -67,7 +114,9 @@ def requirements_from_design(intent, specs):
         "low_power": low_power,
         "usb": need_usb,
         "can": need_can,
-        "requested_mcu": (intent.get("mcu") or {}).get("family"),
+        "requested_mcu": ((intent.get("mcu") or {}).get("family")
+                          if isinstance(intent.get("mcu"), dict)
+                          else intent.get("mcu")),
     }
 
 
@@ -113,7 +162,6 @@ def _shortfall(spec, req):
     """Return a list of reasons this MCU fails the HARD requirements (empty =
     it qualifies)."""
     reasons = []
-    isup = spec.get("interfaces_supported", [])
     for w in req.get("wireless", []):
         if not spec.get("wireless") or w not in spec["wireless"]:
             reasons.append("no %s radio" % w.upper())
@@ -196,7 +244,7 @@ def select_mcu(req):
     elif qualifying:
         chosen = max(qualifying, key=lambda x: x[2])
         why = "best fit for the requirements (%s), status=%s, confidence=%.2f" % (
-            ", ".join(req["interfaces"] + req["wireless"]) or "basic I/O",
+            ", ".join(req.get("interfaces", []) + req.get("wireless", [])) or "basic I/O",
             chosen[1]["status"], chosen[1]["confidence"])
     else:
         # nothing fits — name the capability that killed every candidate

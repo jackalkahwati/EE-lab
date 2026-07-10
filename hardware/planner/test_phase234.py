@@ -4,6 +4,7 @@ import os
 import sys
 
 import fab_2layer as f2
+import production_line as pl
 
 checks = []
 
@@ -88,7 +89,6 @@ check("26 fleet update: gap closed for simple class, next = QFN-56",
       and "QFN-56" in flu["next_recommendation"]["recommendation"])
 check("28 2-layer clean is not physical validation",
       "NOT physical validation" in rr["honesty"])
-import production_line as pl
 check("29 production_ready unreachable",
       pl.readiness_state({}) == "first_article_ready_for_human_approval")
 st, why = f2.eligibility({"fine_pitch": True, "net_count": 5,

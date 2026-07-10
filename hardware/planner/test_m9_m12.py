@@ -1,5 +1,4 @@
 """M9-M12 regression: power/RF/high-speed/reliability gates."""
-import json
 import os
 import sys
 

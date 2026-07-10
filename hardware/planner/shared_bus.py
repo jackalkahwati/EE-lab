@@ -16,6 +16,7 @@ Nothing here fakes a route. It models intent + checks the realized board; the
 router (flroute) still routes the copper.
 """
 import json
+import re
 
 # canonical bus signal nets (must match synth's ROLE_NET so the model and the
 # synthesized board name the same wires — a mismatch is itself a modeled defect)
@@ -23,11 +24,55 @@ I2C_NETS = {"sda": "I2C_SDA", "scl": "I2C_SCL"}
 SPI_NETS = {"sck": "SPI_SCK", "mosi": "SPI_MOSI", "miso": "SPI_MISO"}
 
 
+def _active_interfaces(spec):
+    """Return interfaces selected for this design.
+
+    A UCS may advertise an alternate electrical interface (for example, the
+    BME280's SPI mode while I2C is the primary mode).  Treating every advertised
+    alternative as simultaneously wired creates phantom buses and false CS
+    errors, so explicit ``role=alt`` entries stay dormant.
+    """
+    active = []
+    for iface in spec.get("interfaces") or []:
+        if isinstance(iface, str):
+            active.append({"type": iface})
+        elif isinstance(iface, dict) and iface.get("role") != "alt":
+            active.append(iface)
+    return active
+
+
 def _iface(spec, kind):
-    for i in spec.get("interfaces", []):
+    for i in _active_interfaces(spec):
         if i.get("type") == kind:
             return i
     return None
+
+
+def _local_mcu(intent):
+    """Return the explicitly selected local MCU identifier, if any."""
+    mcu = (intent or {}).get("mcu")
+    if isinstance(mcu, dict):
+        return mcu.get("family") or mcu.get("mpn") or mcu.get("selected")
+    return mcu or None
+
+
+def _endpoint_count(pads):
+    """Count signal endpoints, excluding pull-up/termination resistors."""
+    return len({(str(ref), str(pad)) for ref, pad, _fp in pads
+                if not str(ref).upper().startswith("R")})
+
+
+def _spi_cs_net(spec, index, iface):
+    signals = iface.get("signals") or {}
+    if "cs" not in signals and "latch" not in signals:
+        return "NO chip-select pin modeled"
+    category = spec.get("category", "").lower()
+    if "flash" in category:
+        return "W25Q_CS"
+    if "shift" in category:
+        return "SR_LATCH"
+    token = re.sub(r"[^A-Z0-9]+", "_", str(spec.get("mpn", index)).upper()).strip("_")
+    return "SPI_CS_%d_%s" % (index, token or "DEVICE")
 
 
 def _addr(spec):
@@ -47,7 +92,8 @@ def model_buses(design):
     chip-selects, topology, fanout count, and any modeling blockers."""
     specs = [s for s in design.get("final_design", []) if s.get("pins")]
     intent = design.get("intent", {})
-    has_mcu = bool((intent.get("mcu") or {}).get("family")) or intent.get("mcu") is not None
+    local_mcu = _local_mcu(intent)
+    has_mcu = bool(local_mcu)
     buses = []
 
     # ---- I2C multi-drop ------------------------------------------------------
@@ -55,7 +101,8 @@ def model_buses(design):
     if i2c_devs:
         # source: a local MCU if present, else the FL-1 bus connector acts as the
         # external master (the board is a bus SLAVE cluster driven over the header)
-        source = "MCU (RP2040)" if has_mcu else "FL-1 bus connector (external master)"
+        source = ("MCU (%s)" % local_mcu if has_mcu
+                  else "FL-1 bus connector (external master)")
         addrs, blockers = {}, []
         for s in i2c_devs:
             a = _addr(s)
@@ -70,6 +117,7 @@ def model_buses(design):
             "devices": [s["mpn"] for s in i2c_devs],
             "device_count": len(i2c_devs),
             "fanout_count": len(i2c_devs) + (0 if has_mcu else 1),
+            "required_endpoint_count": len(i2c_devs) + 1,
             "required_nets": [I2C_NETS["sda"], I2C_NETS["scl"]],
             "pullups": {"nets": [I2C_NETS["sda"], I2C_NETS["scl"]], "rail": "+3V3",
                         "provided_by": source, "required": True},
@@ -78,28 +126,37 @@ def model_buses(design):
         })
 
     # ---- SPI shared-bus groundwork (Phase 5) --------------------------------
-    spi_devs = [s for s in specs if _iface(s, "spi")]
+    spi_devs = []
+    for spec in specs:
+        iface = _iface(spec, "spi") or _iface(spec, "spi_write_only")
+        if iface:
+            spi_devs.append((spec, iface))
     if spi_devs:
         css = {}
-        for i, s in enumerate(spi_devs):
-            iface = _iface(s, "spi")
-            sig = iface.get("signals", {})
-            css[s["mpn"]] = ("shared CS net" if ("cs" in sig or "latch" in sig)
-                             else "NO chip-select pin modeled")
+        for i, (spec, iface) in enumerate(spi_devs):
+            device_id = str(spec.get("ref") or spec["mpn"])
+            if device_id in css:
+                device_id = "%s#%d" % (device_id, i + 1)
+            css[device_id] = _spi_cs_net(spec, i, iface)
+        full_duplex = any(iface.get("type") == "spi" for _spec, iface in spi_devs)
+        required_nets = [SPI_NETS["sck"], SPI_NETS["mosi"]]
+        if full_duplex:
+            required_nets.append(SPI_NETS["miso"])
         buses.append({
             "name": "SPI0",
             "type": "spi",
             "topology": "shared SCK/MOSI/MISO, individual chip-selects (fanout)",
-            "source": "MCU (RP2040)" if has_mcu else "FL-1 bus connector",
-            "devices": [s["mpn"] for s in spi_devs],
+            "source": "MCU (%s)" % local_mcu if has_mcu else "FL-1 bus connector",
+            "devices": [s["mpn"] for s, _iface_ in spi_devs],
             "device_count": len(spi_devs),
             "fanout_count": len(spi_devs),
-            "required_nets": [SPI_NETS["sck"], SPI_NETS["mosi"], SPI_NETS["miso"]],
+            "required_endpoint_count": len(spi_devs) + 1,
+            "required_nets": required_nets,
             "chip_selects": css,
             "shared_signals": ["SCK", "MOSI", "MISO (where the device drives it)"],
             "note": "v1 groundwork: model + checks; each device needs its own CS, "
                     "no shared/duplicated CS, no faked duplicate SPI nets",
-            "blockers": ([] if has_mcu or True else []),
+            "blockers": [],
         })
 
     return buses
@@ -121,14 +178,16 @@ def check_bus(bus, board_pads):
 
     for net in bus["required_nets"]:
         pads = board_pads.get(net, [])
-        # each shared net must reach EVERY device plus the source: at least
-        # device_count members (source may be plane/header). Fewer => a device
-        # is disconnected or a fake independent net was created.
-        if len(pads) < bus["device_count"]:
+        # Each shared net must reach every device plus the source. Pull-up and
+        # termination resistors are not signal endpoints and cannot hide a
+        # missing device/source connection.
+        required = bus.get("required_endpoint_count", bus["device_count"] + 1)
+        connected = _endpoint_count(pads)
+        if connected < required:
             err("disconnected_or_fake_net",
-                "%s has %d pad(s); bus has %d device(s) — a device is not on the "
-                "shared net (disconnected pin or a fake independent net)"
-                % (net, len(pads), bus["device_count"]))
+                "%s has %d signal endpoint(s); bus needs %d (%d device(s) + "
+                "source) — an endpoint is disconnected or on a fake independent net"
+                % (net, connected, required, bus["device_count"]))
         # duplicate net-name detection: same (ref,pad) appearing twice signals a
         # net emitted twice under the same name
         seen = set()
@@ -146,10 +205,16 @@ def check_bus(bus, board_pads):
                      "%s pull-up not confirmed on the board (source may carry it)" % net)
 
     if bus["type"] == "spi":
+        assigned = {}
         for mpn, cs in bus.get("chip_selects", {}).items():
             if "NO chip-select" in str(cs):
                 err("spi_missing_cs", "%s has no modeled chip-select — shared SPI "
                     "devices must each have a unique CS" % mpn)
+            elif cs in assigned:
+                err("spi_duplicate_cs", "%s and %s share %s — each SPI device needs "
+                    "a unique chip-select" % (assigned[cs], mpn, cs))
+            else:
+                assigned[cs] = mpn
 
     return problems
 
@@ -172,7 +237,8 @@ def build_report(design, board_pads=None):
         entry = dict(bus)
         if board_pads is not None:
             problems = check_bus(bus, board_pads)
-            routed = all(len(board_pads.get(n, [])) >= bus["device_count"]
+            required = bus.get("required_endpoint_count", bus["device_count"] + 1)
+            routed = all(_endpoint_count(board_pads.get(n, [])) >= required
                          for n in bus["required_nets"])
             errs = [p for p in problems if p["severity"] == "error"]
             entry["routing_status"] = "connected" if routed and not errs else (

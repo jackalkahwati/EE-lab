@@ -75,7 +75,6 @@ def classify(result):
             fp = _footprint_for(r, devices) or ""
             if _FINE_PITCH_FP.search(fp) or r in fine_fps:
                 fine = True
-        m = re.search(r"actual\s+([\d.]+)\s*mm.*?([\d.]+)\s*mm", desc)  # actual, required (order varies)
         deficit = None
         req = re.search(r"clearance\s+([\d.]+)\s*mm", desc)
         act = re.search(r"actual\s+([\d.]+)\s*mm", desc)

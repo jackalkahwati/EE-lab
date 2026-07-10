@@ -294,7 +294,6 @@ def block_mcu_generic(spec, alloc, x, y, nets):
         yc += 6
     # programming header: SWD (ARM) taps the debug pads; ISP (AVR) taps SPI+reset
     prog = spec.get("programming", [])
-    dbg = alloc.get("reserved", {}).get("debug", [])
     if "SWD" in prog:
         hdrmap = {"1": rail, "2": "MCU_SWDIO", "3": "GND", "4": "MCU_SWCLK",
                   "5": "MCU_RESET", "6": "GND"}

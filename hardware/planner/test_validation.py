@@ -12,7 +12,6 @@ import os
 import sys
 
 import instruments as ins
-import validation as va
 
 checks = []
 

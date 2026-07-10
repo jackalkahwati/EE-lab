@@ -4,6 +4,7 @@ import os
 import sys
 
 import capability_packs as cp
+import production_line as pl
 
 checks = []
 
@@ -108,7 +109,6 @@ check("36 claim-gate violations prevented list",
 check("37 routed benchmark is not physical validation",
       "NOT physical validation" in art(
           "compose-ordinary-rigid-benchmark-suite-report")["honesty"])
-import production_line as pl
 check("38 production_ready still unreachable",
       pl.readiness_state({}) == "first_article_ready_for_human_approval")
 check("47 nothing ordered", "nothing ordered" in art(

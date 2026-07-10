@@ -10,7 +10,6 @@ import json
 import os
 import sys
 
-import fine_grid as fg
 
 checks = []
 

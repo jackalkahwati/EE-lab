@@ -298,6 +298,6 @@ def risk_register():
          "open-frame safety labels + bench discipline; enclosure in Rev B"),
     ]
     return {"version": "v1", "risks": [
-        {"risk": r, "severity": s, "likelihood": l, "mitigation": m,
+        {"risk": r, "severity": s, "likelihood": likelihood, "mitigation": m,
          "owner": "Jack (review) / Compose (evidence)", "review_required": s == "high"}
-        for r, s, l, m in rows]}
+        for r, s, likelihood, m in rows]}

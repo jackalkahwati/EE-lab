@@ -3,7 +3,6 @@ pattern spec / extraction / license gates / selection, using real local sources.
 
   python3 test_patterns.py
 """
-import glob
 import json
 import os
 import sys

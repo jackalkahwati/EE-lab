@@ -6,8 +6,6 @@ model, and bridges Phase 13 build-readiness to validation-readiness. The hard ra
 a do_not_build board can only be validation_ready_with_mock (SIMULATED) — never
 physically validation-ready, never via an internal-board adapter.
 """
-import json
-
 import instruments as ins
 
 

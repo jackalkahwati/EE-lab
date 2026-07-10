@@ -4,6 +4,7 @@ import os
 import sys
 
 import fleet_learning as fl
+import production_line as pl
 
 checks = []
 
@@ -79,7 +80,6 @@ check("22 no physical validation invented",
           or "NOT physically" in str(j.get("simulated_or_physical"))
           for j in ledger["jobs"]))
 check("23 no yield data invented", "EMPTY" in lr["yield_memory"])
-import production_line as pl
 check("24 production_ready still unreachable",
       pl.readiness_state({}) == "first_article_ready_for_human_approval")
 fa3 = art("fl1-final-first-article-review-v3", os.path.join(RUNS, "fl1-cal-board-v4", "data"))

@@ -13,7 +13,6 @@ import sys
 import benchmark_model as bm
 import benchmark_score as bscore
 import reference_library as rl
-import signoff as so
 
 checks = []
 

@@ -6,6 +6,7 @@ future_internal_board (not physically available); mock validation is simulated o
 
   python3 test_fl1_core.py
 """
+import json
 import os
 import sys
 
@@ -59,7 +60,6 @@ check("interconnect: controller is bus master, shared I2C control bus",
 # core validation runs (mock) are simulated only — never physical
 RD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "software",
                   "prompt-to-pcb-ui", "public", "runs", "fl1-core-relay", "data")
-import json
 crv = os.path.join(RD, "fl1-core-validation-runs.json")
 if os.path.exists(crv):
     runs = json.load(open(crv))["runs"]

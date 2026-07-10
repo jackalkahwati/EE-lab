@@ -15,7 +15,6 @@ import json
 import os
 
 import pattern_spec as ps
-from reference_manifest import allowed_use
 
 _ROLE = {"mcu": "mcu", "adc": "adc", "precision": "adc", "dac": "dac",
          "current_sense": "current_sense", "voltage_reference": "voltage_reference",

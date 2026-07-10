@@ -4,7 +4,7 @@ import os
 import sys
 
 import jit_primitives as jp
-import qfn56_escape as q
+import production_line as pl
 
 checks = []
 
@@ -93,7 +93,6 @@ check("34-35 routed clean != physical; package != production",
 check("36-39 boot/USB/clock/cost-down claims blocked",
       all(c in cap["blocked_claims"] for c in
           ("boot", "USB_compliance", "clock_performance", "cost_down_success")))
-import production_line as pl
 check("production_ready unreachable",
       pl.readiness_state({}) == "first_article_ready_for_human_approval")
 check("no ordering", "NEVER" in run["order"])

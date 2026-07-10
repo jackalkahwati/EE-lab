@@ -35,15 +35,15 @@ for n, a in enumerate(["fl1-system-bom-rollup", "fl1-approved-vendor-list",
 
 bom = art("fl1-system-bom-rollup")
 check("14 I2C DNP/population notes represented in the BOM rollup",
-      any(l.get("dnp_note") for l in bom["lines"]))
+      any(line.get("dnp_note") for line in bom["lines"]))
 check("15 keyed-connector Rev B alternates represented",
-      any("KEYED SHROUDED" in str(l.get("ref", "")) + str(l.get("part", ""))
-          for l in bom["lines"] if l["board"] == "SYSTEM"))
+      any("KEYED SHROUDED" in str(line.get("ref", "")) + str(line.get("part", ""))
+          for line in bom["lines"] if line["board"] == "SYSTEM"))
 check("16 no silent substitutions for protected components",
-      all("not_allowed_silent" in l["substitution_policy"]
-          or "exact_part" in l["substitution_policy"]
-          for l in bom["lines"]
-          if any(k in str(l.get("part", "")).lower()
+      all("not_allowed_silent" in line["substitution_policy"]
+          or "exact_part" in line["substitution_policy"]
+          for line in bom["lines"]
+          if any(k in str(line.get("part", "")).lower()
                  for k in ("ref30", "ads1115", "relay", "24lc"))))
 bv = art("fl1-build-variants")
 check("17 variants distinguish standalone vs backplane system builds",

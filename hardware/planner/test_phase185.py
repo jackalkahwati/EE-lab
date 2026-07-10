@@ -3,7 +3,6 @@ import json
 import os
 import sys
 
-import role_completeness as rc
 
 checks = []
 

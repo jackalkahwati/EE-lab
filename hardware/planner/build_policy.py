@@ -39,14 +39,20 @@ def build_policy(board, evidence):
     br = ev.get("build_recommendation", "unknown")     # from the REAL build or Phase 13
     routes_clean = ev.get("routes_clean", False)
     assembly_ready = ev.get("assembly_ready", False)
-    sourced = ev.get("sourced", True)
+    # Missing evidence is not a pass.  In particular, a review label must not
+    # bypass assembly or sourcing readiness and accidentally create an order
+    # package from a merely routed board.
+    sourced = ev.get("sourced", False)
     drc_clean = ev.get("drc_violations", 1) == 0
     validation = ev.get("validation_readiness_status")
     blockers = list(ev.get("exact_blockers", []))
 
     do_not_build = br in ("do_not_build", "unsupported")
-    order_ok = (br == "ready_to_build" and routes_clean and drc_clean and assembly_ready and sourced)
-    review_ok = (br in ("ready_to_build", "ready_to_build_with_review") and routes_clean and drc_clean)
+    strict_ready = routes_clean and drc_clean and assembly_ready and sourced
+    order_ok = br == "ready_to_build" and strict_ready
+    review_ok = br == "ready_to_build_with_review" and strict_ready
+    routed_candidate = (br in ("ready_to_build", "ready_to_build_with_review")
+                        and routes_clean and drc_clean)
 
     # package type + order recommendation
     if br == "unsupported":
@@ -60,6 +66,10 @@ def build_policy(board, evidence):
         pkg, order, attempt = "order_ready_pcba_package", "order_3_pcba_review_required", True
     elif review_ok:
         pkg, order, attempt = "order_ready_pcba_package", "order_3_pcba_review_required", True
+    elif routed_candidate:
+        # The electrical design may still be exercised/reviewed, but missing
+        # assembly or sourcing evidence keeps it out of the order path.
+        pkg, order, attempt = "design_attempt_package", "design_attempt_only", True
     elif br == "needs_ingestion":
         pkg, order, attempt = "design_attempt_package", "design_attempt_only", ev.get("attempted", False)
     elif br in ("needs_reference", "needs_external_tool"):
@@ -67,8 +77,8 @@ def build_policy(board, evidence):
     else:
         pkg, order, attempt = "architecture_package", "architecture_only", False
 
-    human_review = order.endswith("review_required") or br == "ready_to_build_with_review" or \
-        (order_ok and True)  # first-article review for any first internal fab
+    human_review = (order.endswith("review_required")
+                    or br == "ready_to_build_with_review" or order_ok)
 
     return {
         "board": board,

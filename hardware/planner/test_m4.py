@@ -4,6 +4,7 @@ import os
 import sys
 
 import chipdown_synthesis as cd
+import production_line as pl
 
 checks = []
 
@@ -50,7 +51,6 @@ m = cd.synthesize_chipdown("Memory_EEPROM", "24LC02", "Package_SO",
                            "SOIC-16_3.9x9.9mm_P1.27mm", "U50")
 check("9 wrong footprint still blocks (8 pins vs SOIC-16)",
       m["state"] == "blocked")
-import production_line as pl
 check("10 production_ready unreachable",
       pl.readiness_state({}) == "first_article_ready_for_human_approval")
 

@@ -10,9 +10,7 @@ import json
 import os
 import sys
 
-import calibration as cal
 import redesign_engine as rde
-import traceability as tr
 
 checks = []
 

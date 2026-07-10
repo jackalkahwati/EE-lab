@@ -3,7 +3,6 @@ import json
 import os
 import sys
 
-import physical_campaign as pc
 
 checks = []
 

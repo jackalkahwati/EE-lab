@@ -4,6 +4,7 @@ import os
 import sys
 
 import package_families as pf
+import production_line as pl
 
 checks = []
 
@@ -106,7 +107,6 @@ check("37 pack update (16 packs, scoped)",
 flu = art("compose-package-family-fleet-learning-update")
 check("38 fleet update: next = physical evidence loop execution",
       "physical evidence loop" in flu["next_recommendation"]["recommendation"])
-import production_line as pl
 check("57 production_ready unreachable",
       pl.readiness_state({}) == "first_article_ready_for_human_approval")
 led = art("compose-physical-evidence-ledger",

@@ -3,6 +3,8 @@ import json
 import os
 import sys
 
+import production_line as pl
+
 checks = []
 
 
@@ -58,7 +60,6 @@ check("13 fleet: next = M3 physical first article",
 qfn = art("bare-mcu-qfn56-core-sandbox-v1", "bare-mcu-qfn56-core-sandbox-compose-run")
 check("14 QFN sandbox regression re-verified under fanout changes",
       qfn["status"] == "PASSED")
-import production_line as pl
 check("15 production_ready unreachable",
       pl.readiness_state({}) == "first_article_ready_for_human_approval")
 led = art("power-entry-header-2l", "compose-physical-evidence-ledger")

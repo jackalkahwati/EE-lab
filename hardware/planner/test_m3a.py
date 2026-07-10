@@ -53,7 +53,7 @@ check("8 QFN-56 reduced + stress fixtures present and honest",
       and by["rp2040_like_qfn56_stress"]["pass"])
 check("9 2-layer fixture rejects internal layers",
       by["two_layer_no_internal_layers"]["pass"]
-      and not any("In" in l for l in
+      and not any("In" in layer for layer in
                   by["two_layer_no_internal_layers"]["layer_usage"]))
 gold = art("flroute-golden-artifact-system")
 check("10 golden system: 24 goldens, synthetic determinism proven",

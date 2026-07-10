@@ -256,7 +256,6 @@ def cots_spec():
 def internal_board_spec(build_readiness=None):
     """Future internal-board adapters. A board Phase 13 marks do_not_build/unsupported is
     exposed as future_internal_board or mock_only — NEVER physically available."""
-    import benchmark_model as bm
     br = {b["board"]: b for b in (build_readiness or {}).get("boards", [])} if build_readiness else {}
     BOARD_CAPS = {
         "calibration_reference": ["verify_reference", "measure_voltage", "read_bus"],

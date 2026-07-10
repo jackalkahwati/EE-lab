@@ -4,6 +4,7 @@ import os
 import sys
 
 import chipdown_synthesis as cd
+import production_line as pl
 
 checks = []
 
@@ -68,7 +69,6 @@ pk = art("compose-chipdown-pack-registry-update")
 check("14 pack scoped to the proven part",
       "PCF8574/SOIC-16 scope" in
       pk["new_pack"]["chipdown_synthesis_pack"]["state"])
-import production_line as pl
 check("15 production_ready unreachable",
       pl.readiness_state({}) == "first_article_ready_for_human_approval")
 led = art("compose-physical-evidence-ledger",

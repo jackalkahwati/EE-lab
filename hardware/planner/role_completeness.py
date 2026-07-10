@@ -12,7 +12,6 @@ Statuses:
 
 A DRC-clean but role_incomplete board is REJECTED for order.
 """
-import json
 import re
 
 

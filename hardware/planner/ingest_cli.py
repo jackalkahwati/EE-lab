@@ -12,7 +12,6 @@ import argparse
 import csv
 import json
 import os
-import sys
 
 import ingest
 import ingest_library

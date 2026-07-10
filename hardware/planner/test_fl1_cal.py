@@ -52,8 +52,8 @@ if os.path.exists(cal):
     # honest: if it did not fully route, it is NOT a fake pass
     drc = int(re.search(r"\d+", str(a["drc_violations"])).group())
     routed, total = map(int, a["routed"].split("/"))
-    passed = a["outcome"] == "A_pass"
-    check("no fake pass — pass only if routed 5/5 + DRC 0",
+    passed = a["outcome"] in ("A_pass", "A_physical_pass")
+    check("no fake pass — pass only if fully routed + DRC 0",
           (passed == (routed == total and drc == 0)) and (a["blocker"] is None) == passed,
           "outcome=%s routed=%s drc=%d" % (a["outcome"], a["routed"], drc))
 else:

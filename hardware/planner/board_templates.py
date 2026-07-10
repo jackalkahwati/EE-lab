@@ -6,7 +6,6 @@ PROVEN block vocabulary, cites the real routed-in-sandbox run(s) that
 already exercised its board class, names required evidence, and blocks
 unsupported variants with the exact gate that refuses them.
 """
-import module_library as ml
 import usb_fs
 
 TEMPLATES = {

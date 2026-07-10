@@ -105,7 +105,6 @@ else:
     check("9 ADS1115 front-end renamed", True, "run removed")
 
 # 10. board-margin scaling is still contextual (fine-pitch full, sparse scaled)
-import synth  # noqa: E402  (imports compose etc.; just checking the code path exists)
 check("10 board-margin scaling code present (contextual)",
       "fine-pitch escape room" in open(os.path.join(HERE, "synth.py")).read()
       and "_applied = round(hmargin" in open(os.path.join(HERE, "synth.py")).read())

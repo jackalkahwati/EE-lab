@@ -7,7 +7,6 @@ physical evidence, overrides DRC/ERC, or upgrades a claim without the
 required inputs. Availability is never correctness.
 """
 import importlib
-import json
 import os
 import re
 import shutil
