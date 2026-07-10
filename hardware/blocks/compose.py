@@ -446,10 +446,15 @@ def block_motion_controller(x, y, n, nets):
     power inlet, and a 4-pin bipolar motor output. STEP/DIR/EN come from the
     shared MCU nets. First board that carries a resolved IC's non-trivial
     support circuit, not just its bus interface."""
+    # Layout note: the TMC2209 is a fine-pitch driver whose VMOTOR / coil / and
+    # charge-pump pins each need a clear escape lane. Keep its support parts back
+    # from the package so the grid router's escape stubs aren't walled in by a
+    # neighbouring cap/connector's clearance halo (the dense original packing
+    # left VMOTOR / M_A1 / M_A2 / DIR with no legal escape → motor-net shorts).
     # motor power inlet (VMOTOR / GND) — separate from the +5V logic rail
     b = place("Connector_PinHeader_2.54mm", "PinHeader_1x02_P2.54mm_Vertical",
-              "J8", x + 4, y + 8, 90, {"1": "VMOTOR", "2": "GND"}, nets)
-    b += cap("C21", x + 4, y + 16, "VMOTOR", "GND", nets)   # motor supply bulk
+              "J8", x + 4, y + 10, 90, {"1": "VMOTOR", "2": "GND"}, nets)
+    b += cap("C21", x + 4, y + 20, "VMOTOR", "GND", nets)   # motor supply bulk
     # the driver, resolved + placed, with every support-pin net named
     b2, r = sourced_ic("TMC2209 stepper motor driver", "stepper_driver", {
         "power": "+3V3", "gnd": "GND", "vmotor": "VMOTOR",
@@ -457,17 +462,18 @@ def block_motion_controller(x, y, n, nets):
         "motor_a1": "M_A1", "motor_a2": "M_A2",
         "motor_b1": "M_B1", "motor_b2": "M_B2",
         "cp_out": "CP_OUT", "cp_in": "CP_IN", "vcp": "VCP", "reg_out": "REG_5V",
-    }, "U8", x + 14, y + 10, 0, nets)
+    }, "U8", x + 18, y + 14, 0, nets)
     b += b2
-    b += cap("C22", x + 22, y + 8, "CP_OUT", "CP_IN", nets)    # charge-pump flying cap
-    b += cap("C23", x + 22, y + 14, "VCP", "VMOTOR", nets)     # charge-pump reservoir
-    b += cap("C24", x + 22, y + 20, "REG_5V", "GND", nets)     # 5VOUT internal-reg decoupling
-    b += cap("C25", x + 14, y + 20, "+3V3", "GND", nets)       # VCC_IO decoupling
-    # 4-pin bipolar motor output (coil A, coil B)
+    # charge-pump + reg support, spaced a full grid-lane clear of the package
+    b += cap("C22", x + 32, y + 8, "CP_OUT", "CP_IN", nets)    # charge-pump flying cap
+    b += cap("C23", x + 32, y + 16, "VCP", "VMOTOR", nets)     # charge-pump reservoir
+    b += cap("C24", x + 32, y + 24, "REG_5V", "GND", nets)     # 5VOUT internal-reg decoupling
+    b += cap("C25", x + 18, y + 28, "+3V3", "GND", nets)       # VCC_IO decoupling
+    # 4-pin bipolar motor output (coil A, coil B), well clear of the driver
     b += place("Connector_PinHeader_2.54mm", "PinHeader_1x04_P2.54mm_Vertical",
-               "J9", x + 30, y + 12, 0,
+               "J9", x + 44, y + 16, 0,
                {"1": "M_A1", "2": "M_A2", "3": "M_B1", "4": "M_B2"}, nets)
-    return b, 40, 30
+    return b, 56, 38
 
 
 def block_dc_measure(x, y, n, nets):
