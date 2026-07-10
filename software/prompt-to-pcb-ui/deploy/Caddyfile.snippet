@@ -1,0 +1,11 @@
+# app.firstlight.build — FirstLight Compose
+# If the Oracle VM already runs Caddy, append this block to /etc/caddy/Caddyfile
+# (Caddy auto-provisions Let's Encrypt TLS). Then: sudo systemctl reload caddy
+app.firstlight.build {
+	reverse_proxy 127.0.0.1:4500
+	encode zstd gzip
+	# Compose serves run artifacts and uploads; allow reasonably large bodies.
+	request_body {
+		max_size 50MB
+	}
+}

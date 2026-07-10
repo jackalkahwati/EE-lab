@@ -1,0 +1,24 @@
+[Unit]
+# Compose (prompt-to-pcb-ui) — production Next server on the Oracle VM.
+# Serves on loopback 127.0.0.1:4500; the reverse proxy (Caddy/nginx) terminates
+# TLS for app.firstlight.build and forwards to it.
+Description=FirstLight Compose (Next.js)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+# Adjust if the checkout lives elsewhere on the VM:
+WorkingDirectory=/home/ubuntu/EE-lab/software/prompt-to-pcb-ui
+# Secrets + config live here (chmod 600, NOT in git). See deploy/README.md.
+EnvironmentFile=/etc/firstlight-compose.env
+# Production build must already exist (deploy.sh runs `next build`).
+ExecStart=/usr/bin/env npm run start -- -p 4500 -H 127.0.0.1
+Restart=always
+RestartSec=3
+# Data dir (data/, public/runs) is under WorkingDirectory on the VM's
+# persistent disk, so it survives redeploys and reboots.
+
+[Install]
+WantedBy=multi-user.target
