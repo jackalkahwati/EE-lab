@@ -256,6 +256,25 @@ fn main() {
         .map(|l| l.list()[1].sym().to_string())
         .collect();
     let nl = layers.len().max(1);
+    // Signal vs plane layers. compose.py keeps signal layers on their canonical
+    // KiCad name (F.Cu / In2.Cu / In5.Cu / B.Cu) but names a dedicated plane
+    // layer after the net it carries (GND, PWR, +3V3…). KiCad's DSN export uses
+    // that user name, so a layer whose name is NOT "*.Cu" is a plane pour, not a
+    // routing layer — signals routed there break the plane and (with duplicate
+    // "GND" names) collapse under name lookup into same-layer crossings. Route
+    // tracks only on the .Cu signal layers; vias still span planes directly.
+    let routable: Vec<bool> = layers.iter().map(|n| n.ends_with(".Cu")).collect();
+    let sig_layers: Vec<&str> = layers
+        .iter()
+        .filter(|n| n.ends_with(".Cu"))
+        .map(|n| n.as_str())
+        .collect();
+    eprintln!(
+        "routable signal layers: {}/{} {:?}",
+        sig_layers.len(),
+        nl,
+        sig_layers
+    );
 
     // boundary bbox
     let (mut bx0, mut by0, mut bx1, mut by1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
@@ -1506,6 +1525,13 @@ fn main() {
                             if targets.contains(&nc) {
                                 return Some(base);
                             }
+                            return None;
+                        }
+                        // never lay track on a plane layer (GND/PWR pour). Vias
+                        // span planes directly, so signal↔signal routing is
+                        // unaffected; only a target pad's own cell (e.g. a THT
+                        // pad spanning all layers) may sit on a plane.
+                        if !routable[nc / (gw * gh)] && !targets.contains(&nc) {
                             return None;
                         }
                         if hard_mode {
