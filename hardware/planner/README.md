@@ -1681,10 +1681,18 @@ roadmap-complete; to be replayed through these layers).
   documented (after DRC/ERC, optional, never a replacement).
 
 ### Environment note (honest)
-The Next.js production build broke tonight from environment drift outside
-this sprint (node v25 + turbopack/webpack worker deaths; user-local package
-changes). Frontend verification ran on the dev server: 24/24. Production
-build repair is tracked as an environment task, not silently patched here.
+The Compose UI's Next 16.2.6 toolchain broke mid-sprint on this machine:
+the Turbopack PostCSS sidecar dies at spawn (dev AND build), and the
+webpack BUILD worker is SIGKILLed — while webpack DEV mode works because it
+compiles in-process with no child worker. Bisect evidence: the Next 15.3.2
+website app cold-builds cleanly on the same machine; all native bindings
+(SWC, tailwind oxide, lightningcss) load in plain node; versions are
+identical to the last good build; a forced pnpm reinstall did not help. The
+issue is scoped to Next 16.2.6 child-worker spawning on this machine and is
+tracked as an environment task. OPERATIONAL PATH: run 4500 with
+`npx next dev --webpack -p 4500` (verified: pages render, frontend 24/24).
+Nothing was silently patched; DRC/board verification is unaffected (kipython
+toolchain is independent).
 
 Regression: M3A 17/17 (includes a LIVE fast-suite run), M3B 22/22,
 frontend 24/24, board 5/5.

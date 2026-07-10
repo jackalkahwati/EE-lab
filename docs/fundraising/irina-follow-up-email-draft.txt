@@ -1,0 +1,32 @@
+Subject: First Light follow-up — pricing, path to $100M, attachments
+
+Hi Irina,
+
+Thank you again for the conversation — especially the push on enterprise pricing and selling to the budget holder, not the engineer. That reframed how we're going to market.
+
+I've attached three items:
+
+1. **Strategic memo** — stage, ICP, pricing tiers, moat, use of $4.5M, honest scope of what Compose ships today vs roadmap
+2. **ROI calculator** (CSV) — editable assumptions for traditional vs First Light cost per board program; defaults to a 12-program/yr lab showing ~$870k traditional vs ~$173k Year 1 with Enterprise + FL-1 (~5x, 2.4-month payback), with a defense-grade variant for primes
+3. **Financial model** (CSV) — 7-year path from ~$435k (2026) to ~$93M run-rate (2032 base), with an aggressive case at $105M
+
+**Pricing summary (production customers):**
+- Pilot: $15k / 90 days
+- Team: $48k/yr (24 board programs)
+- Enterprise: $120–150k/yr (60+ programs)
+- Defense/ITAR: $150–350k/yr
+- FL-1: $49.5k founding (includes 1yr Team in bundle pitch)
+- Fab attach: 10%
+
+We're removing $49/mo from the enterprise story — free tier stays for eval only; production is sales-led.
+
+Happy to demo Compose live for your partners meeting, or connect you with 2–3 pipeline conversations under NDA.
+
+Best,
+Jack
+
+---
+Attachments:
+- docs/fundraising/irina-follow-up-memo.md
+- docs/fundraising/compose-roi-calculator.csv
+- docs/fundraising/compose-financial-model.csv
