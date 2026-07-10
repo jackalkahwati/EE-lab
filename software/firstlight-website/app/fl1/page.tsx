@@ -1,10 +1,25 @@
+import type { Metadata } from "next";
+import Image from "next/image";
+import Link from "next/link";
 import { ReserveButton } from "../reserve-button";
 
-export const metadata = {
-  title: "FirstLight FL-1, one platform for autonomous hardware bring-up",
+export const metadata: Metadata = {
+  title: "FirstLight FL-1 — Autonomous hardware bring-up",
   description:
     "FL-1 is a single platform that grows with your lab. Bring-up, test, and validation in the box, expandable with tool heads and software packs. Reserve yours.",
-  openGraph: { images: ["/media/fl1-front.png"] },
+  openGraph: {
+    title: "FirstLight FL-1 — Autonomous hardware bring-up",
+    description:
+      "Insert an assembled PCB. FL-1 powers it up, probes it, and produces an evidence-based diagnosis.",
+    images: [
+      {
+        url: "/media/fl1-front.png",
+        width: 1402,
+        height: 1122,
+        alt: "FirstLight FL-1 autonomous PCB bring-up station",
+      },
+    ],
+  },
 };
 
 const BASE_DOES = [
@@ -55,16 +70,16 @@ const ROI = [
 
 export default function FL1Page() {
   return (
-    <main>
-      <nav className="nav">
+    <main id="main-content">
+      <nav className="nav" aria-label="Primary navigation">
         <div className="container nav-inner">
-          <a href="/" className="wordmark">
+          <Link href="/" className="wordmark">
             <Starburst /> firstlight
-          </a>
+          </Link>
           <div className="nav-links">
-            <a href="/#how">Compose</a>
-            <a href="/#pricing">Pricing</a>
-            <a href="/fl1">FL-1 machine</a>
+            <Link href="/#how">Compose</Link>
+            <Link href="/#pricing">Pricing</Link>
+            <Link href="/fl1">FL-1 machine</Link>
             <a href="#reserve" className="btn btn-small">
               Reserve
             </a>
@@ -87,10 +102,13 @@ export default function FL1Page() {
           </p>
         </div>
         <div className="container fl1-hero-img">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
+          <Image
             src="/media/fl1-hero-open.png"
             alt="FirstLight FL-1 with the canopy open, probing a circuit board"
+            width={1402}
+            height={1122}
+            sizes="(max-width: 948px) calc(100vw - 48px), 900px"
+            priority
           />
         </div>
       </header>
@@ -222,9 +240,9 @@ export default function FL1Page() {
             pass/fail limits FL-1 needs. Design, build, validate, and improve, in
             one continuous loop that gets better with every board it runs.
           </p>
-          <a href="/#how" className="btn btn-ghost">
+          <Link href="/#how" className="btn btn-ghost">
             See FirstLight Compose
-          </a>
+          </Link>
         </div>
       </section>
 
@@ -256,9 +274,9 @@ export default function FL1Page() {
           </span>
           <span className="footer-tag">Every board&apos;s first light.</span>
           <span className="footer-links">
-            <a href="/">Compose</a>
-            <a href="/terms">Terms of Use</a>
-            <a href="/privacy">Privacy Policy</a>
+            <Link href="/">Compose</Link>
+            <Link href="/terms">Terms of Use</Link>
+            <Link href="/privacy">Privacy Policy</Link>
             <a href="mailto:jack@thestardrive.com">Contact</a>
           </span>
           <span className="footer-copy">

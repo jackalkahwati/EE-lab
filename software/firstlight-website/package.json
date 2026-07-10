@@ -6,7 +6,9 @@
     "dev": "next dev -p 4400",
     "build": "next build",
     "start": "next start -p 4400",
-    "lint": "next lint"
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run lint && npm run typecheck && npm run build"
   },
   "dependencies": {
     "next": "^15.3.2",
@@ -16,6 +18,11 @@
   "devDependencies": {
     "@types/node": "^22.15.3",
     "@types/react": "^19.1.2",
+    "eslint": "^9.39.1",
+    "eslint-config-next": "^15.5.20",
     "typescript": "^5.8.3"
+  },
+  "overrides": {
+    "postcss": "^8.5.10"
   }
 }

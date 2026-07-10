@@ -1,3 +1,5 @@
+import Image from "next/image";
+import Link from "next/link";
 import { TryCompose } from "./try-compose";
 
 const COMPOSE_URL =
@@ -30,9 +32,9 @@ const FL1_INSTRUMENTS = [
 
 export default function Home() {
   return (
-    <main>
+    <main id="main-content">
       {/* Nav */}
-      <nav className="nav">
+      <nav className="nav" aria-label="Primary navigation">
         <div className="container nav-inner">
           <a href="#top" className="wordmark">
             <Starburst /> firstlight
@@ -40,7 +42,7 @@ export default function Home() {
           <div className="nav-links">
             <a href="#how">How it works</a>
             <a href="#pricing">Pricing</a>
-            <a href="/fl1">FL-1 machine</a>
+            <Link href="/fl1">FL-1 machine</Link>
             <a href={COMPOSE_URL} className="nav-signin">
               Sign in
             </a>
@@ -85,10 +87,13 @@ export default function Home() {
             </ul>
           </div>
           <div className="hero-image">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
+            <Image
               src="/media/board-top.png"
               alt="A PCB designed and routed by FirstLight Compose from a plain-language prompt"
+              width={1568}
+              height={1376}
+              sizes="(max-width: 860px) calc(100vw - 48px), 520px"
+              priority
             />
           </div>
         </div>
@@ -204,10 +209,12 @@ export default function Home() {
           <h2>The machine that brings your board to life.</h2>
           <div className="fl1-grid">
             <div className="fl1-image">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
+              <Image
                 src="/media/fl1-hero-open.png"
                 alt="FirstLight FL-1 Desktop with the canopy open, probing a board, the autonomous PCB bring-up and diagnosis station"
+                width={1402}
+                height={1122}
+                sizes="(max-width: 860px) calc(100vw - 48px), 512px"
               />
             </div>
             <div>
@@ -227,12 +234,12 @@ export default function Home() {
                 the first production units.
               </p>
               <div className="fl1-cta-row">
-                <a className="btn" href="/fl1#reserve">
+                <Link className="btn" href="/fl1#reserve">
                   Reserve an FL-1
-                </a>
-                <a className="btn btn-ghost" href="/fl1">
+                </Link>
+                <Link className="btn btn-ghost" href="/fl1">
                   Learn more
-                </a>
+                </Link>
               </div>
             </div>
           </div>
@@ -249,14 +256,14 @@ export default function Home() {
           </p>
           <video
             controls
-            autoPlay
-            loop
-            muted
             playsInline
-            preload="metadata"
+            preload="none"
+            poster="/media/web-hero.png"
             className="demo-video"
+            aria-label="CAD concept film of the FL-1 performing an autonomous probing run"
           >
             <source src="/media/promo.mp4" type="video/mp4" />
+            Your browser does not support embedded video.
           </video>
         </div>
       </section>
@@ -270,8 +277,8 @@ export default function Home() {
           <span className="footer-tag">Every board&apos;s first light.</span>
           <span className="footer-links">
             <a href={COMPOSE_URL}>Sign in</a>
-            <a href="/terms">Terms of Use</a>
-            <a href="/privacy">Privacy Policy</a>
+            <Link href="/terms">Terms of Use</Link>
+            <Link href="/privacy">Privacy Policy</Link>
             <a href={`mailto:${CONTACT}`}>Contact</a>
           </span>
           <span className="footer-copy">

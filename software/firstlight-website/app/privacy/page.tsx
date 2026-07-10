@@ -1,8 +1,10 @@
-export const metadata = { title: "Privacy Policy, FirstLight" };
+import Link from "next/link";
+
+export const metadata = { title: "Privacy Policy — FirstLight" };
 
 export default function Privacy() {
   return (
-    <main className="legal-page">
+    <main className="legal-page" id="main-content">
       <div className="container narrow">
         <p className="kicker">StarDrive Inc.</p>
         <h1>Privacy Policy</h1>
@@ -87,7 +89,7 @@ export default function Privacy() {
         </p>
 
         <p>
-          <a href="/" className="compose-link">&larr; Back to FirstLight</a>
+          <Link href="/" className="compose-link">&larr; Back to FirstLight</Link>
         </p>
       </div>
     </main>
