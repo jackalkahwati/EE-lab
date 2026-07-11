@@ -8,6 +8,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
+import { ProfileMenu } from '@/components/profile-menu'
 
 const LINKS: { href: string; label: string; hint: string }[] = [
   { href: '/', label: 'Programs', hint: 'board-program portfolio' },
@@ -43,13 +44,16 @@ export function TopNav() {
             </Link>
           ))}
         </nav>
-        <button
-          type="button"
-          onClick={() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))}
-          className="ml-auto hidden items-center gap-1.5 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground sm:flex"
-        >
-          Search <kbd className="rounded bg-muted px-1 font-mono text-[9px]">⌘K</kbd>
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))}
+            className="hidden items-center gap-1.5 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground sm:flex"
+          >
+            Search <kbd className="rounded bg-muted px-1 font-mono text-[9px]">⌘K</kbd>
+          </button>
+          <ProfileMenu />
+        </div>
       </div>
     </header>
   )
