@@ -259,6 +259,71 @@ def bind(pins, interface, nets):
     return pmap, {"bound": bound_roles, "missing": missing, "nc": nc}
 
 
+# ---- contract-free inference (the open-contract path) -----------------------
+# Where a CONTRACT above encodes ONE part class by hand, this infers roles from
+# pin names alone, so any part source_part resolves gets a best-effort netmap
+# without a new PR. Ordered: power/ground first (multi, greedy), then only the
+# UNAMBIGUOUS buses/clock/USB/debug. Ambiguous names (SDO/SDI/DIN/DOUT) are left
+# unbound on purpose — a wrong guess is a dead board, so those go to review, not
+# a silent net. 'category' drives support synthesis and the honest review flag.
+UNIVERSAL_ROLES = [
+    ("gnd",      _GND, "gnd", "multi", "gnd"),
+    ("power",    _PWR + ["VBAT", "VDDA", "VDDD", "VDDCORE", "IOVDD", "VREG", "DEC1", "DEC", "3V3", "VDD33", "VDDH"], "power", "multi", "power"),
+    ("i2c_scl",  ["SCL"], "I2C_SCL", "one", "bus"),
+    ("i2c_sda",  ["SDA"], "I2C_SDA", "one", "bus"),
+    ("spi_sck",  ["SCK", "SPCK", "SCLK"], "SPI_SCK", "one", "bus"),
+    ("spi_mosi", ["MOSI", "COPI"], "SPI_MOSI", "one", "bus"),
+    ("spi_miso", ["MISO", "CIPO"], "SPI_MISO", "one", "bus"),
+    ("spi_cs",   ["CS", "NSS", "CSB", "CSN", "SSN"], "SPI_CS", "one", "bus"),
+    ("uart_tx",  ["TXD", "SOUT", "UTX"], "UART_TX", "one", "bus"),
+    ("uart_rx",  ["RXD", "SIN", "URX"], "UART_RX", "one", "bus"),
+    ("usb_dp",   ["USBDP", "DP", "DPLUS", "USBP"], "USB_DP", "one", "signal"),
+    ("usb_dm",   ["USBDM", "DM", "DMINUS", "USBN"], "USB_DM", "one", "signal"),
+    ("swdio",    ["SWDIO", "TMS"], "SWDIO", "one", "signal"),
+    ("swclk",    ["SWCLK", "SWDCLK", "TCK"], "SWCLK", "one", "signal"),
+    ("xin",      ["XIN", "XTAL1", "OSCIN", "XC1"], "XIN", "one", "clock"),
+    ("xout",     ["XOUT", "XTAL2", "OSCOUT", "XC2"], "XOUT", "one", "clock"),
+    ("reset",    ["RESET", "NRST", "RST", "RUN"], "RESET", "one", "signal"),
+    ("boot",     ["BOOT", "BOOT0", "BOOTSEL"], "BOOT", "one", "signal"),
+    ("antenna",  ["ANT", "RFIO", "RFOUT", "RFP", "RFN"], "ANT", "one", "rf"),
+]
+
+
+def infer_bind(pins, nets=None):
+    """Contract-free bind: infer each pin's role from its name, no predefined
+    interface required. Returns (pmap {number: net}, report). Pins the universal
+    vocabulary cannot classify are returned as `review` (never given a net
+    silently) — the honest boundary between what was inferred and what a human
+    must still map. RF/analog roles are flagged review even when matched, because
+    they need real design, not a decoupling-cap rule."""
+    nets = nets or {}
+    rail = {"gnd": nets.get("gnd", "GND"), "power": nets.get("power", "+3V3")}
+    pmap, used, bound = {}, set(), {}
+    review_cats = set()
+    for role, aliases, netkey, card, cat in UNIVERSAL_ROLES:
+        naliases = {_norm(a) for a in aliases}
+        for num, nm in pins:
+            if num in used:
+                continue
+            if _pin_tokens(nm) & naliases:
+                net = rail.get(netkey) or nets.get(netkey) or netkey
+                pmap[num] = net
+                used.add(num)
+                bound.setdefault(role, []).append("%s(%s)->%s" % (nm, num, net))
+                if cat in ("rf", "analog"):
+                    review_cats.add(cat)
+                if card == "one":
+                    break
+    review = [(num, nm) for num, nm in pins if num not in used]
+    return pmap, {
+        "bound": bound,
+        "review": review,                      # pins a human must still bind
+        "review_categories": sorted(review_cats),
+        "coverage": "%d/%d pins auto-bound" % (len(pmap), len(pins)),
+        "trust": "inferred (REVIEW-REQUIRED)",  # never physically validated
+    }
+
+
 # ---- footprint selection ----------------------------------------------------
 # Prefer leaded/coarse packages that escape on two signal layers; avoid
 # fine-pitch leadless (QFN/DFN/WSON/BGA) that need via-in-pad fanout.
