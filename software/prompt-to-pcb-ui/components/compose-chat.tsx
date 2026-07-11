@@ -13,13 +13,28 @@ import { cn } from '@/lib/utils'
 import { llmHeaders } from '@/components/llm-settings'
 import { STAGE_DEFS, STAGE_PREFIX, type StageId, type StageState } from '@/lib/firstlight'
 import { Plus, Menu, Loader2, Check, X, Circle, Square, Pencil } from 'lucide-react'
+import { boardIntentOf, disciplineRows, type ProductSpec } from '@/lib/product-spec'
 
 type Answer = { question: string; answer: string }
 type Question = { type: 'question'; question: string; boardClass?: string; hints?: string[] }
 type Spec = { type: 'spec'; boardClass: string; blocks: string[]; summary: string; request: string; layers?: number }
 type Ev = { type: string; id?: StageId; state?: StageState; stage?: StageId; text?: string
   level?: string; spec?: any; runDir?: string; status?: string }
-type Phase = 'idle' | 'interview' | 'ready' | 'revReady' | 'building' | 'done' | 'error'
+// 'architect' = product-level decomposition dialogue (one tier above the board
+// interview); the rest are the board build phases.
+type Phase = 'idle' | 'architect' | 'interview' | 'ready' | 'revReady' | 'building' | 'done' | 'error'
+
+/** Compact one-line summary of the product budgets, for the plan header. */
+function budgetLine(ps: ProductSpec): string {
+  const b = ps.budgets ?? {}
+  const parts: string[] = []
+  if (b.unitCostUsd != null) parts.push(`$${b.unitCostUsd} target`)
+  if (b.sizeMm?.x) parts.push(`${b.sizeMm.x}×${b.sizeMm.y ?? '?'}×${b.sizeMm.z ?? '?'} mm`)
+  if (b.massG != null) parts.push(`${b.massG} g`)
+  if (b.power?.batteryMah) parts.push(`${b.power.batteryMah} mAh${b.power.runtimeHours ? ` / ${b.power.runtimeHours} h` : ''}`)
+  if (b.volumeUnits) parts.push(`${b.volumeUnits.toLocaleString()} units/yr`)
+  return parts.join(' · ')
+}
 
 // UTF-8-safe base64 (spec can contain µ, ×, em-dash…) — matches the compose page
 function b64(json: string) {
@@ -45,6 +60,7 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
   const [answers, setAnswers] = useState<Answer[]>([])
   const [current, setCurrent] = useState<Question | null>(null)
   const [spec, setSpec] = useState<Spec | null>(null)
+  const [productSpec, setProductSpec] = useState<ProductSpec | null>(null)
   const [revSpec, setRevSpec] = useState<{ blocks: string[]; boardClass: string; note: string; request: string } | null>(null)
   const [typed, setTyped] = useState('')
   const [loading, setLoading] = useState(false)
@@ -87,7 +103,7 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
   function reset() {
     esRef.current?.close(); esRef.current = null
     setPhase('idle'); setRequest(''); setAnswers([]); setCurrent(null); setSpec(null)
-    setRevSpec(null); setTyped(''); setErr(null); setStages({}); setLogs([]); onNew()
+    setProductSpec(null); setRevSpec(null); setTyped(''); setErr(null); setStages({}); setLogs([]); onNew()
   }
 
   // With a built board on screen (not a fresh +New), a chat message REVISES it.
@@ -117,7 +133,13 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
     const v = typed.trim(); if (!v) return
     setTyped('')
     if (reviseMode && activeRunId) { setRequest(v); revise(v, activeRunId) }
-    else if (phase === 'idle') { setRequest(v); ask(v, []) }
+    // every fresh design enters through the Product Architect — it decides which
+    // discipline modules to invoke. No product/board toggle.
+    else if (phase === 'idle') { setRequest(v); askArchitect(v, []) }
+    else if (phase === 'architect' && current) {
+      const next = [...answers, { question: current.question, answer: v }]
+      setAnswers(next); setCurrent(null); askArchitect(request, next)
+    }
     else if (phase === 'interview' && current) {
       const next = [...answers, { question: current.question, answer: v }]
       setAnswers(next); setCurrent(null); ask(request, next)
@@ -144,12 +166,14 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
     es.onerror = () => { es.close(); esRef.current = null; setErr('connection lost'); setPhase('error') }
   }
 
-  function start() {
-    if (!spec) return
+  /** Launch the real board pipeline for a finalized board spec + prompt. Used by
+   *  both the manual "Yes, build it" path and the Architect's auto electronics
+   *  hand-off, so the two flows share one build code path. */
+  function buildBoard(bspec: { blocks: string[]; boardClass: string; layers?: number }, req: string) {
     setPhase('building'); setStages({}); setLogs([])
     const id = `run-${crypto.randomUUID()}`
-    const payload = b64(JSON.stringify({ blocks: spec.blocks, boardClass: spec.boardClass, ...(spec.layers ? { layers: spec.layers } : {}) }))
-    const url = `/api/pipeline/run?prompt=${encodeURIComponent(request)}`
+    const payload = b64(JSON.stringify({ blocks: bspec.blocks, boardClass: bspec.boardClass, ...(bspec.layers ? { layers: bspec.layers } : {}) }))
+    const url = `/api/pipeline/run?prompt=${encodeURIComponent(req)}`
       + `&runId=${encodeURIComponent(id)}&compose=1&spec=${encodeURIComponent(payload)}`
     const es = new EventSource(url); esRef.current = es
     es.onmessage = (e) => {
@@ -163,6 +187,55 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
       } else if (ev.type === 'error') { es.close(); esRef.current = null; setErr(ev.text ?? 'pipeline error'); setPhase('error') }
     }
     es.onerror = () => { es.close(); esRef.current = null; setErr('connection lost'); setPhase('error') }
+  }
+
+  function start() {
+    if (spec) buildBoard(spec, request)
+  }
+
+  /** Product Architect: decompose a product intent into disciplines, then invoke
+   *  the specialist modules the decomposition marks as needed. Today only the
+   *  electronics module is live — it auto-builds a real board from the electronics
+   *  block's boardIntent. Every other required discipline shows honestly as
+   *  pending (module not built yet); not_applicable ones are skipped. No toggle:
+   *  the decomposition itself decides what runs. */
+  async function dispatchProduct(ps: ProductSpec) {
+    setProductSpec(ps)
+    const elec = ps.disciplines?.electronics
+    if (elec?.status !== 'defined') {
+      // this product does not need electronics (e.g. a passive enclosure) — no
+      // live module to invoke yet, so just show the decomposition.
+      setPhase('done')
+      return
+    }
+    // invoke electronics: its boardIntent -> a finalized board spec (force, no
+    // second round of questions) -> the real build pipeline.
+    setPhase('building'); setStages({}); setLogs([]); setLoading(true); setErr(null)
+    try {
+      const r = await fetch('/api/interview', {
+        method: 'POST', headers: { 'content-type': 'application/json', ...llmHeaders() },
+        body: JSON.stringify({ request: boardIntentOf(ps), answers: [], force: true }),
+      })
+      const bs = await r.json()
+      if (bs.error) throw new Error(bs.error)
+      if (bs.type !== 'spec') throw new Error('electronics module could not finalize a board')
+      buildBoard(bs as Spec, boardIntentOf(ps))
+    } catch (e) { setErr(String(e)); setPhase('error') } finally { setLoading(false) }
+  }
+
+  /** Product-tier interview: same shape as the board interview, one level up. */
+  async function askArchitect(req: string, acc: Answer[]) {
+    setLoading(true); setErr(null)
+    try {
+      const r = await fetch('/api/architect', {
+        method: 'POST', headers: { 'content-type': 'application/json', ...llmHeaders() },
+        body: JSON.stringify({ request: req, answers: acc }),
+      })
+      const d = await r.json()
+      if (d.error) throw new Error(d.error)
+      if (d.type === 'spec') { await dispatchProduct(d.spec as ProductSpec) }
+      else { setCurrent({ type: 'question', question: d.question, boardClass: d.product } as Question); setPhase('architect') }
+    } catch (e) { setErr(String(e)); setPhase('error') } finally { setLoading(false) }
   }
 
   function stop() { esRef.current?.close(); esRef.current = null; setPhase('done') }
@@ -243,8 +316,9 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
       <div ref={bodyRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 text-sm">
         {phase === 'idle' && !reviseMode && (
           <p className="text-muted-foreground">
-            Describe the board you want and I&apos;ll ask a few questions, then build it.
-            <span className="mt-1 block text-[11px]">e.g. &ldquo;8-probe relay test matrix, RP2040, 24V&rdquo;</span>
+            Describe a product or a board. I&apos;ll decompose it into engineering
+            disciplines and build the ones we can.
+            <span className="mt-1 block text-[11px]">e.g. &ldquo;invisible AI earbud, sub-$40 BOM, all-day battery&rdquo; · &ldquo;8-probe relay test matrix, RP2040, 24V&rdquo;</span>
           </p>
         )}
         {phase === 'idle' && reviseMode && (
@@ -307,6 +381,55 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
           </div>
         )}
 
+        {/* product decomposition — which disciplines the Architect routed to */}
+        {productSpec && (
+          <div className="space-y-2 rounded-md border border-border p-2.5">
+            <div>
+              <div className="text-[13px] font-semibold text-foreground">{productSpec.product}</div>
+              {productSpec.description && (
+                <div className="text-[11px] text-muted-foreground">{productSpec.description}</div>
+              )}
+              {budgetLine(productSpec) && (
+                <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">{budgetLine(productSpec)}</div>
+              )}
+            </div>
+            <div className="space-y-1.5 border-t border-border pt-1.5">
+              <div className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">disciplines</div>
+              {disciplineRows(productSpec)
+                .filter((r) => r.status !== 'not_applicable')
+                .map((r) => {
+                  const isElec = r.discipline === 'electronics'
+                  const st = isElec
+                    ? phase === 'error'
+                      ? 'failed'
+                      : phase === 'done'
+                        ? 'built'
+                        : 'building'
+                    : 'pending'
+                  const icon =
+                    st === 'built' ? <Check className="size-3.5 text-emerald-500" />
+                      : st === 'failed' ? <X className="size-3.5 text-destructive" />
+                        : st === 'building' ? <Loader2 className="size-3.5 animate-spin text-primary" />
+                          : <Circle className="size-3 text-muted-foreground/40" />
+                  return (
+                    <div key={r.discipline} className="flex items-start gap-2">
+                      <span className="mt-0.5 shrink-0">{icon}</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[12px] text-foreground">{r.label}</span>
+                          <span className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
+                            {st === 'pending' ? 'module not built yet' : st}
+                          </span>
+                        </div>
+                        {r.summary && <div className="text-[10px] text-muted-foreground">{r.summary}</div>}
+                      </div>
+                    </div>
+                  )
+                })}
+            </div>
+          </div>
+        )}
+
         {/* live agent step feed */}
         {(building || phase === 'done') && (
           <div className="space-y-1.5 rounded-md border border-border p-2.5">
@@ -359,9 +482,9 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
             rows={1}
             placeholder={phase === 'ready' ? 'press “Yes, build it” above'
               : phase === 'revReady' ? 'press “Build revision” above'
-                : phase === 'interview' ? 'type your answer…'
+                : phase === 'architect' || phase === 'interview' ? 'type your answer…'
                   : reviseMode ? 'Describe a change to revise this board…'
-                    : phase === 'idle' ? 'Describe the board…' : 'start a new thread with + New'}
+                    : phase === 'idle' ? 'Describe a product or a board…' : 'start a new thread with + New'}
             className="max-h-24 min-h-[1.5rem] flex-1 resize-none bg-transparent text-[13px] outline-none placeholder:text-muted-foreground disabled:opacity-50"
           />
           <button type="button" onClick={submit} disabled={!typed.trim() || building || loading || phase === 'ready' || phase === 'revReady'}
