@@ -76,7 +76,11 @@ enough), finalize:
  *  or the caller's own key/provider via x-llm-provider / x-llm-key headers. */
 async function callLLM(userMsg: string, force: boolean, override?: LLMOverride) {
   const sys = force
-    ? SYSTEM + '\nYou have asked enough questions, you MUST finalize now (enough:true).'
+    ? SYSTEM +
+      '\n\nFINALIZE MODE: the design has already been specified upstream. Do NOT ' +
+      'ask any question. Reply with a finalized spec ("enough":true) NOW, choosing ' +
+      'sensible defaults for anything unspecified (USB-C 5V power, 4 layers, standard ' +
+      'in-stock parts). "enough" MUST be true.'
     : SYSTEM
   let lastErr: unknown
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -154,7 +158,10 @@ export async function POST(req: Request) {
       (qa ? `Clarifications so far:\n${qa}\n\n` : 'No clarifications yet.\n\n') +
       `Questions already asked: ${answers.length} of max ${MAX_QUESTIONS}.`
 
-    const force = answers.length >= MAX_QUESTIONS
+    // `force` skips clarifying questions and finalizes immediately. The Product
+    // Architect sets it on the electronics hand-off: it already interviewed at
+    // the product tier, so the board request is complete and needs no re-asking.
+    const force = body.force === true || answers.length >= MAX_QUESTIONS
     const { out, provider } = await callLLM(userMsg, force, overrideFromHeaders(req.headers))
 
     const blocks: string[] = Array.isArray(out.blocks) ? out.blocks : []
@@ -172,7 +179,11 @@ export async function POST(req: Request) {
       }
     }
 
-    if (out.enough) {
+    // On the forced electronics hand-off, finalize even if the model tried to
+    // ask one more thing — as long as it has already proposed blocks. This keeps
+    // the Architect flow from stalling on a board-level question the product
+    // interview already covered.
+    if (out.enough || (force && blocks.length > 0)) {
       return Response.json({
         type: 'spec',
         boardClass,

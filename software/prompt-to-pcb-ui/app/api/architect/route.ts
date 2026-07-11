@@ -1,0 +1,177 @@
+/**
+ * Product Architect — the top of the engineering hierarchy. Turns a natural-
+ * language PRODUCT intent ("invisible AI earbud, sub-$40 BOM, all-day battery")
+ * into a Product Spec: product-level budgets + a per-discipline requirement
+ * block (lib/product-spec). Stateless clarifying dialogue like the board
+ * interview, one tier up: the client sends the intent + answers so far, the
+ * model returns the next question or a finalized spec.
+ *
+ * The electronics block's `boardIntent` then feeds the existing board interview
+ * / Compose pipeline; every other discipline is DECLARED honestly (status),
+ * never fabricated. Same provider chain + JSON extraction as /api/interview.
+ */
+import { callLLMText, overrideFromHeaders, type LLMOverride } from '@/lib/llm'
+import { PRODUCT_SPEC_SCHEMA, normalizeSpec } from '@/lib/product-spec'
+
+export const dynamic = 'force-dynamic'
+
+const MAX_QUESTIONS = 4
+
+interface Answer {
+  question: string
+  answer: string
+}
+
+const SYSTEM = `detailed thinking off.
+You are the Product Architect for an autonomous product-engineering platform.
+Given any hardware INTENT, run a short clarifying interview, then decompose it
+into a Product Spec: product-level budgets and a requirement block for each
+engineering discipline (electronics, mechanical, firmware, manufacturing,
+supply chain, validation).
+
+GENERAL — this is NOT specific to any product category. The same decomposition
+must work for a consumer device, an industrial instrument, a robotics
+subsystem, a bare PCB, or a passive mechanical part. Never assume audio,
+wearables, or any domain.
+
+ROUTING (critical) — your per-discipline "status" tells the platform which
+specialist modules to invoke. Scope honestly:
+- "defined": the intent genuinely REQUIRES this discipline. The platform will
+  invoke that module (or hold it pending until the module exists).
+- "not_applicable": the intent does NOT need this discipline; the platform skips
+  it. A bare breakout PCB needs no mechanical/firmware. A passive bracket or
+  enclosure needs no electronics/firmware. A firmware-only ask needs no new
+  mechanical. Only mark a discipline "defined" when real engineering work in it
+  is actually needed. NEVER mark a discipline "built".
+
+PRINCIPLES:
+- You own intent and budgets, not implementation. Do NOT design the PCB or the
+  enclosure. State WHAT each required discipline must deliver and its slice of
+  the cost / size / mass / power budgets. Omit budgets that do not apply.
+- If (and only if) electronics is "defined", its block MUST include a
+  "boardIntent": one concrete, buildable natural-language board request (real
+  parts + function + rough size/layers) handed to the board designer. Real parts
+  only, no invented ones.
+- Ask about the highest-impact unknowns first, ONE at a time (what/who, target
+  unit cost, size envelope, battery/runtime, production volume). Give 2-4
+  concrete options and a sensible default. Keep questions short. If the intent is
+  already a clear, single-discipline request (e.g. a specific breakout board),
+  do not pad it — finalize quickly with the other disciplines "not_applicable".
+
+Output ONLY one JSON object, no prose, no markdown fences.
+To ask the next question:
+{"enough":false,"product":"<short name>","question":"...","options":["...","..."],"default":"..."}
+When product intent and budgets are pinned down (or you have asked enough),
+finalize with EXACTLY this shape:
+{"enough":true,"spec":${PRODUCT_SPEC_SCHEMA}}`
+
+/** Shared provider chain (lib/llm), or the caller's own key/provider header. */
+async function callLLM(userMsg: string, force: boolean, override?: LLMOverride) {
+  const sys = force
+    ? SYSTEM + '\nYou have asked enough questions, you MUST finalize now (enough:true).'
+    : SYSTEM
+  let lastErr: unknown
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      // Architect gates the whole flow and must emit a large structured spec,
+      // which nemotron does unreliably. Anthropic handles it well, so force it
+      // via the key path (the default chain falls through to nemotron in this
+      // server even with a valid key). The caller's own x-llm-* override wins.
+      const antKey = process.env.ANTHROPIC_API_KEY
+      const opts =
+        override?.apiKey
+          ? override
+          : antKey
+            ? { apiKey: antKey, provider: 'anthropic' as const, model: 'claude-sonnet-5' }
+            : { model: 'claude-sonnet-5' }
+      const { text, provider } = await callLLMText(
+        sys,
+        attempt === 0
+          ? userMsg
+          : userMsg + '\n\nYOUR PREVIOUS REPLY WAS NOT VALID JSON. Reply with ONLY the JSON object.',
+        opts,
+      )
+      return { out: JSON.parse(firstJsonObject(text)), provider }
+    } catch (e) {
+      lastErr = e
+    }
+  }
+  throw lastErr ?? new Error('architect model failed')
+}
+
+/** Find the architect object anywhere in the reply: strips reasoning tags,
+ *  tries every '{' until one balances and looks like an architect turn. */
+function firstJsonObject(text: string): string {
+  const t = text.replace(/<think>[\s\S]*?<\/think>/gi, '')
+  let idx = t.indexOf('{')
+  let n = 0
+  while (idx >= 0 && n < 60) {
+    let depth = 0
+    let inStr = false
+    let esc = false
+    for (let i = idx; i < t.length; i++) {
+      const ch = t[i]
+      if (inStr) {
+        if (esc) esc = false
+        else if (ch === '\\') esc = true
+        else if (ch === '"') inStr = false
+      } else if (ch === '"') inStr = true
+      else if (ch === '{') depth++
+      else if (ch === '}') {
+        depth--
+        if (depth === 0) {
+          const cand = t.slice(idx, i + 1)
+          try {
+            const o = JSON.parse(cand)
+            if (o && typeof o === 'object' && ('enough' in o || 'question' in o || 'spec' in o)) {
+              return cand
+            }
+          } catch {
+            /* try the next start */
+          }
+          break
+        }
+      }
+    }
+    idx = t.indexOf('{', idx + 1)
+    n++
+  }
+  throw new Error('no valid architect JSON in model reply')
+}
+
+export async function POST(req: Request) {
+  try {
+    const body = await req.json()
+    const request: string = body.request ?? ''
+    const answers: Answer[] = Array.isArray(body.answers) ? body.answers : []
+    if (!request.trim()) {
+      return Response.json({ error: 'empty product intent' }, { status: 400 })
+    }
+
+    const qa = answers
+      .map((a, i) => `${i + 1}. Q: ${a.question}\n   A: ${a.answer}`)
+      .join('\n')
+    const userMsg =
+      `Product intent: ${request}\n\n` +
+      (qa ? `Clarifications so far:\n${qa}\n\n` : 'No clarifications yet.\n\n') +
+      `Questions already asked: ${answers.length} of max ${MAX_QUESTIONS}.`
+
+    const force = answers.length >= MAX_QUESTIONS
+    const { out, provider } = await callLLM(userMsg, force, overrideFromHeaders(req.headers))
+
+    if (out.enough) {
+      const spec = normalizeSpec(out.spec)
+      return Response.json({ type: 'spec', spec, request, provider })
+    }
+    return Response.json({
+      type: 'question',
+      product: out.product ?? 'product',
+      question: out.question ?? 'Any other product requirements?',
+      options: Array.isArray(out.options) ? out.options : [],
+      default: out.default ?? '',
+      provider,
+    })
+  } catch (err) {
+    return Response.json({ error: String(err) }, { status: 502 })
+  }
+}
