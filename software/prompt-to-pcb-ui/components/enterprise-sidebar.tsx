@@ -1,16 +1,17 @@
 'use client'
 
 /**
- * Left drawer nav for the enterprise console. Icons + labels, active-route
- * highlight. Rendered once by app/enterprise/layout.tsx so every section
- * inherits it; content renders to the right.
+ * Left drawer nav for the enterprise console. Collapsible: icon-only by default,
+ * toggle to an expanded rail with labels (preference persisted per browser).
+ * Rendered once by app/enterprise/layout.tsx so every section inherits it.
  */
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
 import {
   Activity, BarChart3, Boxes, CheckSquare, Coins, LayoutDashboard,
-  Plug, Receipt, ScrollText, Settings, Users,
+  PanelLeftClose, PanelLeftOpen, Plug, Receipt, ScrollText, Settings, Users,
 } from 'lucide-react'
 
 const LINKS = [
@@ -27,22 +28,59 @@ const LINKS = [
   { href: '/enterprise/settings', label: 'Settings', Icon: Settings },
 ]
 
+const PREF_KEY = 'ent-sidebar-expanded'
+
 export function EnterpriseSidebar() {
   const pathname = usePathname()
+  const [expanded, setExpanded] = useState(false)
+
+  // restore the saved expand/collapse preference
+  useEffect(() => {
+    const v = localStorage.getItem(PREF_KEY)
+    if (v !== null) setExpanded(v === '1')
+  }, [])
+
+  const toggle = () =>
+    setExpanded((v) => {
+      const next = !v
+      localStorage.setItem(PREF_KEY, next ? '1' : '0')
+      return next
+    })
+
   const active = (href: string) =>
     href === '/enterprise' ? pathname === '/enterprise' : pathname.startsWith(href)
+
   return (
     <nav
       aria-label="Enterprise sections"
-      className="sticky top-11 flex h-[calc(100dvh-2.75rem)] w-14 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border bg-card/30 py-2 lg:w-48"
+      className={cn(
+        'sticky top-11 flex h-[calc(100dvh-2.75rem)] shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border bg-card/30 py-2 transition-[width] duration-150',
+        expanded ? 'w-48' : 'w-14',
+      )}
     >
+      <button
+        type="button"
+        onClick={toggle}
+        aria-label={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
+        aria-expanded={expanded}
+        title={expanded ? 'Collapse' : 'Expand'}
+        className="mx-1.5 mb-1 flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-secondary/50 hover:text-foreground"
+      >
+        {expanded ? (
+          <PanelLeftClose className="size-4 shrink-0" />
+        ) : (
+          <PanelLeftOpen className="size-4 shrink-0" />
+        )}
+        {expanded && <span>Collapse</span>}
+      </button>
+
       {LINKS.map(({ href, label, Icon }) => {
         const on = active(href)
         return (
           <Link
             key={href}
             href={href}
-            title={label}
+            title={expanded ? undefined : label}
             className={cn(
               'mx-1.5 flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs',
               on
@@ -50,7 +88,7 @@ export function EnterpriseSidebar() {
                 : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground')}
           >
             <Icon className={cn('size-4 shrink-0', on && 'text-primary')} />
-            <span className="hidden lg:inline">{label}</span>
+            {expanded && <span>{label}</span>}
           </Link>
         )
       })}
