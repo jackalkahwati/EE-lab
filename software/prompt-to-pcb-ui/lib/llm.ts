@@ -69,7 +69,12 @@ async function anthropicCall(system: string, user: string, key?: string, model?:
   })
   if (!r.ok) throw new Error(`anthropic HTTP ${r.status}`)
   const d = await r.json()
-  const t = d.content?.[0]?.text
+  // Claude-5 models can emit a reasoning block before the answer, so the text
+  // is not always content[0]. Find the first text block (reading content[0]
+  // blindly returned empty and silently fell the whole chain through to
+  // nemotron).
+  const t = (d.content as { type: string; text?: string }[] | undefined)
+    ?.find((b) => b.type === 'text')?.text
   if (!t) throw new Error('anthropic empty')
   return t
 }
