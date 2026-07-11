@@ -12,6 +12,7 @@
  */
 import { callLLMText, overrideFromHeaders, type LLMOverride } from '@/lib/llm'
 import { PRODUCT_SPEC_SCHEMA, normalizeSpec } from '@/lib/product-spec'
+import { idBriefSummary, normalizeIdBrief, type IdBrief } from '@/lib/id-brief'
 
 export const dynamic = 'force-dynamic'
 
@@ -65,11 +66,16 @@ When product intent and budgets are pinned down (or you have asked enough),
 finalize with EXACTLY this shape:
 {"enough":true,"spec":${PRODUCT_SPEC_SCHEMA}}`
 
+/** An Industrial Design brief, when present, is a HARD upstream constraint:
+ *  its envelope becomes the size budget and its POV the product philosophy. */
+const ID_CONSTRAINT = `\n\nAn INDUSTRIAL DESIGN brief has already been established for this product and is a HARD constraint. Respect it: its envelope IS the product size budget (budgets.sizeMm must fit within it), its aesthetic IS the product philosophy, and every discipline (electronics maxBoardMm, mechanical, etc.) must fit the given form and CMF. Do not contradict or re-open the form; design the internals to serve it.\nINDUSTRIAL DESIGN BRIEF:\n`
+
 /** Shared provider chain (lib/llm), or the caller's own key/provider header. */
-async function callLLM(userMsg: string, force: boolean, override?: LLMOverride) {
-  const sys = force
+async function callLLM(userMsg: string, force: boolean, override?: LLMOverride, idConstraint?: string) {
+  let sys = force
     ? SYSTEM + '\nYou have asked enough questions, you MUST finalize now (enough:true).'
     : SYSTEM
+  if (idConstraint) sys += ID_CONSTRAINT + idConstraint
   let lastErr: unknown
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -147,6 +153,10 @@ export async function POST(req: Request) {
     if (!request.trim()) {
       return Response.json({ error: 'empty product intent' }, { status: 400 })
     }
+    // Optional upstream Industrial Design brief — constrains budgets + form.
+    const idConstraint = body.idBrief
+      ? idBriefSummary(normalizeIdBrief(body.idBrief as Partial<IdBrief>))
+      : undefined
 
     const qa = answers
       .map((a, i) => `${i + 1}. Q: ${a.question}\n   A: ${a.answer}`)
@@ -157,7 +167,7 @@ export async function POST(req: Request) {
       `Questions already asked: ${answers.length} of max ${MAX_QUESTIONS}.`
 
     const force = answers.length >= MAX_QUESTIONS
-    const { out, provider } = await callLLM(userMsg, force, overrideFromHeaders(req.headers))
+    const { out, provider } = await callLLM(userMsg, force, overrideFromHeaders(req.headers), idConstraint)
 
     if (out.enough) {
       const spec = normalizeSpec(out.spec)

@@ -14,15 +14,17 @@ import { llmHeaders } from '@/components/llm-settings'
 import { STAGE_DEFS, STAGE_PREFIX, type StageId, type StageState } from '@/lib/firstlight'
 import { Plus, Menu, Loader2, Check, X, Circle, Square, Pencil } from 'lucide-react'
 import { boardIntentOf, disciplineRows, type ProductSpec } from '@/lib/product-spec'
+import { idBriefSummary, type IdBrief } from '@/lib/id-brief'
 
 type Answer = { question: string; answer: string }
 type Question = { type: 'question'; question: string; boardClass?: string; hints?: string[] }
 type Spec = { type: 'spec'; boardClass: string; blocks: string[]; summary: string; request: string; layers?: number }
 type Ev = { type: string; id?: StageId; state?: StageState; stage?: StageId; text?: string
   level?: string; spec?: any; runDir?: string; status?: string }
-// 'architect' = product-level decomposition dialogue (one tier above the board
-// interview); the rest are the board build phases.
-type Phase = 'idle' | 'architect' | 'interview' | 'ready' | 'revReady' | 'building' | 'done' | 'error'
+// 'id' = Industrial Design brief (the first stage: form/ergonomics/CMF/envelope).
+// 'architect' = product-level decomposition dialogue (one tier below ID). The
+// rest are the board build phases.
+type Phase = 'idle' | 'id' | 'architect' | 'interview' | 'ready' | 'revReady' | 'building' | 'done' | 'error'
 
 /** Compact one-line summary of the product budgets, for the plan header. */
 function budgetLine(ps: ProductSpec): string {
@@ -60,6 +62,7 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
   const [answers, setAnswers] = useState<Answer[]>([])
   const [current, setCurrent] = useState<Question | null>(null)
   const [spec, setSpec] = useState<Spec | null>(null)
+  const [idBrief, setIdBrief] = useState<IdBrief | null>(null)
   const [productSpec, setProductSpec] = useState<ProductSpec | null>(null)
   const [revSpec, setRevSpec] = useState<{ blocks: string[]; boardClass: string; note: string; request: string } | null>(null)
   const [typed, setTyped] = useState('')
@@ -103,7 +106,7 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
   function reset() {
     esRef.current?.close(); esRef.current = null
     setPhase('idle'); setRequest(''); setAnswers([]); setCurrent(null); setSpec(null)
-    setProductSpec(null); setRevSpec(null); setTyped(''); setErr(null); setStages({}); setLogs([]); onNew()
+    setIdBrief(null); setProductSpec(null); setRevSpec(null); setTyped(''); setErr(null); setStages({}); setLogs([]); onNew()
   }
 
   // With a built board on screen (not a fresh +New), a chat message REVISES it.
@@ -133,9 +136,14 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
     const v = typed.trim(); if (!v) return
     setTyped('')
     if (reviseMode && activeRunId) { setRequest(v); revise(v, activeRunId) }
-    // every fresh design enters through the Product Architect — it decides which
-    // discipline modules to invoke. No product/board toggle.
-    else if (phase === 'idle') { setRequest(v); askArchitect(v, []) }
+    // every fresh design enters through Industrial Design first (form/CMF/
+    // envelope), whose brief then constrains the Product Architect, which decides
+    // which discipline modules to invoke. No product/board toggle.
+    else if (phase === 'idle') { setRequest(v); askIndustrialDesign(v, []) }
+    else if (phase === 'id' && current) {
+      const next = [...answers, { question: current.question, answer: v }]
+      setAnswers(next); setCurrent(null); askIndustrialDesign(request, next)
+    }
     else if (phase === 'architect' && current) {
       const next = [...answers, { question: current.question, answer: v }]
       setAnswers(next); setCurrent(null); askArchitect(request, next)
@@ -223,13 +231,40 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
     } catch (e) { setErr(String(e)); setPhase('error') } finally { setLoading(false) }
   }
 
-  /** Product-tier interview: same shape as the board interview, one level up. */
-  async function askArchitect(req: string, acc: Answer[]) {
+  /** Industrial Design: the FIRST stage. A clarifying interview about form,
+   *  ergonomics, CMF, and envelope; its finalized brief then constrains the
+   *  Product Architect. Same interview shape as the tiers below it. */
+  async function askIndustrialDesign(req: string, acc: Answer[]) {
+    setLoading(true); setErr(null)
+    try {
+      const r = await fetch('/api/industrial-design', {
+        method: 'POST', headers: { 'content-type': 'application/json', ...llmHeaders() },
+        body: JSON.stringify({ request: req, answers: acc }),
+      })
+      const d = await r.json()
+      if (d.error) throw new Error(d.error)
+      if (d.type === 'brief') {
+        const brief = d.brief as IdBrief
+        setIdBrief(brief)
+        // hand off to the architect with the ID brief as a hard constraint; the
+        // ID Q&A is done, so start the architect's interview with a clean slate.
+        setAnswers([]); setCurrent(null)
+        await askArchitect(req, [], brief)
+      } else {
+        setCurrent({ type: 'question', question: d.question, boardClass: d.product } as Question)
+        setPhase('id')
+      }
+    } catch (e) { setErr(String(e)); setPhase('error') } finally { setLoading(false) }
+  }
+
+  /** Product-tier interview: same shape as the board interview, one level up.
+   *  An optional Industrial Design brief rides along as an upstream constraint. */
+  async function askArchitect(req: string, acc: Answer[], brief?: IdBrief) {
     setLoading(true); setErr(null)
     try {
       const r = await fetch('/api/architect', {
         method: 'POST', headers: { 'content-type': 'application/json', ...llmHeaders() },
-        body: JSON.stringify({ request: req, answers: acc }),
+        body: JSON.stringify({ request: req, answers: acc, idBrief: brief ?? idBrief ?? undefined }),
       })
       const d = await r.json()
       if (d.error) throw new Error(d.error)
@@ -316,8 +351,9 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
       <div ref={bodyRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 text-sm">
         {phase === 'idle' && !reviseMode && (
           <p className="text-muted-foreground">
-            Describe a product or a board. I&apos;ll decompose it into engineering
-            disciplines and build the ones we can.
+            Describe a product or a board. I&apos;ll shape its industrial design
+            (form, ergonomics, CMF, envelope), decompose that into engineering
+            disciplines, and build the ones we can.
             <span className="mt-1 block text-[11px]">e.g. &ldquo;invisible AI earbud, sub-$40 BOM, all-day battery&rdquo; · &ldquo;8-probe relay test matrix, RP2040, 24V&rdquo;</span>
           </p>
         )}
@@ -378,6 +414,21 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
                 Cancel
               </button>
             </div>
+          </div>
+        )}
+
+        {/* industrial design brief — the form the pipeline is building to */}
+        {idBrief && (
+          <div className="space-y-1.5 rounded-md border border-border p-2.5">
+            <div className="flex items-center gap-1.5">
+              <span className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">industrial design</span>
+              <Check className="size-3 text-emerald-500" />
+            </div>
+            <div className="text-[13px] font-semibold text-foreground">{idBrief.product}</div>
+            {idBriefSummary(idBrief) && (
+              <pre className="whitespace-pre-wrap font-mono text-[10px] leading-relaxed text-muted-foreground">{idBriefSummary(idBrief)}</pre>
+            )}
+            {idBrief.rationale && <div className="text-[11px] italic text-muted-foreground">{idBrief.rationale}</div>}
           </div>
         )}
 
@@ -482,7 +533,7 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
             rows={1}
             placeholder={phase === 'ready' ? 'press “Yes, build it” above'
               : phase === 'revReady' ? 'press “Build revision” above'
-                : phase === 'architect' || phase === 'interview' ? 'type your answer…'
+                : phase === 'id' || phase === 'architect' || phase === 'interview' ? 'type your answer…'
                   : reviseMode ? 'Describe a change to revise this board…'
                     : phase === 'idle' ? 'Describe a product or a board…' : 'start a new thread with + New'}
             className="max-h-24 min-h-[1.5rem] flex-1 resize-none bg-transparent text-[13px] outline-none placeholder:text-muted-foreground disabled:opacity-50"
