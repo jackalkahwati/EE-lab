@@ -126,12 +126,59 @@ async function nemotronCall(system: string, user: string, key?: string): Promise
   return d.choices?.[0]?.message?.content ?? ''
 }
 
+/**
+ * Claude Code CLI provider — routes calls through the LOCAL `claude` binary,
+ * which authenticates with the user's claude.ai (Max) subscription login rather
+ * than the metered API. Opt-in via USE_CLAUDE_CODE_CLI so it never affects a
+ * deployed/multi-user instance (and the binary only exists on a dev machine).
+ * ANTHROPIC_API_KEY is stripped from the child env: Claude Code prefers an API
+ * key over the subscription login, so leaving it set would re-hit the metered
+ * (possibly out-of-credit) API. Slower than a raw fetch (full CLI spin-up) and
+ * bounded by the subscription's usage limits.
+ */
+async function claudeCodeCall(system: string, user: string, _key?: string, model?: string): Promise<string> {
+  const { spawn } = await import('node:child_process')
+  const fs = await import('node:fs')
+  const bin = (() => {
+    if (process.env.CLAUDE_CLI_PATH) return process.env.CLAUDE_CLI_PATH
+    const home = process.env.HOME || ''
+    for (const p of [`${home}/.local/bin/claude`, '/opt/homebrew/bin/claude', '/usr/local/bin/claude']) {
+      try { if (fs.existsSync(p)) return p } catch { /* keep looking */ }
+    }
+    return 'claude'
+  })()
+  const alias = /opus/i.test(model || '') ? 'opus' : /haiku/i.test(model || '') ? 'haiku' : 'sonnet'
+  const env = { ...process.env }
+  delete env.ANTHROPIC_API_KEY
+  return await new Promise<string>((resolve, reject) => {
+    const cp = spawn(bin, ['-p', '--model', alias, '--output-format', 'json'], { env, timeout: LLM_TIMEOUT_MS })
+    let out = '', err = ''
+    cp.stdout.on('data', (d) => (out += d))
+    cp.stderr.on('data', (d) => (err += d))
+    cp.on('error', (e) => reject(new Error(`claude-code spawn: ${e.message}`)))
+    cp.on('close', () => {
+      try {
+        const d = JSON.parse(out.trim())
+        if (d.is_error) return reject(new Error(`claude-code: ${String(d.result || err).slice(0, 140)}`))
+        if (!d.result) return reject(new Error('claude-code empty'))
+        resolve(d.result)
+      } catch { reject(new Error(`claude-code bad output: ${(err || out).slice(0, 140)}`)) }
+    })
+    cp.stdin.write(`${system}\n\n${user}`)
+    cp.stdin.end()
+  })
+}
+
 const PROVIDERS: Record<string, (s: string, u: string, k?: string, m?: string) => Promise<string>> = {
   anthropic: anthropicCall,
   openai: openaiCall,
   gemini: geminiCall,
   nemotron: nemotronCall,
+  'claude-code': claudeCodeCall,
 }
+
+const useClaudeCodeCli = () =>
+  process.env.USE_CLAUDE_CODE_CLI === '1' || process.env.USE_CLAUDE_CODE_CLI === 'true'
 
 /** Read a BYOK override out of request headers (x-llm-provider / x-llm-key). */
 export function overrideFromHeaders(headers: Headers): LLMOverride | undefined {
@@ -152,6 +199,17 @@ export async function callLLMText(
   user: string,
   override?: LLMOverride,
 ): Promise<{ text: string; provider: string }> {
+  // Local subscription mode: route calls through the Claude Code CLI (Max
+  // subscription, not metered API). Routes pass the platform ANTHROPIC_API_KEY
+  // as an override, so treat an override key that MATCHES the env key as
+  // "platform" (use the CLI); only a real header BYOK key (different from the
+  // env key) takes precedence. Falls through to the normal chain if the CLI
+  // itself fails.
+  if (useClaudeCodeCli() && (!override?.apiKey || override.apiKey === process.env.ANTHROPIC_API_KEY)) {
+    try {
+      return { text: await claudeCodeCall(system, user, undefined, override?.model), provider: 'claude-code (subscription)' }
+    } catch { /* fall through to platform chain */ }
+  }
   if (override?.apiKey) {
     const name = override.provider && PROVIDERS[override.provider] ? override.provider : 'anthropic'
     return {
