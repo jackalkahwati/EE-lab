@@ -1,0 +1,102 @@
+/**
+ * Mechanical build plan — the GENERIC, product-engine-directed contract for the
+ * mechanical module. The product engine (LLM) decides WHAT to build (an in-ear
+ * shell, a bracket, a potting box, a plate) and emits an ordered list of
+ * parametric CAD operations in a small, safe vocabulary. A thin executor renders
+ * that plan into real Onshape geometry and exports STEP — it never bakes in a
+ * fixed "enclosure recipe". Specialization lives in this plan (data), not code.
+ *
+ * Coordinates are millimetres, in a right-handed frame: the XY plane is the base
+ * (Top) plane, +Z is up (height/thickness). Sketch profiles are centred at
+ * (cx, cy) unless noted. See tools/onshape/features.py for the renderer.
+ */
+
+export type MechProfile =
+  | { kind: 'roundedRect'; cx: number; cy: number; w: number; h: number; r?: number }
+  | { kind: 'rect'; cx: number; cy: number; w: number; h: number }
+  | { kind: 'circle'; cx: number; cy: number; d: number }
+
+/** One parametric operation. Generic across product categories. */
+export type MechOp =
+  | { op: 'sketch'; name: string; plane?: 'top' | 'front' | 'right'; profile: MechProfile }
+  | { op: 'extrude'; name: string; sketch: string; depth: number; offset?: number; merge?: boolean }
+  | { op: 'pocket'; name: string; sketch: string; depth: number; offset?: number } // material removal
+  | { op: 'standoff'; name: string; x: number; y: number; height: number; od: number; holeDia?: number; baseZ?: number }
+  | { op: 'cutout'; name: string; face: 'top' | 'front' | 'right'; cx: number; cy: number; w: number; h: number; depth: number }
+  // a representative internal component (PCB, battery, antenna, speaker…) placed
+  // in the cavity as its own body, so the packaging is visible and fit is honest
+  | { op: 'component'; name: string; kind: 'pcb' | 'battery' | 'antenna' | 'speaker' | 'generic'; shape?: 'box' | 'cyl'; cx: number; cy: number; cz: number; w: number; h: number; thickness: number }
+
+export interface MechPlan {
+  part: string // name of the part being built
+  units: 'mm'
+  operations: MechOp[]
+  notes?: string // one line: what this mechanical piece is / how it serves the product
+}
+
+const num = (v: unknown, d = 0): number => (typeof v === 'number' && isFinite(v) ? v : d)
+
+/** Validate + coerce an LLM-produced plan; drop malformed ops so the executor
+ *  never sees a broken operation. */
+export function normalizeMechPlan(raw: Partial<MechPlan> | undefined): MechPlan {
+  const s = (raw ?? {}) as MechPlan
+  const ops: MechOp[] = Array.isArray(s.operations)
+    ? (s.operations.map(coerceOp).filter(Boolean) as MechOp[])
+    : []
+  return { part: s.part || 'Part', units: 'mm', operations: ops, notes: typeof s.notes === 'string' ? s.notes : undefined }
+}
+
+function coerceProfile(p: any): MechProfile | null {
+  if (!p || typeof p !== 'object') return null
+  if (p.kind === 'circle') return { kind: 'circle', cx: num(p.cx), cy: num(p.cy), d: num(p.d) }
+  if (p.kind === 'rect') return { kind: 'rect', cx: num(p.cx), cy: num(p.cy), w: num(p.w), h: num(p.h) }
+  // default to rounded rect
+  return { kind: 'roundedRect', cx: num(p.cx), cy: num(p.cy), w: num(p.w), h: num(p.h), r: num(p.r, 0) }
+}
+
+function coerceOp(o: any): MechOp | null {
+  if (!o || typeof o !== 'object' || typeof o.op !== 'string') return null
+  const name = typeof o.name === 'string' ? o.name : o.op
+  switch (o.op) {
+    case 'sketch': {
+      const profile = coerceProfile(o.profile)
+      if (!profile) return null
+      return { op: 'sketch', name, plane: o.plane === 'front' || o.plane === 'right' ? o.plane : 'top', profile }
+    }
+    case 'extrude':
+      if (typeof o.sketch !== 'string') return null
+      return { op: 'extrude', name, sketch: o.sketch, depth: num(o.depth), offset: o.offset != null ? num(o.offset) : undefined, merge: !!o.merge }
+    case 'pocket':
+      if (typeof o.sketch !== 'string') return null
+      return { op: 'pocket', name, sketch: o.sketch, depth: num(o.depth), offset: o.offset != null ? num(o.offset) : undefined }
+    case 'standoff':
+      return { op: 'standoff', name, x: num(o.x), y: num(o.y), height: num(o.height), od: num(o.od), holeDia: o.holeDia != null ? num(o.holeDia) : undefined, baseZ: o.baseZ != null ? num(o.baseZ) : undefined }
+    case 'cutout':
+      return { op: 'cutout', name, face: o.face === 'front' || o.face === 'right' ? o.face : 'top', cx: num(o.cx), cy: num(o.cy), w: num(o.w), h: num(o.h), depth: num(o.depth) }
+    case 'component': {
+      const kinds = ['pcb', 'battery', 'antenna', 'speaker', 'generic']
+      return { op: 'component', name, kind: kinds.includes(o.kind) ? o.kind : 'generic', shape: o.shape === 'cyl' ? 'cyl' : 'box', cx: num(o.cx), cy: num(o.cy), cz: num(o.cz), w: num(o.w), h: num(o.h), thickness: num(o.thickness, 1) }
+    }
+    default:
+      return null
+  }
+}
+
+/** The JSON contract the product engine must emit (embedded in its prompt). */
+export const MECH_PLAN_SCHEMA = `{
+  "part": "<name, e.g. 'In-ear shell' | 'Mounting bracket'>",
+  "units": "mm",
+  "notes": "<one line: what this piece is and how it serves the product>",
+  "operations": [
+    { "op": "sketch",   "name": "baseOutline", "plane": "top", "profile": { "kind": "roundedRect", "cx": 0, "cy": 0, "w": <board w + walls>, "h": <board h + walls>, "r": <corner radius> } },
+    { "op": "extrude",  "name": "body", "sketch": "baseOutline", "depth": <outer height> },
+    { "op": "sketch",   "name": "cavity", "plane": "top", "profile": { "kind": "roundedRect", "cx": 0, "cy": 0, "w": <board w + clearance>, "h": <board h + clearance>, "r": <r> } },
+    { "op": "pocket",   "name": "innerCavity", "sketch": "cavity", "depth": <cavity depth>, "offset": <wall thickness> },
+    { "op": "standoff", "name": "mount1", "x": <x>, "y": <y>, "height": <standoff h>, "od": <boss dia>, "holeDia": <screw dia>, "baseZ": <wall thickness> },
+    { "op": "cutout",   "name": "usbPort", "face": "front", "cx": <x>, "cy": <z>, "w": <port w>, "h": <port h>, "depth": <wall thickness> },
+    { "op": "component", "name": "PCB", "kind": "pcb", "shape": "box", "cx": 0, "cy": 0, "cz": <wall thickness>, "w": <REAL board width>, "h": <REAL board height>, "thickness": 1.6 },
+    { "op": "component", "name": "battery", "kind": "battery", "shape": "box", "cx": <x>, "cy": <y>, "cz": <above PCB>, "w": <batt w>, "h": <batt h>, "thickness": <batt t> },
+    { "op": "component", "name": "antenna", "kind": "antenna", "shape": "box", "cx": <x>, "cy": <y>, "cz": <z>, "w": <ant w>, "h": <ant h>, "thickness": 0.5 }
+  ]
+}
+ALWAYS include "component" ops for the real PCB (use its ACTUAL given dimensions, not a shrunk guess), the battery, and the antenna, placed in the cavity — so the packaging is visible and any fit problem is honest. If the real PCB is larger than the cavity, still place it at its true size; do NOT shrink it to fake a fit.`

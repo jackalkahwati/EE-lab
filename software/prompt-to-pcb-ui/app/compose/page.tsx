@@ -37,9 +37,17 @@ import { ArtifactExplorer } from '@/components/artifact-explorer'
 import { FL1ReadinessPanel } from '@/components/fl1-readiness-panel'
 import { BoardObjects } from '@/components/board-objects'
 import { ReviewsPill } from '@/components/board-reviews'
+import { IdStageView } from '@/components/id-stage-view'
+import { IdBriefPanel } from '@/components/id-brief-panel'
+import { ExploreStage } from '@/components/explore-stage'
+import { MechanicalStage } from '@/components/mechanical-stage'
+import { SimulationStage } from '@/components/simulation-stage'
+import { DisciplineStage } from '@/components/discipline-stage'
+import type { IdBrief } from '@/lib/id-brief'
+import type { ProductSpec } from '@/lib/product-spec'
 import {
-  Activity, BookOpen, ClipboardCheck, Cpu, Eye, Gauge, LayoutDashboard, ListTree, Maximize2,
-  Package, Receipt, ScrollText, Wrench,
+  Activity, BookOpen, Box, ClipboardCheck, Code, Cpu, Eye, Factory, Gauge, LayoutDashboard, ListTree, Maximize2,
+  Package, Palette, Receipt, ScrollText, ShieldCheck, Sparkles, Truck, Wrench,
 } from 'lucide-react'
 
 type Run = any
@@ -60,12 +68,43 @@ const VIEWS: { tab: Tab; label: string; Icon: any }[] = [
   { tab: 'Artifacts', label: 'Artifacts', Icon: ScrollText },
 ]
 
+// Pipeline stages the middle+right panes follow. Electronics + Industrial Design
+// are live; Mechanical (CAD) and Simulation are declared honestly as not-yet-built.
+const STAGES = [
+  { key: 'explore', label: 'Explore', Icon: Sparkles, built: true },
+  { key: 'electronics', label: 'Electronics', Icon: Cpu, built: true },
+  { key: 'id', label: 'Design', Icon: Palette, built: true },
+  { key: 'mechanical', label: 'Mechanical', Icon: Box, built: true },
+  { key: 'simulation', label: 'Simulation', Icon: Gauge, built: true },
+  { key: 'firmware', label: 'Firmware', Icon: Code, built: true },
+  { key: 'manufacturing', label: 'Mfg', Icon: Factory, built: true },
+  { key: 'supplyChain', label: 'Supply', Icon: Truck, built: true },
+  { key: 'validation', label: 'Validation', Icon: ShieldCheck, built: true },
+] as const
+type Stage = (typeof STAGES)[number]['key']
+
+/** Honest placeholder for a stage whose specialist module isn't built yet. */
+function StagePlaceholder({ title, Icon }: { title: string; Icon: any }) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-muted-foreground">
+      <Icon className="size-9 opacity-25" />
+      <span className="text-sm font-medium text-foreground">{title}</span>
+      <span className="max-w-xs text-xs">This module isn&apos;t built yet. When it is, its output will appear here in the pipeline — nothing is faked.</span>
+    </div>
+  )
+}
+
 export default function Compose2Page() {
   const [runs, setRuns] = useState<Run[]>([])
   const [selectedId, setSelectedId] = useState('')
   const [realBoard, setRealBoard] = useState<RealBoard | null>(null)
   const [tab, setTab] = useState<Tab>('Overview')
   const [view, setView] = useState<'3d' | 'layout' | 'schematic'>('3d')
+  // which pipeline stage the middle+right panes show; auto-advances as the
+  // pipeline runs (board builds -> Electronics; ID finishes -> Industrial Design)
+  const [stage, setStage] = useState<Stage>('electronics')
+  const [idBrief, setIdBrief] = useState<IdBrief | null>(null)
+  const [productSpec, setProductSpec] = useState<ProductSpec | null>(null)
   // "+New" clears the stage to a blank slate (no board) while the chat stays
   // active; the board reappears when the new design finishes building.
   const [newDesign, setNewDesign] = useState(false)
@@ -88,6 +127,13 @@ export default function Compose2Page() {
     if (Array.isArray(disk) && disk.find((r: Run) => r.id === id)) setSelectedId(id)
     const d = await loadRealBoard(runDir); if (d) setRealBoard(d)
     setNewDesign(false) // the freshly-built board now takes the stage
+    setStage('electronics') // show the real board first; ID advances the stage after
+  }
+  // the chat lifts up the ID brief when Industrial Design finishes; advancing to
+  // that stage so the form (wrapping the real board) is what's on screen.
+  const onIdBrief = (b: IdBrief | null) => {
+    setIdBrief(b)
+    setStage(b ? 'id' : 'electronics')
   }
 
   // resizable panes (drag the dividers); persisted per browser
@@ -177,6 +223,8 @@ export default function Compose2Page() {
             onSelectThread={() => {}}
             onNew={() => {}}
             onRunComplete={onRunComplete}
+            onIdBrief={onIdBrief}
+            onProductSpec={setProductSpec}
           />
         </aside>
         <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-muted-foreground">
@@ -202,9 +250,11 @@ export default function Compose2Page() {
           newDesign={newDesign}
           revisePrefill={revisePrefill}
           onPrefillConsumed={() => setRevisePrefill('')}
-          onSelectThread={(id) => { setSelectedId(id); setNewDesign(false) }}
+          onSelectThread={(id) => { setSelectedId(id); setNewDesign(false); setIdBrief(null); setProductSpec(null); setStage('electronics') }}
           onNew={() => setNewDesign(true)}
           onRunComplete={onRunComplete}
+          onIdBrief={onIdBrief}
+          onProductSpec={setProductSpec}
           onRename={async (id, name) => {
             await fetch('/api/runs/rename', {
               method: 'POST', headers: { 'content-type': 'application/json' },
@@ -217,124 +267,210 @@ export default function Compose2Page() {
 
       <Handle which="left" />
 
-      {/* CENTER — the board as hero. overflow-hidden so a narrow middle pane
-          clips its own toolbar instead of bleeding it into the right pane. */}
+      {/* CENTER — stage bar over the middle pane ONLY, then the active stage's
+          visualization. The right pane is a full-height sibling (like the left). */}
       <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <div className="flex items-center gap-3 border-b border-border px-3 py-2">
-          {/* left cluster shrinks + clips first, keeping the view toggle in view */}
-          <div className="flex min-w-0 flex-1 items-center gap-3 overflow-hidden">
-            {!newDesign && isReal && tab !== 'Overview' && <ReviewsPill real={real} />}
-            {!newDesign && isReal && real?.board?.bomTotal ? (
-              <span className="shrink-0 rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground"
-                title="component BOM estimate — not fab, not a quote">
-                ~${Number(real.board.bomTotal).toFixed(2)} BOM
-              </span>
-            ) : null}
-            <button type="button" onClick={() => setTab('Patterns')}
-              className="flex shrink-0 items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
-              title="reusable patterns & ingested knowledge">
-              <BookOpen className="size-3" /> Knowledge
-            </button>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <div className="flex overflow-hidden rounded-sm border border-border">
-              {([['3d', '3D'], ['layout', 'Layout'], ['schematic', 'Schematic']] as const).map(([v, label]) => (
-                <button key={v} type="button" onClick={() => setView(v)}
-                  className={cn('px-2.5 py-0.5 text-[11px]',
-                    view === v ? 'bg-secondary font-medium text-foreground' : 'text-muted-foreground hover:text-foreground')}>
-                  {label}
-                </button>
-              ))}
-            </div>
-            <button type="button" onClick={toggleFullscreen} title="fullscreen board"
-              className="rounded-sm border border-border p-1 text-muted-foreground hover:text-foreground">
-              <Maximize2 className="size-3.5" />
-            </button>
-          </div>
-        </div>
-        <div ref={stageRef} className="min-h-0 flex-1 bg-background">
-          <ErrorBoundary>
-            {newDesign ? (
-              <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-muted-foreground">
-                <Cpu className="size-9 opacity-25" />
-                <span className="text-xs">New design — describe a board on the left to begin.</span>
-              </div>
-            ) : (
-              <>
-                {view === '3d' && (
-                  <Board3D basePath={boardBase} fallback={
-                    <div className="flex h-full items-center justify-center text-xs text-muted-foreground">no 3D model for this run</div>} />
-                )}
-                {view === 'layout' && (
-                  <BoardCanvas key={selectedRun.id} run={selectedRun}
-                    realBoard={isReal ? real?.board : null} basePath={boardBase} />
-                )}
-                {view === 'schematic' && <BoardSchematic runDir={selectedRunDir ?? null} />}
-              </>
-            )}
-          </ErrorBoundary>
-        </div>
-      </section>
-
-      <Handle which="right" />
-
-      {/* RIGHT — journey spine + phase panel */}
-      <section style={{ width: rightW }} className="flex shrink-0 border-l border-border">
-        <nav className="flex w-16 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border bg-card/30 py-2">
-          {VIEWS.map((v) => {
-            const on = tab === v.tab
+        {/* stage bar — scoped to the middle pane */}
+        <div className="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-border px-2 py-1.5">
+          {STAGES.map((s) => {
+            const needsSpec = ['explore', 'firmware', 'manufacturing', 'supplyChain', 'validation'].includes(s.key)
+            const avail = needsSpec ? !!productSpec : s.key === 'electronics' ? !!selectedRun : s.key === 'id' ? !!idBrief : true
+            const locked = !avail && (needsSpec || s.key === 'electronics' || s.key === 'id')
+            const on = stage === s.key
             return (
-              <button key={v.tab} type="button" onClick={() => setTab(v.tab)} title={v.label}
-                className={cn('mx-1.5 flex flex-col items-center gap-0.5 rounded-md px-1 py-1.5 text-[8px]',
-                  on ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground')}>
-                <v.Icon className={cn('size-4', on && 'text-primary')} />
-                <span className="leading-none">{v.label}</span>
+              <button key={s.key} type="button" disabled={locked}
+                onClick={() => setStage(s.key)}
+                title={s.key === 'id' && !idBrief ? 'runs after the board builds' : s.key === 'explore' && !productSpec ? 'describe a product first' : s.label}
+                className={cn('flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11px]',
+                  on ? 'bg-secondary font-medium text-foreground' : 'text-muted-foreground hover:text-foreground',
+                  locked && 'cursor-not-allowed opacity-40 hover:text-muted-foreground')}>
+                <s.Icon className={cn('size-3.5 shrink-0', on && 'text-primary')} />
+                {s.label}
+                {!s.built && <span className="rounded-sm bg-muted px-1 text-[8px] uppercase tracking-wide text-muted-foreground">soon</span>}
               </button>
             )
           })}
-        </nav>
-        <div className="flex min-w-0 flex-1 flex-col">
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            <ErrorBoundary>
-              {newDesign ? (
-                <div className="flex h-full items-center justify-center p-6 text-center text-xs text-muted-foreground">
-                  No board yet — the overview appears once your new design builds.
-                </div>
-              ) : (
-                <>
-                  {tab === 'Overview' && <RunOverview runId={selectedRun.runDir ? selectedRun.id : null} run={selectedRun} />}
-                  {tab === 'Objects' && <BoardObjects real={real} />}
-                  {tab === 'Artifacts' && <ArtifactExplorer runId={selectedRun.runDir ? selectedRun.id : null} />}
-                  {tab === 'Code' && <CodeViewer key={isReal ? 'real' : 'seed'} files={isReal ? real?.ato : null} />}
-                  {tab === 'BOM' && <BomTable lines={isReal ? real?.bom : null} />}
-                  {tab === 'Checks' && <BoardChecks real={real} />}
-                  {tab === 'Constraints' && <ConstraintsPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
-                  {tab === 'Pinout' && <PinoutPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
-                  {tab === 'Advanced' && <AdvancedRoutingPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
-                  {tab === 'Ingest' && <IngestPanel />}
-                  {tab === 'Patterns' && <PatternsPanel />}
-                  {tab === 'FL-1 Ready' && <FL1ReadinessPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
-                  {tab === 'Recovery' && <RecoveryPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
-                  {tab === 'Assembly' && <AssemblyPanel runId={selectedRun.runDir ? selectedRun.id : null} fabZip={null} />}
-                  {tab === 'Review' && <ReviewPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
-                  {tab === 'FL-1' && (
-                    <div className="flex h-full flex-col">
-                      <FL1ValidationView runId={selectedRun.runDir ? selectedRun.id : null} />
-                      <div className="border-t border-border">
-                        <FL1Loop
-                          runId={selectedRun.runDir ? selectedRun.id : null}
-                          onRevise={(eco) => setRevisePrefill(eco)}
-                        />
-                      </div>
-                    </div>
-                  )}
-                  {tab === 'Order' && <ProcurementPanel real={real} runDir={selectedRunDir ?? null} />}
-                </>
-              )}
-            </ErrorBoundary>
-          </div>
         </div>
-      </section>
+
+        {/* active stage visualization (middle pane only) */}
+        {stage === 'explore' && (
+              <ErrorBoundary><ExploreStage spec={productSpec} runId={selectedRun?.id} /></ErrorBoundary>
+            )}
+            {stage === 'electronics' && (
+              <>
+                <div className="flex items-center gap-3 border-b border-border px-3 py-2">
+                  <div className="flex min-w-0 flex-1 items-center gap-3 overflow-hidden">
+                    {!newDesign && isReal && tab !== 'Overview' && <ReviewsPill real={real} />}
+                    {!newDesign && isReal && real?.board?.bomTotal ? (
+                      <span className="shrink-0 rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground"
+                        title="component BOM estimate — not fab, not a quote">
+                        ~${Number(real.board.bomTotal).toFixed(2)} BOM
+                      </span>
+                    ) : null}
+                    <button type="button" onClick={() => setTab('Patterns')}
+                      className="flex shrink-0 items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+                      title="reusable patterns & ingested knowledge">
+                      <BookOpen className="size-3" /> Knowledge
+                    </button>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <div className="flex overflow-hidden rounded-sm border border-border">
+                      {([['3d', '3D'], ['layout', 'Layout'], ['schematic', 'Schematic']] as const).map(([v, label]) => (
+                        <button key={v} type="button" onClick={() => setView(v)}
+                          className={cn('px-2.5 py-0.5 text-[11px]',
+                            view === v ? 'bg-secondary font-medium text-foreground' : 'text-muted-foreground hover:text-foreground')}>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    <button type="button" onClick={toggleFullscreen} title="fullscreen board"
+                      className="rounded-sm border border-border p-1 text-muted-foreground hover:text-foreground">
+                      <Maximize2 className="size-3.5" />
+                    </button>
+                  </div>
+                </div>
+                <div ref={stageRef} className="min-h-0 flex-1 bg-background">
+                  <ErrorBoundary>
+                    {newDesign ? (
+                      <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-muted-foreground">
+                        <Cpu className="size-9 opacity-25" />
+                        <span className="text-xs">New design — describe a board on the left to begin.</span>
+                      </div>
+                    ) : (
+                      <>
+                        {view === '3d' && (
+                          <Board3D basePath={boardBase} fallback={
+                            <div className="flex h-full items-center justify-center text-xs text-muted-foreground">no 3D model for this run</div>} />
+                        )}
+                        {view === 'layout' && (
+                          <BoardCanvas key={selectedRun.id} run={selectedRun}
+                            realBoard={isReal ? real?.board : null} basePath={boardBase} />
+                        )}
+                        {view === 'schematic' && <BoardSchematic runDir={selectedRunDir ?? null} />}
+                      </>
+                    )}
+                  </ErrorBoundary>
+                </div>
+              </>
+            )}
+            {stage === 'id' && (
+              <ErrorBoundary>
+                {idBrief
+                  ? <IdStageView brief={idBrief} boardMm={isReal ? real?.board?.boardSize : undefined} runId={selectedRun?.id} />
+                  : <StagePlaceholder title="Industrial Design" Icon={Palette} />}
+              </ErrorBoundary>
+            )}
+            {stage === 'mechanical' && (
+              <ErrorBoundary><MechanicalStage spec={productSpec} runId={selectedRun?.id} /></ErrorBoundary>
+            )}
+            {stage === 'simulation' && (
+              <ErrorBoundary><SimulationStage spec={productSpec} runId={selectedRun?.id} /></ErrorBoundary>
+            )}
+            {(stage === 'firmware' || stage === 'manufacturing' || stage === 'supplyChain' || stage === 'validation') && (
+              <ErrorBoundary><DisciplineStage discipline={stage} spec={productSpec} runId={selectedRun?.id} /></ErrorBoundary>
+            )}
+          </section>
+
+          <Handle which="right" />
+
+          {/* RIGHT — the active stage's detailed results */}
+          <section style={{ width: rightW }} className="flex shrink-0 border-l border-border">
+            {stage === 'electronics' ? (
+              <>
+                <nav className="flex w-16 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border bg-card/30 py-2">
+                  {VIEWS.map((v) => {
+                    const on = tab === v.tab
+                    return (
+                      <button key={v.tab} type="button" onClick={() => setTab(v.tab)} title={v.label}
+                        className={cn('mx-1.5 flex flex-col items-center gap-0.5 rounded-md px-1 py-1.5 text-[8px]',
+                          on ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground')}>
+                        <v.Icon className={cn('size-4', on && 'text-primary')} />
+                        <span className="leading-none">{v.label}</span>
+                      </button>
+                    )
+                  })}
+                </nav>
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <div className="min-h-0 flex-1 overflow-y-auto">
+                    <ErrorBoundary>
+                      {newDesign ? (
+                        <div className="flex h-full items-center justify-center p-6 text-center text-xs text-muted-foreground">
+                          No board yet — the overview appears once your new design builds.
+                        </div>
+                      ) : (
+                        <>
+                          {tab === 'Overview' && <RunOverview runId={selectedRun.runDir ? selectedRun.id : null} run={selectedRun} />}
+                          {tab === 'Objects' && <BoardObjects real={real} />}
+                          {tab === 'Artifacts' && <ArtifactExplorer runId={selectedRun.runDir ? selectedRun.id : null} />}
+                          {tab === 'Code' && <CodeViewer key={isReal ? 'real' : 'seed'} files={isReal ? real?.ato : null} />}
+                          {tab === 'BOM' && <BomTable lines={isReal ? real?.bom : null} />}
+                          {tab === 'Checks' && <BoardChecks real={real} />}
+                          {tab === 'Constraints' && <ConstraintsPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
+                          {tab === 'Pinout' && <PinoutPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
+                          {tab === 'Advanced' && <AdvancedRoutingPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
+                          {tab === 'Ingest' && <IngestPanel />}
+                          {tab === 'Patterns' && <PatternsPanel />}
+                          {tab === 'FL-1 Ready' && <FL1ReadinessPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
+                          {tab === 'Recovery' && <RecoveryPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
+                          {tab === 'Assembly' && <AssemblyPanel runId={selectedRun.runDir ? selectedRun.id : null} fabZip={null} />}
+                          {tab === 'Review' && <ReviewPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
+                          {tab === 'FL-1' && (
+                            <div className="flex h-full flex-col">
+                              <FL1ValidationView runId={selectedRun.runDir ? selectedRun.id : null} />
+                              <div className="border-t border-border">
+                                <FL1Loop
+                                  runId={selectedRun.runDir ? selectedRun.id : null}
+                                  onRevise={(eco) => setRevisePrefill(eco)}
+                                />
+                              </div>
+                            </div>
+                          )}
+                          {tab === 'Order' && <ProcurementPanel real={real} runDir={selectedRunDir ?? null} />}
+                        </>
+                      )}
+                    </ErrorBoundary>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="flex min-w-0 flex-1 flex-col">
+                <ErrorBoundary>
+                  {['firmware', 'manufacturing', 'supplyChain', 'validation'].includes(stage) ? (
+                    <div className="flex h-full flex-col gap-3 p-4 text-[12px] text-muted-foreground">
+                      <div className="font-mono text-[9px] uppercase tracking-wide">specialist module</div>
+                      <p>A <span className="text-foreground">separate module</span> built on the shared generic engine: the product engine emits a structured artifact grounded in the spec + real board.</p>
+                      <p>Fidelity is honest — <span className="text-amber-600 dark:text-amber-400">generated / advisory</span>, not validated, compiled, or live-sourced. Each artifact carries its own fidelity label.</p>
+                    </div>
+                  ) : stage === 'explore' ? (
+                    <div className="flex h-full flex-col gap-3 p-4 text-[12px] text-muted-foreground">
+                      <div className="font-mono text-[9px] uppercase tracking-wide">design-of-N</div>
+                      <p>The product engine turns your spec into a <span className="text-foreground">design problem</span> (variables · objectives · constraints), then the optimizer generates candidates, scores them, and picks the best off the Pareto frontier.</p>
+                      <p>Objectives with a real evaluator (cost, size, battery) are scored analytically. Objectives without one (audio, antenna, thermal…) are carried as <span className="text-amber-600 dark:text-amber-400">honest gaps</span> until their evaluator plugin lands — never faked.</p>
+                      <p>The selected design is what the discipline modules then build.</p>
+                    </div>
+                  ) : stage === 'id'
+                    ? (idBrief ? <IdBriefPanel brief={idBrief} /> : <StagePlaceholder title="Industrial Design" Icon={Palette} />)
+                    : stage === 'mechanical'
+                      ? (
+                        <div className="flex h-full flex-col gap-3 p-4 text-[12px] text-muted-foreground">
+                          <div className="font-mono text-[9px] uppercase tracking-wide">mechanical · CAD</div>
+                          <p>The product engine emits a <span className="text-foreground">mechanical build plan</span> (sketch · extrude · pocket · standoff · cutout) sized to the real board. A thin executor renders it in <span className="text-foreground">Onshape</span> and exports a real <span className="text-foreground">STEP</span> file.</p>
+                          <p>No fixed enclosure recipe — the plan (data) decides the form, so the same executor builds a shell, a bracket, or a potting box.</p>
+                          <p>Advisory CAD: a first-pass parametric part, <span className="text-amber-600 dark:text-amber-400">not tolerance/fit-validated</span>. Per-op failures are reported, never hidden.</p>
+                        </div>
+                      )
+                      : (
+                        <div className="flex h-full flex-col gap-3 p-4 text-[12px] text-muted-foreground">
+                          <div className="font-mono text-[9px] uppercase tracking-wide">simulation · physics</div>
+                          <p>Real lumped-physics simulations via <span className="text-foreground">numpy/scipy</span> — thermal (transient RC), drop (impulse), acoustics (sealed-box), RF (link budget), battery (energy). Each result is labeled by <span className="text-foreground">fidelity</span> and the tool that produced it.</p>
+                          <p>These are lumped/analytic, <span className="text-amber-600 dark:text-amber-400">not 3D FEA/FDTD</span>. High-fidelity solvers (Elmer · CalculiX · openEMS · OpenFOAM; gmsh present) are the install-gated upgrade.</p>
+                          <p>The runner only reports metrics it can compute — nothing faked.</p>
+                        </div>
+                      )}
+                </ErrorBoundary>
+              </div>
+            )}
+          </section>
     </main>
   )
 }

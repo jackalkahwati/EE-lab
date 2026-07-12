@@ -58,13 +58,29 @@ To ask the next question:
 When the form is pinned down (or you have asked enough), finalize with EXACTLY:
 {"enough":true,"brief":${ID_BRIEF_SCHEMA}}`
 
+/** When the electronics board is already built, its real footprint is a HARD
+ *  floor on the envelope — the form must physically contain the achievable
+ *  geometry, never promise something smaller than the board. */
+function boardGround(rb: { wMm?: number; hMm?: number; layers?: number; components?: number } | undefined): string {
+  if (!rb || !rb.wMm || !rb.hMm) return ''
+  const w = Math.round(rb.wMm)
+  const h = Math.round(rb.hMm)
+  return (
+    `\n\nGROUNDING — the electronics board for this product is ALREADY BUILT and FIXED at these REAL dimensions: ${w} × ${h} mm` +
+    (rb.layers ? `, ${rb.layers}-layer` : '') +
+    (rb.components ? `, ${rb.components} components` : '') +
+    `. Your envelope MUST physically contain this board plus enclosure walls, a battery, and clearances: envelopeMm.x must be >= ${w + 4}, envelopeMm.y >= ${h + 4}, and envelopeMm.z must leave room for the board + component + battery stack (typically >= 10). NEVER propose an envelope smaller than the board footprint — design the form AROUND this achievable geometry. If the board is larger than the intent implied, say so honestly in the rationale.`
+  )
+}
+
 /** Shared provider chain (lib/llm), or the caller's own key/provider header.
  *  Forces Anthropic like the architect — the structured brief is emitted
  *  unreliably by the default nemotron fallback. */
-async function callLLM(userMsg: string, force: boolean, override?: LLMOverride) {
-  const sys = force
+async function callLLM(userMsg: string, force: boolean, override?: LLMOverride, ground?: string) {
+  let sys = force
     ? SYSTEM + '\nYou have asked enough questions, you MUST finalize now (enough:true).'
     : SYSTEM
+  if (ground) sys += ground
   let lastErr: unknown
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -147,7 +163,8 @@ export async function POST(req: Request) {
       `Questions already asked: ${answers.length} of max ${MAX_QUESTIONS}.`
 
     const force = answers.length >= MAX_QUESTIONS
-    const { out, provider } = await callLLM(userMsg, force, overrideFromHeaders(req.headers))
+    const ground = boardGround(body.realBoard)
+    const { out, provider } = await callLLM(userMsg, force, overrideFromHeaders(req.headers), ground)
 
     if (out.enough) {
       const brief = normalizeIdBrief(out.brief)

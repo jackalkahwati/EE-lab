@@ -18,23 +18,23 @@ import { authSecret } from '@/lib/auth'
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
+  // Self-redirects use APP_URL (canonical https origin), not req.nextUrl —
+  // behind the tunnel req.nextUrl.origin is http://localhost:4500.
+  const origin = process.env.APP_URL || req.nextUrl.origin
   try {
     authSecret()
   } catch {
-    const url = req.nextUrl.clone()
-    url.pathname = '/login'
+    const url = new URL('/login', origin)
     url.search = '?error=auth-not-configured'
     return NextResponse.redirect(url)
   }
   const clientId = process.env.GOOGLE_CLIENT_ID
   if (!clientId || !process.env.GOOGLE_CLIENT_SECRET) {
-    const url = req.nextUrl.clone()
-    url.pathname = '/login'
+    const url = new URL('/login', origin)
     url.search = '?error=google-not-configured'
     return NextResponse.redirect(url)
   }
 
-  const origin = process.env.APP_URL || req.nextUrl.origin
   const state = randomBytes(16).toString('hex')
   const auth = new URL('https://accounts.google.com/o/oauth2/v2/auth')
   auth.searchParams.set('client_id', clientId)

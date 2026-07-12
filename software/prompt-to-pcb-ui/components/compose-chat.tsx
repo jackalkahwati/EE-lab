@@ -15,6 +15,11 @@ import { STAGE_DEFS, STAGE_PREFIX, type StageId, type StageState } from '@/lib/f
 import { Plus, Menu, Loader2, Check, X, Circle, Square, Pencil } from 'lucide-react'
 import { boardIntentOf, disciplineRows, type ProductSpec } from '@/lib/product-spec'
 import { idBriefSummary, type IdBrief } from '@/lib/id-brief'
+import { loadRealBoard } from '@/lib/real-board'
+
+/** Real board footprint handed to Industrial Design so its envelope contains
+ *  the achievable geometry (the board is built first, then ID wraps it). */
+type GroundBoard = { wMm: number; hMm: number; layers?: number; components?: number }
 
 type Answer = { question: string; answer: string }
 type Question = { type: 'question'; question: string; boardClass?: string; hints?: string[] }
@@ -44,7 +49,7 @@ function b64(json: string) {
     String.fromCharCode(parseInt(h, 16))))
 }
 
-export function ComposeChat({ threads, activeId, activeRunId, activeName, newDesign, revisePrefill, onSelectThread, onNew, onRunComplete, onRename, onPrefillConsumed }: {
+export function ComposeChat({ threads, activeId, activeRunId, activeName, newDesign, revisePrefill, onSelectThread, onNew, onRunComplete, onRename, onPrefillConsumed, onIdBrief, onProductSpec }: {
   threads: { id: string; label: string }[]
   activeId: string
   activeRunId?: string   // the real run currently on screen (revisable)
@@ -56,6 +61,8 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
   onRunComplete: (runDir: string, id: string) => void
   onRename?: (id: string, name: string) => void
   onPrefillConsumed?: () => void
+  onIdBrief?: (brief: IdBrief | null) => void // lift the ID brief to the workspace panes
+  onProductSpec?: (spec: ProductSpec | null) => void // lift the spec for the Explore stage
 }) {
   const [phase, setPhase] = useState<Phase>('idle')
   const [request, setRequest] = useState('')
@@ -63,6 +70,7 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
   const [current, setCurrent] = useState<Question | null>(null)
   const [spec, setSpec] = useState<Spec | null>(null)
   const [idBrief, setIdBrief] = useState<IdBrief | null>(null)
+  const [groundBoard, setGroundBoard] = useState<GroundBoard | null>(null)
   const [productSpec, setProductSpec] = useState<ProductSpec | null>(null)
   const [revSpec, setRevSpec] = useState<{ blocks: string[]; boardClass: string; note: string; request: string } | null>(null)
   const [typed, setTyped] = useState('')
@@ -79,6 +87,13 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
     bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight, behavior: 'smooth' })
   }, [answers, current, spec, logs, phase])
   useEffect(() => () => { esRef.current?.close() }, [])
+  // lift the ID brief to the workspace so the center/right panes can show the
+  // Industrial Design stage. Keyed on the brief only, so a parent re-render
+  // passing a fresh callback cannot loop.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { onIdBrief?.(idBrief) }, [idBrief])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { onProductSpec?.(productSpec) }, [productSpec])
 
   // An FL-1 ECO (or any external revision text) drops straight into the input,
   // pre-filled for review; the user edits if needed and presses Send to revise.
@@ -106,7 +121,7 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
   function reset() {
     esRef.current?.close(); esRef.current = null
     setPhase('idle'); setRequest(''); setAnswers([]); setCurrent(null); setSpec(null)
-    setIdBrief(null); setProductSpec(null); setRevSpec(null); setTyped(''); setErr(null); setStages({}); setLogs([]); onNew()
+    setIdBrief(null); setGroundBoard(null); setProductSpec(null); setRevSpec(null); setTyped(''); setErr(null); setStages({}); setLogs([]); onNew()
   }
 
   // With a built board on screen (not a fresh +New), a chat message REVISES it.
@@ -136,13 +151,14 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
     const v = typed.trim(); if (!v) return
     setTyped('')
     if (reviseMode && activeRunId) { setRequest(v); revise(v, activeRunId) }
-    // every fresh design enters through Industrial Design first (form/CMF/
-    // envelope), whose brief then constrains the Product Architect, which decides
-    // which discipline modules to invoke. No product/board toggle.
-    else if (phase === 'idle') { setRequest(v); askIndustrialDesign(v, []) }
+    // Every fresh design enters through the Product Architect, which decides which
+    // discipline modules to invoke and builds the real board FIRST. Industrial
+    // Design runs AFTER, grounded in that real board (form wraps achievable
+    // geometry — no promising a form the electronics can't fit). No toggle.
+    else if (phase === 'idle') { setRequest(v); askArchitect(v, []) }
     else if (phase === 'id' && current) {
       const next = [...answers, { question: current.question, answer: v }]
-      setAnswers(next); setCurrent(null); askIndustrialDesign(request, next)
+      setAnswers(next); setCurrent(null); askIndustrialDesign(request, next, groundBoard)
     }
     else if (phase === 'architect' && current) {
       const next = [...answers, { question: current.question, answer: v }]
@@ -177,7 +193,7 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
   /** Launch the real board pipeline for a finalized board spec + prompt. Used by
    *  both the manual "Yes, build it" path and the Architect's auto electronics
    *  hand-off, so the two flows share one build code path. */
-  function buildBoard(bspec: { blocks: string[]; boardClass: string; layers?: number }, req: string) {
+  function buildBoard(bspec: { blocks: string[]; boardClass: string; layers?: number }, req: string, opts?: { thenId?: boolean }) {
     setPhase('building'); setStages({}); setLogs([])
     const id = `run-${crypto.randomUUID()}`
     const payload = b64(JSON.stringify({ blocks: bspec.blocks, boardClass: bspec.boardClass, ...(bspec.layers ? { layers: bspec.layers } : {}) }))
@@ -192,6 +208,8 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
       else if (ev.type === 'done') {
         es.close(); esRef.current = null; setPhase('done')
         if (ev.runDir) onRunComplete(ev.runDir, id)
+        // product flow: once the real board exists, wrap it with Industrial Design
+        if (opts?.thenId && ev.runDir) startIdFromBoard(ev.runDir)
       } else if (ev.type === 'error') { es.close(); esRef.current = null; setErr(ev.text ?? 'pipeline error'); setPhase('error') }
     }
     es.onerror = () => { es.close(); esRef.current = null; setErr('connection lost'); setPhase('error') }
@@ -227,29 +245,27 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
       const bs = await r.json()
       if (bs.error) throw new Error(bs.error)
       if (bs.type !== 'spec') throw new Error('electronics module could not finalize a board')
-      buildBoard(bs as Spec, boardIntentOf(ps))
+      // build the real board first; Industrial Design wraps it once it exists.
+      buildBoard(bs as Spec, boardIntentOf(ps), { thenId: true })
     } catch (e) { setErr(String(e)); setPhase('error') } finally { setLoading(false) }
   }
 
-  /** Industrial Design: the FIRST stage. A clarifying interview about form,
-   *  ergonomics, CMF, and envelope; its finalized brief then constrains the
-   *  Product Architect. Same interview shape as the tiers below it. */
-  async function askIndustrialDesign(req: string, acc: Answer[]) {
+  /** Industrial Design: runs AFTER the electronics board is built, grounded in
+   *  its real footprint (ground). A clarifying interview about form, ergonomics,
+   *  CMF, and envelope; the finalized brief wraps the achievable geometry. The
+   *  board is already on screen, so a finished brief returns to the 'done' state. */
+  async function askIndustrialDesign(req: string, acc: Answer[], ground: GroundBoard | null) {
     setLoading(true); setErr(null)
     try {
       const r = await fetch('/api/industrial-design', {
         method: 'POST', headers: { 'content-type': 'application/json', ...llmHeaders() },
-        body: JSON.stringify({ request: req, answers: acc }),
+        body: JSON.stringify({ request: req, answers: acc, realBoard: ground ?? undefined }),
       })
       const d = await r.json()
       if (d.error) throw new Error(d.error)
       if (d.type === 'brief') {
-        const brief = d.brief as IdBrief
-        setIdBrief(brief)
-        // hand off to the architect with the ID brief as a hard constraint; the
-        // ID Q&A is done, so start the architect's interview with a clean slate.
-        setAnswers([]); setCurrent(null)
-        await askArchitect(req, [], brief)
+        setIdBrief(d.brief as IdBrief)
+        setCurrent(null); setAnswers([]); setPhase('done')
       } else {
         setCurrent({ type: 'question', question: d.question, boardClass: d.product } as Question)
         setPhase('id')
@@ -257,8 +273,21 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
     } catch (e) { setErr(String(e)); setPhase('error') } finally { setLoading(false) }
   }
 
+  /** After the electronics board finishes, kick off Industrial Design grounded in
+   *  its real footprint so the form wraps what was actually built. */
+  async function startIdFromBoard(runDir: string) {
+    const rb = await loadRealBoard(runDir).catch(() => null)
+    const ground: GroundBoard | null = rb
+      ? { wMm: rb.board.boardSize.wMm, hMm: rb.board.boardSize.hMm, layers: rb.board.layers, components: rb.board.components }
+      : null
+    setGroundBoard(ground)
+    setAnswers([]); setCurrent(null)
+    await askIndustrialDesign(request, [], ground)
+  }
+
   /** Product-tier interview: same shape as the board interview, one level up.
-   *  An optional Industrial Design brief rides along as an upstream constraint. */
+   *  An optional Industrial Design brief can ride along as a constraint (used by
+   *  the feedback loop; the first pass runs unconstrained, form comes after). */
   async function askArchitect(req: string, acc: Answer[], brief?: IdBrief) {
     setLoading(true); setErr(null)
     try {
@@ -351,9 +380,9 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
       <div ref={bodyRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 text-sm">
         {phase === 'idle' && !reviseMode && (
           <p className="text-muted-foreground">
-            Describe a product or a board. I&apos;ll shape its industrial design
-            (form, ergonomics, CMF, envelope), decompose that into engineering
-            disciplines, and build the ones we can.
+            Describe a product or a board. I&apos;ll decompose it into engineering
+            disciplines, build the real board first, then wrap it in an industrial
+            design (form, ergonomics, CMF, envelope) grounded in what we actually built.
             <span className="mt-1 block text-[11px]">e.g. &ldquo;invisible AI earbud, sub-$40 BOM, all-day battery&rdquo; · &ldquo;8-probe relay test matrix, RP2040, 24V&rdquo;</span>
           </p>
         )}

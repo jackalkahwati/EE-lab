@@ -9,8 +9,10 @@ import { authSecret, makeSession, sessionCookieHeader, upsertOAuthUser } from '@
 export const dynamic = 'force-dynamic'
 
 function fail(req: NextRequest, code: string) {
-  const url = req.nextUrl.clone()
-  url.pathname = '/login'
+  // Redirect off the canonical public origin (APP_URL), not req.nextUrl —
+  // behind the Cloudflare tunnel the request reaches Next as
+  // http://localhost:4500, which would bounce the user to a dead localhost URL.
+  const url = new URL('/login', process.env.APP_URL || req.nextUrl.origin)
   url.search = `?error=${code}`
   return NextResponse.redirect(url)
 }
@@ -81,7 +83,9 @@ export async function GET(req: NextRequest) {
   }
   const nextPath = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/'
   const qIdx = nextPath.indexOf('?')
-  const url = req.nextUrl.clone()
+  // Build the post-login redirect off APP_URL (the canonical https origin), not
+  // req.nextUrl — behind the tunnel that origin is http://localhost:4500.
+  const url = new URL(origin)
   url.pathname = qIdx >= 0 ? nextPath.slice(0, qIdx) : nextPath
   url.search = qIdx >= 0 ? nextPath.slice(qIdx) : ''
   const res = NextResponse.redirect(url)
