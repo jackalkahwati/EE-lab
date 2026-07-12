@@ -1,14 +1,11 @@
 /**
- * Chip-scale electronics module — the product engine emits a tscircuit board
- * (code-defined electronics) for the product; the tscircuit runner autoroutes it
- * in-process and returns the REAL board size + routing result + an SVG. This is
- * the chip-down path that produces an earbud-scale board the big flroute pipeline
- * can't — and it's honest: a board only counts as routed with traces AND zero
- * errors, and the real dimensions flow into the mechanical fit-check / redesign
- * loop (so the fit can actually close).
- *
- * Generic: the product engine directs the board (code = data); the runner just
- * executes whatever it emits.
+ * Chip-scale electronics module — the product engine lists a MINIMAL, highly-
+ * integrated part set + connections; the tscircuit runner places them
+ * DETERMINISTICALLY (double-sided shelf-pack — no LLM placement) and autoroutes
+ * in-process. This reliably yields an earbud-scale board the big flroute pipeline
+ * can't, and its real dimensions flow into the mechanical fit-check / redesign
+ * loop so the fit can actually close. Honest: routed only with traces AND zero
+ * errors; the real size is never faked.
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
@@ -22,50 +19,58 @@ export const maxDuration = 200
 const RUN_ID = /^run-[A-Za-z0-9._-]{1,128}$/
 
 const SYSTEM = `detailed thinking off.
-You are the chip-scale electronics specialist. Emit a tscircuit board (code-
-defined PCB) that realizes the product's electronics at the SMALLEST honest size,
-using chip-scale packages. Output ONLY tscircuit code — a default-exported React
-component — no prose, no markdown fences.
+You are the chip-scale electronics specialist. List the MINIMAL, highly-integrated
+part set + connections for this product's board. Assume high integration: prefer a
+single audio/BLE SoC that already integrates the PMIC/charger/DSP; add ONLY what is
+truly separate (1-2 MEMS mics, a driver amp if not integrated) plus a few 0201
+decoupling parts. Fewer parts = smaller board.
 
-RULES (critical — the autorouter fails if violated):
-- <board autorouter="auto"> with NO width/height (it auto-fits).
-- Components: <chip name="U1" footprint="qfn32" pcbX={..} pcbY={..} />, plus
-  <capacitor .. footprint="0402"/> and <resistor .. footprint="0402"/>.
-  Use small footprints: qfn8/qfn16/qfn24/qfn32 for ICs, 0201/0402 for passives.
-- PLACEMENT MUST NOT OVERLAP courtyards. Space ICs at least ~8mm apart; keep
-  passives ≥2mm from any IC. Lay parts on a spread grid, not stacked.
-- Connect with <trace from=".U1 > .pinN" to=".C1 > .pin1" />. Pin numbers MUST
-  exist on the footprint (qfn32 -> pins 1..32, qfn8 -> 1..8, passives -> pin1/pin2).
-- Include the real functional blocks for THIS product (e.g. a BLE audio SoC, PMIC/
-  charger, MEMS mic(s), driver amp) as chips, plus a handful of decoupling parts.
-- 6-12 components, ~6-14 traces. Keep it valid and routable.
+Output ONLY one JSON object, no prose, no fences:
+{"parts":[{"name":"U1","footprint":"qfn32","kind":"chip"},{"name":"MIC1","footprint":"qfn6","kind":"chip"},{"name":"C1","footprint":"0201","kind":"capacitor"}],
+ "nets":[["U1.1","C1.1"],["U1.13","MIC1.1"]]}
+RULES:
+- footprints: qfn6/qfn8/qfn16/qfn24/qfn32 for ICs; 0201 or 0402 for passives.
+- kind is "chip" | "capacitor" | "resistor".
+- nets connect pins as "COMPONENT.PIN" (e.g. "U1.5" = U1 pin 5). Pin numbers MUST
+  exist on the footprint (qfn32 -> 1..32, qfn6 -> 1..6, passives -> 1 and 2).
+- 4-7 parts, 4-8 nets — maximize integration (one SoC does most of it), keep it
+  minimal so it packs tiny. The runner computes placement + routing — you only
+  list parts + connections.`
 
-Example shape:
-export default () => (
-  <board autorouter="auto">
-    <chip name="U1" footprint="qfn32" pcbX={0} pcbY={0} />
-    <chip name="U2" footprint="qfn16" pcbX={-10} pcbY={0} />
-    <capacitor name="C1" capacitance="100nF" footprint="0402" pcbX={5} pcbY={-8} />
-    <trace from=".U1 > .pin1" to=".C1 > .pin1" />
-    <trace from=".U1 > .pin5" to=".U2 > .pin1" />
-  </board>
-)`
-
-async function emitCode(userMsg: string, override?: LLMOverride): Promise<string> {
+async function emitPartsNets(userMsg: string, override?: LLMOverride): Promise<{ parts: any[]; nets: any[] }> {
   const antKey = process.env.ANTHROPIC_API_KEY
   const opts = override?.apiKey
     ? override
     : antKey
       ? { apiKey: antKey, provider: 'anthropic' as const, model: 'claude-sonnet-5' }
       : { model: 'claude-sonnet-5' }
-  const { text } = await callLLMText(SYSTEM, userMsg, opts)
-  let code = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
-  const fence = code.match(/```(?:tsx|jsx|ts|js)?\s*\n([\s\S]*?)```/)
-  if (fence) code = fence[1].trim()
-  return code
+  let lastErr: unknown
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const { text } = await callLLMText(SYSTEM, attempt === 0 ? userMsg : userMsg + '\n\nReply with ONLY the JSON object.', opts)
+      const o = JSON.parse(firstJson(text))
+      if (Array.isArray(o.parts) && o.parts.length) return { parts: o.parts, nets: Array.isArray(o.nets) ? o.nets : [] }
+    } catch (e) { lastErr = e }
+  }
+  throw lastErr ?? new Error('parts model failed')
 }
 
-function runBoard(code: string, svgPath: string): Promise<any> {
+function firstJson(text: string): string {
+  const t = text.replace(/<think>[\s\S]*?<\/think>/gi, '')
+  const i = t.indexOf('{')
+  if (i < 0) throw new Error('no json')
+  let depth = 0, inStr = false, esc = false
+  for (let k = i; k < t.length; k++) {
+    const ch = t[k]
+    if (inStr) { if (esc) esc = false; else if (ch === '\\') esc = true; else if (ch === '"') inStr = false }
+    else if (ch === '"') inStr = true
+    else if (ch === '{') depth++
+    else if (ch === '}') { depth--; if (depth === 0) return t.slice(i, k + 1) }
+  }
+  throw new Error('unbalanced json')
+}
+
+function runBoard(payload: object, svgPath: string): Promise<any> {
   const script = path.join(process.cwd(), '..', '..', 'tools', 'tscircuit', 'run_board.mjs')
   return new Promise((resolve, reject) => {
     const py = spawn('node', [script], { timeout: 150_000 })
@@ -77,7 +82,7 @@ function runBoard(code: string, svgPath: string): Promise<any> {
       try { resolve(JSON.parse(out.trim().split('\n').pop() || '{}')) }
       catch { reject(new Error('runner produced no JSON: ' + (err || out).slice(0, 300))) }
     })
-    py.stdin.write(JSON.stringify({ code, svgPath }))
+    py.stdin.write(JSON.stringify({ ...payload, svgPath }))
     py.stdin.end()
   })
 }
@@ -96,32 +101,16 @@ export async function POST(req: Request) {
       `PRODUCT: ${spec.product}\n${spec.description || ''}\n` +
       `size budget: ${JSON.stringify(b.sizeMm ?? {})}\n` +
       `electronics: ${elec?.summary || elec?.boardIntent || '-'}\n` +
-      `Emit the chip-scale tscircuit board.`
+      `List the minimal chip-scale part set + nets.`
 
-    const override = overrideFromHeaders(req.headers)
-    let code = await emitCode(userMsg, override)
+    const { parts, nets } = await emitPartsNets(userMsg, overrideFromHeaders(req.headers))
     const dir = path.join(process.cwd(), 'public', 'runs', runId, 'electronics')
     await fs.mkdir(dir, { recursive: true })
     const svgPath = path.join(dir, 'chipscale.svg')
-    let result = await runBoard(code, svgPath)
+    const result = await runBoard({ parts, nets }, svgPath)
 
-    // one repair pass: if parts overlap (the autorouter's main failure mode),
-    // feed the error back and ask for more spacing.
-    const totalErrs = (r: any) => Object.values(r?.errors ?? {}).reduce((a: number, b: any) => a + b, 0) as number
-    if (!result.error && totalErrs(result) > 0 && result.routedTraces > 0) {
-      const fixMsg =
-        `${userMsg}\n\nYour previous board had ${totalErrs(result)} placement/DRC errors ` +
-        `(${Object.keys(result.errors).join(', ')}). Here is the code:\n${code}\n\n` +
-        `Emit a CORRECTED version with MORE spacing between the overlapping parts (increase the ` +
-        `pcbX/pcbY gaps so no courtyards touch). Keep every component and trace. Output ONLY the code.`
-      const code2 = await emitCode(fixMsg, override)
-      const result2 = await runBoard(code2, svgPath)
-      if (!result2.error && totalErrs(result2) < totalErrs(result)) { code = code2; result = result2 }
-    }
+    if (result?.error) return Response.json({ ok: false, error: result.error })
 
-    if (result?.error) return Response.json({ ok: false, error: result.error, code })
-
-    // persist the chip-scale board dims so mechanical fit-check / redesign prefer it
     if (result.boardMm) {
       await fs.writeFile(path.join(dir, 'chipscale-board.json'),
         JSON.stringify({ boardMm: result.boardMm, areaMm2: result.areaMm2, components: result.components, routedTraces: result.routedTraces }))
@@ -135,7 +124,7 @@ export async function POST(req: Request) {
       routedTraces: result.routedTraces,
       errors: result.errors ?? {},
       svgUrl: result.svg ? `/runs/${runId}/electronics/chipscale.svg?t=${Date.now()}` : null,
-      code,
+      code: result.code,
     })
   } catch (err) {
     return Response.json({ ok: false, error: String(err) }, { status: 502 })
