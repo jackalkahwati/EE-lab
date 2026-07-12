@@ -11,7 +11,65 @@
  * Usage: node run_board.mjs   < {"code":"...","svgPath":"/abs/board.svg"}
  */
 import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { spawnSync } from 'node:child_process'
 import { runTscircuitCode } from '@tscircuit/eval'
+
+// Real KiCad DRC — the honesty upgrade over tscircuit's own router check. We
+// convert the routed board to a real .kicad_pcb and run `kicad-cli pcb drc`
+// against realistic fab rules (JLCPCB 4-layer, 0.09mm), so "clean" means it
+// passes the same design-rule check a fab runs, not just our own. Gated on
+// kicad-cli being installed; absent -> honestly reported unavailable.
+const KICAD_CLI = ['/opt/homebrew/bin/kicad-cli', '/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli']
+  .find((p) => { try { return fs.existsSync(p) } catch { return false } })
+
+// JLCPCB 4-layer standard capability, published: min track/space 0.09mm, min
+// drill 0.2mm, min via 0.45mm dia / 0.13mm annular ring. One consistent fab
+// profile so every reported violation is measured against the same real fab.
+const FAB_RULES = `(version 1)
+(rule "min_track_width" (constraint track_width (min 0.09mm)))
+(rule "min_clearance" (constraint clearance (min 0.09mm)))
+(rule "min_hole" (constraint hole_size (min 0.2mm)))
+(rule "min_via_diameter" (constraint via_diameter (min 0.45mm)))
+(rule "min_annular_width" (constraint annular_width (min 0.13mm)))`
+
+async function realDrc(cj) {
+  if (!KICAD_CLI) return { available: false, reason: 'kicad-cli not installed' }
+  let dir
+  try {
+    const ver = spawnSync(KICAD_CLI, ['version'], { encoding: 'utf8', timeout: 15000 }).stdout?.trim() || '?'
+    const { CircuitJsonToKicadPcbConverter } = await import('circuit-json-to-kicad')
+    const conv = new CircuitJsonToKicadPcbConverter(cj)
+    conv.runUntilFinished()
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fl-drc-'))
+    const pcbPath = path.join(dir, 'board.kicad_pcb')
+    const drcPath = path.join(dir, 'drc.json')
+    fs.writeFileSync(pcbPath, conv.getOutputString())
+    fs.writeFileSync(path.join(dir, 'board.kicad_dru'), FAB_RULES)
+    const r = spawnSync(KICAD_CLI, ['pcb', 'drc', '--format', 'json', '--output', drcPath, pcbPath], { encoding: 'utf8', timeout: 120000 })
+    if (!fs.existsSync(drcPath)) return { available: false, reason: 'drc produced no report', stderr: (r.stderr || '').slice(0, 200) }
+    const rep = JSON.parse(fs.readFileSync(drcPath, 'utf8'))
+    const all = [...(rep.violations || []), ...(rep.unconnected_items || []), ...(rep.schematic_parity || [])]
+    const errs = all.filter((v) => v.severity === 'error')
+    const warns = all.filter((v) => v.severity === 'warning')
+    const byType = {}
+    for (const v of errs) byType[v.type] = (byType[v.type] || 0) + 1
+    return {
+      available: true,
+      kicadVersion: ver,
+      ruleProfile: 'JLCPCB 4-layer (0.09mm track/space)',
+      errors: errs.length,
+      warnings: warns.length,
+      errorTypes: byType,
+      sample: errs.slice(0, 6).map((v) => `${v.type}: ${(v.description || '').slice(0, 90)}`),
+    }
+  } catch (e) {
+    return { available: false, reason: String(e).slice(0, 160) }
+  } finally {
+    if (dir) try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* best effort */ }
+  }
+}
 
 // approx footprint sizes [w,h] mm — for deterministic placement
 const FP = {
@@ -99,6 +157,8 @@ async function main() {
   }
 
   const errorCount = Object.values(errors).reduce((a, b) => a + b, 0)
+  // real KiCad DRC on the actual routed board (unless explicitly skipped)
+  const drc = input.drc === false || !board ? { available: false, reason: 'skipped' } : await realDrc(cj)
   process.stdout.write(JSON.stringify({
     ok: !!board && traces.length > 0 && errorCount === 0,
     boardMm: board ? { w: Math.round(board.width * 10) / 10, h: Math.round(board.height * 10) / 10 } : null,
@@ -106,6 +166,7 @@ async function main() {
     components: comps.length,
     routedTraces: traces.length,
     errors,
+    drc,
     svg,
     code,
   }))

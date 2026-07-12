@@ -149,7 +149,7 @@ export async function POST(req: Request) {
 
     if (result.boardMm) {
       await fs.writeFile(path.join(dir, 'chipscale-board.json'),
-        JSON.stringify({ boardMm: result.boardMm, areaMm2: result.areaMm2, components: result.components, routedTraces: result.routedTraces, realFootprints }))
+        JSON.stringify({ boardMm: result.boardMm, areaMm2: result.areaMm2, components: result.components, routedTraces: result.routedTraces, realFootprints, drc: result.drc ?? null }))
     }
 
     return Response.json({
@@ -159,6 +159,7 @@ export async function POST(req: Request) {
       components: result.components,
       routedTraces: result.routedTraces,
       errors: result.errors ?? {},
+      drc: result.drc ?? null,
       realFootprints,
       svgUrl: result.svg ? `/runs/${runId}/electronics/chipscale.svg?t=${Date.now()}` : null,
       code: result.code,

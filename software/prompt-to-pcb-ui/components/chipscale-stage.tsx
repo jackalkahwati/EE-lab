@@ -19,6 +19,16 @@ type Result = {
   components?: number
   routedTraces?: number
   realFootprints?: number
+  drc?: {
+    available: boolean
+    reason?: string
+    kicadVersion?: string
+    ruleProfile?: string
+    errors?: number
+    warnings?: number
+    errorTypes?: Record<string, number>
+    sample?: string[]
+  } | null
   errors?: Record<string, number>
   svgUrl?: string | null
   code?: string
@@ -89,6 +99,33 @@ export function ChipScaleStage({ spec, runId }: { spec: any; runId?: string }) {
               ? <span className="text-emerald-600 dark:text-emerald-400">{res.realFootprints} part{res.realFootprints > 1 ? 's' : ''} on REAL LCSC footprints (easyeda2kicad); the rest generic.</span>
               : <span>Generic footprints — no LCSC parts resolved this run.</span>}
           </div>
+
+          {res.drc && (
+            res.drc.available ? (
+              <div className={cn('rounded-md border px-3 py-2 text-[12px]',
+                res.drc.errors === 0 ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                  : 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400')}>
+                <div className="font-medium">
+                  Real KiCad DRC ({res.drc.kicadVersion}) · {res.drc.ruleProfile}: {' '}
+                  {res.drc.errors === 0 ? '✓ 0 errors' : `${res.drc.errors} error${res.drc.errors === 1 ? '' : 's'}`}
+                  {res.drc.warnings ? `, ${res.drc.warnings} warning${res.drc.warnings === 1 ? '' : 's'}` : ''}
+                </div>
+                {!!res.drc.errorTypes && Object.keys(res.drc.errorTypes).length > 0 && (
+                  <div className="mt-1 text-[11px]">{Object.entries(res.drc.errorTypes).map(([k, v]) => `${k}×${v}`).join(' · ')}</div>
+                )}
+                {!!res.drc.sample?.length && (
+                  <ul className="mt-1 list-disc pl-4 text-[11px] opacity-90">
+                    {res.drc.sample.slice(0, 3).map((s, i) => <li key={i}>{s}</li>)}
+                  </ul>
+                )}
+                <div className="mt-1 text-[10px] opacity-70">Same design-rule check a fab runs — not tscircuit&apos;s own router check.</div>
+              </div>
+            ) : (
+              <div className="rounded-md border border-border px-3 py-2 text-[11px] text-muted-foreground">
+                Real KiCad DRC unavailable ({res.drc.reason}) — showing tscircuit&apos;s router check only.
+              </div>
+            )
+          )}
           {res.svgUrl && (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={res.svgUrl} alt="chip-scale PCB" className="mx-auto max-h-[46vh] w-auto rounded-md border border-border bg-white p-2" />
