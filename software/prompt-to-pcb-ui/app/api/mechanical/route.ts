@@ -109,12 +109,19 @@ export async function POST(req: Request) {
     if (!spec?.product) return Response.json({ error: 'missing product spec' }, { status: 400 })
     if (!runId || !RUN_ID.test(runId)) return Response.json({ error: 'missing/invalid runId' }, { status: 400 })
 
-    // ground the plan in the REAL built board footprint
+    // ground the plan in the REAL built board footprint — prefer the chip-scale
+    // board (electronics-cs) if it exists, else the flroute board.json
     let board: { wMm?: number; hMm?: number; layers?: number } = {}
     try {
-      const bj = JSON.parse(await fs.readFile(path.join(process.cwd(), 'public', 'runs', runId, 'data', 'board.json'), 'utf8'))
-      board = { wMm: bj?.boardSize?.wMm, hMm: bj?.boardSize?.hMm, layers: bj?.layers }
-    } catch { /* no board yet — plan from budgets only */ }
+      const cs = JSON.parse(await fs.readFile(path.join(process.cwd(), 'public', 'runs', runId, 'electronics', 'chipscale-board.json'), 'utf8'))
+      if (cs?.boardMm?.w && cs?.boardMm?.h) board = { wMm: cs.boardMm.w, hMm: cs.boardMm.h }
+    } catch { /* no chip-scale board */ }
+    if (!board.wMm) {
+      try {
+        const bj = JSON.parse(await fs.readFile(path.join(process.cwd(), 'public', 'runs', runId, 'data', 'board.json'), 'utf8'))
+        board = { wMm: bj?.boardSize?.wMm, hMm: bj?.boardSize?.hMm, layers: bj?.layers }
+      } catch { /* no board yet — plan from budgets only */ }
+    }
 
     const b = spec.budgets ?? {}
     const userMsg =

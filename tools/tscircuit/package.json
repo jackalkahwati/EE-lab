@@ -1,0 +1,1 @@
+{"name":"fl-tscircuit","private":true,"type":"module","dependencies":{"@tscircuit/eval":"^0.0.996","@tscircuit/soup-util":"^0.0.41","circuit-json":"^0.0.448","circuit-to-svg":"^0.0.382","tscircuit":"^0.0.2059"}}

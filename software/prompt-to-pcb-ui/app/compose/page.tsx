@@ -43,10 +43,11 @@ import { ExploreStage } from '@/components/explore-stage'
 import { MechanicalStage } from '@/components/mechanical-stage'
 import { SimulationStage } from '@/components/simulation-stage'
 import { DisciplineStage } from '@/components/discipline-stage'
+import { ChipScaleStage } from '@/components/chipscale-stage'
 import type { IdBrief } from '@/lib/id-brief'
 import type { ProductSpec } from '@/lib/product-spec'
 import {
-  Activity, BookOpen, Box, ClipboardCheck, Code, Cpu, Eye, Factory, Gauge, LayoutDashboard, ListTree, Maximize2,
+  Activity, BookOpen, Box, CircuitBoard, ClipboardCheck, Code, Cpu, Eye, Factory, Gauge, LayoutDashboard, ListTree, Maximize2,
   Package, Palette, Receipt, ScrollText, ShieldCheck, Sparkles, Truck, Wrench,
 } from 'lucide-react'
 
@@ -73,6 +74,7 @@ const VIEWS: { tab: Tab; label: string; Icon: any }[] = [
 const STAGES = [
   { key: 'explore', label: 'Explore', Icon: Sparkles, built: true },
   { key: 'electronics', label: 'Electronics', Icon: Cpu, built: true },
+  { key: 'chipscale', label: 'Chip-scale', Icon: CircuitBoard, built: true },
   { key: 'id', label: 'Design', Icon: Palette, built: true },
   { key: 'mechanical', label: 'Mechanical', Icon: Box, built: true },
   { key: 'simulation', label: 'Simulation', Icon: Gauge, built: true },
@@ -273,7 +275,7 @@ export default function Compose2Page() {
         {/* stage bar — scoped to the middle pane */}
         <div className="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-border px-2 py-1.5">
           {STAGES.map((s) => {
-            const needsSpec = ['explore', 'firmware', 'manufacturing', 'supplyChain', 'validation'].includes(s.key)
+            const needsSpec = ['explore', 'chipscale', 'firmware', 'manufacturing', 'supplyChain', 'validation'].includes(s.key)
             const avail = needsSpec ? !!productSpec : s.key === 'electronics' ? !!selectedRun : s.key === 'id' ? !!idBrief : true
             const locked = !avail && (needsSpec || s.key === 'electronics' || s.key === 'id')
             const on = stage === s.key
@@ -363,6 +365,9 @@ export default function Compose2Page() {
             {stage === 'mechanical' && (
               <ErrorBoundary><MechanicalStage spec={productSpec} runId={selectedRun?.id} /></ErrorBoundary>
             )}
+            {stage === 'chipscale' && (
+              <ErrorBoundary><ChipScaleStage spec={productSpec} runId={selectedRun?.id} /></ErrorBoundary>
+            )}
             {stage === 'simulation' && (
               <ErrorBoundary><SimulationStage spec={productSpec} runId={selectedRun?.id} /></ErrorBoundary>
             )}
@@ -440,6 +445,13 @@ export default function Compose2Page() {
                       <div className="font-mono text-[9px] uppercase tracking-wide">specialist module</div>
                       <p>A <span className="text-foreground">separate module</span> built on the shared generic engine: the product engine emits a structured artifact grounded in the spec + real board.</p>
                       <p>Fidelity is honest — <span className="text-amber-600 dark:text-amber-400">generated / advisory</span>, not validated, compiled, or live-sourced. Each artifact carries its own fidelity label.</p>
+                    </div>
+                  ) : stage === 'chipscale' ? (
+                    <div className="flex h-full flex-col gap-3 p-4 text-[12px] text-muted-foreground">
+                      <div className="font-mono text-[9px] uppercase tracking-wide">chip-scale · tscircuit</div>
+                      <p>The chip-down path: the product engine emits a <span className="text-foreground">code-defined board</span>, and <span className="text-foreground">tscircuit</span> (MIT, in-process) autoroutes it into an earbud-scale board — where the standard flroute pipeline produces a much larger one.</p>
+                      <p>The routed board's real size flows into the <span className="text-foreground">mechanical fit-check + redesign loop</span>, so the fit can actually close.</p>
+                      <p>Honest: generic footprints, not yet WLCSP/rigid-flex — a real step toward the earbud, <span className="text-amber-600 dark:text-amber-400">not EVT silicon</span>.</p>
                     </div>
                   ) : stage === 'explore' ? (
                     <div className="flex h-full flex-col gap-3 p-4 text-[12px] text-muted-foreground">

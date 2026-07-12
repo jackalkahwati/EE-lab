@@ -107,11 +107,18 @@ export async function POST(req: Request) {
     let board: { wMm?: number; hMm?: number } = {}
     let boardAreaMm2: number | undefined
     if (runId && RUN_ID.test(runId)) {
+      // prefer the chip-scale board (electronics-cs) if present
       try {
-        const bj = JSON.parse(await fs.readFile(path.join(process.cwd(), 'public', 'runs', runId, 'data', 'board.json'), 'utf8'))
-        board = { wMm: bj?.boardSize?.wMm, hMm: bj?.boardSize?.hMm }
-        if (board.wMm && board.hMm) boardAreaMm2 = board.wMm * board.hMm
-      } catch { /* no board */ }
+        const cs = JSON.parse(await fs.readFile(path.join(process.cwd(), 'public', 'runs', runId, 'electronics', 'chipscale-board.json'), 'utf8'))
+        if (cs?.boardMm?.w && cs?.boardMm?.h) { board = { wMm: cs.boardMm.w, hMm: cs.boardMm.h }; boardAreaMm2 = cs.areaMm2 }
+      } catch { /* none */ }
+      if (!board.wMm) {
+        try {
+          const bj = JSON.parse(await fs.readFile(path.join(process.cwd(), 'public', 'runs', runId, 'data', 'board.json'), 'utf8'))
+          board = { wMm: bj?.boardSize?.wMm, hMm: bj?.boardSize?.hMm }
+          if (board.wMm && board.hMm) boardAreaMm2 = board.wMm * board.hMm
+        } catch { /* no board */ }
+      }
     }
     const antKey = process.env.ANTHROPIC_API_KEY
     const llmOpts = antKey ? { apiKey: antKey, provider: 'anthropic' as const, model: 'claude-sonnet-5' } : { model: 'claude-sonnet-5' }
