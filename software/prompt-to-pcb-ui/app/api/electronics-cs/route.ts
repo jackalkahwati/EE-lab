@@ -26,11 +26,14 @@ truly separate (1-2 MEMS mics, a driver amp if not integrated) plus a few 0201
 decoupling parts. Fewer parts = smaller board.
 
 Output ONLY one JSON object, no prose, no fences:
-{"parts":[{"name":"U1","footprint":"qfn32","kind":"chip"},{"name":"MIC1","footprint":"qfn6","kind":"chip"},{"name":"C1","footprint":"0201","kind":"capacitor"}],
+{"parts":[{"name":"U1","footprint":"qfn32","kind":"chip"},{"name":"MIC1","footprint":"qfn6","kind":"chip"},{"name":"C1","footprint":"0201","kind":"capacitor","lcsc":"C1525"}],
  "nets":[["U1.1","C1.1"],["U1.13","MIC1.1"]]}
 RULES:
 - footprints: qfn6/qfn8/qfn16/qfn24/qfn32 for ICs; 0201 or 0402 for passives.
 - kind is "chip" | "capacitor" | "resistor".
+- OPTIONAL "lcsc": if you know a REAL LCSC part number for a component, include it
+  (e.g. "C1525" = 100nF 0402, "C25804" = 10k 0402) — the platform pulls the real
+  footprint. OMIT it if unsure; a generic footprint is used. Do NOT invent LCSC ids.
 - nets connect pins as "COMPONENT.PIN" (e.g. "U1.5" = U1 pin 5). Pin numbers MUST
   exist on the footprint (qfn32 -> 1..32, qfn6 -> 1..6, passives -> 1 and 2).
 - 4-7 parts, 4-8 nets — maximize integration (one SoC does most of it), keep it
@@ -70,6 +73,25 @@ function firstJson(text: string): string {
   throw new Error('unbalanced json')
 }
 
+/** Pull a REAL KiCad footprint for an LCSC part via easyeda2kicad; null on any
+ *  failure (invalid id / no network) so the runner falls back to a generic one. */
+function fetchFootprint(lcsc: string): Promise<string | null> {
+  if (!/^C\d{2,10}$/.test(lcsc)) return Promise.resolve(null)
+  const base = path.join('/tmp', `fl_fp_${lcsc}`)
+  return new Promise((resolve) => {
+    const py = spawn('python3', ['-m', 'easyeda2kicad', '--footprint', '--overwrite', `--lcsc_id=${lcsc}`, `--output=${base}`], { timeout: 30_000 })
+    py.on('error', () => resolve(null))
+    py.on('close', async () => {
+      try {
+        const dir = `${base}.pretty`
+        const files = await fs.readdir(dir)
+        const mod = files.find((f) => f.endsWith('.kicad_mod'))
+        resolve(mod ? await fs.readFile(path.join(dir, mod), 'utf8') : null)
+      } catch { resolve(null) }
+    })
+  })
+}
+
 function runBoard(payload: object, svgPath: string): Promise<any> {
   const script = path.join(process.cwd(), '..', '..', 'tools', 'tscircuit', 'run_board.mjs')
   return new Promise((resolve, reject) => {
@@ -104,6 +126,20 @@ export async function POST(req: Request) {
       `List the minimal chip-scale part set + nets.`
 
     const { parts, nets } = await emitPartsNets(userMsg, overrideFromHeaders(req.headers))
+
+    // pull REAL LCSC footprints for any part the engine tagged with a valid id;
+    // attach as part.kicadMod so the runner uses the true pad geometry + size.
+    // Fetch each distinct id ONCE (duplicate ids — e.g. two identical caps —
+    // would otherwise race two subprocesses on the same /tmp file).
+    const ids = [...new Set(parts.map((p: any) => (p?.lcsc ? String(p.lcsc) : '')).filter(Boolean))]
+    const mods = new Map<string, string>()
+    await Promise.all(ids.map(async (id) => { const m = await fetchFootprint(id); if (m) mods.set(id, m) }))
+    let realFootprints = 0
+    for (const p of parts as any[]) {
+      const m = p?.lcsc ? mods.get(String(p.lcsc)) : undefined
+      if (m) { p.kicadMod = m; realFootprints++ }
+    }
+
     const dir = path.join(process.cwd(), 'public', 'runs', runId, 'electronics')
     await fs.mkdir(dir, { recursive: true })
     const svgPath = path.join(dir, 'chipscale.svg')
@@ -113,7 +149,7 @@ export async function POST(req: Request) {
 
     if (result.boardMm) {
       await fs.writeFile(path.join(dir, 'chipscale-board.json'),
-        JSON.stringify({ boardMm: result.boardMm, areaMm2: result.areaMm2, components: result.components, routedTraces: result.routedTraces }))
+        JSON.stringify({ boardMm: result.boardMm, areaMm2: result.areaMm2, components: result.components, routedTraces: result.routedTraces, realFootprints }))
     }
 
     return Response.json({
@@ -123,6 +159,7 @@ export async function POST(req: Request) {
       components: result.components,
       routedTraces: result.routedTraces,
       errors: result.errors ?? {},
+      realFootprints,
       svgUrl: result.svg ? `/runs/${runId}/electronics/chipscale.svg?t=${Date.now()}` : null,
       code: result.code,
     })

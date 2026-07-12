@@ -18,6 +18,7 @@ type Result = {
   areaMm2?: number | null
   components?: number
   routedTraces?: number
+  realFootprints?: number
   errors?: Record<string, number>
   svgUrl?: string | null
   code?: string
@@ -83,7 +84,10 @@ export function ChipScaleStage({ spec, runId }: { spec: any; runId?: string }) {
             {' '}{res.components} components, {res.routedTraces} traces
           </div>
           <div className="rounded-md border border-border p-2 text-[11px] text-muted-foreground">
-            vs the standard flroute pipeline (~153×112mm ≈ 17,100mm²): <span className="text-foreground">~{res.areaMm2 ? Math.round(17100 / res.areaMm2) : '?'}× smaller area</span>. Chip-scale (tscircuit, MIT, in-process) — generic footprints, not yet WLCSP/rigid-flex, so not EVT silicon.
+            vs the standard flroute pipeline (~153×112mm ≈ 17,100mm²): <span className="text-foreground">~{res.areaMm2 ? Math.round(17100 / res.areaMm2) : '?'}× smaller area</span>. Chip-scale (tscircuit, MIT, in-process).{' '}
+            {res.realFootprints
+              ? <span className="text-emerald-600 dark:text-emerald-400">{res.realFootprints} part{res.realFootprints > 1 ? 's' : ''} on REAL LCSC footprints (easyeda2kicad); the rest generic.</span>
+              : <span>Generic footprints — no LCSC parts resolved this run.</span>}
           </div>
           {res.svgUrl && (
             // eslint-disable-next-line @next/next/no-img-element
