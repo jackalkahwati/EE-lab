@@ -10,6 +10,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { callLLMText, overrideFromHeaders, type LLMOverride } from '@/lib/llm'
 import { DISCIPLINE_MODULES, DISCIPLINE_ARTIFACT_SCHEMA, normalizeDisciplineArtifact } from '@/lib/discipline-artifact'
+import { loadGroundBoard } from '@/lib/ground-board'
 import type { ProductSpec } from '@/lib/product-spec'
 
 export const dynamic = 'force-dynamic'
@@ -64,19 +65,29 @@ export async function POST(req: Request) {
     if (!spec?.product) return Response.json({ error: 'missing product spec' }, { status: 400 })
     if (!mod) return Response.json({ error: `unknown discipline: ${discipline}` }, { status: 400 })
 
-    // ground in the real board (+ BOM for supply chain)
+    // Ground in the REAL board — prefer the bespoke chip-scale board so every
+    // discipline references the actual product board, not the flroute placeholder.
     let boardCtx = ''
     if (runId && RUN_ID.test(runId)) {
-      try {
-        const bj = JSON.parse(await fs.readFile(path.join(process.cwd(), 'public', 'runs', runId, 'data', 'board.json'), 'utf8'))
-        boardCtx = `\nREAL BOARD: ${Math.round(bj?.boardSize?.wMm)}×${Math.round(bj?.boardSize?.hMm)}mm · ${bj?.layers}-layer · ${bj?.components} components · ${bj?.netsTotal} nets`
-      } catch { /* none */ }
-      if (discipline === 'supplyChain') {
-        try {
-          const bom = JSON.parse(await fs.readFile(path.join(process.cwd(), 'public', 'runs', runId, 'data', 'bom.json'), 'utf8'))
-          const lines = Array.isArray(bom) ? bom.slice(0, 30).map((l: any) => l?.mpn || l?.part || l?.value || l?.ref).filter(Boolean) : []
-          if (lines.length) boardCtx += `\nBOM PARTS: ${lines.join(', ')}`
-        } catch { /* none */ }
+      const gb = await loadGroundBoard(runId)
+      if (gb) {
+        const kind = gb.source === 'chipscale' ? 'chip-scale board' : 'board'
+        boardCtx = `\nREAL BOARD (${kind}): ${Math.round(gb.wMm)}×${Math.round(gb.hMm)}mm${gb.layers ? ` · ${gb.layers}-layer` : ''}${gb.components ? ` · ${gb.components} components` : ''}`
+        // Supply chain BOM: use the chip-scale part set (the real BLE SoC + mics +
+        // PMIC) when present; fall back to the flroute BOM only if there's no
+        // chip-scale board.
+        if (discipline === 'supplyChain') {
+          const csParts = (gb.parts || []).map((p) => p.lcsc ? `${p.name} (${p.footprint}, LCSC ${p.lcsc})` : `${p.name} (${p.footprint})`)
+          if (csParts.length) {
+            boardCtx += `\nBOM PARTS (chip-scale): ${csParts.join(', ')}`
+          } else {
+            try {
+              const bom = JSON.parse(await fs.readFile(path.join(process.cwd(), 'public', 'runs', runId, 'data', 'bom.json'), 'utf8'))
+              const lines = Array.isArray(bom) ? bom.slice(0, 30).map((l: any) => l?.mpn || l?.part || l?.value || l?.ref).filter(Boolean) : []
+              if (lines.length) boardCtx += `\nBOM PARTS: ${lines.join(', ')}`
+            } catch { /* none */ }
+          }
+        }
       }
     }
 

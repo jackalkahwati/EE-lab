@@ -177,8 +177,12 @@ export async function POST(req: Request) {
     if (result?.error) return Response.json({ ok: false, error: result.error })
 
     if (result.boardMm) {
+      // Persist the part set too, so downstream disciplines (supply chain BOM,
+      // manufacturing, validation) can ground on the REAL chip-scale parts (the
+      // BLE SoC + mics + PMIC), not the flroute reference board's placeholder BOM.
+      const partList = parts.map((p: any) => ({ name: p.name, footprint: p.footprint, kind: p.kind, lcsc: p.lcsc ?? null }))
       await fs.writeFile(path.join(dir, 'chipscale-board.json'),
-        JSON.stringify({ boardMm: result.boardMm, areaMm2: result.areaMm2, components: result.components, routedTraces: result.routedTraces, realFootprints, drc: result.drc ?? null, drcRepair: result.drcRepair ?? null }))
+        JSON.stringify({ boardMm: result.boardMm, areaMm2: result.areaMm2, components: result.components, routedTraces: result.routedTraces, realFootprints, parts: partList, drc: result.drc ?? null, drcRepair: result.drcRepair ?? null }))
     }
 
     return Response.json({

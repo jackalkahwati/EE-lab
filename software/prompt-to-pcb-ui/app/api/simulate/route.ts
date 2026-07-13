@@ -8,9 +8,9 @@
  * fabricates a metric it can't compute. High-fidelity FEA/FDTD (Elmer /
  * CalculiX / openEMS / OpenFOAM) is the install-gated upgrade, not faked here.
  */
-import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
+import { loadGroundBoard } from '@/lib/ground-board'
 import type { ProductSpec } from '@/lib/product-spec'
 
 export const dynamic = 'force-dynamic'
@@ -45,10 +45,9 @@ export async function POST(req: Request) {
 
     let boardAreaMm2: number | undefined
     if (runId && RUN_ID.test(runId)) {
-      try {
-        const bj = JSON.parse(await fs.readFile(path.join(process.cwd(), 'public', 'runs', runId, 'data', 'board.json'), 'utf8'))
-        if (bj?.boardSize?.wMm && bj?.boardSize?.hMm) boardAreaMm2 = bj.boardSize.wMm * bj.boardSize.hMm
-      } catch { /* no board */ }
+      // prefer the chip-scale board so thermal/RF/etc. use the real product area
+      const gb = await loadGroundBoard(runId)
+      if (gb) boardAreaMm2 = gb.wMm * gb.hMm
     }
 
     const p = spec.budgets?.power ?? {}

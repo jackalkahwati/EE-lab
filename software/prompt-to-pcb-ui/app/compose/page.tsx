@@ -106,6 +106,10 @@ export default function Compose2Page() {
   const [stage, setStage] = useState<Stage>('electronics')
   const [idBrief, setIdBrief] = useState<IdBrief | null>(null)
   const [productSpec, setProductSpec] = useState<ProductSpec | null>(null)
+  // Which discipline modules have been built this session (their tab produced a
+  // real artifact). Drives the left-panel checkboxes so a built discipline shows
+  // complete, not "module not built yet". Reset when the thread/design changes.
+  const [builtDisc, setBuiltDisc] = useState<Record<string, boolean>>({})
   // "+New" clears the stage to a blank slate (no board) while the chat stays
   // active; the board reappears when the new design finishes building.
   const [newDesign, setNewDesign] = useState(false)
@@ -251,8 +255,9 @@ export default function Compose2Page() {
           newDesign={newDesign}
           revisePrefill={revisePrefill}
           onPrefillConsumed={() => setRevisePrefill('')}
-          onSelectThread={(id) => { setSelectedId(id); setNewDesign(false); setIdBrief(null); setProductSpec(null); setStage('electronics') }}
-          onNew={() => setNewDesign(true)}
+          onSelectThread={(id) => { setSelectedId(id); setNewDesign(false); setIdBrief(null); setProductSpec(null); setStage('electronics'); setBuiltDisc({}) }}
+          onNew={() => { setNewDesign(true); setBuiltDisc({}) }}
+          builtDisciplines={builtDisc}
           onRunComplete={onRunComplete}
           onIdBrief={onIdBrief}
           onProductSpec={setProductSpec}
@@ -370,13 +375,13 @@ export default function Compose2Page() {
               </ErrorBoundary>
             )}
             {stage === 'mechanical' && (
-              <ErrorBoundary><MechanicalStage spec={productSpec} runId={selectedRun?.id} /></ErrorBoundary>
+              <ErrorBoundary><MechanicalStage spec={productSpec} runId={selectedRun?.id} onBuilt={() => setBuiltDisc((b) => ({ ...b, mechanical: true }))} /></ErrorBoundary>
             )}
             {stage === 'simulation' && (
-              <ErrorBoundary><SimulationStage spec={productSpec} runId={selectedRun?.id} /></ErrorBoundary>
+              <ErrorBoundary><SimulationStage spec={productSpec} runId={selectedRun?.id} onBuilt={() => setBuiltDisc((b) => ({ ...b, simulation: true }))} /></ErrorBoundary>
             )}
             {(stage === 'firmware' || stage === 'manufacturing' || stage === 'supplyChain' || stage === 'validation') && (
-              <ErrorBoundary><DisciplineStage discipline={stage} spec={productSpec} runId={selectedRun?.id} /></ErrorBoundary>
+              <ErrorBoundary><DisciplineStage discipline={stage} spec={productSpec} runId={selectedRun?.id} onBuilt={() => setBuiltDisc((b) => ({ ...b, [stage]: true }))} /></ErrorBoundary>
             )}
           </section>
 

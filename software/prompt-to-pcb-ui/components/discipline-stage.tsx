@@ -17,7 +17,7 @@ type Artifact = {
   sections: { title: string; items: string[] }[]
 }
 
-export function DisciplineStage({ discipline, spec, runId }: { discipline: string; spec: any; runId?: string }) {
+export function DisciplineStage({ discipline, spec, runId, onBuilt }: { discipline: string; spec: any; runId?: string; onBuilt?: () => void }) {
   const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
   const [art, setArt] = useState<Artifact | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -33,7 +33,7 @@ export function DisciplineStage({ discipline, spec, runId }: { discipline: strin
       })
       const d = await r.json()
       if (d.error) throw new Error(d.error)
-      setArt(d.artifact); setState('done')
+      setArt(d.artifact); setState('done'); onBuilt?.()
     } catch (e) { setErr(String(e)); setState('error') }
   }
 

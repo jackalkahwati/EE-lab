@@ -25,7 +25,7 @@ type Result = {
   error?: string
 }
 
-export function MechanicalStage({ spec, runId }: { spec: ProductSpec | null; runId?: string }) {
+export function MechanicalStage({ spec, runId, onBuilt }: { spec: ProductSpec | null; runId?: string; onBuilt?: () => void }) {
   const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
   const [res, setRes] = useState<Result | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -39,7 +39,7 @@ export function MechanicalStage({ spec, runId }: { spec: ProductSpec | null; run
         body: JSON.stringify({ spec, runId }),
       })
       const d = await r.json()
-      if (d.ok) { setRes(d); setState('done') }
+      if (d.ok) { setRes(d); setState('done'); onBuilt?.() }
       else { setErr(d.error || 'enclosure build failed'); setRes(d); setState('error') }
     } catch (e) { setErr(String(e)); setState('error') }
   }

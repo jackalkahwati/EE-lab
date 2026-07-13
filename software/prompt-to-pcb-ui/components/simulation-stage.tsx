@@ -18,7 +18,7 @@ type SimResult = {
 }
 type Result = { scipy: boolean; results: SimResult[] }
 
-export function SimulationStage({ spec, runId }: { spec: any; runId?: string }) {
+export function SimulationStage({ spec, runId, onBuilt }: { spec: any; runId?: string; onBuilt?: () => void }) {
   const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
   const [res, setRes] = useState<Result | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -33,7 +33,7 @@ export function SimulationStage({ spec, runId }: { spec: any; runId?: string }) 
       })
       const d = await r.json()
       if (d.error) throw new Error(d.error)
-      setRes(d); setState('done')
+      setRes(d); setState('done'); onBuilt?.()
     } catch (e) { setErr(String(e)); setState('error') }
   }
 

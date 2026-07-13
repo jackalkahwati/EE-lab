@@ -49,7 +49,7 @@ function b64(json: string) {
     String.fromCharCode(parseInt(h, 16))))
 }
 
-export function ComposeChat({ threads, activeId, activeRunId, activeName, newDesign, revisePrefill, onSelectThread, onNew, onRunComplete, onRename, onPrefillConsumed, onIdBrief, onProductSpec }: {
+export function ComposeChat({ threads, activeId, activeRunId, activeName, newDesign, revisePrefill, onSelectThread, onNew, onRunComplete, onRename, onPrefillConsumed, onIdBrief, onProductSpec, builtDisciplines }: {
   threads: { id: string; label: string }[]
   activeId: string
   activeRunId?: string   // the real run currently on screen (revisable)
@@ -63,6 +63,7 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
   onPrefillConsumed?: () => void
   onIdBrief?: (brief: IdBrief | null) => void // lift the ID brief to the workspace panes
   onProductSpec?: (spec: ProductSpec | null) => void // lift the spec for the Explore stage
+  builtDisciplines?: Record<string, boolean> // discipline modules built this session (their tab produced an artifact)
 }) {
   const [phase, setPhase] = useState<Phase>('idle')
   // The electronics board actually built (a runDir exists). Kept separate from
@@ -498,7 +499,9 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
                         : phase === 'done'
                           ? 'built'
                           : 'building'
-                    : 'pending'
+                    : builtDisciplines?.[r.discipline] // its tab produced a real artifact
+                      ? 'built'
+                      : 'pending'
                   const icon =
                     st === 'built' ? <Check className="size-3.5 text-emerald-500" />
                       : st === 'failed' ? <X className="size-3.5 text-destructive" />
