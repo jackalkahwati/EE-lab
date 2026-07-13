@@ -1,0 +1,2 @@
+# The freerouting jar is a 55MB binary — fetch it, don't commit it (see README).
+*.jar

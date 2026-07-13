@@ -24,6 +24,54 @@ import { runTscircuitCode } from '@tscircuit/eval'
 const KICAD_CLI = ['/opt/homebrew/bin/kicad-cli', '/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli']
   .find((p) => { try { return fs.existsSync(p) } catch { return false } })
 
+// freerouting — a real push-and-shove autorouter (Java). It routes far cleaner
+// than tscircuit's built-in router (fewer vias, passes fab DRC), so the loop
+// prefers it. Gated on Java + the jar existing; absent -> loop falls back to
+// the built-in router + geometry repair.
+const JAVA = ['/opt/homebrew/opt/openjdk/bin/java', '/usr/bin/java', '/usr/local/bin/java']
+  .find((p) => { try { return fs.existsSync(p) } catch { return false } }) || (process.env.JAVA_HOME ? `${process.env.JAVA_HOME}/bin/java` : null)
+const FR_JAR = (() => {
+  const p = path.join(process.cwd(), '..', 'freerouting', 'freerouting-2.2.4.jar')
+  try { return fs.existsSync(p) ? p : null } catch { return null }
+})()
+
+/** Route a placed board with freerouting: strip any existing routing, export a
+ *  Specctra DSN, run the autorouter, merge the routed session back to circuit
+ *  JSON. Returns { cj, unrouted } (unrouted = nets it couldn't complete, an
+ *  honest incompleteness signal), or null if freerouting is unavailable/failed
+ *  so the caller can fall back to the built-in router. */
+async function freeroute(cj) {
+  if (!JAVA || !FR_JAR) return null
+  let dir
+  try {
+    const { convertCircuitJsonToDsnJson, stringifyDsnJson, parseDsnToDsnJson, convertDsnSessionToCircuitJson } = await import('dsn-converter')
+    const unrouted = cj.filter((e) => e.type !== 'pcb_trace' && e.type !== 'pcb_via')
+    const dsnPcb = convertCircuitJsonToDsnJson(unrouted)
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fl-fr-'))
+    const dsnPath = path.join(dir, 'b.dsn'), sesPath = path.join(dir, 'b.ses')
+    fs.writeFileSync(dsnPath, stringifyDsnJson(dsnPcb))
+    // -Djava.awt.headless=true: run with NO GUI window (freerouting otherwise
+    //   pops its editor app on -de/-do) — pure backend subprocess.
+    // Network timeouts: its startup "check for updates" call otherwise stalls
+    //   ~2min on the socket; routing itself is sub-second.
+    // Together these take a run from ~120s (+ a GUI window) to ~3s, headless.
+    const r = spawnSync(JAVA, [
+      '-Djava.awt.headless=true',
+      '-Dsun.net.client.defaultConnectTimeout=1500',
+      '-Dsun.net.client.defaultReadTimeout=1500',
+      '-jar', FR_JAR, '-de', dsnPath, '-do', sesPath, '-mp', '10',
+    ], { encoding: 'utf8', timeout: 120000 })
+    if (!fs.existsSync(sesPath)) return null
+    const m = [...(r.stdout || '').matchAll(/\((\d+) unrouted\)/g)]
+    const unroutedN = m.length ? Number(m[m.length - 1][1]) : 0
+    const session = parseDsnToDsnJson(fs.readFileSync(sesPath, 'utf8'))
+    const routed = convertDsnSessionToCircuitJson(dsnPcb, session, unrouted)
+    return { cj: routed, unrouted: unroutedN }
+  } catch { return null } finally {
+    if (dir) try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* best effort */ }
+  }
+}
+
 // Two REAL fab processes the redesign loop can target, from published JLCPCB
 // capabilities. Standard (cheapest) vs HDI/advanced (finer, pricier). A
 // chip-scale earbud board is genuinely an HDI board, so converging under the
@@ -187,33 +235,54 @@ function fabRepair(cj, { pad = 0.5, hole = 0.2 } = {}) {
  *  converging, returns the BEST board found plus an honest verdict naming the
  *  residual and the capability wall. Never fakes convergence. */
 async function iterativeRedesign(parts, nets) {
-  const ladder = [
-    { name: 'standard fab, compact',  place: { gap: 2.1, maxW: 15 }, profile: 'standard' },
-    { name: 'standard fab, spread',   place: { gap: 3.4, maxW: 18 }, profile: 'standard' },
-    { name: 'HDI fab, compact',       place: { gap: 2.1, maxW: 15 }, profile: 'hdi' },
-    { name: 'HDI fab, spread',        place: { gap: 3.4, maxW: 18 }, profile: 'hdi' },
-  ]
+  // Prefer freerouting (real push-and-shove router) when available; fall back to
+  // the built-in router + geometry repair. Escalate the fab process (standard ->
+  // HDI) within each router. A board only truly converges when DRC is clean AND
+  // every net is routed.
+  const ladder = FR_JAR && JAVA
+    ? [
+        { name: 'freerouting, standard fab', router: 'fr',   place: { gap: 2.1, maxW: 15 }, profile: 'standard' },
+        { name: 'freerouting, spread',       router: 'fr',   place: { gap: 3.6, maxW: 19 }, profile: 'standard' },
+        { name: 'freerouting, HDI fab',      router: 'fr',   place: { gap: 2.1, maxW: 15 }, profile: 'hdi' },
+        { name: 'built-in router, HDI fab',  router: 'tsci', place: { gap: 2.1, maxW: 15 }, profile: 'hdi' },
+      ]
+    : [
+        { name: 'built-in router, standard', router: 'tsci', place: { gap: 2.1, maxW: 15 }, profile: 'standard' },
+        { name: 'built-in router, spread',   router: 'tsci', place: { gap: 3.4, maxW: 18 }, profile: 'standard' },
+        { name: 'built-in router, HDI fab',  router: 'tsci', place: { gap: 2.1, maxW: 15 }, profile: 'hdi' },
+      ]
   const trail = []
   let best = null
   for (let i = 0; i < ladder.length; i++) {
     const s = ladder[i]
-    const cj = await runTscircuitCode(buildCode(parts, nets, s.place))
-    const fixes = fabRepair(cj, FAB_PROFILES[s.profile].via)
+    let cj = await runTscircuitCode(buildCode(parts, nets, s.place))
+    let fixes = [], unrouted = 0
+    if (s.router === 'fr') {
+      const fr = await freeroute(cj)
+      if (!fr) continue // freerouting failed this pass; try the next strategy
+      cj = fr.cj; unrouted = fr.unrouted
+      fixes = ['routed with freerouting (push & shove)']
+      if (unrouted) fixes.push(`${unrouted} net(s) left unrouted`)
+    } else {
+      fixes = fabRepair(cj, FAB_PROFILES[s.profile].via)
+    }
     const drc = await realDrc(cj, s.profile)
     if (!drc.available) return { available: false, drc, trail, best: null }
-    trail.push({ iter: i + 1, strategy: s.name, profile: FAB_PROFILES[s.profile].label, errors: drc.errors })
-    if (!best || drc.errors < best.drc.errors) best = { cj, drc, fixes, strategy: s.name }
-    if (drc.errors === 0) break // converged — a real solution, stop escalating
+    const score = drc.errors + unrouted * 5 // unrouted nets are worse than a DRC nit
+    trail.push({ iter: i + 1, strategy: s.name, profile: FAB_PROFILES[s.profile].label, errors: drc.errors, unrouted })
+    if (!best || score < best.score) best = { cj, drc, fixes, unrouted, score, strategy: s.name }
+    if (drc.errors === 0 && unrouted === 0) break // fully routed AND fab-clean — done
   }
-  const converged = best.drc.errors === 0
-  // honest verdict when the ladder can't reach clean: name the wall.
+  if (!best) return { available: false, drc: { available: false, reason: 'all routing strategies failed' }, trail }
+  const converged = best.drc.errors === 0 && best.unrouted === 0
   let verdict = null
   if (!converged) {
-    const top = Object.entries(best.drc.errorTypes || {}).sort((a, b) => b[1] - a[1])[0]?.[0]
-    const wall = /hole_clearance|clearance/.test(top || '')
-      ? "tscircuit's built-in autorouter packs vias/traces too densely for fab spacing — a clean board needs a commercial autorouter (e.g. freerouting), manual routing, or fewer nets"
-      : `unresolved ${top || 'DRC'} violations beyond the loop's levers`
-    verdict = `iterated ${trail.length} strateg${trail.length === 1 ? 'y' : 'ies'}; best ${best.drc.errors} error(s) under ${best.drc.ruleProfile}. Capability gap: ${wall}.`
+    if (best.unrouted > 0) {
+      verdict = `iterated ${trail.length} strateg${trail.length === 1 ? 'y' : 'ies'}; best board has ${best.drc.errors} DRC error(s) and ${best.unrouted} net(s) the autorouter couldn't complete — needs manual routing or a simpler netlist.`
+    } else {
+      const top = Object.entries(best.drc.errorTypes || {}).sort((a, b) => b[1] - a[1])[0]?.[0]
+      verdict = `iterated ${trail.length} strateg${trail.length === 1 ? 'y' : 'ies'}; best ${best.drc.errors} error(s) (${top || 'DRC'}) under ${best.drc.ruleProfile} — beyond the loop's current levers.`
+    }
   }
   return { available: true, converged, best, trail, verdict }
 }
@@ -235,8 +304,9 @@ async function main() {
         converged: res.converged,
         iterations: res.trail,
         winningStrategy: res.best.strategy,
-        errorsFirst: res.trail[0].errors,
+        errorsFirst: res.trail[0]?.errors ?? null,
         errorsBest: res.best.drc.errors,
+        unrouted: res.best.unrouted,
         fixes: res.best.fixes,
         verdict: res.verdict,
       }

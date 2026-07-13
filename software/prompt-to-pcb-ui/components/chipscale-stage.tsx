@@ -31,10 +31,11 @@ type Result = {
   } | null
   drcRepair?: {
     converged: boolean
-    iterations: { iter: number; strategy: string; profile: string; errors: number }[]
+    iterations: { iter: number; strategy: string; profile: string; errors: number; unrouted?: number }[]
     winningStrategy: string
     errorsFirst: number
     errorsBest: number
+    unrouted?: number
     fixes: string[]
     verdict: string | null
   } | null
@@ -127,14 +128,16 @@ export function ChipScaleStage({ spec, runId }: { spec: any; runId?: string }) {
                     {res.drc.sample.slice(0, 3).map((s, i) => <li key={i}>{s}</li>)}
                   </ul>
                 )}
-                {res.drcRepair && (
+                {res.drcRepair && Array.isArray(res.drcRepair.iterations) && res.drcRepair.iterations.length > 0 && (
                   <div className="mt-1.5 border-t border-current/20 pt-1.5 text-[11px]">
                     <span className="font-medium">Redesign loop{res.drcRepair.converged ? ' ✓ converged' : ''}:</span>{' '}
                     {res.drcRepair.iterations.map((it) => `${it.errors}`).join(' → ')} errors across {res.drcRepair.iterations.length} strateg{res.drcRepair.iterations.length === 1 ? 'y' : 'ies'}
                     {res.drcRepair.converged
                       ? ` — clean via "${res.drcRepair.winningStrategy}".`
-                      : ` — best "${res.drcRepair.winningStrategy}".`}
-                    <div className="mt-0.5 opacity-80">fixes: {res.drcRepair.fixes.join('; ')}</div>
+                      : ` — best "${res.drcRepair.winningStrategy}"${res.drcRepair.unrouted ? `, ${res.drcRepair.unrouted} net(s) unrouted` : ''}.`}
+                    {Array.isArray(res.drcRepair.fixes) && res.drcRepair.fixes.length > 0 && (
+                      <div className="mt-0.5 opacity-80">fixes: {res.drcRepair.fixes.join('; ')}</div>
+                    )}
                     {res.drcRepair.verdict && !res.drcRepair.converged && (
                       <div className="mt-0.5 opacity-90">{res.drcRepair.verdict}</div>
                     )}
