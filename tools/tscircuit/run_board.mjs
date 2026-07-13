@@ -40,13 +40,33 @@ const FR_JAR = (() => {
  *  JSON. Returns { cj, unrouted } (unrouted = nets it couldn't complete, an
  *  honest incompleteness signal), or null if freerouting is unavailable/failed
  *  so the caller can fall back to the built-in router. */
-async function freeroute(cj) {
+/** Rewrite a 2-layer DSN as a 4-layer board with through-vias spanning all
+ *  layers. A chip-scale board is genuinely 4-layer HDI, and the inner copper
+ *  gives the router the room to complete dense nets a 2-layer board leaves
+ *  stranded (congestion, not geometry). */
+function dsnTo4Layer(d) {
+  const f = d.structure.layers.find((l) => l.name === 'F.Cu')
+  const b = d.structure.layers.find((l) => l.name === 'B.Cu')
+  if (!f || !b) return d
+  f.property = { index: 0 }; b.property = { index: 3 }
+  d.structure.layers = [f, { name: 'In1.Cu', type: 'signal', property: { index: 1 } }, { name: 'In2.Cu', type: 'signal', property: { index: 2 } }, b]
+  for (const ps of (d.library?.padstacks || [])) {
+    if (/via/i.test(ps.name)) {
+      const dia = ps.shapes?.[0]?.diameter || 600
+      ps.shapes = ['F.Cu', 'In1.Cu', 'In2.Cu', 'B.Cu'].map((layer) => ({ shapeType: 'circle', layer, diameter: dia }))
+    }
+  }
+  return d
+}
+
+async function freeroute(cj, { layers = 2 } = {}) {
   if (!JAVA || !FR_JAR) return null
   let dir
   try {
     const { convertCircuitJsonToDsnJson, stringifyDsnJson, parseDsnToDsnJson, convertDsnSessionToCircuitJson } = await import('dsn-converter')
     const unrouted = cj.filter((e) => e.type !== 'pcb_trace' && e.type !== 'pcb_via')
-    const dsnPcb = convertCircuitJsonToDsnJson(unrouted)
+    let dsnPcb = convertCircuitJsonToDsnJson(unrouted)
+    if (layers === 4) dsnPcb = dsnTo4Layer(dsnPcb)
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fl-fr-'))
     const dsnPath = path.join(dir, 'b.dsn'), sesPath = path.join(dir, 'b.ses')
     fs.writeFileSync(dsnPath, stringifyDsnJson(dsnPcb))
@@ -66,7 +86,7 @@ async function freeroute(cj) {
     const unroutedN = m.length ? Number(m[m.length - 1][1]) : 0
     const session = parseDsnToDsnJson(fs.readFileSync(sesPath, 'utf8'))
     const routed = convertDsnSessionToCircuitJson(dsnPcb, session, unrouted)
-    return { cj: routed, unrouted: unroutedN }
+    return { cj: routed, unrouted: unroutedN, layers }
   } catch { return null } finally {
     if (dir) try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* best effort */ }
   }
@@ -173,17 +193,39 @@ function kicadModToFootprint(mod) {
 // real footprint size (from LCSC) when present, else the generic table
 const partSize = (p) => (p._fp ? [p._fp.w, p._fp.h] : fpSize(p.footprint))
 
-function place(parts, maxW = 15, gap = 2.1) {
-  const sorted = [...parts].sort((a, b) => {
-    const [aw, ah] = partSize(a), [bw, bh] = partSize(b)
-    return bw * bh - aw * ah
-  })
+/** Order parts so connected ones are adjacent in the pack (BFS from the highest-
+ *  degree node — usually the SoC hub). This keeps net lengths short so the
+ *  autorouter can actually complete every connection; a size-only sort scatters
+ *  wired parts and strands nets. Falls back to size order for unconnected parts
+ *  and when there are no nets. */
+function connectivityOrder(parts, nets) {
+  if (!nets?.length) return [...parts].sort((a, b) => { const [aw, ah] = partSize(a), [bw, bh] = partSize(b); return bw * bh - aw * ah })
+  const deg = {}, adj = {}
+  for (const n of nets) {
+    const ca = String(n[0]).split('.')[0], cb = String(n[1]).split('.')[0]
+    deg[ca] = (deg[ca] || 0) + 1; deg[cb] = (deg[cb] || 0) + 1
+    ;(adj[ca] = adj[ca] || []).push(cb); (adj[cb] = adj[cb] || []).push(ca)
+  }
+  const start = Object.entries(deg).sort((a, b) => b[1] - a[1])[0]?.[0]
+  const seen = new Set(), order = [], q = start ? [start] : []
+  while (q.length) { const n = q.shift(); if (seen.has(n)) continue; seen.add(n); order.push(n); for (const m of (adj[n] || [])) if (!seen.has(m)) q.push(m) }
+  const byName = new Map(parts.map((p) => [p.name, p]))
+  const result = order.map((n) => byName.get(n)).filter(Boolean)
+  for (const p of parts) if (!seen.has(p.name)) result.push(p) // unconnected parts last
+  return result
+}
+
+function place(parts, maxW = 15, gap = 2.1, singleSided = false, nets = null) {
+  const sorted = connectivityOrder(parts, nets)
   let x = 0, y = 0, rowH = 0, i = 0
   const placed = []
   for (const p of sorted) {
     const [w, h] = partSize(p)
     if (x > 0 && x + w > maxW) { x = 0; y += rowH + gap; rowH = 0 }
-    placed.push({ ...p, pcbX: +(x + w / 2).toFixed(2), pcbY: +(-(y + h / 2)).toFixed(2), layer: i % 2 ? 'bottom' : 'top' })
+    // single-sided (all top) keeps the router's layers clean so dense nets
+    // complete; the shelf-pack spacing already prevents courtyard overlap, so
+    // we no longer need the alternating-layer trick for that.
+    placed.push({ ...p, pcbX: +(x + w / 2).toFixed(2), pcbY: +(-(y + h / 2)).toFixed(2), layer: singleSided ? 'top' : (i % 2 ? 'bottom' : 'top') })
     i++; x += w + gap; rowH = Math.max(rowH, h)
   }
   return placed
@@ -192,10 +234,10 @@ function place(parts, maxW = 15, gap = 2.1) {
 /** parts + nets -> tscircuit code (positions computed here, not by the LLM).
  *  place opts let the redesign loop spread the board out to relieve routing
  *  congestion between iterations. */
-function buildCode(parts, nets, { maxW = 15, gap = 2.1 } = {}) {
+function buildCode(parts, nets, { maxW = 15, gap = 2.1, singleSided = false } = {}) {
   // resolve real LCSC footprints (from part.kicadMod) before placement/sizing
   for (const p of parts) p._fp = p.kicadMod ? kicadModToFootprint(p.kicadMod) : null
-  const placed = place(parts, maxW, gap)
+  const placed = place(parts, maxW, gap, singleSided, nets)
   const comps = placed.map((p) => {
     const kind = p.kind === 'resistor' ? 'resistor' : p.kind === 'capacitor' ? 'capacitor' : 'chip'
     const val = kind === 'resistor' ? ' resistance="10k"' : kind === 'capacitor' ? ' capacitance="100nF"' : ''
@@ -241,10 +283,10 @@ async function iterativeRedesign(parts, nets) {
   // every net is routed.
   const ladder = FR_JAR && JAVA
     ? [
-        { name: 'freerouting, standard fab', router: 'fr',   place: { gap: 2.1, maxW: 15 }, profile: 'standard' },
-        { name: 'freerouting, spread',       router: 'fr',   place: { gap: 3.6, maxW: 19 }, profile: 'standard' },
-        { name: 'freerouting, HDI fab',      router: 'fr',   place: { gap: 2.1, maxW: 15 }, profile: 'hdi' },
-        { name: 'built-in router, HDI fab',  router: 'tsci', place: { gap: 2.1, maxW: 15 }, profile: 'hdi' },
+        { name: 'freerouting 2-layer, standard fab', router: 'fr', layers: 2, place: { gap: 2.1, maxW: 15, singleSided: true }, profile: 'standard' },
+        { name: 'freerouting 4-layer, standard fab', router: 'fr', layers: 4, place: { gap: 2.1, maxW: 15, singleSided: true }, profile: 'standard' },
+        { name: 'freerouting 4-layer, HDI fab',      router: 'fr', layers: 4, place: { gap: 2.1, maxW: 15, singleSided: true }, profile: 'hdi' },
+        { name: 'built-in router, HDI fab',          router: 'tsci', place: { gap: 2.1, maxW: 15 }, profile: 'hdi' },
       ]
     : [
         { name: 'built-in router, standard', router: 'tsci', place: { gap: 2.1, maxW: 15 }, profile: 'standard' },
@@ -258,10 +300,10 @@ async function iterativeRedesign(parts, nets) {
     let cj = await runTscircuitCode(buildCode(parts, nets, s.place))
     let fixes = [], unrouted = 0
     if (s.router === 'fr') {
-      const fr = await freeroute(cj)
+      const fr = await freeroute(cj, { layers: s.layers })
       if (!fr) continue // freerouting failed this pass; try the next strategy
       cj = fr.cj; unrouted = fr.unrouted
-      fixes = ['routed with freerouting (push & shove)']
+      fixes = [`routed with freerouting (push & shove, ${s.layers}-layer)`]
       if (unrouted) fixes.push(`${unrouted} net(s) left unrouted`)
     } else {
       fixes = fabRepair(cj, FAB_PROFILES[s.profile].via)
