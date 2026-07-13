@@ -237,22 +237,96 @@ function place(parts, maxW = 15, gap = 2.1, singleSided = false, nets = null) {
   return placed
 }
 
-/** parts + nets -> tscircuit code (positions computed here, not by the LLM).
- *  place opts let the redesign loop spread the board out to relieve routing
- *  congestion between iterations. */
-function buildCode(parts, nets, { maxW = 15, gap = 2.1, singleSided = false } = {}) {
-  // resolve real LCSC footprints (from part.kicadMod) before placement/sizing
-  for (const p of parts) p._fp = p.kicadMod ? kicadModToFootprint(p.kicadMod) : null
-  const placed = place(parts, maxW, gap, singleSided, nets)
+/** placed parts (with pcbX/pcbY/layer/pcbRotation/_fp) + nets -> tscircuit code. */
+function emitBoardCode(placed, nets) {
   const comps = placed.map((p) => {
     const kind = p.kind === 'resistor' ? 'resistor' : p.kind === 'capacitor' ? 'capacitor' : 'chip'
     const val = kind === 'resistor' ? ' resistance="10k"' : kind === 'capacitor' ? ' capacitance="100nF"' : ''
     const fp = p._fp ? `{${p._fp.jsx}}` : `"${p.footprint}"`
-    return `    <${kind} name="${p.name}" footprint=${fp}${val} pcbX={${p.pcbX}} pcbY={${p.pcbY}} layer="${p.layer}" />`
+    const rot = p.pcbRotation ? ` pcbRotation={${p.pcbRotation}}` : ''
+    return `    <${kind} name="${p.name}" footprint=${fp}${val} pcbX={${p.pcbX}} pcbY={${p.pcbY}}${rot} layer="${p.layer}" />`
   })
   const pin = (ref) => { const [c, ...r] = String(ref).split('.'); return `.${c} > .pin${r.join('') || '1'}` }
   const traces = (nets || []).map((n) => `    <trace from="${pin(n[0])}" to="${pin(n[1])}" />`)
   return `export default () => (\n  <board autorouter="auto">\n${comps.join('\n')}\n${traces.join('\n')}\n  </board>\n)`
+}
+
+/** parts + nets -> tscircuit code (positions computed here, not by the LLM). */
+function buildCode(parts, nets, { maxW = 15, gap = 2.1, singleSided = false } = {}) {
+  // resolve real LCSC footprints (from part.kicadMod) before placement/sizing
+  for (const p of parts) p._fp = p.kicadMod ? kicadModToFootprint(p.kicadMod) : null
+  return emitBoardCode(place(parts, maxW, gap, singleSided, nets), nets)
+}
+
+/** Read each part's pin -> [dx,dy] offset (pad position relative to its
+ *  component center) from a routed circuit-json, so placement can optimize real
+ *  pin-to-pin distances rather than component centers. */
+function extractPinOffsets(cj) {
+  const offsets = {}
+  for (const c of cj.filter((e) => e.type === 'pcb_component')) {
+    const src = cj.find((e) => e.type === 'source_component' && e.source_component_id === c.source_component_id)
+    if (!src?.name || !c.center) continue
+    offsets[src.name] = {}
+    for (const pad of cj.filter((e) => e.type === 'pcb_smtpad' && e.pcb_component_id === c.pcb_component_id)) {
+      const port = cj.find((e) => e.type === 'pcb_port' && e.pcb_port_id === pad.pcb_port_id)
+      const sp = port && cj.find((e) => e.type === 'source_port' && e.source_port_id === port.source_port_id)
+      const num = sp?.port_hints?.find((h) => /^\d+$/.test(h))
+      if (num != null && pad.x != null) offsets[src.name][num] = [pad.x - c.center.x, pad.y - c.center.y]
+    }
+  }
+  return offsets
+}
+
+/**
+ * Net-aware placement: minimize pin-to-pin wirelength (so connected pins sit
+ * close, with parts rotated to face each other) while keeping ~1mm routing
+ * channels between courtyards, via simulated annealing over positions +
+ * rotations. Connected pins ending up adjacent is what lets the autorouter
+ * complete every net; a connectivity shelf-pack keeps parts near but doesn't
+ * orient their pins. Returns tscircuit code, or null if pin offsets can't be
+ * read (falls back to shelf-pack). Deterministic (seeded) so a re-run is stable.
+ */
+async function netAwarePlace(parts, nets, { maxW = 15, gap = 2.1 } = {}) {
+  if (!nets?.length) return null
+  for (const p of parts) p._fp = p.kicadMod ? kicadModToFootprint(p.kicadMod) : null
+  const initPlaced = place(parts, maxW, gap, true, nets)
+  let cj0
+  try { cj0 = await runTscircuitCode(emitBoardCode(initPlaced, nets)) } catch { return null }
+  const offsets = extractPinOffsets(cj0)
+  if (Object.keys(offsets).length < parts.length) return null
+
+  let seed = 0x2545f491
+  const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff }
+  const rot = (o, deg) => { const r = deg * Math.PI / 180, c = Math.cos(r), s = Math.sin(r); return [o[0] * c - o[1] * s, o[0] * s + o[1] * c] }
+  const size = (st) => { const [w, h] = partSize(st); return (st.rot % 180) ? [h, w] : [w, h] }
+  const aabb = (st) => { const [w, h] = size(st); return [st.x - w / 2, st.y - h / 2, st.x + w / 2, st.y + h / 2] }
+  const gapBetween = (a, b) => Math.max(Math.max(a[0] - b[2], b[0] - a[2]), Math.max(a[1] - b[3], b[1] - a[3]))
+  const pinPos = (st, pinNum) => { const o = offsets[st.name]?.[pinNum] || [0, 0]; const ro = rot(o, st.rot); return [st.x + ro[0], st.y + ro[1]] }
+  const TARGET = 1.0
+  const byName = (states, n) => states.find((s) => s.name === n)
+  const cost = (states) => {
+    let wl = 0
+    for (const [a, b] of nets) { const [ca, pa] = String(a).split('.'), [cb, pb] = String(b).split('.'); const A = byName(states, ca), B = byName(states, cb); if (!A || !B) continue; const pA = pinPos(A, pa || '1'), pB = pinPos(B, pb || '1'); wl += Math.hypot(pA[0] - pB[0], pA[1] - pB[1]) }
+    let sp = 0
+    for (let i = 0; i < states.length; i++) for (let j = i + 1; j < states.length; j++) { const g = gapBetween(aabb(states[i]), aabb(states[j])); if (g < TARGET) sp += (TARGET - g) ** 2 }
+    return wl + sp * 20
+  }
+  let cur = initPlaced.map((p) => ({ ...p, x: p.pcbX, y: p.pcbY, rot: 0 }))
+  let curCost = cost(cur), best = cur.map((p) => ({ ...p })), bestCost = curCost
+  const STEPS = 6000
+  for (let step = 0; step < STEPS; step++) {
+    const T = 8 * (1 - step / STEPS) + 0.05
+    const cand = cur.map((p) => ({ ...p }))
+    const i = Math.floor(rnd() * cand.length)
+    if (rnd() < 0.3) cand[i].rot = [0, 90, 180, 270][Math.floor(rnd() * 4)]
+    else { cand[i].x += (rnd() - 0.5) * T; cand[i].y += (rnd() - 0.5) * T }
+    const cc = cost(cand)
+    if (cc < curCost || rnd() < Math.exp((curCost - cc) / (T * 0.3))) { cur = cand; curCost = cc; if (cc < bestCost) { best = cand.map((p) => ({ ...p })); bestCost = cc } }
+  }
+  // normalize to positive coords, write back placement + rotation
+  const minX = Math.min(...best.map((p) => aabb(p)[0])), minY = Math.min(...best.map((p) => aabb(p)[1]))
+  const placed = best.map((p) => ({ ...p, pcbX: +(p.x - minX).toFixed(2), pcbY: +(p.y - minY).toFixed(2), pcbRotation: p.rot || 0, layer: 'top' }))
+  return emitBoardCode(placed, nets)
 }
 
 /** DRC-driven redesign: apply the real geometry fixes the platform CAN make to
@@ -299,11 +373,21 @@ async function iterativeRedesign(parts, nets) {
         { name: 'built-in router, spread',   router: 'tsci', place: { gap: 3.4, maxW: 18 }, profile: 'standard' },
         { name: 'built-in router, HDI fab',  router: 'tsci', place: { gap: 2.1, maxW: 15 }, profile: 'hdi' },
       ]
+  // Net-aware placement (min pin-to-pin wirelength + routing channels) once, up
+  // front — it's what lets the router complete every net. Reused across the
+  // freerouting passes (they differ only in layers/fab profile). Null -> the
+  // strategies fall back to the connectivity shelf-pack.
+  const netAwareCode = FR_JAR && JAVA ? await netAwarePlace(parts, nets, { gap: 2.1, maxW: 15 }) : null
+
   const trail = []
   let best = null
   for (let i = 0; i < ladder.length; i++) {
     const s = ladder[i]
-    let cj = await runTscircuitCode(buildCode(parts, nets, s.place))
+    // Net-aware placement (single-sided, pin-facing) suits freerouting; the
+    // built-in router converges better with its own alternating-layer shelf-pack
+    // + geometry repair, so only freerouting gets the net-aware placement.
+    const code = s.router === 'fr' && netAwareCode ? netAwareCode : buildCode(parts, nets, s.place)
+    let cj = await runTscircuitCode(code)
     let fixes = [], unrouted = 0
     if (s.router === 'fr') {
       const fr = await freeroute(cj, { layers: s.layers })
@@ -313,7 +397,11 @@ async function iterativeRedesign(parts, nets) {
       // same edge margin the built-in path gets so copper clears the edge.
       const board = cj.find((e) => e.type === 'pcb_board')
       if (board) { board.width += 1.2; board.height += 1.2 }
-      fixes = [`routed with freerouting (push & shove, ${s.layers}-layer)`, 'added 0.6mm board-edge copper margin']
+      fixes = [
+        netAwareCode ? 'net-aware placement (min pin-to-pin wirelength)' : 'connectivity placement',
+        `routed with freerouting (push & shove, ${s.layers}-layer)`,
+        'added 0.6mm board-edge copper margin',
+      ]
       if (unrouted) fixes.push(`${unrouted} net(s) left unrouted`)
     } else {
       fixes = fabRepair(cj, FAB_PROFILES[s.profile].via)
