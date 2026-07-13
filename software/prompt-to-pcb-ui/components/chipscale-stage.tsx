@@ -36,6 +36,7 @@ type Result = {
     errorsFirst: number
     errorsBest: number
     unrouted?: number
+    groundPlane?: { assigned: number; unconnected: number | null; errors: number | null } | null
     fixes: string[]
     verdict: string | null
   } | null
@@ -135,6 +136,16 @@ export function ChipScaleStage({ spec, runId, asElectronics }: { spec: any; runI
                     {res.drcRepair.converged
                       ? ` — clean via "${res.drcRepair.winningStrategy}".`
                       : ` — best "${res.drcRepair.winningStrategy}"${res.drcRepair.unrouted ? `, ${res.drcRepair.unrouted} net(s) unrouted` : ''}.`}
+                    {res.drcRepair.groundPlane && (
+                      <div className="mt-0.5">
+                        <span className="font-medium">Ground plane (pcbnew):</span>{' '}
+                        {res.drcRepair.groundPlane.assigned} pins bonded to a real GND zone
+                        {res.drcRepair.groundPlane.unconnected
+                          ? `, ${res.drcRepair.groundPlane.unconnected} not reached (dense — needs via-in-pad)`
+                          : ' — every ground pin on the plane ✓'}
+                        {res.drcRepair.groundPlane.errors ? `, ${res.drcRepair.groundPlane.errors} zone DRC error(s)` : ''}
+                      </div>
+                    )}
                     {Array.isArray(res.drcRepair.fixes) && res.drcRepair.fixes.length > 0 && (
                       <div className="mt-0.5 opacity-80">fixes: {res.drcRepair.fixes.join('; ')}</div>
                     )}

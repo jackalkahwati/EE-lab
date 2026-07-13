@@ -50,20 +50,28 @@ corners = [
     (bb.GetRight() - inset, bb.GetBottom() - inset),
     (bb.GetLeft() + inset, bb.GetBottom() - inset),
 ]
-zone = pcbnew.ZONE(board)
-zone.SetLayer(board.GetLayerID("F.Cu"))
-zone.SetNet(gnd)
-zone.SetPadConnection(pcbnew.ZONE_CONNECTION_FULL)  # solidly bond ground pads
-zone.SetLocalClearance(pcbnew.FromMM(0.2))
-outline = zone.Outline()
-outline.NewOutline()
-for (x, y) in corners:
-    outline.Append(x, y)
-board.Add(zone)
 
+def add_zone(layer):
+    z = pcbnew.ZONE(board)
+    z.SetLayer(board.GetLayerID(layer))
+    z.SetNet(gnd)
+    z.SetPadConnection(pcbnew.ZONE_CONNECTION_FULL)  # solidly bond ground pads
+    z.SetLocalClearance(pcbnew.FromMM(0.2))
+    o = z.Outline(); o.NewOutline()
+    for (x, y) in corners:
+        o.Append(x, y)
+    board.Add(z)
+    return z
+
+# Top-layer ground plane: bonds the top-side ground pads directly and stays DRC
+# clean. On a dense board the fill can fragment and strand a few pads; we report
+# that honestly (like an unrouted net) rather than forcing via-in-pad stitching,
+# which trips solder-mask/clearance DRC (dense boards need a via-in-pad fab
+# process for full coverage — a real limitation, not faked away).
+add_zone("F.Cu")
 pcbnew.ZONE_FILLER(board).Fill(board.Zones())
 board.BuildConnectivity()
 unconnected = board.GetConnectivity().GetUnconnectedCount(False)
-pcbnew.SaveBoard(outp, board)
 
+pcbnew.SaveBoard(outp, board)
 print(json.dumps({"assigned": assigned, "unconnected": unconnected, "zones": board.GetAreaCount()}))

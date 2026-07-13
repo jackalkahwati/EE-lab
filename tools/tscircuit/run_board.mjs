@@ -579,6 +579,17 @@ async function main() {
         if (gp?.available) {
           drcRepair.groundPlane = { assigned: gp.assigned, unconnected: gp.unconnected, errors: gp.errors }
           drcRepair.fixes = [...res.best.fixes, `ground plane: ${gp.assigned} pins on a DRC-verified GND zone${gp.unconnected ? ` (${gp.unconnected} not reached)` : ''}`]
+          // `converged` stays the SIGNAL verdict (routing clean). The ground plane
+          // is a best-effort overlay reported on its own — a real board's plane
+          // coexisting with dense routing strands a few pads without via-in-pad;
+          // we surface that honestly rather than fail the whole board over it.
+          const planeClean = (gp.unconnected ?? 0) === 0 && (gp.errors ?? 0) === 0
+          if (!planeClean) {
+            const bits = []
+            if (gp.unconnected) bits.push(`${gp.unconnected} ground pin(s) the plane can't reach without via-in-pad`)
+            if (gp.errors) bits.push(`${gp.errors} zone DRC error(s) amid the dense routing`)
+            drcRepair.verdict = `${res.verdict ? res.verdict + ' ' : ''}Ground plane: ${bits.join(' + ')} — a real chip-scale density limit, reported not hidden.`
+          }
         }
       }
     }
