@@ -120,11 +120,14 @@ function setViaClearance(dsnPcb, um) {
   const rule = dsnPcb.structure && dsnPcb.structure.rule
   if (!rule) return
   const cl = (rule.clearances = rule.clearances || [])
-  for (const type of ['via_via', 'via_pin']) {
-    const ex = cl.find((c) => c.type === type)
-    if (ex) ex.value = um
-    else cl.push({ value: um, type })
-  }
+  // via_via / via_pin: hole-to-hole spacing. via_smd: push vias off SMD pad
+  // copper so the drilled hole clears the fab's hole-to-copper rule (a via
+  // dropped beside a 0.5mm-pitch QFN pin otherwise trips hole_clearance to the
+  // neighbour's copper — the dominant residual on dense boards).
+  const set = (type, val) => { const ex = cl.find((c) => c.type === type); if (ex) ex.value = val; else cl.push({ value: val, type }) }
+  set('via_via', um)
+  set('via_pin', um)
+  set('via_smd', Math.round(um * 1.4))
 }
 
 async function freeroute(cj, { layers = 2 } = {}) {
@@ -359,6 +362,31 @@ function extractPinOffsets(cj) {
   return offsets
 }
 
+/** Read each part's true courtyard extent (w,h) from a rendered board, keyed by
+ *  component name. The courtyard is the fab keep-out KiCad's courtyards_overlap
+ *  check enforces — larger than the part body — so placement must separate parts
+ *  by this, not by the body box. Sizes are at rotation 0; callers swap w/h for
+ *  90/270. */
+function extractCourtyardSizes(cj) {
+  const nameOf = {}
+  for (const e of cj) {
+    if (e.type !== 'pcb_component') continue
+    const sc = cj.find((x) => x.type === 'source_component' && x.source_component_id === e.source_component_id)
+    if (sc?.name) nameOf[e.pcb_component_id] = sc.name
+  }
+  const out = {}
+  for (const e of cj) {
+    let w, h
+    if (e.type === 'pcb_courtyard_outline' && e.outline?.length) {
+      const xs = e.outline.map((p) => p.x), ys = e.outline.map((p) => p.y)
+      w = Math.max(...xs) - Math.min(...xs); h = Math.max(...ys) - Math.min(...ys)
+    } else if (e.type === 'pcb_courtyard_rect') { w = e.width; h = e.height } else continue
+    const nm = nameOf[e.pcb_component_id]
+    if (nm && w > 0 && h > 0) out[nm] = [w, h]
+  }
+  return out
+}
+
 /**
  * Net-aware placement: minimize pin-to-pin wirelength (so connected pins sit
  * close, with parts rotated to face each other) while keeping ~1mm routing
@@ -376,13 +404,48 @@ async function netAwarePlace(parts, nets, { maxW = 15, gap = 2.1 } = {}) {
   try { cj0 = await runTscircuitCode(emitBoardCode(initPlaced, nets)) } catch { return null }
   const offsets = extractPinOffsets(cj0)
   if (Object.keys(offsets).length < parts.length) return null
+  // True courtyard extent per part (what KiCad's courtyards_overlap check sees) —
+  // read from the rendered board, since a footprint's courtyard is larger than
+  // its part body. Legalization and the SA spacing term both use this so parts
+  // are separated by their real keep-out, not an undersized body box.
+  const courtyard = extractCourtyardSizes(cj0)
 
   const rot = (o, deg) => { const r = deg * Math.PI / 180, c = Math.cos(r), s = Math.sin(r); return [o[0] * c - o[1] * s, o[0] * s + o[1] * c] }
-  const size = (st) => { const [w, h] = partSize(st); return (st.rot % 180) ? [h, w] : [w, h] }
+  const size = (st) => { const [w, h] = courtyard[st.name] || partSize(st); return (st.rot % 180) ? [h, w] : [w, h] }
   const aabb = (st) => { const [w, h] = size(st); return [st.x - w / 2, st.y - h / 2, st.x + w / 2, st.y + h / 2] }
   const gapBetween = (a, b) => Math.max(Math.max(a[0] - b[2], b[0] - a[2]), Math.max(a[1] - b[3], b[1] - a[3]))
   const pinPos = (st, pinNum) => { const o = offsets[st.name]?.[pinNum] || [0, 0]; const ro = rot(o, st.rot); return [st.x + ro[0], st.y + ro[1]] }
   const TARGET = 1.0
+  // Courtyard legalization: SA's spacing term is only a SOFT penalty, so when a
+  // net's wirelength pull beats it the annealer settles two parts into overlap —
+  // which downstream becomes overlapping pads, shorts, and mask bridges. This
+  // pass GUARANTEES a fab-legal result: iteratively push any pair whose AABBs are
+  // closer than MIN_CLEAR apart along their least-penetration axis until every
+  // courtyard clears. It's the "legalization" stage a real placer (e.g. OpenROAD
+  // SA-PCB) runs after global placement; here it's a few hundred deterministic
+  // relaxation sweeps. The board may grow — honest — but courtyards never overlap.
+  const MIN_CLEAR = 0.5
+  const legalize = (statesIn) => {
+    const states = statesIn.map((p) => ({ ...p }))
+    for (let iter = 0; iter < 400; iter++) {
+      let moved = false
+      for (let i = 0; i < states.length; i++) {
+        for (let j = i + 1; j < states.length; j++) {
+          const [wi, hi] = size(states[i]), [wj, hj] = size(states[j])
+          const dx = states[j].x - states[i].x, dy = states[j].y - states[i].y
+          const ox = (wi + wj) / 2 + MIN_CLEAR - Math.abs(dx)
+          const oy = (hi + hj) / 2 + MIN_CLEAR - Math.abs(dy)
+          if (ox > 0 && oy > 0) { // courtyards overlap or sit inside the clearance
+            moved = true
+            if (ox <= oy) { const push = ox / 2 + 1e-3, s = dx >= 0 ? 1 : -1; states[i].x -= s * push; states[j].x += s * push }
+            else { const push = oy / 2 + 1e-3, s = dy >= 0 ? 1 : -1; states[i].y -= s * push; states[j].y += s * push }
+          }
+        }
+      }
+      if (!moved) break
+    }
+    return states
+  }
   const byName = (states, n) => states.find((s) => s.name === n)
   const cost = (states) => {
     let wl = 0
@@ -407,6 +470,7 @@ async function netAwarePlace(parts, nets, { maxW = 15, gap = 2.1 } = {}) {
       const cc = cost(cand)
       if (cc < curCost || rnd() < Math.exp((curCost - cc) / (T * 0.3))) { cur = cand; curCost = cc; if (cc < bestCost) { best = cand.map((p) => ({ ...p })); bestCost = cc } }
     }
+    best = legalize(best) // guarantee no courtyard overlaps in the final placement
     const minX = Math.min(...best.map((p) => aabb(p)[0])), minY = Math.min(...best.map((p) => aabb(p)[1]))
     return best.map((p) => ({ ...p, pcbX: +(p.x - minX).toFixed(2), pcbY: +(p.y - minY).toFixed(2), pcbRotation: p.rot || 0, layer: 'top' }))
   }
@@ -539,7 +603,7 @@ async function iterativeRedesign(parts, nets) {
     const drc = await realDrc(cj, s.profile)
     if (!drc.available) return { available: false, drc, trail, best: null }
     const score = drc.errors + unrouted * 5 // unrouted nets are worse than a DRC nit
-    trail.push({ iter: i + 1, strategy: s.name, profile: FAB_PROFILES[s.profile].label, errors: drc.errors, unrouted })
+    trail.push({ iter: i + 1, strategy: s.name, profile: FAB_PROFILES[s.profile].label, errors: drc.errors, errorTypes: drc.errorTypes, unrouted })
     if (!best || score < best.score) best = { cj, drc, fixes, unrouted, score, strategy: s.name }
     if (drc.errors === 0 && unrouted === 0) break // fully routed AND fab-clean — done
   }
