@@ -25,7 +25,8 @@ integrated SoC (audio/BLE + PMIC/charger/DSP) and add the parts a real board nee
 
 Output ONLY one JSON object, no prose, no fences:
 {"parts":[{"name":"U1","footprint":"qfn32","kind":"chip"},{"name":"MIC1","footprint":"qfn6","kind":"chip"},{"name":"C1","footprint":"0402","kind":"capacitor","lcsc":"C1525"}],
- "nets":[["U1.1","C1.1"],["U1.13","MIC1.1"]]}
+ "nets":[["U1.1","C1.1"],["U1.13","MIC1.1"]],
+ "gnd":["U1.16","MIC1.3","C1.2"]}
 
 PARTS — include the real functional set (10-16 parts):
 - U1: the main SoC (qfn32/qfn48).
@@ -49,11 +50,16 @@ RULES:
 - nets connect pins as "COMPONENT.PIN"; pin numbers MUST exist (qfnN -> 1..N,
   passive -> 1 and 2). Two-point nets only (["A.p","B.p"]); split a shared rail into
   multiple two-point nets.
-- Be COMPLETE: real decoupling, real audio buses, real RF chain. The runner places
-  + routes; you list the parts + connections. (Power/ground PLANES aren't modeled
-  yet, so wire power point-to-point and keep the count realistic but routable.)`
+- "gnd": list EVERY ground pin as "COMPONENT.PIN" (SoC GND/VSS pins, mic grounds,
+  the ground side of each decoupling cap, antenna ground). These are NOT in "nets" —
+  the platform lays a real ground PLANE and bonds them to it (that's how a board
+  handles ground, not point-to-point traces). This is what makes the netlist
+  production-realistic: signals + power in "nets", every ground in "gnd".
+- Be COMPLETE: real decoupling, real audio buses, real RF chain, and a full ground
+  net. The runner places + routes signals and pours the ground plane; you list the
+  parts, the signal/power connections, and the ground pins.`
 
-async function emitPartsNets(userMsg: string, override?: LLMOverride): Promise<{ parts: any[]; nets: any[] }> {
+async function emitPartsNets(userMsg: string, override?: LLMOverride): Promise<{ parts: any[]; nets: any[]; gnd: string[] }> {
   const antKey = process.env.ANTHROPIC_API_KEY
   const opts = override?.apiKey
     ? override
@@ -65,7 +71,7 @@ async function emitPartsNets(userMsg: string, override?: LLMOverride): Promise<{
     try {
       const { text } = await callLLMText(SYSTEM, attempt === 0 ? userMsg : userMsg + '\n\nReply with ONLY the JSON object.', opts)
       const o = JSON.parse(firstJson(text))
-      if (Array.isArray(o.parts) && o.parts.length) return { parts: o.parts, nets: Array.isArray(o.nets) ? o.nets : [] }
+      if (Array.isArray(o.parts) && o.parts.length) return { parts: o.parts, nets: Array.isArray(o.nets) ? o.nets : [], gnd: Array.isArray(o.gnd) ? o.gnd.map(String) : [] }
     } catch (e) { lastErr = e }
   }
   throw lastErr ?? new Error('parts model failed')
@@ -138,7 +144,7 @@ export async function POST(req: Request) {
       `electronics: ${elec?.summary || elec?.boardIntent || '-'}\n` +
       `List the minimal chip-scale part set + nets.`
 
-    const { parts, nets } = await emitPartsNets(userMsg, overrideFromHeaders(req.headers))
+    const { parts, nets, gnd } = await emitPartsNets(userMsg, overrideFromHeaders(req.headers))
 
     // pull REAL LCSC footprints for any part the engine tagged with a valid id;
     // attach as part.kicadMod so the runner uses the true pad geometry + size.
@@ -156,7 +162,7 @@ export async function POST(req: Request) {
     const dir = path.join(process.cwd(), 'public', 'runs', runId, 'electronics')
     await fs.mkdir(dir, { recursive: true })
     const svgPath = path.join(dir, 'chipscale.svg')
-    const result = await runBoard({ parts, nets }, svgPath)
+    const result = await runBoard({ parts, nets, gnd }, svgPath)
 
     if (result?.error) return Response.json({ ok: false, error: result.error })
 

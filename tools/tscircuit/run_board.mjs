@@ -41,6 +41,47 @@ const FR_JAR = (() => {
   try { return fs.existsSync(p) ? p : null } catch { return null }
 })()
 
+// KiCad's own python (ships with the app) + the ground-plane pass. pcbnew carries
+// a real net model, so it can assign nets and lay a DRC-verified ground plane the
+// net-less circuit-json-to-kicad export can't.
+const KICAD_PY = ['/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3', '/usr/bin/python3']
+  .find((p) => { try { return fs.existsSync(p) } catch { return false } })
+const GROUND_PLANE_PY = (() => {
+  const p = path.join(HERE, '..', 'kicad', 'ground_plane.py')
+  try { return fs.existsSync(p) ? p : null } catch { return null }
+})()
+
+/** Add a real ground plane to the routed board (via pcbnew) and DRC-verify it:
+ *  assign the GND net to every ground pin, fill a bonded GND zone, then run real
+ *  KiCad DRC on the grounded board. Returns { assigned, unconnected, errors } —
+ *  unconnected = ground pins the plane didn't reach (0 = every ground pin on the
+ *  plane), reported honestly. Null if pcbnew/gnd pins are unavailable. */
+async function applyGroundPlane(cj, gndPins, profileKey = 'standard') {
+  if (!KICAD_CLI || !KICAD_PY || !GROUND_PLANE_PY || !gndPins?.length) return null
+  let dir
+  try {
+    const { CircuitJsonToKicadPcbConverter } = await import('circuit-json-to-kicad')
+    const conv = new CircuitJsonToKicadPcbConverter(cj); conv.runUntilFinished()
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fl-gp-'))
+    const inPcb = path.join(dir, 'b.kicad_pcb'), outPcb = path.join(dir, 'g.kicad_pcb')
+    const gndJson = path.join(dir, 'gnd.json'), drcJson = path.join(dir, 'g.json')
+    fs.writeFileSync(inPcb, conv.getOutputString())
+    fs.writeFileSync(gndJson, JSON.stringify(gndPins))
+    const r = spawnSync(KICAD_PY, [GROUND_PLANE_PY, inPcb, outPcb, gndJson], { encoding: 'utf8', timeout: 120000 })
+    if (!fs.existsSync(outPcb)) return { available: false, reason: 'ground plane pass produced no board', stderr: (r.stderr || '').slice(0, 200) }
+    let gp = {}; try { gp = JSON.parse((r.stdout || '').trim().split('\n').pop() || '{}') } catch { /* keep defaults */ }
+    fs.writeFileSync(path.join(dir, 'g.kicad_dru'), (FAB_PROFILES[profileKey] || FAB_PROFILES.standard).rules)
+    spawnSync(KICAD_CLI, ['pcb', 'drc', '--format', 'json', '--output', drcJson, outPcb], { encoding: 'utf8', timeout: 120000 })
+    let errors = null
+    if (fs.existsSync(drcJson)) { const rep = JSON.parse(fs.readFileSync(drcJson, 'utf8')); errors = (rep.violations || []).filter((v) => v.severity === 'error').length }
+    return { available: true, assigned: gp.assigned ?? 0, unconnected: gp.unconnected ?? null, errors }
+  } catch (e) {
+    return { available: false, reason: String(e).slice(0, 160) }
+  } finally {
+    if (dir) try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* best effort */ }
+  }
+}
+
 /** Route a placed board with freerouting: strip any existing routing, export a
  *  Specctra DSN, run the autorouter, merge the routed session back to circuit
  *  JSON. Returns { cj, unrouted } (unrouted = nets it couldn't complete, an
@@ -92,7 +133,14 @@ async function freeroute(cj, { layers = 2 } = {}) {
     const unroutedN = m.length ? Number(m[m.length - 1][1]) : 0
     const session = parseDsnToDsnJson(fs.readFileSync(sesPath, 'utf8'))
     const routed = convertDsnSessionToCircuitJson(dsnPcb, session, unrouted)
-    return { cj: routed, unrouted: unroutedN, layers }
+    // The DSN round-trip keeps the pads (pcb_smtpad) but DROPS the pcb_component
+    // containers + courtyards/silk — and circuit-json-to-kicad renders footprints
+    // FROM pcb_component, so without them it emits ZERO footprints (DRC then never
+    // sees component pads, and a ground plane can't find them). Re-attach the
+    // component-defining elements the router doesn't touch.
+    const keepTypes = new Set(['pcb_component', 'pcb_courtyard_outline', 'pcb_courtyard_rect', 'pcb_silkscreen_path', 'pcb_silkscreen_text', 'pcb_solder_paste', 'cad_component'])
+    const reattach = unrouted.filter((e) => keepTypes.has(e.type))
+    return { cj: [...routed, ...reattach], unrouted: unroutedN, layers }
   } catch { return null } finally {
     if (dir) try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* best effort */ }
   }
@@ -522,6 +570,16 @@ async function main() {
         unrouted: res.best.unrouted,
         fixes: res.best.fixes,
         verdict: res.verdict,
+      }
+      // Real ground plane (pcbnew): assign GND to the ground pins and lay a
+      // DRC-verified GND zone that bonds them. Signals stay freerouting-routed;
+      // ground becomes a plane, the way a real board does it.
+      if (input.gnd?.length) {
+        const gp = await applyGroundPlane(res.best.cj, input.gnd, res.best.drc.profileKey || 'standard')
+        if (gp?.available) {
+          drcRepair.groundPlane = { assigned: gp.assigned, unconnected: gp.unconnected, errors: gp.errors }
+          drcRepair.fixes = [...res.best.fixes, `ground plane: ${gp.assigned} pins on a DRC-verified GND zone${gp.unconnected ? ` (${gp.unconnected} not reached)` : ''}`]
+        }
       }
     }
   }
