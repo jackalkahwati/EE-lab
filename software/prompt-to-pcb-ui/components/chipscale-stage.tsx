@@ -45,7 +45,7 @@ type Result = {
   error?: string
 }
 
-export function ChipScaleStage({ spec, runId }: { spec: any; runId?: string }) {
+export function ChipScaleStage({ spec, runId, asElectronics }: { spec: any; runId?: string; asElectronics?: boolean }) {
   const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
   const [res, setRes] = useState<Result | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -71,7 +71,7 @@ export function ChipScaleStage({ spec, runId }: { spec: any; runId?: string }) {
   return (
     <div className="flex h-full flex-col overflow-y-auto p-5">
       <div className="mb-3 flex items-center gap-2">
-        <span className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">chip-scale electronics · tscircuit</span>
+        <span className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">{asElectronics ? 'electronics · bespoke chip-down board' : 'chip-scale electronics · tscircuit'}</span>
         {res?.code && (
           <button type="button" onClick={() => setShowCode((s) => !s)}
             className="rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground">
@@ -81,11 +81,11 @@ export function ChipScaleStage({ spec, runId }: { spec: any; runId?: string }) {
         <button type="button" onClick={run} disabled={!canRun || state === 'loading'}
           className="ml-auto flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
           {state === 'loading' ? <Loader2 className="size-3 animate-spin" /> : <CircuitBoard className="size-3" />}
-          {res ? 'Regenerate' : 'Generate chip-scale board'}
+          {res ? 'Regenerate' : asElectronics ? 'Design the electronics' : 'Generate chip-scale board'}
         </button>
       </div>
 
-      {!canRun && <p className="text-sm text-muted-foreground">Build a board first — the chip-scale path re-lays the electronics small.</p>}
+      {!canRun && <p className="text-sm text-muted-foreground">Describe a product on the left first — then the electronics are synthesized as a real bare-chip board.</p>}
       {state === 'idle' && canRun && (
         <p className="text-sm text-muted-foreground">
           The product engine emits a code-defined board; <span className="text-foreground">tscircuit</span> autoroutes it in-process into an earbud-scale board. Its real size flows into the fit-check + redesign loop.
