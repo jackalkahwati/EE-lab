@@ -237,11 +237,16 @@ function place(parts, maxW = 15, gap = 2.1, singleSided = false, nets = null) {
   return placed
 }
 
-/** placed parts (with pcbX/pcbY/layer/pcbRotation/_fp) + nets -> tscircuit code. */
+/** placed parts (with pcbX/pcbY/layer/pcbRotation/_fp) + nets -> tscircuit code.
+ *  NOTE: circuit-json-to-kicad silently DROPS <capacitor> elements (chips and
+ *  resistors render, capacitors don't), which would leave cap pads out of the
+ *  KiCad board that DRC checks. So emit capacitors as <chip> — same 2-pad
+ *  geometry/footprint, but it actually lands in the board so DRC/nets/planes
+ *  see it. (The cap's electrical role lives in the netlist/BOM, not here.) */
 function emitBoardCode(placed, nets) {
   const comps = placed.map((p) => {
-    const kind = p.kind === 'resistor' ? 'resistor' : p.kind === 'capacitor' ? 'capacitor' : 'chip'
-    const val = kind === 'resistor' ? ' resistance="10k"' : kind === 'capacitor' ? ' capacitance="100nF"' : ''
+    const kind = p.kind === 'resistor' ? 'resistor' : 'chip'
+    const val = kind === 'resistor' ? ' resistance="10k"' : ''
     const fp = p._fp ? `{${p._fp.jsx}}` : `"${p.footprint}"`
     const rot = p.pcbRotation ? ` pcbRotation={${p.pcbRotation}}` : ''
     return `    <${kind} name="${p.name}" footprint=${fp}${val} pcbX={${p.pcbX}} pcbY={${p.pcbY}}${rot} layer="${p.layer}" />`
