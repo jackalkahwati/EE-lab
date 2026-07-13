@@ -65,6 +65,10 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
   onProductSpec?: (spec: ProductSpec | null) => void // lift the spec for the Explore stage
 }) {
   const [phase, setPhase] = useState<Phase>('idle')
+  // The electronics board actually built (a runDir exists). Kept separate from
+  // `phase` so a later Industrial-Design/connection error can't retroactively
+  // show "Electronics FAILED" on a board that really built.
+  const [boardBuilt, setBoardBuilt] = useState(false)
   const [request, setRequest] = useState('')
   const [answers, setAnswers] = useState<Answer[]>([])
   const [current, setCurrent] = useState<Question | null>(null)
@@ -120,7 +124,7 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
 
   function reset() {
     esRef.current?.close(); esRef.current = null
-    setPhase('idle'); setRequest(''); setAnswers([]); setCurrent(null); setSpec(null)
+    setPhase('idle'); setBoardBuilt(false); setRequest(''); setAnswers([]); setCurrent(null); setSpec(null)
     setIdBrief(null); setGroundBoard(null); setProductSpec(null); setRevSpec(null); setTyped(''); setErr(null); setStages({}); setLogs([]); onNew()
   }
 
@@ -194,7 +198,7 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
    *  both the manual "Yes, build it" path and the Architect's auto electronics
    *  hand-off, so the two flows share one build code path. */
   function buildBoard(bspec: { blocks: string[]; boardClass: string; layers?: number }, req: string, opts?: { thenId?: boolean }) {
-    setPhase('building'); setStages({}); setLogs([])
+    setPhase('building'); setBoardBuilt(false); setStages({}); setLogs([])
     const id = `run-${crypto.randomUUID()}`
     const payload = b64(JSON.stringify({ blocks: bspec.blocks, boardClass: bspec.boardClass, ...(bspec.layers ? { layers: bspec.layers } : {}) }))
     const url = `/api/pipeline/run?prompt=${encodeURIComponent(req)}`
@@ -207,7 +211,7 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
         setLogs((l) => [...l.slice(-60), { stage: ev.stage!, text: ev.text!, level: ev.level }])
       else if (ev.type === 'done') {
         es.close(); esRef.current = null; setPhase('done')
-        if (ev.runDir) onRunComplete(ev.runDir, id)
+        if (ev.runDir) { setBoardBuilt(true); onRunComplete(ev.runDir, id) }
         // product flow: once the real board exists, wrap it with Industrial Design
         if (opts?.thenId && ev.runDir) startIdFromBoard(ev.runDir)
       } else if (ev.type === 'error') { es.close(); esRef.current = null; setErr(ev.text ?? 'pipeline error'); setPhase('error') }
@@ -282,7 +286,14 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
       : null
     setGroundBoard(ground)
     setAnswers([]); setCurrent(null)
-    await askIndustrialDesign(request, [], ground)
+    // Use a resilient intent: the raw prompt if present, else the product spec's
+    // board intent / product name. An empty request here made industrial-design
+    // 400 ("empty product intent"), which flipped the whole run to error and
+    // showed "Electronics FAILED" even though the board built — and blocked the
+    // flow from reaching Industrial Design / Mechanical.
+    const intent = request.trim() || (productSpec ? boardIntentOf(productSpec) : '') || productSpec?.product || ''
+    if (!intent) { setPhase('done'); return }
+    await askIndustrialDesign(intent, [], ground)
   }
 
   /** Product-tier interview: same shape as the board interview, one level up.
@@ -409,7 +420,7 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
           </div>
         )}
         {loading && <div className="flex items-center gap-2 text-[12px] text-muted-foreground"><Loader2 className="size-3.5 animate-spin" /> thinking…</div>}
-        {err && <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px] text-destructive">{err}</div>}
+        {err && !boardBuilt && <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px] text-destructive">{err}</div>}
 
         {/* plan ready */}
         {phase === 'ready' && spec && (
@@ -480,11 +491,13 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
                 .map((r) => {
                   const isElec = r.discipline === 'electronics'
                   const st = isElec
-                    ? phase === 'error'
-                      ? 'failed'
-                      : phase === 'done'
-                        ? 'built'
-                        : 'building'
+                    ? boardBuilt
+                      ? 'built' // board really built — never show FAILED for a later ID/connection error
+                      : phase === 'error'
+                        ? 'failed'
+                        : phase === 'done'
+                          ? 'built'
+                          : 'building'
                     : 'pending'
                   const icon =
                     st === 'built' ? <Check className="size-3.5 text-emerald-500" />
