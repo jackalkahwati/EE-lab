@@ -13,8 +13,14 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { runTscircuitCode } from '@tscircuit/eval'
+
+// Resolve sibling tools relative to THIS script, not the cwd — the Next server
+// spawns this runner with its own (app) working directory, so a cwd-relative
+// path finds nothing and silently drops freerouting.
+const HERE = path.dirname(fileURLToPath(import.meta.url))
 
 // Real KiCad DRC — the honesty upgrade over tscircuit's own router check. We
 // convert the routed board to a real .kicad_pcb and run `kicad-cli pcb drc`
@@ -31,7 +37,7 @@ const KICAD_CLI = ['/opt/homebrew/bin/kicad-cli', '/Applications/KiCad/KiCad.app
 const JAVA = ['/opt/homebrew/opt/openjdk/bin/java', '/usr/bin/java', '/usr/local/bin/java']
   .find((p) => { try { return fs.existsSync(p) } catch { return false } }) || (process.env.JAVA_HOME ? `${process.env.JAVA_HOME}/bin/java` : null)
 const FR_JAR = (() => {
-  const p = path.join(process.cwd(), '..', 'freerouting', 'freerouting-2.2.4.jar')
+  const p = path.join(HERE, '..', 'freerouting', 'freerouting-2.2.4.jar')
   try { return fs.existsSync(p) ? p : null } catch { return null }
 })()
 
