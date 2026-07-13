@@ -243,6 +243,11 @@ export default function Compose2Page() {
   const real = realBoard && realBoard.base === (selectedRunDir ?? '') ? realBoard : null
   const isReal = selectedRun?.real === true && real !== null
   const boardBase = selectedRunDir ? `${selectedRunDir}/board` : '/board'
+  // The run has a bespoke chip-scale board — point Layout + Schematic at ITS
+  // artwork (the flroute reference schematic/layout still shows a Pico otherwise).
+  const hasChip = real?.board?.source === 'chip-scale chip-down board'
+  const chipPcbSvg = selectedRun ? `/runs/${selectedRun.id}/electronics/chipscale.svg` : ''
+  const chipSchemSvg = selectedRun ? `/runs/${selectedRun.id}/electronics/chipscale-schematic.svg` : ''
 
   return (
     <main className="flex h-[calc(100dvh-2.75rem)] overflow-hidden bg-background text-foreground">
@@ -359,10 +364,22 @@ export default function Compose2Page() {
                             <div className="flex h-full items-center justify-center text-xs text-muted-foreground">no 3D model for this run</div>} />
                         )}
                         {view === 'layout' && (
-                          <BoardCanvas key={selectedRun.id} run={selectedRun}
-                            realBoard={isReal ? real?.board : null} basePath={boardBase} />
+                          hasChip
+                            ? <div className="flex h-full items-center justify-center overflow-auto bg-white p-4">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src={`${chipPcbSvg}?t=${selectedRun.id}`} alt="chip-scale PCB layout" className="max-h-full w-auto" />
+                              </div>
+                            : <BoardCanvas key={selectedRun.id} run={selectedRun}
+                                realBoard={isReal ? real?.board : null} basePath={boardBase} />
                         )}
-                        {view === 'schematic' && <BoardSchematic runDir={selectedRunDir ?? null} />}
+                        {view === 'schematic' && (
+                          hasChip
+                            ? <div className="flex h-full items-center justify-center overflow-auto bg-white p-4">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src={`${chipSchemSvg}?t=${selectedRun.id}`} alt="chip-scale schematic" className="max-h-full w-auto" />
+                              </div>
+                            : <BoardSchematic runDir={selectedRunDir ?? null} />
+                        )}
                       </>
                     )}
                   </ErrorBoundary>

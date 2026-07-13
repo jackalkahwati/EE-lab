@@ -743,9 +743,12 @@ async function main() {
   let svg = false
   if (input.svgPath && board) {
     try {
-      const { convertCircuitJsonToPcbSvg } = await import('circuit-to-svg')
+      const { convertCircuitJsonToPcbSvg, convertCircuitJsonToSchematicSvg } = await import('circuit-to-svg')
       fs.writeFileSync(input.svgPath, convertCircuitJsonToPcbSvg(cj))
       svg = true
+      // also a schematic SVG so the Layout/Schematic views show THIS board, not
+      // the flroute reference schematic.
+      try { fs.writeFileSync(input.svgPath.replace(/\.svg$/, '-schematic.svg'), convertCircuitJsonToSchematicSvg(cj)) } catch { /* schematic optional */ }
     } catch { /* svg optional */ }
   }
 
