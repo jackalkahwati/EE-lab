@@ -11,6 +11,7 @@ import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { Loader2, Box, Download, ExternalLink } from 'lucide-react'
 import { llmHeaders } from '@/components/llm-settings'
+import { MechanicalAssembly } from '@/components/mechanical-assembly'
 import type { ProductSpec } from '@/lib/product-spec'
 
 type Result = {
@@ -69,6 +70,14 @@ export function MechanicalStage({ spec, runId, onBuilt }: { spec: ProductSpec | 
       {res?.ok && state === 'done' && (
         <div className="space-y-4">
           <div className="text-[13px] font-semibold text-foreground">{res.part}</div>
+          {runId && (
+            <div>
+              <div className="mb-1 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">final assembly — populated board + Li-ion cell in the enclosure (drag to rotate)</div>
+              <div className="h-[46vh] w-full overflow-hidden rounded-md border border-border bg-[#07090c]">
+                <MechanicalAssembly basePath={`/runs/${runId}/board`} />
+              </div>
+            </div>
+          )}
           {res.previewUrl && (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={res.previewUrl} alt={`${res.part} CAD preview`} className="mx-auto max-h-[46vh] w-auto rounded-md border border-border bg-white" />
