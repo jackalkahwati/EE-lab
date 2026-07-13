@@ -136,6 +136,27 @@ function buildCode(parts, nets) {
   return `export default () => (\n  <board autorouter="auto">\n${comps.join('\n')}\n${traces.join('\n')}\n  </board>\n)`
 }
 
+/** DRC-driven redesign: apply the real geometry fixes the platform CAN make to
+ *  a routed board — enlarge the autorouter's sub-spec vias to JLCPCB minimums
+ *  (0.5mm pad / 0.2mm hole -> 0.15mm annular) and add a board-edge margin so
+ *  copper clears the outline. Mutates cj in place; returns the list of fixes.
+ *  What it can't fix (e.g. vias the router packs too close) stays in the re-run
+ *  DRC and is reported honestly, never hidden. */
+function fabRepair(cj) {
+  const fixes = []
+  let vias = 0
+  for (const e of cj) {
+    if (e.type === 'pcb_via') {
+      if ((e.outer_diameter ?? 0) < 0.5) { e.outer_diameter = 0.5; vias++ }
+      if ((e.hole_diameter ?? 1) > 0.2) e.hole_diameter = 0.2
+    }
+  }
+  if (vias) fixes.push(`enlarged ${vias} via${vias === 1 ? '' : 's'} to 0.5mm pad / 0.2mm hole (JLCPCB min)`)
+  const board = cj.find((e) => e.type === 'pcb_board')
+  if (board) { board.width += 1.2; board.height += 1.2; fixes.push('added 0.6mm board-edge copper margin') }
+  return fixes
+}
+
 async function main() {
   const input = JSON.parse(fs.readFileSync(0, 'utf8'))
   const code = input.code || (input.parts ? buildCode(input.parts, input.nets) : '')
@@ -147,6 +168,24 @@ async function main() {
   const errors = {}
   for (const e of cj) if (/error/.test(e.type)) errors[e.type] = (errors[e.type] || 0) + 1
 
+  // Real KiCad DRC, then a DRC-driven redesign pass: if the first check has
+  // errors, apply the fixes we can (fabRepair) and re-check. Report the whole
+  // trajectory so "fixed" and "still-broken" are both visible.
+  const runDrc = input.drc !== false && !!board
+  let drc = runDrc ? await realDrc(cj) : { available: false, reason: 'skipped' }
+  let drcRepair = null
+  if (input.repair !== false && drc.available && drc.errors > 0) {
+    const fixes = fabRepair(cj)
+    const after = await realDrc(cj)
+    drcRepair = {
+      errorsBefore: drc.errors,
+      errorsAfter: after.errors,
+      fixes,
+      converged: after.errors === 0,
+    }
+    drc = after // report the post-repair board (SVG + dims below reflect it too)
+  }
+
   let svg = false
   if (input.svgPath && board) {
     try {
@@ -157,8 +196,6 @@ async function main() {
   }
 
   const errorCount = Object.values(errors).reduce((a, b) => a + b, 0)
-  // real KiCad DRC on the actual routed board (unless explicitly skipped)
-  const drc = input.drc === false || !board ? { available: false, reason: 'skipped' } : await realDrc(cj)
   process.stdout.write(JSON.stringify({
     ok: !!board && traces.length > 0 && errorCount === 0,
     boardMm: board ? { w: Math.round(board.width * 10) / 10, h: Math.round(board.height * 10) / 10 } : null,
@@ -167,6 +204,7 @@ async function main() {
     routedTraces: traces.length,
     errors,
     drc,
+    drcRepair,
     svg,
     code,
   }))

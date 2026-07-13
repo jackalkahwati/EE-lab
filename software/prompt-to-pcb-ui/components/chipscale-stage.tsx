@@ -29,6 +29,12 @@ type Result = {
     errorTypes?: Record<string, number>
     sample?: string[]
   } | null
+  drcRepair?: {
+    errorsBefore: number
+    errorsAfter: number
+    fixes: string[]
+    converged: boolean
+  } | null
   errors?: Record<string, number>
   svgUrl?: string | null
   code?: string
@@ -117,6 +123,14 @@ export function ChipScaleStage({ spec, runId }: { spec: any; runId?: string }) {
                   <ul className="mt-1 list-disc pl-4 text-[11px] opacity-90">
                     {res.drc.sample.slice(0, 3).map((s, i) => <li key={i}>{s}</li>)}
                   </ul>
+                )}
+                {res.drcRepair && (
+                  <div className="mt-1.5 border-t border-current/20 pt-1.5 text-[11px]">
+                    <span className="font-medium">Redesign loop:</span>{' '}
+                    {res.drcRepair.errorsBefore} → {res.drcRepair.errorsAfter} errors
+                    {res.drcRepair.converged ? ' (converged clean)' : ` (${res.drcRepair.errorsAfter} residual — reported, not hidden)`}
+                    {' · '}{res.drcRepair.fixes.join('; ')}
+                  </div>
                 )}
                 <div className="mt-1 text-[10px] opacity-70">Same design-rule check a fab runs — not tscircuit&apos;s own router check.</div>
               </div>
