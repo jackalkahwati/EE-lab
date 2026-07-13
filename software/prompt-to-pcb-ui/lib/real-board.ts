@@ -223,10 +223,21 @@ export async function loadRealBoard(base = ''): Promise<RealBoard | null> {
   // base '' = shared latest artifacts (/data); '/runs/<id>' = a run's own snapshot
   const board = await fetchJson<RealBoardJson>(`${base}/data/board.json`)
   if (!board) return null
-  const [bom, ato] = await Promise.all([
+  const [bom, ato, chip] = await Promise.all([
     fetchJson<BomLine[]>(`${base}/data/bom.json`),
     fetchJson<AtoFile[]>(`${base}/data/ato.json`),
+    // the bespoke chip-scale board (the real chip-down design)
+    base ? fetchJson<{ boardMm?: { w: number; h: number }; components?: number }>(`${base}/electronics/chipscale-board.json`) : Promise.resolve(null),
   ])
+  // When the chip-scale board exists, the headline size + part count should be
+  // ITS numbers (the small chip-down board that goes in the enclosure and now
+  // renders in 3D) — not the flroute reference board. DRC/BOM still come from the
+  // flroute board.json until those are repointed too.
+  if (chip?.boardMm?.w && chip?.boardMm?.h) {
+    board.boardSize = { wMm: chip.boardMm.w, hMm: chip.boardMm.h }
+    if (chip.components) board.components = chip.components
+    board.source = 'chip-scale chip-down board'
+  }
   return { base, board, run: buildRun(board), reports: buildReports(board), bom, ato }
 }
 

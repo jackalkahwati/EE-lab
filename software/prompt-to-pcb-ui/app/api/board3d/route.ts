@@ -28,6 +28,11 @@ function resolvePcb(base: string): string | null {
   }
   const m = base.match(/^\/runs\/([A-Za-z0-9._-]+)\/board$/)
   if (!m) return null
+  // Prefer the bespoke chip-scale board (the real chip-down design that was
+  // routed) over the flroute reference board, so the 3D view shows the small
+  // board that actually goes in the enclosure — not the RP2040 module board.
+  const chip = path.join(APP, 'public', 'runs', m[1], 'electronics', 'chipscale.kicad_pcb')
+  if (fs.existsSync(chip)) return chip
   return path.join(APP, 'public', 'runs', m[1], 'variant.kicad_pcb')
 }
 
@@ -86,7 +91,10 @@ export async function GET(req: Request) {
       { status: 404 },
     )
 
-  const glb = path.join(APP, 'public', base.replace(/^\//, ''), 'board.glb')
+  // distinct cache file per source board so the chip-scale GLB never collides
+  // with a previously-exported flroute GLB
+  const glbName = pcb.includes('chipscale') ? 'chipscale.glb' : 'board.glb'
+  const glb = path.join(APP, 'public', base.replace(/^\//, ''), glbName)
   try {
     await ensureGlb(pcb, glb)
   } catch (e: any) {

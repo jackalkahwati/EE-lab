@@ -75,7 +75,10 @@ async function applyGroundPlane(cj, gndPins, profileKey = 'standard') {
     spawnSync(KICAD_CLI, ['pcb', 'drc', '--format', 'json', '--output', drcJson, outPcb], { encoding: 'utf8', timeout: 120000 })
     let errors = null
     if (fs.existsSync(drcJson)) { const rep = JSON.parse(fs.readFileSync(drcJson, 'utf8')); errors = (rep.violations || []).filter((v) => v.severity === 'error').length }
-    return { available: true, assigned: gp.assigned ?? 0, unconnected: gp.unconnected ?? null, stitched: gp.stitched ?? 0, skipped: gp.skipped ?? 0, errors }
+    // return the grounded .kicad_pcb too (read before the temp dir is cleaned) so
+    // the caller can persist it for the 3D render — the real chip-down board.
+    const pcb = fs.readFileSync(outPcb, 'utf8')
+    return { available: true, assigned: gp.assigned ?? 0, unconnected: gp.unconnected ?? null, stitched: gp.stitched ?? 0, skipped: gp.skipped ?? 0, errors, pcb }
   } catch (e) {
     return { available: false, reason: String(e).slice(0, 160) }
   } finally {
@@ -659,7 +662,7 @@ async function main() {
 
   // Iterative DRC-driven redesign: search the strategy ladder for a real
   // fab-clean board; use the best one it finds as the reported result.
-  let cj, drc, drcRepair = null, code
+  let cj, drc, drcRepair = null, code, kicadPcb = null
   if (iterative) {
     const res = await iterativeRedesign(input.parts, input.nets)
     if (res.available) {
@@ -682,6 +685,7 @@ async function main() {
       if (input.gnd?.length) {
         const gp = await applyGroundPlane(res.best.cj, input.gnd, res.best.drc.profileKey || 'standard')
         if (gp?.available) {
+          if (gp.pcb) kicadPcb = gp.pcb // grounded board (with the GND plane) for the 3D render
           drcRepair.groundPlane = { assigned: gp.assigned, unconnected: gp.unconnected, stitched: gp.stitched, skipped: gp.skipped, errors: gp.errors }
           const stitchNote = gp.stitched ? `, ${gp.stitched} bonded down via tented via-in-pad` : ''
           drcRepair.fixes = [...res.best.fixes, `ground plane: ${gp.assigned} pins on a DRC-verified GND zone${stitchNote}${gp.unconnected ? ` (${gp.unconnected} still unreached)` : ''}`]
@@ -723,9 +727,21 @@ async function main() {
     } catch { /* svg optional */ }
   }
 
+  // Persist the routed board as a .kicad_pcb for the 3D render. Prefer the
+  // grounded board (captured above); else convert the best cj now. This is the
+  // real chip-down board — small, the one that belongs in the enclosure.
+  if (!kicadPcb && board) {
+    try {
+      const { CircuitJsonToKicadPcbConverter } = await import('circuit-json-to-kicad')
+      const conv = new CircuitJsonToKicadPcbConverter(cj); conv.runUntilFinished()
+      kicadPcb = conv.getOutputString()
+    } catch { /* 3D export optional */ }
+  }
+
   const errorCount = Object.values(errors).reduce((a, b) => a + b, 0)
   process.stdout.write(JSON.stringify({
     ok: !!board && traces.length > 0 && errorCount === 0,
+    kicadPcb,
     boardMm: board ? { w: Math.round(board.width * 10) / 10, h: Math.round(board.height * 10) / 10 } : null,
     areaMm2: board ? Math.round(board.width * board.height) : null,
     // freerouting's DSN round-trip drops pcb_component records; fall back to the

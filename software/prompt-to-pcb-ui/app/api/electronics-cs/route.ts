@@ -183,6 +183,8 @@ export async function POST(req: Request) {
       const partList = parts.map((p: any) => ({ name: p.name, footprint: p.footprint, kind: p.kind, lcsc: p.lcsc ?? null }))
       await fs.writeFile(path.join(dir, 'chipscale-board.json'),
         JSON.stringify({ boardMm: result.boardMm, areaMm2: result.areaMm2, components: result.components, routedTraces: result.routedTraces, realFootprints, parts: partList, drc: result.drc ?? null, drcRepair: result.drcRepair ?? null }))
+      // the routed .kicad_pcb for the 3D render (the real chip-down board)
+      if (result.kicadPcb) await fs.writeFile(path.join(dir, 'chipscale.kicad_pcb'), result.kicadPcb)
     }
 
     return Response.json({
