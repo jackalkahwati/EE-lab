@@ -50,6 +50,28 @@ const GROUND_PLANE_PY = (() => {
   const p = path.join(HERE, '..', 'kicad', 'ground_plane.py')
   try { return fs.existsSync(p) ? p : null } catch { return null }
 })()
+const ADD_MODELS_PY = (() => {
+  const p = path.join(HERE, '..', 'kicad', 'add_models.py')
+  try { return fs.existsSync(p) ? p : null } catch { return null }
+})()
+
+/** Attach stock KiCad 3D models to the board's footprints (pcbnew) so it renders
+ *  as a populated PCBA, not a bare PCB. Returns the model-augmented .kicad_pcb
+ *  string, or the original if the pass is unavailable/fails. */
+function attachModels(pcbString, parts) {
+  if (!KICAD_PY || !ADD_MODELS_PY || !Array.isArray(parts) || !parts.length) return pcbString
+  let dir
+  try {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fl-mdl-'))
+    const inPcb = path.join(dir, 'b.kicad_pcb'), outPcb = path.join(dir, 'm.kicad_pcb'), pj = path.join(dir, 'parts.json')
+    fs.writeFileSync(inPcb, pcbString)
+    fs.writeFileSync(pj, JSON.stringify(parts.map((p) => ({ name: p.name, footprint: p.footprint, kind: p.kind }))))
+    spawnSync(KICAD_PY, [ADD_MODELS_PY, inPcb, outPcb, pj], { encoding: 'utf8', timeout: 60000 })
+    return fs.existsSync(outPcb) ? fs.readFileSync(outPcb, 'utf8') : pcbString
+  } catch { return pcbString } finally {
+    if (dir) try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* best effort */ }
+  }
+}
 
 /** Add a real ground plane to the routed board (via pcbnew) and DRC-verify it:
  *  assign the GND net to every ground pin, fill a bonded GND zone, then run real
@@ -737,6 +759,9 @@ async function main() {
       kicadPcb = conv.getOutputString()
     } catch { /* 3D export optional */ }
   }
+  // Populate the board with 3D component bodies so it renders as a PCBA, not a
+  // bare PCB.
+  if (kicadPcb && input.parts) kicadPcb = attachModels(kicadPcb, input.parts)
 
   const errorCount = Object.values(errors).reduce((a, b) => a + b, 0)
   process.stdout.write(JSON.stringify({
