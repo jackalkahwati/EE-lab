@@ -30,10 +30,13 @@ type Result = {
     sample?: string[]
   } | null
   drcRepair?: {
-    errorsBefore: number
-    errorsAfter: number
-    fixes: string[]
     converged: boolean
+    iterations: { iter: number; strategy: string; profile: string; errors: number }[]
+    winningStrategy: string
+    errorsFirst: number
+    errorsBest: number
+    fixes: string[]
+    verdict: string | null
   } | null
   errors?: Record<string, number>
   svgUrl?: string | null
@@ -126,10 +129,15 @@ export function ChipScaleStage({ spec, runId }: { spec: any; runId?: string }) {
                 )}
                 {res.drcRepair && (
                   <div className="mt-1.5 border-t border-current/20 pt-1.5 text-[11px]">
-                    <span className="font-medium">Redesign loop:</span>{' '}
-                    {res.drcRepair.errorsBefore} → {res.drcRepair.errorsAfter} errors
-                    {res.drcRepair.converged ? ' (converged clean)' : ` (${res.drcRepair.errorsAfter} residual — reported, not hidden)`}
-                    {' · '}{res.drcRepair.fixes.join('; ')}
+                    <span className="font-medium">Redesign loop{res.drcRepair.converged ? ' ✓ converged' : ''}:</span>{' '}
+                    {res.drcRepair.iterations.map((it) => `${it.errors}`).join(' → ')} errors across {res.drcRepair.iterations.length} strateg{res.drcRepair.iterations.length === 1 ? 'y' : 'ies'}
+                    {res.drcRepair.converged
+                      ? ` — clean via "${res.drcRepair.winningStrategy}".`
+                      : ` — best "${res.drcRepair.winningStrategy}".`}
+                    <div className="mt-0.5 opacity-80">fixes: {res.drcRepair.fixes.join('; ')}</div>
+                    {res.drcRepair.verdict && !res.drcRepair.converged && (
+                      <div className="mt-0.5 opacity-90">{res.drcRepair.verdict}</div>
+                    )}
                   </div>
                 )}
                 <div className="mt-1 text-[10px] opacity-70">Same design-rule check a fab runs — not tscircuit&apos;s own router check.</div>
