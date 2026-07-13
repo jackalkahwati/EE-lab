@@ -168,7 +168,7 @@ async function realDrc(cj, profileKey = 'standard') {
 
 // approx footprint sizes [w,h] mm — for deterministic placement
 const FP = {
-  qfn32: [5, 5], qfn24: [4, 4], qfn20: [4, 4], qfn16: [3, 3], qfn12: [2.5, 2.5],
+  qfn48: [7, 7], qfn32: [5, 5], qfn24: [4, 4], qfn20: [4, 4], qfn16: [3, 3], qfn12: [2.5, 2.5],
   qfn8: [2, 2], qfn6: [1.6, 1.6], qfn4: [1.2, 1.2],
   '0603': [1.6, 0.8], '0402': [1.0, 0.5], '0201': [0.6, 0.3],
 }

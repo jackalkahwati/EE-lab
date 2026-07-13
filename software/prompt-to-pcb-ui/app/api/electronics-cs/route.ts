@@ -19,26 +19,39 @@ export const maxDuration = 200
 const RUN_ID = /^run-[A-Za-z0-9._-]{1,128}$/
 
 const SYSTEM = `detailed thinking off.
-You are the chip-scale electronics specialist. List the MINIMAL, highly-integrated
-part set + connections for this product's board. Assume high integration: prefer a
-single audio/BLE SoC that already integrates the PMIC/charger/DSP; add ONLY what is
-truly separate (1-2 MEMS mics, a driver amp if not integrated) plus a few 0201
-decoupling parts. Fewer parts = smaller board.
+You are the chip-scale electronics engineer. Design a PRODUCTION-REALISTIC board
+for this product — a real functional netlist, not a toy. Use a single highly-
+integrated SoC (audio/BLE + PMIC/charger/DSP) and add the parts a real board needs.
 
 Output ONLY one JSON object, no prose, no fences:
-{"parts":[{"name":"U1","footprint":"qfn32","kind":"chip"},{"name":"MIC1","footprint":"qfn6","kind":"chip"},{"name":"C1","footprint":"0201","kind":"capacitor","lcsc":"C1525"}],
+{"parts":[{"name":"U1","footprint":"qfn32","kind":"chip"},{"name":"MIC1","footprint":"qfn6","kind":"chip"},{"name":"C1","footprint":"0402","kind":"capacitor","lcsc":"C1525"}],
  "nets":[["U1.1","C1.1"],["U1.13","MIC1.1"]]}
+
+PARTS — include the real functional set (10-16 parts):
+- U1: the main SoC (qfn32/qfn48).
+- 1-2 MEMS mics (qfn6); a speaker driver/amp if not integrated.
+- ANT1 chip antenna (footprint "0402") + an antenna-matching L and C.
+- Decoupling: ONE 100nF (0402) capacitor per SoC power pin/rail, plus one bulk
+  1uF/10uF. Each cap sits on its own power net.
+- Charge path parts + a status LED (0402) with series resistor.
+
+NETS — every real signal + power connection (12-22 nets) as ["COMP.PIN","COMP.PIN"]:
+- Power rails: each SoC power pin -> its decoupling cap (and shared rails linked).
+- Audio: I2S/PDM buses -> the mic(s) and the speaker/driver (clock + data lines).
+- RF: SoC RF pin -> matching L -> matching C -> ANT1.
+- Charging + control: charge sense, status LED, reset if separate.
+
 RULES:
-- footprints: qfn6/qfn8/qfn16/qfn24/qfn32 for ICs; 0201 or 0402 for passives.
+- footprints: qfn6/qfn8/qfn16/qfn24/qfn32/qfn48 for ICs; 0402 for passives.
 - kind is "chip" | "capacitor" | "resistor".
-- OPTIONAL "lcsc": if you know a REAL LCSC part number for a component, include it
-  (e.g. "C1525" = 100nF 0402, "C25804" = 10k 0402) — the platform pulls the real
-  footprint. OMIT it if unsure; a generic footprint is used. Do NOT invent LCSC ids.
-- nets connect pins as "COMPONENT.PIN" (e.g. "U1.5" = U1 pin 5). Pin numbers MUST
-  exist on the footprint (qfn32 -> 1..32, qfn6 -> 1..6, passives -> 1 and 2).
-- 4-7 parts, 4-8 nets — maximize integration (one SoC does most of it), keep it
-  minimal so it packs tiny. The runner computes placement + routing — you only
-  list parts + connections.`
+- OPTIONAL "lcsc": a REAL LCSC part number for a component if you know one
+  (e.g. "C1525" = 100nF 0402, "C25804" = 10k 0402). OMIT if unsure. Do NOT invent ids.
+- nets connect pins as "COMPONENT.PIN"; pin numbers MUST exist (qfnN -> 1..N,
+  passive -> 1 and 2). Two-point nets only (["A.p","B.p"]); split a shared rail into
+  multiple two-point nets.
+- Be COMPLETE: real decoupling, real audio buses, real RF chain. The runner places
+  + routes; you list the parts + connections. (Power/ground PLANES aren't modeled
+  yet, so wire power point-to-point and keep the count realistic but routable.)`
 
 async function emitPartsNets(userMsg: string, override?: LLMOverride): Promise<{ parts: any[]; nets: any[] }> {
   const antKey = process.env.ANTHROPIC_API_KEY
