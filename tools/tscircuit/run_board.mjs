@@ -323,7 +323,7 @@ function place(parts, maxW = 15, gap = 2.1, singleSided = false, nets = null) {
  *  KiCad board that DRC checks. So emit capacitors as <chip> — same 2-pad
  *  geometry/footprint, but it actually lands in the board so DRC/nets/planes
  *  see it. (The cap's electrical role lives in the netlist/BOM, not here.) */
-function emitBoardCode(placed, nets) {
+function emitBoardCode(placed, nets, { clearance = null } = {}) {
   const comps = placed.map((p) => {
     const kind = p.kind === 'resistor' ? 'resistor' : 'chip'
     const val = kind === 'resistor' ? ' resistance="10k"' : ''
@@ -333,14 +333,22 @@ function emitBoardCode(placed, nets) {
   })
   const pin = (ref) => { const [c, ...r] = String(ref).split('.'); return `.${c} > .pin${r.join('') || '1'}` }
   const traces = (nets || []).map((n) => `    <trace from="${pin(n[0])}" to="${pin(n[1])}" />`)
-  return `export default () => (\n  <board autorouter="auto">\n${comps.join('\n')}\n${traces.join('\n')}\n  </board>\n)`
+  // The built-in router otherwise packs vias right against nearby traces/pads,
+  // tripping the fab's hole-to-copper rule (its holes end up 0.17-0.28mm from
+  // copper, under the 0.4-0.5mm min). tscircuit's board takes RoutingTolerances;
+  // a via's hole sits inside its pad, so widening the edge clearances the router
+  // keeps pushes the holes out far enough to clear the rule by construction.
+  const tol = clearance
+    ? ` minViaHoleEdgeToViaHoleEdgeClearance="${clearance}mm" minPlatedHoleDrillEdgeToDrillEdgeClearance="${clearance}mm" minViaEdgeToPadEdgeClearance="${clearance}mm" minTraceToPadEdgeClearance="${clearance}mm"`
+    : ''
+  return `export default () => (\n  <board autorouter="auto"${tol}>\n${comps.join('\n')}\n${traces.join('\n')}\n  </board>\n)`
 }
 
 /** parts + nets -> tscircuit code (positions computed here, not by the LLM). */
-function buildCode(parts, nets, { maxW = 15, gap = 2.1, singleSided = false } = {}) {
+function buildCode(parts, nets, { maxW = 15, gap = 2.1, singleSided = false, clearance = null } = {}) {
   // resolve real LCSC footprints (from part.kicadMod) before placement/sizing
   for (const p of parts) p._fp = p.kicadMod ? kicadModToFootprint(p.kicadMod) : null
-  return emitBoardCode(place(parts, maxW, gap, singleSided, nets), nets)
+  return emitBoardCode(place(parts, maxW, gap, singleSided, nets), nets, { clearance })
 }
 
 /** Read each part's pin -> [dx,dy] offset (pad position relative to its
@@ -560,12 +568,12 @@ async function iterativeRedesign(parts, nets) {
         { name: 'freerouting 2-layer, standard fab', router: 'fr', layers: 2, place: { gap: 2.1, maxW: 15, singleSided: true }, profile: 'standard' },
         { name: 'freerouting 4-layer, standard fab', router: 'fr', layers: 4, place: { gap: 2.1, maxW: 15, singleSided: true }, profile: 'standard' },
         { name: 'freerouting 4-layer, HDI fab',      router: 'fr', layers: 4, place: { gap: 2.1, maxW: 15, singleSided: true }, profile: 'hdi' },
-        { name: 'built-in router, HDI fab',          router: 'tsci', place: { gap: 2.1, maxW: 15 }, profile: 'hdi' },
+        { name: 'built-in router, HDI fab',          router: 'tsci', place: { gap: 2.1, maxW: 15, clearance: 0.45 }, profile: 'hdi' },
       ]
     : [
-        { name: 'built-in router, standard', router: 'tsci', place: { gap: 2.1, maxW: 15 }, profile: 'standard' },
-        { name: 'built-in router, spread',   router: 'tsci', place: { gap: 3.4, maxW: 18 }, profile: 'standard' },
-        { name: 'built-in router, HDI fab',  router: 'tsci', place: { gap: 2.1, maxW: 15 }, profile: 'hdi' },
+        { name: 'built-in router, standard', router: 'tsci', place: { gap: 2.1, maxW: 15, clearance: 0.5 }, profile: 'standard' },
+        { name: 'built-in router, spread',   router: 'tsci', place: { gap: 3.4, maxW: 18, clearance: 0.5 }, profile: 'standard' },
+        { name: 'built-in router, HDI fab',  router: 'tsci', place: { gap: 2.1, maxW: 15, clearance: 0.45 }, profile: 'hdi' },
       ]
   // Net-aware placement (min pin-to-pin wirelength + routing channels) once, up
   // front — it's what lets the router complete every net. Reused across the
