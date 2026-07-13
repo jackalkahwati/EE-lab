@@ -387,7 +387,9 @@ async function main() {
     ok: !!board && traces.length > 0 && errorCount === 0,
     boardMm: board ? { w: Math.round(board.width * 10) / 10, h: Math.round(board.height * 10) / 10 } : null,
     areaMm2: board ? Math.round(board.width * board.height) : null,
-    components: comps.length,
+    // freerouting's DSN round-trip drops pcb_component records; fall back to the
+    // real part count so the UI never shows "0 components" for a routed board.
+    components: comps.length || (Array.isArray(input.parts) ? input.parts.length : 0),
     routedTraces: traces.length,
     errors,
     drc,
