@@ -309,7 +309,11 @@ async function iterativeRedesign(parts, nets) {
       const fr = await freeroute(cj, { layers: s.layers })
       if (!fr) continue // freerouting failed this pass; try the next strategy
       cj = fr.cj; unrouted = fr.unrouted
-      fixes = [`routed with freerouting (push & shove, ${s.layers}-layer)`]
+      // freerouting can route copper right to the outline; give the board the
+      // same edge margin the built-in path gets so copper clears the edge.
+      const board = cj.find((e) => e.type === 'pcb_board')
+      if (board) { board.width += 1.2; board.height += 1.2 }
+      fixes = [`routed with freerouting (push & shove, ${s.layers}-layer)`, 'added 0.6mm board-edge copper margin']
       if (unrouted) fixes.push(`${unrouted} net(s) left unrouted`)
     } else {
       fixes = fabRepair(cj, FAB_PROFILES[s.profile].via)
