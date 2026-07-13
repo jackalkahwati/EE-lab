@@ -295,8 +295,6 @@ async function netAwarePlace(parts, nets, { maxW = 15, gap = 2.1 } = {}) {
   const offsets = extractPinOffsets(cj0)
   if (Object.keys(offsets).length < parts.length) return null
 
-  let seed = 0x2545f491
-  const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff }
   const rot = (o, deg) => { const r = deg * Math.PI / 180, c = Math.cos(r), s = Math.sin(r); return [o[0] * c - o[1] * s, o[0] * s + o[1] * c] }
   const size = (st) => { const [w, h] = partSize(st); return (st.rot % 180) ? [h, w] : [w, h] }
   const aabb = (st) => { const [w, h] = size(st); return [st.x - w / 2, st.y - h / 2, st.x + w / 2, st.y + h / 2] }
@@ -311,22 +309,39 @@ async function netAwarePlace(parts, nets, { maxW = 15, gap = 2.1 } = {}) {
     for (let i = 0; i < states.length; i++) for (let j = i + 1; j < states.length; j++) { const g = gapBetween(aabb(states[i]), aabb(states[j])); if (g < TARGET) sp += (TARGET - g) ** 2 }
     return wl + sp * 20
   }
-  let cur = initPlaced.map((p) => ({ ...p, x: p.pcbX, y: p.pcbY, rot: 0 }))
-  let curCost = cost(cur), best = cur.map((p) => ({ ...p })), bestCost = curCost
-  const STEPS = 6000
-  for (let step = 0; step < STEPS; step++) {
-    const T = 8 * (1 - step / STEPS) + 0.05
-    const cand = cur.map((p) => ({ ...p }))
-    const i = Math.floor(rnd() * cand.length)
-    if (rnd() < 0.3) cand[i].rot = [0, 90, 180, 270][Math.floor(rnd() * 4)]
-    else { cand[i].x += (rnd() - 0.5) * T; cand[i].y += (rnd() - 0.5) * T }
-    const cc = cost(cand)
-    if (cc < curCost || rnd() < Math.exp((curCost - cc) / (T * 0.3))) { cur = cand; curCost = cc; if (cc < bestCost) { best = cand.map((p) => ({ ...p })); bestCost = cc } }
+  // One SA run from a given seed (positions + rotations); returns placed parts.
+  const saOptimize = (seedInit) => {
+    let seed = seedInit
+    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff }
+    let cur = initPlaced.map((p) => ({ ...p, x: p.pcbX, y: p.pcbY, rot: 0 }))
+    let curCost = cost(cur), best = cur.map((p) => ({ ...p })), bestCost = curCost
+    const STEPS = 6000
+    for (let step = 0; step < STEPS; step++) {
+      const T = 8 * (1 - step / STEPS) + 0.05
+      const cand = cur.map((p) => ({ ...p }))
+      const i = Math.floor(rnd() * cand.length)
+      if (rnd() < 0.3) cand[i].rot = [0, 90, 180, 270][Math.floor(rnd() * 4)]
+      else { cand[i].x += (rnd() - 0.5) * T; cand[i].y += (rnd() - 0.5) * T }
+      const cc = cost(cand)
+      if (cc < curCost || rnd() < Math.exp((curCost - cc) / (T * 0.3))) { cur = cand; curCost = cc; if (cc < bestCost) { best = cand.map((p) => ({ ...p })); bestCost = cc } }
+    }
+    const minX = Math.min(...best.map((p) => aabb(p)[0])), minY = Math.min(...best.map((p) => aabb(p)[1]))
+    return best.map((p) => ({ ...p, pcbX: +(p.x - minX).toFixed(2), pcbY: +(p.y - minY).toFixed(2), pcbRotation: p.rot || 0, layer: 'top' }))
   }
-  // normalize to positive coords, write back placement + rotation
-  const minX = Math.min(...best.map((p) => aabb(p)[0])), minY = Math.min(...best.map((p) => aabb(p)[1]))
-  const placed = best.map((p) => ({ ...p, pcbX: +(p.x - minX).toFixed(2), pcbY: +(p.y - minY).toFixed(2), pcbRotation: p.rot || 0, layer: 'top' }))
-  return emitBoardCode(placed, nets)
+
+  // SA is stochastic: the default seed can strand a net a different seed would
+  // route. Try several, freeroute each on a 4-layer board, and keep the
+  // placement with the fewest unrouted nets — stop at 0 (fully routable).
+  const SEEDS = [0x2545f491, 101, 5551, 31337, 8]
+  let bestCode = null, bestUn = Infinity
+  for (const s of SEEDS) {
+    const code = emitBoardCode(saOptimize(s), nets)
+    let un = Infinity
+    try { const cj = await runTscircuitCode(code); const fr = await freeroute(cj, { layers: 4 }); un = fr ? fr.unrouted : Infinity } catch { un = Infinity }
+    if (un < bestUn) { bestUn = un; bestCode = code }
+    if (un === 0) break
+  }
+  return bestCode
 }
 
 /** DRC-driven redesign: apply the real geometry fixes the platform CAN make to
