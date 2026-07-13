@@ -67,14 +67,15 @@ async function applyGroundPlane(cj, gndPins, profileKey = 'standard') {
     const gndJson = path.join(dir, 'gnd.json'), drcJson = path.join(dir, 'g.json')
     fs.writeFileSync(inPcb, conv.getOutputString())
     fs.writeFileSync(gndJson, JSON.stringify(gndPins))
-    const r = spawnSync(KICAD_PY, [GROUND_PLANE_PY, inPcb, outPcb, gndJson], { encoding: 'utf8', timeout: 120000 })
+    const hc = String((FAB_PROFILES[profileKey] || FAB_PROFILES.standard).holeClearance ?? 0.5)
+    const r = spawnSync(KICAD_PY, [GROUND_PLANE_PY, inPcb, outPcb, gndJson, hc], { encoding: 'utf8', timeout: 120000 })
     if (!fs.existsSync(outPcb)) return { available: false, reason: 'ground plane pass produced no board', stderr: (r.stderr || '').slice(0, 200) }
     let gp = {}; try { gp = JSON.parse((r.stdout || '').trim().split('\n').pop() || '{}') } catch { /* keep defaults */ }
     fs.writeFileSync(path.join(dir, 'g.kicad_dru'), (FAB_PROFILES[profileKey] || FAB_PROFILES.standard).rules)
     spawnSync(KICAD_CLI, ['pcb', 'drc', '--format', 'json', '--output', drcJson, outPcb], { encoding: 'utf8', timeout: 120000 })
     let errors = null
     if (fs.existsSync(drcJson)) { const rep = JSON.parse(fs.readFileSync(drcJson, 'utf8')); errors = (rep.violations || []).filter((v) => v.severity === 'error').length }
-    return { available: true, assigned: gp.assigned ?? 0, unconnected: gp.unconnected ?? null, errors }
+    return { available: true, assigned: gp.assigned ?? 0, unconnected: gp.unconnected ?? null, stitched: gp.stitched ?? 0, skipped: gp.skipped ?? 0, errors }
   } catch (e) {
     return { available: false, reason: String(e).slice(0, 160) }
   } finally {
@@ -106,6 +107,26 @@ function dsnTo4Layer(d) {
   return d
 }
 
+/** Force freerouting to space vias so their drilled holes clear JLCPCB's 0.5mm
+ *  hole_clearance. Without this the router packs vias at the general clearance
+ *  (0.15mm), leaving via holes only ~0.4mm apart — a residual hole_clearance DRC
+ *  error we could only enlarge-and-hope-in post. A typed via_via / via_pin
+ *  clearance in the DSN structure rule makes the router keep via COPPER >= this
+ *  far apart, so with a 0.6mm via pad the holes end up ~0.55mm apart and pass by
+ *  construction. value is in DSN units (this converter emits um: 1 unit = 1um).
+ *  freerouting reads these Specctra typed clearances natively — config, not a
+ *  new router. */
+function setViaClearance(dsnPcb, um) {
+  const rule = dsnPcb.structure && dsnPcb.structure.rule
+  if (!rule) return
+  const cl = (rule.clearances = rule.clearances || [])
+  for (const type of ['via_via', 'via_pin']) {
+    const ex = cl.find((c) => c.type === type)
+    if (ex) ex.value = um
+    else cl.push({ value: um, type })
+  }
+}
+
 async function freeroute(cj, { layers = 2 } = {}) {
   if (!JAVA || !FR_JAR) return null
   let dir
@@ -114,6 +135,10 @@ async function freeroute(cj, { layers = 2 } = {}) {
     const unrouted = cj.filter((e) => e.type !== 'pcb_trace' && e.type !== 'pcb_via')
     let dsnPcb = convertCircuitJsonToDsnJson(unrouted)
     if (layers === 4) dsnPcb = dsnTo4Layer(dsnPcb)
+    // 0.25mm via_via clearance -> 0.6mm via pads stay >=0.85mm center-to-center,
+    // so 0.3mm holes clear the 0.5mm hole_clearance with margin (was the residual
+    // fab-DRC error on dense boards). freerouting honours this from the DSN.
+    setViaClearance(dsnPcb, 250)
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fl-fr-'))
     const dsnPath = path.join(dir, 'b.dsn'), sesPath = path.join(dir, 'b.ses')
     fs.writeFileSync(dsnPath, stringifyDsnJson(dsnPcb))
@@ -133,14 +158,16 @@ async function freeroute(cj, { layers = 2 } = {}) {
     const unroutedN = m.length ? Number(m[m.length - 1][1]) : 0
     const session = parseDsnToDsnJson(fs.readFileSync(sesPath, 'utf8'))
     const routed = convertDsnSessionToCircuitJson(dsnPcb, session, unrouted)
-    // The DSN round-trip keeps the pads (pcb_smtpad) but DROPS the pcb_component
-    // containers + courtyards/silk — and circuit-json-to-kicad renders footprints
-    // FROM pcb_component, so without them it emits ZERO footprints (DRC then never
-    // sees component pads, and a ground plane can't find them). Re-attach the
-    // component-defining elements the router doesn't touch.
-    const keepTypes = new Set(['pcb_component', 'pcb_courtyard_outline', 'pcb_courtyard_rect', 'pcb_silkscreen_path', 'pcb_silkscreen_text', 'pcb_solder_paste', 'cad_component'])
-    const reattach = unrouted.filter((e) => keepTypes.has(e.type))
-    return { cj: [...routed, ...reattach], unrouted: unroutedN, layers }
+    // Take ONLY the routed copper (traces + vias) from the session and graft it
+    // onto the ORIGINAL placed board. The session's own pcb_smtpad records carry
+    // no pcb_component container, so grafting them (as an earlier version did)
+    // left circuit-json-to-kicad with hollow footprints — orphaned pads, lost
+    // references — which broke DRC's pad checks and the ground-plane match. The
+    // original `unrouted` cj has fully-linked footprints (pcb_component + pads +
+    // source refs); routing never moves pads, and the session traces share the
+    // DSN coordinate space, so they land on the original pads exactly.
+    const routedWires = routed.filter((e) => e.type === 'pcb_trace' || e.type === 'pcb_via')
+    return { cj: [...unrouted, ...routedWires], unrouted: unroutedN, layers }
   } catch { return null } finally {
     if (dir) try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* best effort */ }
   }
@@ -154,6 +181,7 @@ const FAB_PROFILES = {
   standard: {
     label: 'JLCPCB standard (0.09mm track/space, 0.45mm via)',
     via: { pad: 0.5, hole: 0.2 },
+    holeClearance: 0.5,
     rules: `(version 1)
 (rule "t" (constraint track_width (min 0.09mm)))
 (rule "c" (constraint clearance (min 0.09mm)))
@@ -165,6 +193,7 @@ const FAB_PROFILES = {
   hdi: {
     label: 'JLCPCB HDI/advanced (0.0635mm track/space, 0.3mm via)',
     via: { pad: 0.4, hole: 0.2 },
+    holeClearance: 0.4,
     rules: `(version 1)
 (rule "t" (constraint track_width (min 0.0635mm)))
 (rule "c" (constraint clearance (min 0.0635mm)))
@@ -577,16 +606,18 @@ async function main() {
       if (input.gnd?.length) {
         const gp = await applyGroundPlane(res.best.cj, input.gnd, res.best.drc.profileKey || 'standard')
         if (gp?.available) {
-          drcRepair.groundPlane = { assigned: gp.assigned, unconnected: gp.unconnected, errors: gp.errors }
-          drcRepair.fixes = [...res.best.fixes, `ground plane: ${gp.assigned} pins on a DRC-verified GND zone${gp.unconnected ? ` (${gp.unconnected} not reached)` : ''}`]
+          drcRepair.groundPlane = { assigned: gp.assigned, unconnected: gp.unconnected, stitched: gp.stitched, skipped: gp.skipped, errors: gp.errors }
+          const stitchNote = gp.stitched ? `, ${gp.stitched} bonded down via tented via-in-pad` : ''
+          drcRepair.fixes = [...res.best.fixes, `ground plane: ${gp.assigned} pins on a DRC-verified GND zone${stitchNote}${gp.unconnected ? ` (${gp.unconnected} still unreached)` : ''}`]
           // `converged` stays the SIGNAL verdict (routing clean). The ground plane
-          // is a best-effort overlay reported on its own — a real board's plane
-          // coexisting with dense routing strands a few pads without via-in-pad;
-          // we surface that honestly rather than fail the whole board over it.
+          // is a best-effort overlay reported on its own. Tented via-in-pad now
+          // stitches stranded pads down to a reference plane; a via we must skip
+          // to protect the 0.5mm hole_clearance leaves its pad unreached, and we
+          // surface that honestly rather than fail the whole board over it.
           const planeClean = (gp.unconnected ?? 0) === 0 && (gp.errors ?? 0) === 0
           if (!planeClean) {
             const bits = []
-            if (gp.unconnected) bits.push(`${gp.unconnected} ground pin(s) the plane can't reach without via-in-pad`)
+            if (gp.unconnected) bits.push(`${gp.unconnected} ground pin(s) unreached${gp.skipped ? ` (${gp.skipped} via-in-pad skipped to hold hole_clearance)` : ''}`)
             if (gp.errors) bits.push(`${gp.errors} zone DRC error(s) amid the dense routing`)
             drcRepair.verdict = `${res.verdict ? res.verdict + ' ' : ''}Ground plane: ${bits.join(' + ')} — a real chip-scale density limit, reported not hidden.`
           }
