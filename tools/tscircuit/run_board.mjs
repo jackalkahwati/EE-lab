@@ -401,8 +401,9 @@ function extractCourtyardSizes(cj) {
  * channels between courtyards, via simulated annealing over positions +
  * rotations. Connected pins ending up adjacent is what lets the autorouter
  * complete every net; a connectivity shelf-pack keeps parts near but doesn't
- * orient their pins. Returns tscircuit code, or null if pin offsets can't be
- * read (falls back to shelf-pack). Deterministic (seeded) so a re-run is stable.
+ * orient their pins. Returns the winning PLACEMENT (placed parts), so any router
+ * can re-emit it with its own board props, or null if pin offsets can't be read
+ * (falls back to shelf-pack). Deterministic (seeded) so a re-run is stable.
  */
 async function netAwarePlace(parts, nets, { maxW = 15, gap = 2.1 } = {}) {
   if (!nets?.length) return null
@@ -487,15 +488,15 @@ async function netAwarePlace(parts, nets, { maxW = 15, gap = 2.1 } = {}) {
   // route. Try several, freeroute each on a 4-layer board, and keep the
   // placement with the fewest unrouted nets — stop at 0 (fully routable).
   const SEEDS = [0x2545f491, 101, 5551, 31337, 8]
-  let bestCode = null, bestUn = Infinity
+  let bestPlaced = null, bestUn = Infinity
   for (const s of SEEDS) {
-    const code = emitBoardCode(saOptimize(s), nets)
+    const placed = saOptimize(s)
     let un = Infinity
-    try { const cj = await runTscircuitCode(code); const fr = await freeroute(cj, { layers: 4 }); un = fr ? fr.unrouted : Infinity } catch { un = Infinity }
-    if (un < bestUn) { bestUn = un; bestCode = code }
+    try { const cj = await runTscircuitCode(emitBoardCode(placed, nets)); const fr = await freeroute(cj, { layers: 4 }); un = fr ? fr.unrouted : Infinity } catch { un = Infinity }
+    if (un < bestUn) { bestUn = un; bestPlaced = placed }
     if (un === 0) break
   }
-  return bestCode
+  return bestPlaced
 }
 
 /** DRC-driven redesign: apply the real geometry fixes the platform CAN make to
@@ -579,16 +580,19 @@ async function iterativeRedesign(parts, nets) {
   // front — it's what lets the router complete every net. Reused across the
   // freerouting passes (they differ only in layers/fab profile). Null -> the
   // strategies fall back to the connectivity shelf-pack.
-  const netAwareCode = FR_JAR && JAVA ? await netAwarePlace(parts, nets, { gap: 2.1, maxW: 15 }) : null
+  const netAwarePlaced = FR_JAR && JAVA ? await netAwarePlace(parts, nets, { gap: 2.1, maxW: 15 }) : null
 
   const trail = []
   let best = null
   for (let i = 0; i < ladder.length; i++) {
     const s = ladder[i]
-    // Net-aware placement (single-sided, pin-facing) suits freerouting; the
-    // built-in router converges better with its own alternating-layer shelf-pack
-    // + geometry repair, so only freerouting gets the net-aware placement.
-    const code = s.router === 'fr' && netAwareCode ? netAwareCode : buildCode(parts, nets, s.place)
+    // Net-aware placement (pin-facing, min-wirelength) helps BOTH routers: it puts
+    // connected pins adjacent so the router has short, uncrossed channels. Re-emit
+    // it per strategy so the built-in router still gets its fab-aware clearances.
+    // Falls back to the connectivity shelf-pack when net-aware isn't available.
+    const code = netAwarePlaced
+      ? emitBoardCode(netAwarePlaced, nets, { clearance: s.router === 'tsci' ? s.place.clearance : null })
+      : buildCode(parts, nets, s.place)
     let cj = await runTscircuitCode(code)
     let fixes = [], unrouted = 0
     if (s.router === 'fr') {
@@ -600,7 +604,7 @@ async function iterativeRedesign(parts, nets) {
       const board = cj.find((e) => e.type === 'pcb_board')
       if (board) { board.width += 1.2; board.height += 1.2 }
       fixes = [
-        netAwareCode ? 'net-aware placement (min pin-to-pin wirelength)' : 'connectivity placement',
+        netAwarePlaced ? 'net-aware placement (min pin-to-pin wirelength)' : 'connectivity placement',
         `routed with freerouting (push & shove, ${s.layers}-layer)`,
         'added 0.6mm board-edge copper margin',
       ]
