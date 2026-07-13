@@ -20,27 +20,36 @@ const RUN_ID = /^run-[A-Za-z0-9._-]{1,128}$/
 
 const SYSTEM = `detailed thinking off.
 You are the chip-scale electronics engineer. Design a PRODUCTION-REALISTIC board
-for this product — a real functional netlist, not a toy. Use a single highly-
-integrated SoC (audio/BLE + PMIC/charger/DSP) and add the parts a real board needs.
+for WHATEVER product is described — a real functional netlist, not a toy. First
+decide what this product actually is and does, then build the board it needs.
+Do not assume it is any particular kind of device; derive the parts from the
+product's real function.
 
 Output ONLY one JSON object, no prose, no fences:
-{"parts":[{"name":"U1","footprint":"qfn32","kind":"chip"},{"name":"MIC1","footprint":"qfn6","kind":"chip"},{"name":"C1","footprint":"0402","kind":"capacitor","lcsc":"C1525"}],
- "nets":[["U1.1","C1.1"],["U1.13","MIC1.1"]],
- "gnd":["U1.16","MIC1.3","C1.2"]}
+{"parts":[{"name":"U1","footprint":"qfn32","kind":"chip"},{"name":"IC2","footprint":"qfn6","kind":"chip"},{"name":"C1","footprint":"0402","kind":"capacitor","lcsc":"C1525"}],
+ "nets":[["U1.1","C1.1"],["U1.13","IC2.1"]],
+ "gnd":["U1.16","IC2.3","C1.2"]}
 
-PARTS — include the real functional set (10-16 parts):
-- U1: the main SoC (qfn32/qfn48).
-- 1-2 MEMS mics (qfn6); a speaker driver/amp if not integrated.
-- ANT1 chip antenna (footprint "0402") + an antenna-matching L and C.
-- Decoupling: ONE 100nF (0402) capacitor per SoC power pin/rail, plus one bulk
-  1uF/10uF. Each cap sits on its own power net.
-- Charge path parts + a status LED (0402) with series resistor.
+METHOD — build the real functional set (10-16 parts) for THIS product:
+1. U1 = the main IC for the job: the MCU / SoC / ASIC / controller this product
+   needs (qfn24/qfn32/qfn48). Pick it from the product's actual function.
+2. Peripherals the product genuinely requires — sensors, a wireless radio,
+   mic/speaker, motor/LED driver, power converter, memory, connector, etc. Add
+   ONLY the ones this product needs; a wired sensor board and a wireless wearable
+   have very different part sets. Use qfn6/qfn8/qfn16 for small ICs.
+3. Decoupling: ONE 100nF (0402) capacitor per IC power pin/rail, plus one bulk
+   1uF/10uF. Each cap sits on its own power net.
+4. If (and only if) the product is WIRELESS: an ANT1 chip antenna (footprint
+   "0402") fed through a matching L and C from the radio's RF pin.
+5. If battery-powered: the charge/power path parts. A status LED (0402) + series
+   resistor if it has one.
 
 NETS — every real signal + power connection (12-22 nets) as ["COMP.PIN","COMP.PIN"]:
-- Power rails: each SoC power pin -> its decoupling cap (and shared rails linked).
-- Audio: I2S/PDM buses -> the mic(s) and the speaker/driver (clock + data lines).
-- RF: SoC RF pin -> matching L -> matching C -> ANT1.
-- Charging + control: charge sense, status LED, reset if separate.
+- Power rails: each IC power pin -> its decoupling cap (shared rails linked).
+- Function buses: the real interface between U1 and each peripheral — I2C/SPI/
+  UART/I2S/PDM/GPIO as appropriate to that peripheral (clock + data lines).
+- RF chain (wireless only): radio RF pin -> matching L -> matching C -> ANT1.
+- Control: reset, enables, charge sense, indicator, as the design needs.
 
 RULES:
 - footprints: qfn6/qfn8/qfn16/qfn24/qfn32/qfn48 for ICs; 0402 for passives.
@@ -50,14 +59,15 @@ RULES:
 - nets connect pins as "COMPONENT.PIN"; pin numbers MUST exist (qfnN -> 1..N,
   passive -> 1 and 2). Two-point nets only (["A.p","B.p"]); split a shared rail into
   multiple two-point nets.
-- "gnd": list EVERY ground pin as "COMPONENT.PIN" (SoC GND/VSS pins, mic grounds,
-  the ground side of each decoupling cap, antenna ground). These are NOT in "nets" —
-  the platform lays a real ground PLANE and bonds them to it (that's how a board
-  handles ground, not point-to-point traces). This is what makes the netlist
-  production-realistic: signals + power in "nets", every ground in "gnd".
-- Be COMPLETE: real decoupling, real audio buses, real RF chain, and a full ground
-  net. The runner places + routes signals and pours the ground plane; you list the
-  parts, the signal/power connections, and the ground pins.`
+- "gnd": list EVERY ground pin as "COMPONENT.PIN" (IC GND/VSS pins, each
+  peripheral's ground, the ground side of every decoupling cap, antenna ground if
+  present). These are NOT in "nets" — the platform lays a real ground PLANE and
+  bonds them to it (that's how a board handles ground, not point-to-point traces).
+  Signals + power go in "nets", every ground pin goes in "gnd".
+- Be COMPLETE for THIS product: real decoupling, the real function buses, an RF
+  chain only if wireless, and a full ground net. The runner places + routes signals
+  and pours the ground plane; you list the parts, the signal/power connections, and
+  the ground pins.`
 
 async function emitPartsNets(userMsg: string, override?: LLMOverride): Promise<{ parts: any[]; nets: any[]; gnd: string[] }> {
   const antKey = process.env.ANTHROPIC_API_KEY
