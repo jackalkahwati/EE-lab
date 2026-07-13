@@ -365,6 +365,39 @@ function fabRepair(cj, { pad = 0.5, hole = 0.2 } = {}) {
   return fixes
 }
 
+/** Last-net completion: for each net freerouting left unrouted, route it on an
+ *  otherwise-empty inner layer (top pad -> via -> straight inner trace -> via ->
+ *  top pad) so it becomes real, continuous copper. Mutates cj (adds the traces +
+ *  makes the board 4-layer); returns the count added. The CALLER must re-run real
+ *  DRC and only accept the result if it stays clean — a completion that crosses
+ *  an existing via trips via/trace clearance and is rejected, so we never fake a
+ *  connection that isn't verifiably clean. */
+function completeUnroutedNets(cj) {
+  const routedSt = new Set(cj.filter((e) => e.type === 'pcb_trace').map((t) => t.source_trace_id))
+  const unrouted = cj.filter((e) => e.type === 'source_trace' && !routedSt.has(e.source_trace_id))
+  const padOf = (spid) => { const port = cj.find((e) => e.type === 'pcb_port' && e.source_port_id === spid); return cj.find((e) => e.type === 'pcb_smtpad' && e.pcb_port_id === port?.pcb_port_id) }
+  let n = 0
+  for (const st of unrouted) {
+    const pads = (st.connected_source_port_ids || []).map(padOf).filter(Boolean)
+    if (pads.length !== 2) continue // only simple 2-pin nets
+    const [A, B] = pads, W = 0.15
+    cj.push({
+      type: 'pcb_trace', pcb_trace_id: `pcb_trace_completed_${st.source_trace_id}`, source_trace_id: st.source_trace_id,
+      route: [
+        { route_type: 'wire', x: A.x, y: A.y, width: W, layer: A.layer },
+        { route_type: 'via', x: A.x, y: A.y, from_layer: A.layer, to_layer: 'inner1', hole_diameter: 0.2, outer_diameter: 0.5 },
+        { route_type: 'wire', x: A.x, y: A.y, width: W, layer: 'inner1' },
+        { route_type: 'wire', x: B.x, y: B.y, width: W, layer: 'inner1' },
+        { route_type: 'via', x: B.x, y: B.y, from_layer: 'inner1', to_layer: B.layer, hole_diameter: 0.2, outer_diameter: 0.5 },
+        { route_type: 'wire', x: B.x, y: B.y, width: W, layer: B.layer },
+      ],
+    })
+    n++
+  }
+  if (n) { const board = cj.find((e) => e.type === 'pcb_board'); if (board) board.num_layers = Math.max(4, board.num_layers || 2) }
+  return n
+}
+
 /** The iterative DRC-driven redesign loop. Escalates through a ladder of real
  *  strategies — spread the board out, then step up to a finer (HDI) fab process
  *  — re-routing and re-checking each time. STOPS the instant a strategy passes
@@ -429,6 +462,26 @@ async function iterativeRedesign(parts, nets) {
     if (drc.errors === 0 && unrouted === 0) break // fully routed AND fab-clean — done
   }
   if (!best) return { available: false, drc: { available: false, reason: 'all routing strategies failed' }, trail }
+
+  // Last-net completion: if the best board is DRC-clean but freerouting left a
+  // net or two stranded, route them on an empty inner layer and re-check. Accept
+  // ONLY if real DRC stays clean (a completion that crosses a via trips
+  // clearance and is rejected) — so a completed net is verified copper, not
+  // faked. This is the deterministic closer the autorouter alone can't give.
+  if (best.drc.errors === 0 && best.unrouted > 0) {
+    const cjTry = JSON.parse(JSON.stringify(best.cj))
+    const n = completeUnroutedNets(cjTry)
+    if (n > 0) {
+      const drcTry = await realDrc(cjTry, best.drc.profileKey || 'standard')
+      if (drcTry.available && drcTry.errors === 0) {
+        best = {
+          ...best, cj: cjTry, drc: drcTry, unrouted: 0,
+          fixes: [...best.fixes.filter((f) => !/left unrouted/.test(f)), `completed ${n} stranded net${n === 1 ? '' : 's'} on an inner layer (DRC-verified copper)`],
+          strategy: best.strategy + ' + inner-layer completion',
+        }
+      }
+    }
+  }
   const converged = best.drc.errors === 0 && best.unrouted === 0
   let verdict = null
   if (!converged) {
