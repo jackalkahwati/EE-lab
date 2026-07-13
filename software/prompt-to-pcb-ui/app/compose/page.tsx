@@ -38,6 +38,7 @@ import { FL1ReadinessPanel } from '@/components/fl1-readiness-panel'
 import { BoardObjects } from '@/components/board-objects'
 import { ReviewsPill } from '@/components/board-reviews'
 import { IdStageView } from '@/components/id-stage-view'
+import { IdStage } from '@/components/id-stage'
 import { IdBriefPanel } from '@/components/id-brief-panel'
 import { ExploreStage } from '@/components/explore-stage'
 import { MechanicalStage } from '@/components/mechanical-stage'
@@ -280,13 +281,15 @@ export default function Compose2Page() {
         <div className="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-border px-2 py-1.5">
           {STAGES.map((s) => {
             const needsSpec = ['explore', 'firmware', 'manufacturing', 'supplyChain', 'validation'].includes(s.key)
-            const avail = needsSpec ? !!productSpec : s.key === 'electronics' ? (!!selectedRun || !!productSpec) : s.key === 'id' ? !!idBrief : true
+            // Design (id) is now one-click like the other disciplines: reachable as
+            // soon as there's a product spec, so its Generate button is accessible.
+            const avail = needsSpec ? !!productSpec : s.key === 'electronics' ? (!!selectedRun || !!productSpec) : s.key === 'id' ? (!!productSpec || !!idBrief) : true
             const locked = !avail && (needsSpec || s.key === 'electronics' || s.key === 'id')
             const on = stage === s.key
             return (
               <button key={s.key} type="button" disabled={locked}
                 onClick={() => setStage(s.key)}
-                title={s.key === 'id' && !idBrief ? 'runs after the board builds' : s.key === 'explore' && !productSpec ? 'describe a product first' : s.label}
+                title={s.key === 'id' && !idBrief && !productSpec ? 'describe a product first' : s.key === 'explore' && !productSpec ? 'describe a product first' : s.label}
                 className={cn('flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11px]',
                   on ? 'bg-secondary font-medium text-foreground' : 'text-muted-foreground hover:text-foreground',
                   locked && 'cursor-not-allowed opacity-40 hover:text-muted-foreground')}>
@@ -369,9 +372,7 @@ export default function Compose2Page() {
             )}
             {stage === 'id' && (
               <ErrorBoundary>
-                {idBrief
-                  ? <IdStageView brief={idBrief} boardMm={isReal ? real?.board?.boardSize : undefined} runId={selectedRun?.id} />
-                  : <StagePlaceholder title="Industrial Design" Icon={Palette} />}
+                <IdStage spec={productSpec} runId={selectedRun?.id} brief={idBrief} onBrief={setIdBrief} boardMm={isReal ? real?.board?.boardSize : undefined} />
               </ErrorBoundary>
             )}
             {stage === 'mechanical' && (

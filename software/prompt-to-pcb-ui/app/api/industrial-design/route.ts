@@ -13,6 +13,7 @@
  */
 import { callLLMText, overrideFromHeaders, type LLMOverride } from '@/lib/llm'
 import { ID_BRIEF_SCHEMA, normalizeIdBrief } from '@/lib/id-brief'
+import { loadGroundBoard } from '@/lib/ground-board'
 
 export const dynamic = 'force-dynamic'
 
@@ -162,8 +163,16 @@ export async function POST(req: Request) {
       (qa ? `Clarifications so far:\n${qa}\n\n` : 'No clarifications yet.\n\n') +
       `Questions already asked: ${answers.length} of max ${MAX_QUESTIONS}.`
 
-    const force = answers.length >= MAX_QUESTIONS
-    const ground = boardGround(body.realBoard)
+    // force:true lets the Design tab finalize a brief in ONE click (no interview),
+    // the same one-click behaviour every other discipline has.
+    const force = body.force === true || answers.length >= MAX_QUESTIONS
+    // Ground on the chip-scale board (like every discipline) when a runId is given,
+    // else fall back to whatever realBoard the caller passed.
+    let ground = boardGround(body.realBoard)
+    if (typeof body.runId === 'string' && /^run-[A-Za-z0-9._-]{1,128}$/.test(body.runId)) {
+      const gb = await loadGroundBoard(body.runId)
+      if (gb) ground = boardGround({ wMm: gb.wMm, hMm: gb.hMm, layers: gb.layers, components: gb.components })
+    }
     const { out, provider } = await callLLM(userMsg, force, overrideFromHeaders(req.headers), ground)
 
     if (out.enough) {
