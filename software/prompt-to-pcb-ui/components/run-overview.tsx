@@ -53,14 +53,20 @@ export function RunOverview({ runId, run }: { runId: string | null; run?: Run | 
       'assembly-readiness.json', 'fl1-validation.json', 'constraints.json',
       'mcu-selection.json',
     ]
-    Promise.all(
-      files.map((f) =>
+    Promise.all([
+      ...files.map((f) =>
         fetch(`${base}/${f}`, { cache: 'no-store' })
           .then((r) => (r.ok ? r.json() : null))
           .then((d) => [f.replace('.json', ''), d] as const)
           .catch(() => [f.replace('.json', ''), null] as const),
       ),
-    ).then((pairs) => {
+      // the bespoke chip-scale board (the real chip-down design), so the headline
+      // describes THAT, not the flroute reference board
+      fetch(`/runs/${runId}/electronics/chipscale-board.json`, { cache: 'no-store' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => ['chipscale', d] as const)
+        .catch(() => ['chipscale', null] as const),
+    ]).then((pairs) => {
       if (!off) setA(Object.fromEntries(pairs))
     })
     return () => {
@@ -158,21 +164,32 @@ export function RunOverview({ runId, run }: { runId: string | null; run?: Run | 
   // ---- board description (title + what this board is), from last-run.json ----
   const lr = a['last-run']
   const spec = lr?.composeSpec
-  const board = lr?.board
   const title: string =
     run?.name ?? spec?.boardClass ?? lr?.prompt ?? runId
   const prompt: string | null = lr?.prompt ?? run?.prompt ?? null
   const blocks: string[] = spec?.blocks ?? []
-  const purpose = describeBoard(lr)
+
+  // When the bespoke chip-scale board exists, the headline describes THAT board
+  // (the real chip-down design now rendered as a PCBA) — its size, part count,
+  // and a chip-down caption — not the flroute reference board.
+  const chip = a['chipscale']
+  const isChip = !!(chip?.boardMm?.w && chip?.boardMm?.h)
+  const board = isChip
+    ? { ...(lr?.board ?? {}), boardSize: { wMm: chip.boardMm.w, hMm: chip.boardMm.h }, components: chip.components ?? lr?.board?.components }
+    : lr?.board
+  const chipLayers = /4-layer/.test(chip?.drcRepair?.winningStrategy ?? '') ? 4 : /2-layer/.test(chip?.drcRepair?.winningStrategy ?? '') ? 2 : null
+  const purpose = isChip
+    ? 'Chip-scale chip-down board — bare SoC + passives populated on the board, no module.'
+    : describeBoard(lr)
   const summaryBits: string[] = []
-  if (board?.layers) summaryBits.push(`${board.layers}-layer`)
+  if (isChip ? chipLayers : board?.layers) summaryBits.push(`${isChip ? chipLayers : board.layers}-layer`)
   if (board?.boardSize)
     summaryBits.push(
       `${Math.round(board.boardSize.wMm)} × ${Math.round(board.boardSize.hMm)} mm`,
     )
   if (board?.components) summaryBits.push(`${board.components} components`)
-  if (board?.netsTotal) summaryBits.push(`${board.netsTotal} nets`)
-  if (blocks.length) summaryBits.push(`${blocks.length} blocks`)
+  if (!isChip && board?.netsTotal) summaryBits.push(`${board.netsTotal} nets`)
+  if (!isChip && blocks.length) summaryBits.push(`${blocks.length} blocks`)
   const summary = summaryBits.length > 0 ? summaryBits.join(' · ') : null
 
   const warnings: string[] = []
