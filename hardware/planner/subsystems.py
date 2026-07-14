@@ -21,14 +21,25 @@ _LDO_DROPOUT_V = 0.3      # AP2112-class headroom
 _BUCK_EFF = 0.90
 
 
-def estimate_rail_current(final_design, has_mcu=True):
-    """Estimate the 3.3V rail current from the real resolved parts (+ the MCU,
-    which lives outside final_design)."""
-    ma = 50.0 if has_mcu else 0.0  # the MCU
+def current_breakdown(final_design, mcu_family=None):
+    """The 3.3V-rail current budget, itemized — this is the constraint the OTHER
+    subsystems (compute/sensing/hmi/storage) impose on the power subsystem. Making
+    it a real sum from real parts is what makes the decomposition top-down rather
+    than each subsystem designed in isolation."""
+    items = []
+    if mcu_family:
+        items.append((mcu_family + " (MCU)", _CURRENT_MA["mcu"]))
     for s in final_design or []:
         cat = (s.get("category") or "").lower()
-        ma += next((v for k, v in _CURRENT_MA.items() if cat.startswith(k) and k != "mcu"), 3.0)
-    return round(ma, 1)
+        ma = next((v for k, v in _CURRENT_MA.items() if cat.startswith(k) and k != "mcu"), 3.0)
+        items.append((s.get("mpn", cat), ma))
+    total = round(sum(ma for _n, ma in items), 1)
+    return {"total_ma": total, "items": items}
+
+
+def estimate_rail_current(final_design, has_mcu=True):
+    """Total 3.3V rail current from the real resolved parts (+ the MCU)."""
+    return current_breakdown(final_design, "mcu" if has_mcu else None)["total_ma"]
 
 
 def design_power(source_v, rail_v, current_ma):
@@ -73,6 +84,37 @@ def design_power(source_v, rail_v, current_ma):
         "chosen": chosen["name"] + (" (%s)" % chosen["part"] if chosen and chosen["part"] else "") if chosen else None,
         "candidates": cands,
         "rationale": chosen["why"] if chosen else "no feasible power topology for this source/rail",
+    }
+
+
+_SENSE_CAPS = {"temperature", "humidity", "pressure", "environmental", "gas", "voc",
+               "air_quality", "accelerometer", "motion", "gyroscope", "magnetometer",
+               "light_sensor", "proximity", "distance", "hall", "current_sense", "power_monitor"}
+
+
+def derive_requirements(intent, final_design):
+    """TOP-DOWN: derive each subsystem's requirement from the product intent AND
+    the cross-subsystem constraints. The power requirement carries the current
+    budget PROPAGATED from the parts the other subsystems pulled in — the design
+    flows top-down, not each subsystem solved in a vacuum."""
+    intent = intent or {}
+    caps = intent.get("required_capabilities", []) or []
+    buses = intent.get("buses", []) or []
+    power = intent.get("power", {}) or {}
+    mcu = (intent.get("mcu") or {}).get("family")
+    cb = current_breakdown(final_design, mcu)
+    sense = [c for c in caps if c in _SENSE_CAPS]
+    return {
+        "power": "make %s from %s @ ~%d mA (budget: %s)" % (
+            "/".join(power.get("rails", ["+3V3"])), power.get("source", "usb"),
+            cb["total_ma"], " + ".join("%s %.0f" % (n.split()[0], ma) for n, ma in cb["items"][:5])),
+        "compute": "run firmware + drive %d peripheral(s) over %s" % (
+            len(final_design or []), ", ".join(buses) or "GPIO/basic I/O"),
+        "sensing": "measure %s" % (", ".join(sense) if sense else "the requested quantities"),
+        "storage": "retain logs/data across power cycles",
+        "hmi": "present readings + take user input",
+        "connectivity": "move data over %s" % (", ".join(buses) if buses else "the requested links"),
+        "actuation": "drive the physical outputs",
     }
 
 

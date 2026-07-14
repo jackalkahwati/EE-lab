@@ -105,13 +105,22 @@ def build_design_tree(intent, final_design, mcu_family=None):
     for spec in final_design or []:
         buckets[_subsystem_of(spec)].append(spec)
 
+    # TOP-DOWN: derive each subsystem's requirement from the intent AND the
+    # cross-subsystem constraints (the power budget is propagated from the parts
+    # the other subsystems pulled in), so the design flows top-down.
+    try:
+        from subsystems import derive_requirements
+        derived_reqs = derive_requirements(intent, final_design)
+    except Exception:
+        derived_reqs = {}
+
     children = []
     for name, _prefixes, req in SUBSYSTEMS:
         parts = buckets[name]
         # compute always shows (it carries the MCU, which lives outside final_design)
         if not parts and name != "compute":
             continue
-        node = {"name": name, "kind": "subsystem", "requirement": req,
+        node = {"name": name, "kind": "subsystem", "requirement": derived_reqs.get(name, req),
                 "parts": [p["mpn"] for p in parts], "rationale": "", "children": []}
         if name == "compute" and mcu_family:
             node["parts"] = [mcu_family] + node["parts"]
