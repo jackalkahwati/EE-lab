@@ -42,6 +42,31 @@ CAPABILITY_PHRASES = {
     "battery charg": "battery_charger",
     "usb-c power": "usb_c_power", "usb c power": "usb_c_power",
     "ethernet": "ethernet", "can bus": "can", "canbus": "can",
+    # Stage 1 — recognise common part types so they are RESOLVED (or honestly
+    # reported unsupported) instead of being silently dropped at the parse step.
+    # displays
+    "oled": "display", "display": "display", "screen": "display", "lcd": "display",
+    "e-paper": "display", "e-ink": "display", "ssd1306": "display",
+    # motion / IMU (LIS3DH covers the accelerometer; a bare gyro stays honest-unsupported)
+    "imu": "accelerometer", "9-axis": "accelerometer", "6-axis": "accelerometer",
+    "gyro": "gyroscope", "magnetometer": "magnetometer", "compass": "magnetometer",
+    # storage
+    "sd card": "sd_storage", "microsd": "sd_storage", "micro sd": "sd_storage",
+    # audio
+    "microphone": "microphone", "i2s": "i2s_audio", "audio dac": "audio_dac",
+    "speaker": "audio_out", "3.5mm": "audio_jack", "headphone": "audio_jack", "buzzer": "buzzer",
+    # human interface / actuation
+    "tactile": "button", "push button": "button", "pushbutton": "button",
+    "haptic": "haptic", "servo": "servo", "stepper": "stepper", "relay": "relay",
+    "solenoid": "solenoid", "vibration motor": "haptic",
+    # light / proximity / distance
+    "ambient light": "light_sensor", "proximity": "proximity", "time-of-flight": "distance",
+    "tof": "distance", "ultrasonic": "distance", "hall sensor": "hall", "hall-effect": "hall",
+    # battery chemistries (all resolve to the battery connector)
+    "lipo": "battery", "li-ion": "battery", "lithium": "battery",
+    "coin cell": "battery", "cr2032": "battery", "18650": "battery",
+    # comms
+    "lora": "lora", "gps": "gnss", "gnss": "gnss", "nfc": "nfc",
 }
 
 # what capabilities an unsupported part is understood to represent, so recovery

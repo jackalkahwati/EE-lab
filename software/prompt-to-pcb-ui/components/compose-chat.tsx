@@ -222,12 +222,17 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
   /** Launch the real board pipeline for a finalized board spec + prompt. Used by
    *  both the manual "Yes, build it" path and the Architect's auto electronics
    *  hand-off, so the two flows share one build code path. */
-  function buildBoard(bspec: { blocks: string[]; boardClass: string; layers?: number }, req: string, opts?: { thenId?: boolean }) {
+  function buildBoard(bspec: { blocks: string[]; boardClass: string; layers?: number }, req: string, opts?: { thenId?: boolean; plan?: boolean }) {
     setPhase('building'); setBoardBuilt(false); setStages({}); setLogs([])
     const id = `run-${crypto.randomUUID()}`
+    // Stage 0: product builds go through the planner (plan=1) — real parts + the
+    // requested MCU family via synth. The route runs planner.run(prompt) itself,
+    // so no block spec is sent. Legacy/revise flows keep the compose block path.
+    const base = `/api/pipeline/run?prompt=${encodeURIComponent(req)}&runId=${encodeURIComponent(id)}`
     const payload = b64(JSON.stringify({ blocks: bspec.blocks, boardClass: bspec.boardClass, ...(bspec.layers ? { layers: bspec.layers } : {}) }))
-    const url = `/api/pipeline/run?prompt=${encodeURIComponent(req)}`
-      + `&runId=${encodeURIComponent(id)}&compose=1&spec=${encodeURIComponent(payload)}`
+    const url = opts?.plan
+      ? `${base}&plan=1`
+      : `${base}&compose=1&spec=${encodeURIComponent(payload)}`
     const es = new EventSource(url); esRef.current = es
     es.onmessage = (e) => {
       const ev = JSON.parse(e.data) as Ev
@@ -281,7 +286,9 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
       // the plan instead of silently building a different part than promised.
       setSubstitutions(Array.isArray(bs.substitutions) ? bs.substitutions : [])
       // build the real board first; Industrial Design wraps it once it exists.
-      buildBoard(bs as Spec, boardIntentOf(ps), { thenId: true })
+      // Stage 0: go through the planner (plan=1) so the board is real parts + the
+      // requested MCU family (STM32/ESP32/nRF…) via synth, not RP2040 blocks.
+      buildBoard(bs as Spec, boardIntentOf(ps), { thenId: true, plan: true })
     } catch (e) { setErr(String(e)); setPhase('error') } finally { setLoading(false) }
   }
 

@@ -219,11 +219,22 @@ def select_mcu(req):
     requested = req.get("requested_mcu")
     requested_key = None
     if requested:
+        # Match how users name a family ("STM32", "ESP32", "nRF52") against the
+        # seed's more specific key/family ("STM32F103"/"STM32F1", "ESP32-S3",
+        # "nRF52840"). Exact first, then prefix either direction — so a generic
+        # family request is honoured instead of silently falling back to the
+        # soft-score winner (which is why an STM32 ask used to build an RP2040).
+        def _norm(x):
+            return (x or "").upper().replace("-", "").replace("_", "")
+        rq = _norm(requested)
+        best = None
         for key in MCU_SEEDS:
-            if key.upper().replace("-", "") == requested.upper().replace("-", "") \
-               or MCU_SEEDS[key]["family"].upper().replace("-", "") == requested.upper().replace("-", ""):
-                requested_key = key
-                break
+            kk, fam = _norm(key), _norm(MCU_SEEDS[key]["family"])
+            if kk == rq or fam == rq:
+                best = key; break  # exact wins outright
+            if best is None and (kk.startswith(rq) or fam.startswith(rq) or rq.startswith(fam)):
+                best = key  # first prefix match; keep scanning for an exact one
+        requested_key = best
 
     # honour a requested MCU only if it qualifies
     if requested_key:

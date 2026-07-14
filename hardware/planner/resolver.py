@@ -33,6 +33,7 @@ CAPABILITY_MAP = {
     "ldo": ["AP2112K-3.3"], "regulator_3v3": ["AP2112K-3.3", "TPS62162"],
     "usb_c_power": ["USB4085-GF-A"], "usb_power": ["USB4085-GF-A"],
     "battery_connector": ["S2B-PH-K-S"], "battery": ["S2B-PH-K-S"],
+    "display": ["SSD1306-OLED-I2C"], "oled": ["SSD1306-OLED-I2C"],
 }
 
 # capabilities a part actually provides (for substitution reporting). Read from

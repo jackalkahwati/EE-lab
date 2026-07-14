@@ -189,6 +189,21 @@ def build_seeds():
     term["interfaces"] = [{"type": "power_in", "signals": {"vin": "VIN", "gnd": "GND"}}]
     term["description"] = "2-pin 5V screw-terminal power input"
     lib["MX126-5.0-02P"] = term
+    # SSD1306-class I2C OLED module (Stage 1): the module plugs into a 4-pin
+    # header (GND/VCC/SCL/SDA — the standard 0.96in pinout), so it routes as a
+    # trivial 0.1in header and wires SCL/SDA onto the shared I2C bus.
+    oled = ingest.from_pin_table(
+        "SSD1306-OLED-I2C",
+        [("1", "GND", "ground"), ("2", "VCC", "power_in"),
+         ("3", "SCL", "bidirectional"), ("4", "SDA", "bidirectional")],
+        kicad_symbol="Connector:Conn_01x04_Pin",
+        kicad_footprint="Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical",
+        category="display.oled", manufacturer="generic")
+    oled["interfaces"] = [{"type": "i2c", "signals": {"scl": "SCL", "sda": "SDA"}}]
+    oled["power"]["vcc_min"] = 3.0
+    oled["power"]["vcc_max"] = 5.5
+    oled["description"] = "0.96in SSD1306-class I2C OLED module (4-pin header)"
+    lib["SSD1306-OLED-I2C"] = oled
     return lib
 
 

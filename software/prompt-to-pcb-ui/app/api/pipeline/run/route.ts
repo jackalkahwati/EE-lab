@@ -208,9 +208,14 @@ export async function GET(req: Request) {
       synthDesign = null
     }
   }
-  // Both compose and synth produce a self-contained variant board (vs. the rev-a
-  // baseline), so downstream board-path + firmware decisions treat them alike.
-  const boardMode = composeMode || synthMode
+  // Plan mode (Stage 0): the route runs the planner ITSELF on the prompt to
+  // produce the UCS design, then feeds the synth path — real parts + the
+  // requested MCU family instead of the RP2040-only compose block library. No
+  // giant base64 design in the URL; synthDesign is filled in the design stage.
+  const planMode = qp.get('plan') === '1'
+  // Both compose and synth/plan produce a self-contained variant board (vs. the
+  // rev-a baseline), so downstream board-path + firmware decisions treat alike.
+  const boardMode = composeMode || synthMode || planMode
   const appDir = process.cwd()
   const hwDir = path.resolve(appDir, '../../hardware/pcba-rev-a')
   const flroute = path.join(hwDir, 'tools/flroute/target/release/flroute')
@@ -418,10 +423,42 @@ export async function GET(req: Request) {
           }
           log('design', 'GATE design: blocks composed + wired, PASS', 'ok')
           send({ type: 'stage', id: 'design', state: 'passed' })
-        } else if (synthMode && synthDesign) {
+        } else if ((synthMode && synthDesign) || planMode) {
+          // Stage 0 plan mode: run the planner on the prompt to resolve real
+          // parts + an MCU (honouring the requested family), then hand the UCS
+          // design to synth. synth.py emits the SAME contract as compose.py, so
+          // the rest of the pipeline (route/DRC/stitch/fab/firmware/FL-1) is
+          // unchanged. Every substitution the planner made is logged, not hidden.
+          if (planMode) {
+            log('design', 'planning: resolving the prompt to real parts + an MCU…')
+            const plannerDir = path.resolve(hwDir, '../../hardware/planner')
+            const pl = await exec('design', 'python3',
+              [path.join(plannerDir, 'plan_cli.py'), prompt], { cwd: plannerDir })
+            try {
+              synthDesign = JSON.parse(pl.out.trim().split('\n').filter(Boolean).pop() || 'null')
+            } catch { synthDesign = null }
+            const sd = synthDesign as null | {
+              final_design?: unknown[]
+              honest_report?: { outcome: string; request: string; mpn?: string; lost?: string[] }[]
+              intent?: { mcu?: { family?: string } }
+              overall_status?: string
+            }
+            if (sd && Array.isArray(sd.final_design)) {
+              const subs = (sd.honest_report || []).filter((h) => h.outcome === 'substituted')
+              log('design', `planned: ${sd.final_design.length} real parts + ${sd.intent?.mcu?.family ?? '?'} MCU · ${sd.overall_status ?? ''}`, 'ok')
+              for (const s of subs)
+                log('design', `⚠ substituted ${s.request}${s.mpn ? ' → ' + s.mpn : ''}${s.lost?.length ? ' (lost: ' + s.lost.join(', ') + ')' : ''}`, 'warn')
+              send({ type: 'design', spec: synthDesign as Record<string, unknown> })
+            }
+          }
+          if (!synthDesign || !Array.isArray((synthDesign as { final_design?: unknown[] }).final_design)) {
+            send({ type: 'stage', id: 'design', state: 'failed', failReason: planMode ? 'planning failed' : 'invalid synth design' })
+            for (const s of ['placement', 'routing', 'validation', 'erc', 'firmware'] as const)
+              send({ type: 'stage', id: s, state: 'blocked' })
+            send({ type: 'done', status: 'GATE FAILED', boardPath: variantBoard })
+            return
+          }
           // Phase 11: synthesize the board from the UCS design (planner output).
-          // synth.py emits the SAME contract as compose.py, so the rest of the
-          // pipeline (route/DRC/stitch/fab/firmware/FL-1) is unchanged.
           const parts = (synthDesign.final_design as unknown[])?.length ?? 0
           log('design', `synthesizing board from ${parts} Universal Component Specs…`)
           const designPath = path.join(ws, 'ucs_design.json')
