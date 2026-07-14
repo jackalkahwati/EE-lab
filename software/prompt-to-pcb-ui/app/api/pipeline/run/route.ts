@@ -517,6 +517,10 @@ export async function GET(req: Request) {
           log('design', `synthesizing board from ${parts} Universal Component Specs…`)
           const designPath = path.join(ws, 'ucs_design.json')
           fs.writeFileSync(designPath, JSON.stringify(synthDesign))
+          // MERGER: also persist the FULL UCS design publicly by runId so the
+          // chip-scale board engine (electronics-cs) can build from this SAME real
+          // design via the netlist bridge, instead of a separate LLM part-set.
+          try { fs.writeFileSync(path.join(pubData, 'ucs_design.json'), JSON.stringify(synthDesign)) } catch { /* non-fatal */ }
           const comp = await exec('design', KPY, [
             path.resolve(hwDir, '../../hardware/planner/synth.py'),
             designPath,

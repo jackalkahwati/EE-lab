@@ -133,6 +133,27 @@ function fetchFootprint(lcsc: string): Promise<string | null> {
   })
 }
 
+const PLANNER_DIR = path.join(process.cwd(), '..', '..', 'hardware', 'planner')
+const exists = (p: string) => fs.access(p).then(() => true).catch(() => false)
+
+/** MERGER: export the planner's real design (final_design + intent) as a
+ *  run_board {parts, nets, gnd} netlist via synth.py's bridge. Returns null on
+ *  any failure so the caller falls back to the LLM part-set. */
+function plannerNetlist(designPath: string): Promise<{ parts: any[]; nets: any[]; gnd: string[] } | null> {
+  return new Promise((resolve) => {
+    const py = spawn('python3', [path.join(PLANNER_DIR, 'synth.py'), '--netlist', designPath], { cwd: PLANNER_DIR, timeout: 90_000 })
+    let out = ''
+    py.stdout.on('data', (d) => (out += d))
+    py.on('error', () => resolve(null))
+    py.on('close', () => {
+      try {
+        const nl = JSON.parse(out.trim().split('\n').filter(Boolean).pop() || 'null')
+        resolve(nl && Array.isArray(nl.parts) && nl.parts.length && Array.isArray(nl.nets) ? nl : null)
+      } catch { resolve(null) }
+    })
+  })
+}
+
 function runBoard(payload: object, svgPath: string, timeoutMs = 285_000): Promise<any> {
   const script = path.join(process.cwd(), '..', '..', 'tools', 'tscircuit', 'run_board.mjs')
   return new Promise((resolve, reject) => {
@@ -236,8 +257,25 @@ export async function POST(req: Request) {
     const dir = path.join(process.cwd(), 'public', 'runs', runId, 'electronics')
     await fs.mkdir(dir, { recursive: true })
 
-    // FIRST PASS — design the part set, route it.
-    let cand = await buildCandidate(baseMsg, req, dir, 'chipscale.svg', 285_000)
+    // MERGER (Stage E): if the planner produced a real UCS design for this run,
+    // build the chip-scale board from THAT — its real parts, MCU pin allocation
+    // and bus connectivity, exported to a netlist by synth's bridge — so the board
+    // the user sees comes from the SAME design as the plan, not a separate LLM
+    // part-set guess. Falls back to emitPartsNets when there's no planner design
+    // (or the bridge yields nothing). Skipped for a keep-capabilities rebuild.
+    let cand: Awaited<ReturnType<typeof buildCandidate>> | undefined
+    let boardSource: 'planner-merged' | 'llm' = 'llm'
+    const plannerDesignPath = path.join(process.cwd(), 'public', 'runs', runId, 'data', 'ucs_design.json')
+    if (!keepCapabilities && await exists(plannerDesignPath)) {
+      const nl = await plannerNetlist(plannerDesignPath)
+      if (nl?.parts?.length) {
+        const result = await runBoard({ parts: nl.parts, nets: nl.nets, gnd: nl.gnd }, path.join(dir, 'chipscale.svg'), 285_000)
+        cand = { parts: nl.parts, nets: nl.nets, gnd: nl.gnd, note: undefined, droppedCapabilities: undefined, realFootprints: 0, result, svgName: 'chipscale.svg' }
+        boardSource = 'planner-merged'
+      }
+    }
+    // FIRST PASS (fallback) — LLM part set, routed.
+    if (!cand) cand = await buildCandidate(baseMsg, req, dir, 'chipscale.svg', 285_000)
     let designConvergence: any = null
 
     // OUTER LOOP (design↔routing): the routing layer already loosens placement to
@@ -248,7 +286,7 @@ export async function POST(req: Request) {
     // non-essential parts), then re-route. Keep whichever board is genuinely
     // better and report exactly what the re-plan changed (computed from the part
     // sets, not the model's say-so). One bounded iteration so it can't run away.
-    if (DENSITY_REPLAN && !keepCapabilities && densityFailed(cand.result)) {
+    if (DENSITY_REPLAN && !keepCapabilities && boardSource === 'llm' && densityFailed(cand.result)) {
       const first = cand.result
       const T_START = Date.now()
       const OUTER_BUDGET_MS = 520_000 // stay under maxDuration=600 with margin for post-processing
@@ -357,7 +395,7 @@ export async function POST(req: Request) {
       // BLE SoC + mics + PMIC), not the flroute reference board's placeholder BOM.
       const partList = parts.map((p: any) => ({ name: p.name, footprint: p.footprint, kind: p.kind, lcsc: p.lcsc ?? null }))
       await fs.writeFile(path.join(dir, 'chipscale-board.json'),
-        JSON.stringify({ boardMm: result.boardMm, areaMm2: result.areaMm2, components: result.components, routedTraces: result.routedTraces, realFootprints, parts: partList, drc: result.drc ?? null, drcRepair: result.drcRepair ?? null, designConvergence }))
+        JSON.stringify({ boardMm: result.boardMm, areaMm2: result.areaMm2, components: result.components, routedTraces: result.routedTraces, realFootprints, parts: partList, drc: result.drc ?? null, drcRepair: result.drcRepair ?? null, designConvergence, boardSource }))
       // the routed .kicad_pcb for the 3D render (the real chip-down board)
       if (result.kicadPcb) await fs.writeFile(path.join(dir, 'chipscale.kicad_pcb'), result.kicadPcb)
     }
@@ -372,6 +410,7 @@ export async function POST(req: Request) {
       drc: result.drc ?? null,
       drcRepair: result.drcRepair ?? null,
       designConvergence,
+      boardSource,
       realFootprints,
       svgUrl: result.svg ? `/runs/${runId}/electronics/chipscale.svg?t=${Date.now()}` : null,
       code: result.code,
