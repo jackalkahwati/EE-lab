@@ -238,43 +238,80 @@ export async function POST(req: Request) {
     // better and report exactly what the re-plan changed (computed from the part
     // sets, not the model's say-so). One bounded iteration so it can't run away.
     if (DENSITY_REPLAN && densityFailed(cand.result)) {
-      const r0 = cand.result
-      const hist = Object.entries(fpHistogram(cand.parts)).map(([k, v]) => `${v}×${k}`).join(', ')
-      const feedback =
-        `\n\nRE-PLAN — this part set did NOT route clean at chip-scale:\n` +
-        `${cand.parts.length} parts (${hist}) → ${r0.boardMm?.w}×${r0.boardMm?.h}mm with ${r0.drc?.errors} DRC error(s), ` +
-        `mostly hole_clearance (fine-pitch packages packed too tight to route at this size).\n` +
-        `Re-design it SIMPLER so it can route clean:\n` +
-        `- prefer a COARSER package where the function allows (a wider-pitch/larger IC over a fine-pitch qfn);\n` +
-        `- INTEGRATE functions into fewer ICs where a real combined part exists;\n` +
-        `- DROP a non-essential peripheral (keep the product's core function; shed nice-to-haves);\n` +
-        `- fewer discrete parts overall.\n` +
-        `Keep it a REAL functional board for THIS product. Add a "note" field naming what you simplified and why.`
-      // Best-effort: a failed/timed-out re-plan build must NEVER discard the good
-      // first board — fall back to it and report the re-plan didn't complete.
-      let cand2: Awaited<ReturnType<typeof buildCandidate>> | null = null
-      let replanError: string | null = null
-      try { cand2 = await buildCandidate(baseMsg + feedback, req, dir, 'chipscale-replan.svg', 220_000) }
-      catch (e) { replanError = String(e) }
+      const first = cand.result
+      const T_START = Date.now()
+      const OUTER_BUDGET_MS = 520_000 // stay under maxDuration=600 with margin for post-processing
+      const MAX_REPLANS = 3
+      const iterations: any[] = []
+      let best = cand // the best candidate across all iterations (starts as the first pass)
 
-      const winner = cand2 ? betterResult(cand.result, cand2.result) : 'a'
-      designConvergence = {
-        triggered: true,
-        reason: `first pass routed ${r0.boardMm?.w}×${r0.boardMm?.h}mm but held ${r0.drc?.errors} DRC error(s) — over the density budget`,
-        change: cand2 ? describeDesignChange(cand.parts, cand2.parts) : 'the re-plan build did not complete',
-        note: cand2?.note ?? null,
-        replanError,
-        before: { parts: cand.parts.length, drc: r0.drc?.errors ?? null, ok: !!r0.ok },
-        after: cand2 ? { parts: cand2.parts.length, drc: cand2.result?.drc?.errors ?? null, ok: !!cand2.result?.ok } : null,
-        kept: winner === 'b' ? 'replanned' : 'original',
+      // Keep re-planning simpler while the best board is still over the density
+      // budget — each round feeds the CURRENT best board's failure back and asks
+      // for a further simplification, escalating how aggressive the cut is. Stop
+      // on a clean route, on no improvement, when the re-plan budget/iterations
+      // run out, or when a build fails (fall back to the best so far).
+      let round = 0
+      while (round < MAX_REPLANS && densityFailed(best.result)) {
+        const elapsed = Date.now() - T_START
+        const estNext = iterations.length ? (iterations[iterations.length - 1].ms ?? 180_000) : 190_000
+        if (elapsed + estNext > OUTER_BUDGET_MS) { iterations.push({ round: round + 1, skipped: 'time budget', elapsedMs: elapsed }); break }
+        round++
+
+        const rb = best.result
+        const hist = Object.entries(fpHistogram(best.parts)).map(([k, v]) => `${v}×${k}`).join(', ')
+        const escalate = round === 1
+          ? `Re-design it SIMPLER so it can route clean:`
+          : `This is re-plan #${round}; the previous simplification still did NOT route clean. Cut HARDER — strip to the product's ESSENTIAL core function only:`
+        const feedback =
+          `\n\nRE-PLAN — this part set did NOT route clean at chip-scale:\n` +
+          `${best.parts.length} parts (${hist}) → ${rb.boardMm?.w}×${rb.boardMm?.h}mm with ${rb.drc?.errors} DRC error(s), ` +
+          `mostly hole_clearance (fine-pitch packages packed too tight to route at this size).\n` +
+          `${escalate}\n` +
+          `- prefer a COARSER package where the function allows (a wider-pitch/larger IC over a fine-pitch qfn);\n` +
+          `- INTEGRATE functions into fewer ICs where a real combined part exists;\n` +
+          `- DROP a non-essential peripheral (keep the product's core function; shed nice-to-haves);\n` +
+          `- fewer discrete parts overall.\n` +
+          `Keep it a REAL functional board for THIS product. Add a "note" field naming what you simplified and why.`
+
+        const tA = Date.now()
+        let next: Awaited<ReturnType<typeof buildCandidate>> | null = null
+        let replanError: string | null = null
+        try { next = await buildCandidate(baseMsg + feedback, req, dir, `chipscale-replan${round}.svg`, 220_000) }
+        catch (e) { replanError = String(e) }
+        const ms = Date.now() - tA
+
+        if (!next) { iterations.push({ round, replanError, ms }); break } // build failed — keep best so far
+        const improved = betterResult(best.result, next.result) === 'b'
+        iterations.push({
+          round, change: describeDesignChange(best.parts, next.parts), note: next.note ?? null,
+          parts: next.parts.length, drc: next.result?.drc?.errors ?? null, ok: !!next.result?.ok,
+          kept: improved, ms,
+        })
+        if (!improved) break // this re-plan was no better than the current best — stop
+        best = next
+        if (best.result?.ok) break // clean route — genuinely converged
       }
-      if (winner === 'b' && cand2) {
-        cand = cand2
-        // promote the re-planned board's SVGs to the canonical names the UI reads
-        for (const [from, to] of [['chipscale-replan.svg', 'chipscale.svg'], ['chipscale-replan-schematic.svg', 'chipscale-schematic.svg']]) {
+
+      // promote the winning board's SVGs to the canonical names the UI reads
+      if (best !== cand) {
+        for (const [from, to] of [[best.svgName, 'chipscale.svg'], [best.svgName.replace(/\.svg$/, '-schematic.svg'), 'chipscale-schematic.svg']]) {
           try { await fs.copyFile(path.join(dir, from), path.join(dir, to)) } catch { /* svg optional */ }
         }
       }
+
+      designConvergence = {
+        triggered: true,
+        reason: `first pass routed ${first.boardMm?.w}×${first.boardMm?.h}mm but held ${first.drc?.errors} DRC error(s) — over the density budget`,
+        replans: round,
+        converged: !!best.result?.ok,
+        iterations,
+        change: best !== cand ? describeDesignChange(cand.parts, best.parts) : 'no re-plan improved on the first board',
+        note: best !== cand ? best.note ?? null : null,
+        before: { parts: cand.parts.length, drc: first.drc?.errors ?? null, ok: !!first.ok },
+        after: { parts: best.parts.length, drc: best.result?.drc?.errors ?? null, ok: !!best.result?.ok },
+        kept: best !== cand ? 'replanned' : 'original',
+      }
+      cand = best
     }
 
     const { parts, result, realFootprints } = cand
@@ -285,11 +322,9 @@ export async function POST(req: Request) {
     if (designConvergence && result.drcRepair) {
       result.drcRepair.designConvergence = designConvergence
       const dc = designConvergence
-      const tail = dc.replanError
-        ? `re-plan build did not complete (${String(dc.replanError).slice(0, 80)}); kept the original`
-        : dc.kept === 'replanned'
-          ? `re-planned the part set (${dc.change}) → ${dc.after?.drc} vs ${dc.before.drc} DRC error(s)`
-          : `kept the original — the re-plan (${dc.change}) was no better (${dc.after?.drc} vs ${dc.before.drc} DRC error(s))`
+      const tail = dc.kept === 'replanned'
+        ? `re-planned the design ${dc.replans}× (${dc.change}) → ${dc.after?.drc} vs ${dc.before.drc} DRC error(s)${dc.converged ? ', routes clean' : ''}`
+        : `kept the original — ${dc.replans} re-plan attempt(s) were no better`
       result.drcRepair.fixes = [
         ...(result.drcRepair.fixes ?? []),
         `design↔routing outer loop: ${dc.reason} → ${tail}`,
