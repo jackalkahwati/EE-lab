@@ -648,14 +648,30 @@ def _qfn_for(netmap):
     return "qfn%d" % hi
 
 
-def netlist_from_design(design):
+# bench/instrument extras synth adds that a CHIP-SCALE product board doesn't need
+# (they route as THT headers/test points and balloon the board): the programming
+# header + FL-1 instrument-bus header (both THT pin headers), dedicated test-point
+# pads, and the calibration divider resistors. The functional design — MCU,
+# peripherals, decoupling, bus pull-ups, the USB/power connector — stays.
+_CHIP_SCALE_DROP_LIBS = {"TestPoint", "Connector_PinHeader_2.54mm"}
+
+
+def _is_chip_scale_extra(ref, lib):
+    if lib in _CHIP_SCALE_DROP_LIBS:
+        return True
+    return ref.startswith("TP") or ref.startswith("RCAL")
+
+
+def netlist_from_design(design, chip_scale=True, real_geometry=False):
     """MERGER: export the planner's real-parts design as a run_board
     {parts, nets, gnd} netlist, by running the SAME synth net-assembly (its real
     MCU pin allocation + bus matching) and reading the recorded placements. Real
     footprint geometry passes through (run_board parses .kicad_mod), so the board
     is built from the planner's REAL parts + connectivity — not a separate,
     independent LLM part-set guess. This is the bridge that lets ONE design flow
-    from prompt to the routed chip-scale board."""
+    from prompt to the routed chip-scale board. chip_scale=True drops the bench/
+    instrument extras (headers, test points, cal divider) so the exported board is
+    the minimal PRODUCT board, not synth's full bench variant."""
     import tempfile
     import shutil
     import contextlib
@@ -672,22 +688,32 @@ def netlist_from_design(design):
     # merge placements by ref (a ref placed twice = one part; union its pads)
     comps = {}
     for e in compose._NETLIST:
+        if chip_scale and _is_chip_scale_extra(e["ref"], e["lib"]):
+            continue  # bench/instrument extra — not part of the product board
         c = comps.setdefault(e["ref"], {"lib": e["lib"], "name": e["name"], "netmap": {}})
         c["netmap"].update(e["netmap"])
 
     parts, by_net, gnd = [], {}, []
     for ref, c in comps.items():
-        try:
-            mod = compose._load(c["lib"], c["name"])
-        except Exception:
-            mod = None
         nm = c["netmap"]
         name = c["name"]
         kind = ("capacitor" if name.startswith("C_")
                 else "resistor" if name.startswith("R_") else "chip")
         part = {"name": ref, "kind": kind, "footprint": _qfn_for(nm)}
-        if mod:
-            part["kicadMod"] = mod
+        # Real .kicad_mod geometry is OPT-IN: it currently breaks run_board's
+        # routers (freerouting DSN export fails, built-in autorouter errors on the
+        # real pad geometry), whereas the qfnN string footprint — sized by the
+        # real pin count — routes cleanly (33/33 traces vs 0). The NETLIST is what
+        # carries the planner's real design (real parts, real MCU allocation, real
+        # connectivity); the footprint is an approximation until the router-vs-real-
+        # geometry issue is fixed. So default to the routable qfnN footprint.
+        if real_geometry:
+            try:
+                mod = compose._load(c["lib"], c["name"])
+            except Exception:
+                mod = None
+            if mod:
+                part["kicadMod"] = mod
         parts.append(part)
         for pad, net in nm.items():
             ep = "%s.%s" % (ref, pad)
