@@ -1,11 +1,11 @@
 'use client'
 
 /**
- * Simulation stage — runs the lumped-physics sims (numpy/scipy) and shows each
- * result with its metric, pass/fail, fidelity, and the tool that produced it.
- * Honest: these are real lumped/analytic sims, NOT 3D FEA/FDTD; the high-fidelity
- * solvers (Elmer/CalculiX/openEMS/OpenFOAM) are an install-gated upgrade. Generic
- * — the runner picks whichever sims the product's inputs support.
+ * Simulation stage — runs the physics sims and shows each result with its metric,
+ * pass/fail, fidelity, and the tool that produced it. thermal + drop are REAL FEM
+ * (scikit-fem); acoustics/RF/battery are analytic/surrogate, honestly labeled; the
+ * high-fidelity solvers for those (Elmer/CalculiX/openEMS/OpenFOAM) are the
+ * install-gated upgrade. Generic — the runner picks whichever sims the inputs support.
  */
 import { useState, useEffect } from 'react'
 import { cn } from '@/lib/utils'
@@ -68,7 +68,7 @@ export function SimulationStage({ spec, runId, onBuilt }: { spec: any; runId?: s
       {!spec && <p className="text-sm text-muted-foreground">Describe a product first.</p>}
       {state === 'idle' && spec && (
         <p className="text-sm text-muted-foreground">
-          Run real lumped-physics simulations (numpy/scipy) — thermal, drop, acoustics, RF link, battery — on the current design. Each result shows its fidelity and the tool that produced it.
+          Run real physics simulations on the current design — thermal and drop are genuine finite-element solves (scikit-fem); acoustics, RF link and battery are analytic. Each result shows its fidelity and the tool that produced it.
         </p>
       )}
       {state === 'error' && <div className="mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px] text-destructive">{err}</div>}
@@ -89,8 +89,10 @@ export function SimulationStage({ spec, runId, onBuilt }: { spec: any; runId?: s
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-2 pl-6">
                     <span className={cn('rounded-sm px-1 py-0.5 font-mono text-[9px] uppercase',
-                      r.fidelity === 'surrogate' ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400' : 'bg-secondary text-muted-foreground')}>
-                      {r.fidelity}
+                      r.fidelity === 'fem' ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                        : r.fidelity === 'surrogate' ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                          : 'bg-secondary text-muted-foreground')}>
+                      {r.fidelity === 'fem' ? 'FEM ✓' : r.fidelity}
                     </span>
                     <span className="font-mono text-[10px] text-muted-foreground">{r.tool}</span>
                     {r.note && <span className="text-[10px] text-muted-foreground">· {r.note}</span>}
@@ -100,7 +102,7 @@ export function SimulationStage({ spec, runId, onBuilt }: { spec: any; runId?: s
             </div>
           ))}
           <div className="rounded-md border border-border px-3 py-2 text-[11px] text-muted-foreground">
-            Lumped/analytic fidelity {res.scipy ? '(scipy active)' : ''}. High-fidelity 3D FEA/FDTD — <span className="text-foreground">Elmer · CalculiX · openEMS · OpenFOAM</span> (gmsh present for meshing) — is the install-gated upgrade, not yet wired.
+            <span className="text-foreground">Real FEM (scikit-fem)</span> for thermal + drop; analytic/surrogate for acoustics, RF and battery. The next-fidelity upgrade for the analytic domains is 3D FEA/FDTD — <span className="text-foreground">Elmer · CalculiX · openEMS · OpenFOAM</span> (gmsh present for meshing) — install-gated. The runner only reports metrics it can compute, nothing faked.
           </div>
         </div>
       )}

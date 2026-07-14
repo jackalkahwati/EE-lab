@@ -619,8 +619,8 @@ export default function Compose2Page() {
                       : (
                         <div className="flex h-full flex-col gap-3 p-4 text-[12px] text-muted-foreground">
                           <div className="font-mono text-[9px] uppercase tracking-wide">simulation · physics</div>
-                          <p>Real lumped-physics simulations via <span className="text-foreground">numpy/scipy</span> — thermal (transient RC), drop (impulse), acoustics (sealed-box), RF (link budget), battery (energy). Each result is labeled by <span className="text-foreground">fidelity</span> and the tool that produced it.</p>
-                          <p>These are lumped/analytic, <span className="text-amber-600 dark:text-amber-400">not 3D FEA/FDTD</span>. High-fidelity solvers (Elmer · CalculiX · openEMS · OpenFOAM; gmsh present) are the install-gated upgrade.</p>
+                          <p><span className="text-foreground">thermal</span> and <span className="text-foreground">drop</span> are real finite-element solves via <span className="text-foreground">scikit-fem</span> — a 2D FEM heat-conduction field and a Kirchhoff-plate modal FEM. Acoustics (sealed-box), RF (link budget) and battery (energy) are analytic. Each result is labeled by <span className="text-foreground">fidelity</span> and the tool that produced it.</p>
+                          <p>The analytic domains' next-fidelity upgrade is 3D FEA/FDTD — <span className="text-amber-600 dark:text-amber-400">Elmer · CalculiX · openEMS · OpenFOAM</span> (gmsh present) — install-gated.</p>
                           <p>The runner only reports metrics it can compute — nothing faked.</p>
                         </div>
                       )}
