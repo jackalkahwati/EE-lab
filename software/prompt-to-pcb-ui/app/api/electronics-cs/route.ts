@@ -19,8 +19,10 @@ export const dynamic = 'force-dynamic'
 // redesign loop runs more). The old 200s cap + 150s runner timeout below cut a
 // real board off mid-route, so the UI showed a timeout instead of the (honest)
 // DRC result. Give the runner room to finish; the runner still enforces its own
-// hard wall so it can't hang forever.
-export const maxDuration = 300
+// hard wall so it can't hang forever. The design↔routing OUTER loop can run a
+// second (re-planned) board when the first hits a density limit, so the cap
+// covers two builds — the runner timeouts (285s + 220s) still bound each one.
+export const maxDuration = 600
 
 const RUN_ID = /^run-[A-Za-z0-9._-]{1,128}$/
 
@@ -75,7 +77,7 @@ RULES:
   and pours the ground plane; you list the parts, the signal/power connections, and
   the ground pins.`
 
-async function emitPartsNets(userMsg: string, override?: LLMOverride): Promise<{ parts: any[]; nets: any[]; gnd: string[] }> {
+async function emitPartsNets(userMsg: string, override?: LLMOverride): Promise<{ parts: any[]; nets: any[]; gnd: string[]; note?: string }> {
   const antKey = process.env.ANTHROPIC_API_KEY
   const opts = override?.apiKey
     ? override
@@ -87,7 +89,7 @@ async function emitPartsNets(userMsg: string, override?: LLMOverride): Promise<{
     try {
       const { text } = await callLLMText(SYSTEM, attempt === 0 ? userMsg : userMsg + '\n\nReply with ONLY the JSON object.', opts)
       const o = JSON.parse(firstJson(text))
-      if (Array.isArray(o.parts) && o.parts.length) return { parts: o.parts, nets: Array.isArray(o.nets) ? o.nets : [], gnd: Array.isArray(o.gnd) ? o.gnd.map(String) : [] }
+      if (Array.isArray(o.parts) && o.parts.length) return { parts: o.parts, nets: Array.isArray(o.nets) ? o.nets : [], gnd: Array.isArray(o.gnd) ? o.gnd.map(String) : [], note: typeof o.note === 'string' ? o.note : undefined }
     } catch (e) { lastErr = e }
   }
   throw lastErr ?? new Error('parts model failed')
@@ -127,10 +129,10 @@ function fetchFootprint(lcsc: string): Promise<string | null> {
   })
 }
 
-function runBoard(payload: object, svgPath: string): Promise<any> {
+function runBoard(payload: object, svgPath: string, timeoutMs = 285_000): Promise<any> {
   const script = path.join(process.cwd(), '..', '..', 'tools', 'tscircuit', 'run_board.mjs')
   return new Promise((resolve, reject) => {
-    const py = spawn('node', [script], { timeout: 285_000 })
+    const py = spawn('node', [script], { timeout: timeoutMs })
     let out = '', err = ''
     py.stdout.on('data', (d) => (out += d))
     py.stderr.on('data', (d) => (err += d))
@@ -144,6 +146,66 @@ function runBoard(payload: object, svgPath: string): Promise<any> {
   })
 }
 
+// ---- design↔routing OUTER loop ----------------------------------------------
+// Re-plan when the first board hits a real density limit. `FL_DENSITY_REPLAN=0`
+// disables it; the threshold keeps a couple of DRC nits from paying for a full
+// re-plan (only a genuine density limit is worth re-opening the design).
+const DENSITY_REPLAN = process.env.FL_DENSITY_REPLAN !== '0'
+const REPLAN_MIN_ERRORS = 6
+
+/** A board that ROUTED but is well over the DRC budget — the design is too dense,
+ *  not a routing nit. This is the signal to re-open the part set. */
+function densityFailed(result: any): boolean {
+  return !!result?.boardMm && !result.ok && (result?.drc?.errors ?? 0) >= REPLAN_MIN_ERRORS
+}
+
+/** Which board to keep: a clean route always wins; else fewer DRC errors; a tie
+ *  keeps the original (`a`) so a re-plan must be strictly better to be adopted. */
+function betterResult(a: any, b: any): 'a' | 'b' {
+  if (a?.ok && !b?.ok) return 'a'
+  if (b?.ok && !a?.ok) return 'b'
+  const ea = a?.drc?.errors ?? Infinity, eb = b?.drc?.errors ?? Infinity
+  return eb < ea ? 'b' : 'a'
+}
+
+function fpHistogram(parts: any[]): Record<string, number> {
+  const h: Record<string, number> = {}
+  for (const p of parts) { const f = String(p?.footprint || p?.kind || '?'); h[f] = (h[f] || 0) + 1 }
+  return h
+}
+
+/** What the re-plan actually changed, computed from the two part sets (ground
+ *  truth) — not the model's self-report. */
+function describeDesignChange(before: any[], after: any[]): string {
+  const hb = fpHistogram(before), ha = fpHistogram(after)
+  const bits: string[] = []
+  if (after.length !== before.length) bits.push(`${before.length}→${after.length} parts`)
+  const keys = [...new Set([...Object.keys(hb), ...Object.keys(ha)])].sort()
+  const removed = keys.filter((k) => (ha[k] || 0) < (hb[k] || 0)).map((k) => `${(hb[k] || 0) - (ha[k] || 0)}×${k}`)
+  const added = keys.filter((k) => (ha[k] || 0) > (hb[k] || 0)).map((k) => `${(ha[k] || 0) - (hb[k] || 0)}×${k}`)
+  if (removed.length) bits.push(`−[${removed.join(', ')}]`)
+  if (added.length) bits.push(`+[${added.join(', ')}]`)
+  return bits.join('; ') || 'no net change in the part set'
+}
+
+/** One full board candidate: part-set engine → real footprints → routed board. */
+async function buildCandidate(userMsg: string, req: Request, dir: string, svgName: string, timeoutMs: number) {
+  const { parts, nets, gnd, note } = await emitPartsNets(userMsg, overrideFromHeaders(req.headers))
+  // pull REAL LCSC footprints for any part the engine tagged with a valid id;
+  // attach as part.kicadMod so the runner uses the true pad geometry + size.
+  // Fetch each distinct id ONCE (duplicate ids would race on the same /tmp file).
+  const ids = [...new Set(parts.map((p: any) => (p?.lcsc ? String(p.lcsc) : '')).filter(Boolean))]
+  const mods = new Map<string, string>()
+  await Promise.all(ids.map(async (id) => { const m = await fetchFootprint(id); if (m) mods.set(id, m) }))
+  let realFootprints = 0
+  for (const p of parts as any[]) {
+    const m = p?.lcsc ? mods.get(String(p.lcsc)) : undefined
+    if (m) { p.kicadMod = m; realFootprints++ }
+  }
+  const result = await runBoard({ parts, nets, gnd }, path.join(dir, svgName), timeoutMs)
+  return { parts, nets, gnd, note, realFootprints, result, svgName }
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json()
@@ -154,33 +216,85 @@ export async function POST(req: Request) {
 
     const b = spec.budgets ?? {}
     const elec = spec.disciplines?.electronics
-    const userMsg =
+    const baseMsg =
       `PRODUCT: ${spec.product}\n${spec.description || ''}\n` +
       `size budget: ${JSON.stringify(b.sizeMm ?? {})}\n` +
       `electronics: ${elec?.summary || elec?.boardIntent || '-'}\n` +
       `List the minimal chip-scale part set + nets.`
 
-    const { parts, nets, gnd } = await emitPartsNets(userMsg, overrideFromHeaders(req.headers))
-
-    // pull REAL LCSC footprints for any part the engine tagged with a valid id;
-    // attach as part.kicadMod so the runner uses the true pad geometry + size.
-    // Fetch each distinct id ONCE (duplicate ids — e.g. two identical caps —
-    // would otherwise race two subprocesses on the same /tmp file).
-    const ids = [...new Set(parts.map((p: any) => (p?.lcsc ? String(p.lcsc) : '')).filter(Boolean))]
-    const mods = new Map<string, string>()
-    await Promise.all(ids.map(async (id) => { const m = await fetchFootprint(id); if (m) mods.set(id, m) }))
-    let realFootprints = 0
-    for (const p of parts as any[]) {
-      const m = p?.lcsc ? mods.get(String(p.lcsc)) : undefined
-      if (m) { p.kicadMod = m; realFootprints++ }
-    }
-
     const dir = path.join(process.cwd(), 'public', 'runs', runId, 'electronics')
     await fs.mkdir(dir, { recursive: true })
-    const svgPath = path.join(dir, 'chipscale.svg')
-    const result = await runBoard({ parts, nets, gnd }, svgPath)
 
+    // FIRST PASS — design the part set, route it.
+    let cand = await buildCandidate(baseMsg, req, dir, 'chipscale.svg', 285_000)
+    let designConvergence: any = null
+
+    // OUTER LOOP (design↔routing): the routing layer already loosens placement to
+    // relieve density (run_board's gap ladder). When even that can't route clean
+    // — the board is over its DRC budget — the density is a DESIGN problem, not a
+    // layout one. Feed the failure back to the part-set engine and ask for a
+    // simpler/coarser design (coarser packages, integrated functions, fewer
+    // non-essential parts), then re-route. Keep whichever board is genuinely
+    // better and report exactly what the re-plan changed (computed from the part
+    // sets, not the model's say-so). One bounded iteration so it can't run away.
+    if (DENSITY_REPLAN && densityFailed(cand.result)) {
+      const r0 = cand.result
+      const hist = Object.entries(fpHistogram(cand.parts)).map(([k, v]) => `${v}×${k}`).join(', ')
+      const feedback =
+        `\n\nRE-PLAN — this part set did NOT route clean at chip-scale:\n` +
+        `${cand.parts.length} parts (${hist}) → ${r0.boardMm?.w}×${r0.boardMm?.h}mm with ${r0.drc?.errors} DRC error(s), ` +
+        `mostly hole_clearance (fine-pitch packages packed too tight to route at this size).\n` +
+        `Re-design it SIMPLER so it can route clean:\n` +
+        `- prefer a COARSER package where the function allows (a wider-pitch/larger IC over a fine-pitch qfn);\n` +
+        `- INTEGRATE functions into fewer ICs where a real combined part exists;\n` +
+        `- DROP a non-essential peripheral (keep the product's core function; shed nice-to-haves);\n` +
+        `- fewer discrete parts overall.\n` +
+        `Keep it a REAL functional board for THIS product. Add a "note" field naming what you simplified and why.`
+      // Best-effort: a failed/timed-out re-plan build must NEVER discard the good
+      // first board — fall back to it and report the re-plan didn't complete.
+      let cand2: Awaited<ReturnType<typeof buildCandidate>> | null = null
+      let replanError: string | null = null
+      try { cand2 = await buildCandidate(baseMsg + feedback, req, dir, 'chipscale-replan.svg', 220_000) }
+      catch (e) { replanError = String(e) }
+
+      const winner = cand2 ? betterResult(cand.result, cand2.result) : 'a'
+      designConvergence = {
+        triggered: true,
+        reason: `first pass routed ${r0.boardMm?.w}×${r0.boardMm?.h}mm but held ${r0.drc?.errors} DRC error(s) — over the density budget`,
+        change: cand2 ? describeDesignChange(cand.parts, cand2.parts) : 'the re-plan build did not complete',
+        note: cand2?.note ?? null,
+        replanError,
+        before: { parts: cand.parts.length, drc: r0.drc?.errors ?? null, ok: !!r0.ok },
+        after: cand2 ? { parts: cand2.parts.length, drc: cand2.result?.drc?.errors ?? null, ok: !!cand2.result?.ok } : null,
+        kept: winner === 'b' ? 'replanned' : 'original',
+      }
+      if (winner === 'b' && cand2) {
+        cand = cand2
+        // promote the re-planned board's SVGs to the canonical names the UI reads
+        for (const [from, to] of [['chipscale-replan.svg', 'chipscale.svg'], ['chipscale-replan-schematic.svg', 'chipscale-schematic.svg']]) {
+          try { await fs.copyFile(path.join(dir, from), path.join(dir, to)) } catch { /* svg optional */ }
+        }
+      }
+    }
+
+    const { parts, result, realFootprints } = cand
     if (result?.error) return Response.json({ ok: false, error: result.error })
+
+    // fold the outer-loop outcome into drcRepair so the existing UI (which renders
+    // drcRepair.fixes) shows the re-plan honestly, and keep the structured object.
+    if (designConvergence && result.drcRepair) {
+      result.drcRepair.designConvergence = designConvergence
+      const dc = designConvergence
+      const tail = dc.replanError
+        ? `re-plan build did not complete (${String(dc.replanError).slice(0, 80)}); kept the original`
+        : dc.kept === 'replanned'
+          ? `re-planned the part set (${dc.change}) → ${dc.after?.drc} vs ${dc.before.drc} DRC error(s)`
+          : `kept the original — the re-plan (${dc.change}) was no better (${dc.after?.drc} vs ${dc.before.drc} DRC error(s))`
+      result.drcRepair.fixes = [
+        ...(result.drcRepair.fixes ?? []),
+        `design↔routing outer loop: ${dc.reason} → ${tail}`,
+      ]
+    }
 
     if (result.boardMm) {
       // Persist the part set too, so downstream disciplines (supply chain BOM,
@@ -188,7 +302,7 @@ export async function POST(req: Request) {
       // BLE SoC + mics + PMIC), not the flroute reference board's placeholder BOM.
       const partList = parts.map((p: any) => ({ name: p.name, footprint: p.footprint, kind: p.kind, lcsc: p.lcsc ?? null }))
       await fs.writeFile(path.join(dir, 'chipscale-board.json'),
-        JSON.stringify({ boardMm: result.boardMm, areaMm2: result.areaMm2, components: result.components, routedTraces: result.routedTraces, realFootprints, parts: partList, drc: result.drc ?? null, drcRepair: result.drcRepair ?? null }))
+        JSON.stringify({ boardMm: result.boardMm, areaMm2: result.areaMm2, components: result.components, routedTraces: result.routedTraces, realFootprints, parts: partList, drc: result.drc ?? null, drcRepair: result.drcRepair ?? null, designConvergence }))
       // the routed .kicad_pcb for the 3D render (the real chip-down board)
       if (result.kicadPcb) await fs.writeFile(path.join(dir, 'chipscale.kicad_pcb'), result.kicadPcb)
     }
@@ -202,6 +316,7 @@ export async function POST(req: Request) {
       errors: result.errors ?? {},
       drc: result.drc ?? null,
       drcRepair: result.drcRepair ?? null,
+      designConvergence,
       realFootprints,
       svgUrl: result.svg ? `/runs/${runId}/electronics/chipscale.svg?t=${Date.now()}` : null,
       code: result.code,
