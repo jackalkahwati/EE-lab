@@ -878,7 +878,10 @@ async function main() {
           if (gp.pcb) kicadPcb = gp.pcb // grounded board (with the GND plane) for the 3D render
           drcRepair.groundPlane = { assigned: gp.assigned, unconnected: gp.unconnected, stitched: gp.stitched, skipped: gp.skipped, errors: gp.errors }
           const stitchNote = gp.stitched ? `, ${gp.stitched} bonded down via tented via-in-pad` : ''
-          drcRepair.fixes = [...res.best.fixes, `ground plane: ${gp.assigned} pins on a DRC-verified GND zone${stitchNote}${gp.unconnected ? ` (${gp.unconnected} still unreached)` : ''}`]
+          // append to the accumulated fixes (NOT res.best.fixes) so the loosen
+          // note (design↔routing convergence) and any via-legalization note
+          // survive to the UI instead of being clobbered by the ground-plane pass.
+          drcRepair.fixes = [...drcRepair.fixes, `ground plane: ${gp.assigned} pins on a DRC-verified GND zone${stitchNote}${gp.unconnected ? ` (${gp.unconnected} still unreached)` : ''}`]
           // `converged` stays the SIGNAL verdict (routing clean). The ground plane
           // is a best-effort overlay reported on its own. Tented via-in-pad now
           // stitches stranded pads down to a reference plane; a via we must skip
