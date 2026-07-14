@@ -110,6 +110,30 @@ def run(prompt, recover_routing=True):
                                "preserved": rec["capabilities_preserved"],
                                "lost": rec["capabilities_lost"], "requires_approval": True})
 
+    # ---- storage right-sizing (design-of-N over the pin-compatible flash family)
+    # The resolver picks the family default (128 Mbit). Size it to what the product
+    # actually needs: the SMALLEST W25Q that meets the storage requirement, so we
+    # don't pay board area/$ for capacity that goes unused. Same SOIC-8 + SPI
+    # pinout across the family, so the swap is drop-in. Reported with the sizing
+    # assumption, never silent.
+    try:
+        from subsystems import design_storage_from_intent
+        flash = next((s for s in final_design
+                      if s.get("category", "").startswith("memory")
+                      or str(s.get("mpn", "")).startswith("W25Q")), None)
+        if flash:
+            sd = design_storage_from_intent(di, final_design)
+            chosen = sd.get("chosen")
+            if chosen and chosen in lib and chosen != flash["mpn"]:
+                final_design[:] = [s for s in final_design if s["mpn"] != flash["mpn"]]
+                add_to_design(lib[chosen])
+                honest[:] = [h for h in honest if h.get("mpn") != flash["mpn"]]
+                honest.append({"request": "storage", "outcome": "built", "mpn": chosen,
+                               "source": "right-sized:%s->%s" % (flash["mpn"], chosen),
+                               "note": "%s — %s" % (sd["rationale"], sd["assumption"])})
+    except Exception:
+        pass
+
     # ---- MCU (a Compose block, not a UCS part) ------------------------------
     if di["mcu"]["family"]:
         honest.append({"request": di["mcu"]["family"] + " MCU", "outcome": "built",

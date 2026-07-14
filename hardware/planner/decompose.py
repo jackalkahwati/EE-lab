@@ -161,6 +161,22 @@ def build_design_tree(intent, final_design, mcu_family=None):
             except Exception:
                 node["rationale"] = _solve_power(parts, intent)
             node["children"] = _power_blocks(parts, intent)
+        elif name == "storage" and parts:
+            # REAL design-of-N: the pin-compatible W25Q flash family scored on the
+            # capacity the product actually needs vs cost/area (subsystems.py).
+            try:
+                from subsystems import design_storage_from_intent
+                sd = design_storage_from_intent(intent, final_design)
+                node["rationale"] = "%s — %s" % (sd["chosen"] or "no flash", sd["rationale"])
+                node["design_of_n"] = {
+                    "requirement": "%s (%s)" % (sd["requirement"], sd.get("assumption", "")),
+                    "chosen": sd["chosen"],
+                    "candidates": [{"option": c["name"], "score": c["score"],
+                                    "feasible": c.get("feasible", False), "why": c["why"]}
+                                   for c in sd["candidates"]],
+                }
+            except Exception:
+                node["rationale"] = "%d part(s) resolved for this subsystem" % len(parts)
         elif parts:
             node["rationale"] = "%d part(s) resolved for this subsystem" % len(parts)
         else:

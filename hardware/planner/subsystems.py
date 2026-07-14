@@ -129,6 +129,81 @@ def design_power_from_intent(intent, final_design):
     return design_power(source_v, 3.3, current_ma)
 
 
+# --- storage design-of-N -----------------------------------------------------
+# The Winbond W25Q family is PIN-COMPATIBLE (same SOIC-8, same SPI pinout) across
+# capacities — so choosing among them is a REAL design decision (capacity vs cost
+# vs board area), not a manufactured one: pick the SMALLEST part that meets the
+# storage the product actually needs. Real MPNs, real capacities, real ~unit cost
+# (USD, qty-100 ballpark) — the choice is defensible from a datasheet.
+FLASH_FAMILY = [
+    {"mpn": "W25Q16JVSSIQ", "mbit": 16, "cost": 0.16, "footprint": "SOIC-8"},
+    {"mpn": "W25Q32JVSSIQ", "mbit": 32, "cost": 0.20, "footprint": "SOIC-8"},
+    {"mpn": "W25Q64JVSSIQ", "mbit": 64, "cost": 0.30, "footprint": "SOIC-8"},
+    {"mpn": "W25Q128JVSIQ", "mbit": 128, "cost": 0.45, "footprint": "SOIC-8"},
+]
+
+
+def design_storage(required_mbit):
+    """Design-of-N over the pin-compatible flash family. Returns the chosen part
+    (smallest capacity that meets the need — lowest cost/area) + every candidate
+    it scored with a real, defensible reason."""
+    cands = []
+    for f in FLASH_FAMILY:
+        if f["mbit"] >= required_mbit:
+            # feasible: score rewards the TIGHTEST fit (least over-provision) and
+            # lower cost — don't pay board area/$ for capacity you won't use.
+            headroom = f["mbit"] / max(required_mbit, 1)
+            score = round(100.0 - (headroom - 1.0) * 12.0 - f["cost"] * 20.0, 1)
+            cands.append({"name": f["mpn"], "part": f["mpn"], "feasible": True, "mbit": f["mbit"],
+                          "score": score,
+                          "why": "%d Mbit ≥ %d Mbit needed, SOIC-8, ~$%.2f — %.1f× headroom"
+                          % (f["mbit"], required_mbit, f["cost"], headroom)})
+        else:
+            cands.append({"name": f["mpn"], "part": f["mpn"], "feasible": False, "mbit": f["mbit"],
+                          "score": -1, "why": "%d Mbit < %d Mbit needed — too small" % (f["mbit"], required_mbit)})
+    feasible = [c for c in cands if c["feasible"]]
+    chosen = max(feasible, key=lambda c: c["score"]) if feasible else None
+    return {
+        "subsystem": "storage",
+        "requirement": "retain ≥ %d Mbit across power cycles" % required_mbit,
+        "chosen": chosen["name"] if chosen else None,
+        "candidates": cands,
+        "rationale": chosen["why"] if chosen else "need > 128 Mbit — beyond the seeded SPI-NOR family (use an SD card / eMMC)",
+    }
+
+
+# rough bytes/sample by sensor category — enough to size a log realistically
+_SAMPLE_BYTES = 4
+
+
+def derive_storage_requirement(intent, final_design):
+    """Estimate the storage the product needs (Mbit), from what it does. A data
+    logger sizing = channels × rate × retention; a config-only product needs a
+    small floor. The ASSUMPTION is returned so it can be reported, never hidden."""
+    intent = intent or {}
+    caps = intent.get("required_capabilities", []) or []
+    goal = (intent.get("product_goal") or "").lower()
+    sense_channels = sum(1 for c in caps if c in _SENSE_CAPS) or 1
+    logging = any(k in goal for k in ("log", "logger", "logging", "record", "datalogger", "data logger")) \
+        or "storage" in caps or "flash" in caps or "spi_flash" in caps
+    if logging:
+        # assume 1 sample/sec/channel retained for 7 days (a defensible default)
+        rate_hz, days = 1.0, 7
+        samples = sense_channels * rate_hz * days * 86400
+        need_mbit = max(4, round(samples * _SAMPLE_BYTES * 8 / 1e6))
+        assumption = "%d channel(s) × 1 Hz × 7 days × %dB → ~%d Mbit" % (sense_channels, _SAMPLE_BYTES, need_mbit)
+    else:
+        need_mbit, assumption = 4, "config/firmware storage only (no logging) → 4 Mbit floor"
+    return {"required_mbit": need_mbit, "assumption": assumption}
+
+
+def design_storage_from_intent(intent, final_design):
+    req = derive_storage_requirement(intent, final_design)
+    out = design_storage(req["required_mbit"])
+    out["assumption"] = req["assumption"]
+    return out
+
+
 if __name__ == "__main__":
     import json
     # low-current sensor puck -> LDO should win; high-current motor board -> buck

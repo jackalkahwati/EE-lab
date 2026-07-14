@@ -94,6 +94,34 @@ SEEDS = [
                                         {"pin": "HOLD", "to": "VCC", "note": "hold, active low"}]},
         "firmware": {"driver": "spi", "id_cmd": "0x9F", "test": "read_jedec_id"},
     }),
+    # Smaller members of the SAME pin-compatible W25Q family (identical SOIC-8
+    # pinout + SPI interface — pins come from the same symbol) so the storage
+    # design-of-N can right-size to the capacity the product actually needs
+    # instead of always paying for 128 Mbit. Real parts, real capacities.
+    ("W25Q128", "W25Q16JVSSIQ", "Winbond", "memory.spi_flash", {
+        "description": "16Mbit SPI NOR flash",
+        "interfaces": [{"type": "spi", "signals": {"sck": "CLK", "mosi": "DI", "miso": "DO", "cs": "CS"}}],
+        "power": {"vcc_min": 2.7, "vcc_max": 3.6, "vcc_typ": 3.3, "i_max_ma": 15.0},
+        "support_circuit": {"pullups": [{"pin": "WP", "to": "VCC", "note": "write protect"},
+                                        {"pin": "HOLD", "to": "VCC", "note": "hold, active low"}]},
+        "firmware": {"driver": "spi", "id_cmd": "0x9F", "test": "read_jedec_id"},
+    }),
+    ("W25Q128", "W25Q32JVSSIQ", "Winbond", "memory.spi_flash", {
+        "description": "32Mbit SPI NOR flash",
+        "interfaces": [{"type": "spi", "signals": {"sck": "CLK", "mosi": "DI", "miso": "DO", "cs": "CS"}}],
+        "power": {"vcc_min": 2.7, "vcc_max": 3.6, "vcc_typ": 3.3, "i_max_ma": 15.0},
+        "support_circuit": {"pullups": [{"pin": "WP", "to": "VCC", "note": "write protect"},
+                                        {"pin": "HOLD", "to": "VCC", "note": "hold, active low"}]},
+        "firmware": {"driver": "spi", "id_cmd": "0x9F", "test": "read_jedec_id"},
+    }),
+    ("W25Q128", "W25Q64JVSSIQ", "Winbond", "memory.spi_flash", {
+        "description": "64Mbit SPI NOR flash",
+        "interfaces": [{"type": "spi", "signals": {"sck": "CLK", "mosi": "DI", "miso": "DO", "cs": "CS"}}],
+        "power": {"vcc_min": 2.7, "vcc_max": 3.6, "vcc_typ": 3.3, "i_max_ma": 20.0},
+        "support_circuit": {"pullups": [{"pin": "WP", "to": "VCC", "note": "write protect"},
+                                        {"pin": "HOLD", "to": "VCC", "note": "hold, active low"}]},
+        "firmware": {"driver": "spi", "id_cmd": "0x9F", "test": "read_jedec_id"},
+    }),
     ("LIS3DH", "LIS3DH", "STMicroelectronics", "sensor.accelerometer", {
         "description": "3-axis MEMS accelerometer (I2C or SPI)",
         "interfaces": [{"type": "i2c", "signals": {"scl": "SPC", "sda": "SDI"}, "role": "primary"},
