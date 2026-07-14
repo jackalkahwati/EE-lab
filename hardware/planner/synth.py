@@ -629,6 +629,91 @@ def synth(design, out_path):
         print("SYNTH_NOTES:" + json.dumps(dropped))
 
 
+_QFN_SIZES = [6, 8, 16, 24, 32, 48]
+
+
+def _qfn_for(netmap):
+    """qfnN fallback footprint — used ONLY if the real .kicad_mod has no SMD pads
+    run_board can parse (e.g. a THT header). Big enough to cover the highest
+    NUMERIC pad wired so the nets still resolve."""
+    hi = 0
+    for pad in netmap:
+        if str(pad).isdigit():
+            hi = max(hi, int(pad))
+    if hi <= 2:
+        return "0402"
+    for n in _QFN_SIZES:
+        if n >= hi:
+            return "qfn%d" % n
+    return "qfn%d" % hi
+
+
+def netlist_from_design(design):
+    """MERGER: export the planner's real-parts design as a run_board
+    {parts, nets, gnd} netlist, by running the SAME synth net-assembly (its real
+    MCU pin allocation + bus matching) and reading the recorded placements. Real
+    footprint geometry passes through (run_board parses .kicad_mod), so the board
+    is built from the planner's REAL parts + connectivity — not a separate,
+    independent LLM part-set guess. This is the bridge that lets ONE design flow
+    from prompt to the routed chip-scale board."""
+    import tempfile
+    import shutil
+    import contextlib
+    import io
+    compose._NETLIST = []
+    compose._DEVICES[:] = []
+    tmpd = tempfile.mkdtemp(prefix="fl_netlist_")
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            synth(design, os.path.join(tmpd, "b.kicad_pcb"))
+    finally:
+        shutil.rmtree(tmpd, ignore_errors=True)
+
+    # merge placements by ref (a ref placed twice = one part; union its pads)
+    comps = {}
+    for e in compose._NETLIST:
+        c = comps.setdefault(e["ref"], {"lib": e["lib"], "name": e["name"], "netmap": {}})
+        c["netmap"].update(e["netmap"])
+
+    parts, by_net, gnd = [], {}, []
+    for ref, c in comps.items():
+        try:
+            mod = compose._load(c["lib"], c["name"])
+        except Exception:
+            mod = None
+        nm = c["netmap"]
+        name = c["name"]
+        kind = ("capacitor" if name.startswith("C_")
+                else "resistor" if name.startswith("R_") else "chip")
+        part = {"name": ref, "kind": kind, "footprint": _qfn_for(nm)}
+        if mod:
+            part["kicadMod"] = mod
+        parts.append(part)
+        for pad, net in nm.items():
+            ep = "%s.%s" % (ref, pad)
+            if net == "GND":
+                gnd.append(ep)
+            else:
+                by_net.setdefault(net, []).append(ep)
+
+    # daisy-chain each shared net (rail or bus) into two-point hops run_board routes
+    nets = []
+    for net, eps in by_net.items():
+        if len(eps) < 2:
+            continue  # single endpoint (external stub / dangling) — nothing to route
+        for i in range(len(eps) - 1):
+            nets.append([eps[i], eps[i + 1]])
+
+    return {"parts": parts, "nets": nets, "gnd": gnd,
+            "components": len(parts), "signal_nets": len([n for n in by_net if len(by_net[n]) > 1]),
+            "ground_pins": len(gnd)}
+
+
 if __name__ == "__main__":
-    design = json.load(open(sys.argv[1]))
-    synth(design, sys.argv[2])
+    if len(sys.argv) >= 3 and sys.argv[1] == "--netlist":
+        # emit the run_board {parts, nets, gnd} netlist for a design.json (merger)
+        design = json.load(open(sys.argv[2]))
+        print(json.dumps(netlist_from_design(design)))
+    else:
+        design = json.load(open(sys.argv[1]))
+        synth(design, sys.argv[2])

@@ -56,6 +56,13 @@ _cache = {}
 # look identical on the bus). Blocks append; compose() resets + writes it.
 _DEVICES = []
 
+# Netlist accumulator (design-path merger): every place() records its
+# (ref, footprint, pad->net map) here so the SAME synth run that emits the
+# .kicad_pcb can also export a run_board-style {parts, nets, gnd} netlist —
+# reusing synth's real MCU allocation + bus matching instead of a second,
+# independent LLM part-set guess. synth.netlist_from_design() resets + reads it.
+_NETLIST = []
+
 
 def _load(lib, name):
     key = (lib, name)
@@ -110,6 +117,10 @@ def place(lib, name, ref, x, y, rot, netmap, nets):
         t = re.sub(r'(\(pad\s+"[^"]*"[^()]*?\(at\s+[-0-9.]+\s+[-0-9.]+)(\s+([-0-9.]+))?\)',
                    _pad_rot, t)
     t = _inject(t, netmap, nets)
+    # record this placement for the netlist exporter (merger). Store the raw
+    # library ref + the pad->net map; the exporter loads real pad geometry from
+    # lib/name and derives the two-point nets from the maps.
+    _NETLIST.append({"ref": ref, "lib": lib, "name": name, "netmap": dict(netmap)})
     return "  " + t.strip() + "\n"
 
 

@@ -286,7 +286,10 @@ function kicadModToFootprint(mod) {
   const re = /\(pad\s+(\S+)\s+smd\s+\w+\s+\(at\s+(-?[\d.]+)\s+(-?[\d.]+)(?:\s+-?[\d.]+)?\)\s+\(size\s+([\d.]+)\s+([\d.]+)\)/g
   const pads = []
   let m
-  while ((m = re.exec(mod))) pads.push({ n: m[1], x: +m[2], y: -+m[3], w: +m[4], h: +m[5] })
+  // pad names are quoted in KiCad-library .kicad_mod (`(pad "1" smd ...)`) but
+  // bare in easyeda2kicad output — strip quotes so BOTH parse (a quoted name left
+  // in produced portHints={[""1""...]}, breaking the generated JSX).
+  while ((m = re.exec(mod))) pads.push({ n: m[1].replace(/"/g, ''), x: +m[2], y: -+m[3], w: +m[4], h: +m[5] })
   if (!pads.length) return null
   const ext = (sel, half) => pads.map((p) => sel(p) + half(p))
   const maxX = Math.max(...ext((p) => p.x, (p) => p.w / 2))
