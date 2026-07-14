@@ -448,6 +448,13 @@ export async function GET(req: Request) {
               log('design', `planned: ${sd.final_design.length} real parts + ${sd.intent?.mcu?.family ?? '?'} MCU · ${sd.overall_status ?? ''}`, 'ok')
               for (const s of subs)
                 log('design', `⚠ substituted ${s.request}${s.mpn ? ' → ' + s.mpn : ''}${s.lost?.length ? ' (lost: ' + s.lost.join(', ') + ')' : ''}`, 'warn')
+              // Stage 2: the recursive subsystem tree — log the decomposition and
+              // persist it so the product is legible as a hierarchy, not a flat list.
+              const tree = (synthDesign as { design_tree?: { children?: { name: string }[] } }).design_tree
+              if (tree?.children?.length) {
+                log('design', `decomposed into ${tree.children.length} subsystems: ${tree.children.map((c) => c.name).join(', ')}`, 'ok')
+                try { fs.writeFileSync(path.join(pubData, 'design-tree.json'), JSON.stringify(tree)) } catch { /* non-fatal */ }
+              }
               send({ type: 'design', spec: synthDesign as Record<string, unknown> })
             }
           }

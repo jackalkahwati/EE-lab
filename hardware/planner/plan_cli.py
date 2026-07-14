@@ -13,6 +13,7 @@ import json
 import sys
 
 from planner import run
+from decompose import build_design_tree
 
 
 def main():
@@ -21,6 +22,10 @@ def main():
         print(json.dumps({"error": "empty prompt"}))
         return
     r = run(prompt)
+    # Stage 2: the recursive subsystem tree rides alongside the flat design so the
+    # pipeline can show HOW the product decomposes. synth still builds from
+    # final_design; the tree is structure + rationale, it invents no parts.
+    tree = build_design_tree(r["intent"], r["final_design"])
     # synth.py reads final_design/intent/recovery_report; honest_report +
     # overall_status ride along so the pipeline can report substitutions.
     print(json.dumps({
@@ -30,6 +35,7 @@ def main():
         "honest_report": r["honest_report"],
         "overall_status": r["overall_status"],
         "requires_approval": r.get("requires_approval", []),
+        "design_tree": tree,
     }))
 
 
