@@ -1,12 +1,18 @@
 /**
- * Simulation module — runs the applicable lumped-physics simulations (open
- * source: numpy + scipy) for the product and returns real results with honest
- * fidelity + which tool produced each. Inputs are drawn from the product spec,
- * the real built board, and (optionally) the optimizer's selected design.
+ * Simulation module — runs the applicable physics simulations for the product
+ * and returns real results with honest fidelity + which tool produced each.
+ * Inputs are drawn from the product spec, the real built board, and (optionally)
+ * the optimizer's selected design.
  *
- * Generic: the sim runner picks whichever sims its inputs support; it never
- * fabricates a metric it can't compute. High-fidelity FEA/FDTD (Elmer /
- * CalculiX / openEMS / OpenFOAM) is the install-gated upgrade, not faked here.
+ * Fidelity is REAL where a solver is wired, honest where it isn't:
+ *  - thermal: real 2D FEM steady-state heat solve (scikit-fem) — spatially
+ *    resolved plate + convection, not a lumped node.
+ *  - drop:    real Kirchhoff-plate modal FEM (scikit-fem) — the board's
+ *    fundamental frequency (shock/flex robustness).
+ *  - acoustic/rf: still analytic/surrogate — a real acoustic FEM (Elmer) and
+ *    antenna FDTD (openEMS) are the install-gated next-fidelity upgrades.
+ * The runner never fabricates a metric it can't compute; each result carries its
+ * own tool + fidelity, so the panel shows exactly how each number was produced.
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
