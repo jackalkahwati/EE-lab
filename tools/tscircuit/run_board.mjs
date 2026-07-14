@@ -662,34 +662,39 @@ function legalizeVias(cj, { minClear = 0.4, maxDisp = 0.4, iters = 80 } = {}) {
  *  DRC clean (a real, buildable solution). If the ladder is exhausted without
  *  converging, returns the BEST board found plus an honest verdict naming the
  *  residual and the capability wall. Never fakes convergence. */
-async function iterativeRedesign(parts, nets) {
+async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15 } = {}) {
   // Prefer freerouting (real push-and-shove router) when available; fall back to
   // the built-in router + geometry repair. Escalate the fab process (standard ->
   // HDI) within each router. A board only truly converges when DRC is clean AND
   // every net is routed.
+  // `gap` is the component-to-component spacing the placement uses: the outer
+  // design<->routing convergence loop (see main) re-invokes this with a WIDER gap
+  // when the board still won't route, so the routing risk is relieved by giving
+  // the router more channel room — the real lever, not just more layers.
   // A board with no signal nets has nothing to route — the freerouting ladder
   // would spawn ~3 JVMs that route zero traces (~60s wasted, as the 1-chip profile
   // showed). Skip straight to a single placement+DRC pass.
   const noNets = !nets?.length
+  const spread = +(gap + 1.3).toFixed(2) // the fallback ladder's roomier variant, relative to the base gap
   const ladder = noNets
-    ? [{ name: 'placement only (no signal nets)', router: 'tsci', place: { gap: 2.1, maxW: 15, clearance: 0.5 }, profile: 'standard' }]
+    ? [{ name: 'placement only (no signal nets)', router: 'tsci', place: { gap, maxW, clearance: 0.5 }, profile: 'standard' }]
     : FR_JAR && JAVA
     ? [
-        { name: 'freerouting 2-layer, standard fab', router: 'fr', layers: 2, place: { gap: 2.1, maxW: 15, singleSided: true }, profile: 'standard' },
-        { name: 'freerouting 4-layer, standard fab', router: 'fr', layers: 4, place: { gap: 2.1, maxW: 15, singleSided: true }, profile: 'standard' },
-        { name: 'freerouting 4-layer, HDI fab',      router: 'fr', layers: 4, place: { gap: 2.1, maxW: 15, singleSided: true }, profile: 'hdi' },
-        { name: 'built-in router, HDI fab',          router: 'tsci', place: { gap: 2.1, maxW: 15, clearance: 0.45 }, profile: 'hdi' },
+        { name: 'freerouting 2-layer, standard fab', router: 'fr', layers: 2, place: { gap, maxW, singleSided: true }, profile: 'standard' },
+        { name: 'freerouting 4-layer, standard fab', router: 'fr', layers: 4, place: { gap, maxW, singleSided: true }, profile: 'standard' },
+        { name: 'freerouting 4-layer, HDI fab',      router: 'fr', layers: 4, place: { gap, maxW, singleSided: true }, profile: 'hdi' },
+        { name: 'built-in router, HDI fab',          router: 'tsci', place: { gap, maxW, clearance: 0.45 }, profile: 'hdi' },
       ]
     : [
-        { name: 'built-in router, standard', router: 'tsci', place: { gap: 2.1, maxW: 15, clearance: 0.5 }, profile: 'standard' },
-        { name: 'built-in router, spread',   router: 'tsci', place: { gap: 3.4, maxW: 18, clearance: 0.5 }, profile: 'standard' },
-        { name: 'built-in router, HDI fab',  router: 'tsci', place: { gap: 2.1, maxW: 15, clearance: 0.45 }, profile: 'hdi' },
+        { name: 'built-in router, standard', router: 'tsci', place: { gap, maxW, clearance: 0.5 }, profile: 'standard' },
+        { name: 'built-in router, spread',   router: 'tsci', place: { gap: spread, maxW: maxW + 3, clearance: 0.5 }, profile: 'standard' },
+        { name: 'built-in router, HDI fab',  router: 'tsci', place: { gap, maxW, clearance: 0.45 }, profile: 'hdi' },
       ]
   // Net-aware placement (min pin-to-pin wirelength + routing channels) once, up
   // front — it's what lets the router complete every net. Reused across the
   // freerouting passes (they differ only in layers/fab profile). Null -> the
   // strategies fall back to the connectivity shelf-pack.
-  const netAwarePlaced = FR_JAR && JAVA ? await netAwarePlace(parts, nets, { gap: 2.1, maxW: 15 }) : null
+  const netAwarePlaced = FR_JAR && JAVA ? await netAwarePlace(parts, nets, { gap, maxW }) : null
 
   const trail = []
   let best = null
@@ -788,11 +793,50 @@ async function main() {
   // fab-clean board; use the best one it finds as the reported result.
   let cj, drc, drcRepair = null, code, kicadPcb = null
   if (iterative) {
-    const res = await iterativeRedesign(input.parts, input.nets)
-    if (res.available) {
+    // Design<->routing convergence: run the routing ladder at the TIGHTEST gap
+    // first; if the best board still won't route clean (DRC errors or stranded
+    // nets), re-engineer the DESIGN — spread the placement so the router gets
+    // wider channels — and re-run. Stop at the FIRST gap that converges (the
+    // smallest board that routes clean), or, if none do, keep the loosest
+    // attempt and report the density limit honestly. This is the real lever the
+    // reviewer's "2 unconnected pads, stopping" run never got to pull.
+    // Each looser attempt re-runs the whole routing ladder, so a board that never
+    // converges could run 3x and blow the runner's hard wall (a 14-part board
+    // already spends ~210s on one pass). Budget it: a slow board spends its whole
+    // budget on the tight pass (no loosen, but it finishes and reports honestly);
+    // a fast-failing dense board has time left to loosen. We only START a looser
+    // attempt if the elapsed time plus an estimate of the next attempt (~the last
+    // attempt's cost) still fits under the wall.
+    const GAP_LADDER = [2.1, 3.2, 4.6]
+    const T_START = Date.now()
+    const BUDGET_MS = 255_000 // under the electronics-cs runner's 285s hard wall, leaving margin for post-processing
+    let res = null, gapTrail = [], usedGap = GAP_LADDER[0], lastMs = 0
+    const scoreOf = (a) => a?.available ? (a.best.drc.errors + a.best.unrouted * 5) : Infinity
+    for (const g of GAP_LADDER) {
+      if (g !== GAP_LADDER[0]) {
+        const elapsed = Date.now() - T_START
+        if (elapsed + lastMs * 1.1 > BUDGET_MS) {
+          gapTrail.push({ gap: g, skipped: 'time budget', elapsedMs: elapsed })
+          break // out of time to try a looser board — keep the best so far, report honestly
+        }
+      }
+      const tA = Date.now()
+      const attempt = await iterativeRedesign(input.parts, input.nets, { gap: g, maxW: 15 })
+      lastMs = Date.now() - tA
+      gapTrail.push({ gap: g, available: attempt.available,
+        errors: attempt.best?.drc?.errors ?? null, unrouted: attempt.best?.unrouted ?? null,
+        converged: !!attempt.converged, ms: lastMs })
+      // keep the best attempt so far: converged beats not; fewer (errors+5*unrouted) wins
+      if (!res || (attempt.available && (attempt.converged && !res.converged || scoreOf(attempt) < scoreOf(res)))) {
+        res = attempt; usedGap = g
+      }
+      if (attempt.available && attempt.converged) break // smallest board that routes clean — done
+    }
+    if (res && res.available) {
       cj = res.best.cj
       drc = res.best.drc
-      code = buildCode(input.parts, input.nets, { gap: 2.1, maxW: 15 }) // representative source
+      code = buildCode(input.parts, input.nets, { gap: usedGap, maxW: 15 }) // representative source
+      const loosened = gapTrail.length > 1 && usedGap > GAP_LADDER[0]
       drcRepair = {
         converged: res.converged,
         iterations: res.trail,
@@ -800,8 +844,11 @@ async function main() {
         errorsFirst: res.trail[0]?.errors ?? null,
         errorsBest: res.best.drc.errors,
         unrouted: res.best.unrouted,
-        fixes: res.best.fixes,
+        fixes: loosened
+          ? [...res.best.fixes, `spread placement to ${usedGap}mm component gap so the router could close (design↔routing convergence)`]
+          : res.best.fixes,
         verdict: res.verdict,
+        gapConvergence: { ladder: gapTrail, chosenGap: usedGap, loosened },
       }
       // Via-legalization post-pass: if the best board has DRC errors, try nudging
       // over-packed vias off nearby other-net copper, then re-DRC. Keep it ONLY if
