@@ -450,9 +450,25 @@ export async function GET(req: Request) {
                 log('design', `⚠ substituted ${s.request}${s.mpn ? ' → ' + s.mpn : ''}${s.lost?.length ? ' (lost: ' + s.lost.join(', ') + ')' : ''}`, 'warn')
               // Stage 2: the recursive subsystem tree — log the decomposition and
               // persist it so the product is legible as a hierarchy, not a flat list.
-              const tree = (synthDesign as { design_tree?: { children?: { name: string }[] } }).design_tree
+              const tree = (synthDesign as {
+                design_tree?: {
+                  children?: {
+                    name: string
+                    design_of_n?: { chosen?: string; candidates?: { option: string; feasible?: boolean }[] }
+                  }[]
+                }
+              }).design_tree
               if (tree?.children?.length) {
                 log('design', `decomposed into ${tree.children.length} subsystems: ${tree.children.map((c) => c.name).join(', ')}`, 'ok')
+                // surface any subsystem that ran a real design-of-N (candidates
+                // evaluated + chosen), so "we DESIGNED this subsystem" is visible.
+                for (const c of tree.children) {
+                  const don = c.design_of_n
+                  if (don?.candidates?.length) {
+                    const opts = don.candidates.map((x) => `${x.option}${x.feasible === false ? '✗' : ''}`).join(' vs ')
+                    log('design', `  ${c.name}: evaluated ${opts} → chose ${don.chosen}`, 'ok')
+                  }
+                }
                 try { fs.writeFileSync(path.join(pubData, 'design-tree.json'), JSON.stringify(tree)) } catch { /* non-fatal */ }
               }
               // Stage 3: real design verification (mcu-fit / rail-compat / coverage

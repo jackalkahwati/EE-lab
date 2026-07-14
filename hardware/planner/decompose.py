@@ -115,9 +115,42 @@ def build_design_tree(intent, final_design, mcu_family=None):
                 "parts": [p["mpn"] for p in parts], "rationale": "", "children": []}
         if name == "compute" and mcu_family:
             node["parts"] = [mcu_family] + node["parts"]
-            node["rationale"] = "MCU family %s selected for the required buses/peripherals" % mcu_family
+            # compute already runs a REAL design-of-N: the MCU selector scores the
+            # candidate MCUs and rejects the ones that can't meet the buses/pins.
+            # Surface that as the subsystem's design decision.
+            try:
+                from mcu_selector import requirements_from_design, select_mcu
+                dec = select_mcu(requirements_from_design(intent, final_design))
+                cands = []
+                if dec.get("selected"):
+                    cands.append({"option": dec["selected"], "score": None, "feasible": True,
+                                  "why": dec.get("why", "meets the required buses/peripherals")})
+                for rej in (dec.get("rejected") or [])[:5]:
+                    cands.append({"option": rej["mcu"], "score": None, "feasible": False,
+                                  "why": "rejected: " + "; ".join(rej["reasons"])})
+                node["design_of_n"] = {
+                    "requirement": "MCU with the buses/peripherals this design needs",
+                    "chosen": dec.get("selected") or mcu_family, "candidates": cands}
+                node["rationale"] = "%s — %s" % (dec.get("selected") or mcu_family,
+                                                 dec.get("why", "selected for the required buses/peripherals"))
+            except Exception:
+                node["rationale"] = "MCU family %s selected for the required buses/peripherals" % mcu_family
         elif name == "power":
-            node["rationale"] = _solve_power(parts, intent)
+            # REAL per-subsystem design: score LDO vs buck vs direct on the actual
+            # current/thermal tradeoff and record the candidates evaluated (Stage 2
+            # for-real — designing the subsystem, not just labeling it).
+            try:
+                from subsystems import design_power_from_intent
+                pd = design_power_from_intent(intent, final_design)
+                node["rationale"] = "%s — %s" % (pd["chosen"] or "no topology", pd["rationale"])
+                node["design_of_n"] = {
+                    "requirement": pd["requirement"], "chosen": pd["chosen"],
+                    "candidates": [{"option": c["name"], "score": c["score"],
+                                    "feasible": c.get("feasible", False), "why": c["why"]}
+                                   for c in pd["candidates"]],
+                }
+            except Exception:
+                node["rationale"] = _solve_power(parts, intent)
             node["children"] = _power_blocks(parts, intent)
         elif parts:
             node["rationale"] = "%d part(s) resolved for this subsystem" % len(parts)
