@@ -225,13 +225,17 @@ export default function Compose2Page() {
       .then(({ runs: disk }: { runs: Run[] }) => {
         if (Array.isArray(disk) && disk.length) {
           setRuns(disk)
-          setSelectedId((cur) => cur || disk.find((r) => r.real)?.id || disk[0].id)
+          // Do NOT auto-select the last run on load — a fresh page open starts on a
+          // blank slate (the "describe a product" prompt), not the previous board.
+          // Past runs stay available via the ☰ menu.
         }
       }).catch(() => {})
   }, [])
 
+  // No runs[0] fallback: with no explicit selection (fresh load) selectedRun is
+  // undefined → the stage renders its blank/new-design slate, not the last board.
   const selectedRun = useMemo(
-    () => runs.find((r) => r.id === selectedId) ?? runs[0], [runs, selectedId])
+    () => runs.find((r) => r.id === selectedId), [runs, selectedId])
   const selectedRunDir = selectedRun?.runDir
   const selectedReal = selectedRun?.real
 
@@ -319,18 +323,20 @@ export default function Compose2Page() {
     return () => { cancelled = true }
   }, [selectedReal, selectedRunDir])
 
-  // Zero-run install (fresh state): no board to show yet, so render just the
-  // conversation pane — describing a board there builds the first one, and the
-  // full three-pane layout takes over once it finishes.
+  // Blank slate: shown on a fresh load (no run selected) and on a zero-run
+  // install. Just the conversation pane — describing a board builds one; the full
+  // three-pane layout takes over once it finishes. Past runs stay reachable from
+  // the ☰ menu (real threads + select handler), so this is a clean start, not a
+  // dead end.
   if (!selectedRun) {
     return (
       <main className="flex h-[calc(100dvh-2.75rem)] bg-background text-foreground">
         <aside className="flex w-96 shrink-0 flex-col border-r border-border">
           <ComposeChat
-            threads={[]}
+            threads={runs.map((r) => ({ id: r.id, label: r.name || r.id }))}
             activeId=""
             newDesign
-            onSelectThread={() => {}}
+            onSelectThread={(id) => { setSelectedId(id); setNewDesign(false); setIdBrief(null); setProductSpec(null); setStage('electronics'); setBuiltDisc({}); setPipeStatus({}); setPipeFeedback(null) }}
             onNew={() => {}}
             onRunComplete={onRunComplete}
             onIdBrief={onIdBrief}
