@@ -106,6 +106,11 @@ export function IdStageView({
   }
 
   const showingRender = render.status === 'done' && !showScaffold
+  // The scaffold is the honest fallback: show it visibly only when the render is
+  // unavailable/errored, or when the user explicitly toggles it on a done render.
+  // In idle/loading we show a neutral placeholder instead (not the wireframe).
+  const scaffoldIsFallback =
+    render.status === 'unavailable' || render.status === 'error' || (render.status === 'done' && showScaffold)
 
   return (
     <div className="flex h-full flex-col overflow-y-auto p-5">
@@ -134,13 +139,29 @@ export function IdStageView({
       <h2 className="text-lg font-semibold text-foreground">{brief.product}</h2>
       {brief.formFactor && <p className="text-sm text-muted-foreground">{brief.formFactor}</p>}
 
-      {/* visualization: photorealistic render on top, scaffold as the base/truth */}
+      {/* visualization: photorealistic render on top; scaffold is the honest
+          fallback (unavailable/error) or an explicit opt-in, never the initial view.
+          While idle/loading we show a neutral placeholder. The scaffold SVG stays
+          mounted (hidden when not the fallback) so rasterizeScaffold() can still
+          read it for render conditioning. */}
       <div className="mt-4 min-h-0 flex-1">
-        {showingRender ? (
+        {showingRender && render.status === 'done' ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={render.url} alt={`${brief.product} concept render`} className="mx-auto max-h-[52vh] w-auto rounded-md border border-border" />
-        ) : (
+        ) : scaffoldIsFallback ? (
           <IdScaffold brief={brief} boardMm={boardMm} className="mx-auto max-h-[52vh] w-full" />
+        ) : (
+          <div className="mx-auto flex h-[52vh] max-h-[52vh] w-full flex-col items-center justify-center gap-3 rounded-md border border-border bg-muted/30">
+            <Loader2 className="size-6 animate-spin text-muted-foreground" />
+            <span className="text-sm text-muted-foreground">generating render…</span>
+          </div>
+        )}
+        {/* Keep the scaffold mounted (hidden) whenever it isn't the visible fallback,
+            so rasterizeScaffold() can read the live SVG for render conditioning. */}
+        {!scaffoldIsFallback && (
+          <div className="hidden" aria-hidden="true">
+            <IdScaffold brief={brief} boardMm={boardMm} className="mx-auto max-h-[52vh] w-full" />
+          </div>
         )}
       </div>
 

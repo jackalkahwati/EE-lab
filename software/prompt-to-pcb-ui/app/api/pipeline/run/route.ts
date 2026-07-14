@@ -1101,7 +1101,11 @@ export async function GET(req: Request) {
 
           const zipMatch = fab.out.match(/^FAB_ZIP:(.+)$/m)
           if (zipMatch && fs.existsSync(zipMatch[1].trim())) {
-            const pubFab = path.join(appDir, 'public/fab')
+            // RUN-SCOPED destination (public/runs/<runId>/fab): the old fixed
+            // public/fab/pcba-package.zip was shared by every run, so an old
+            // run's report pointed at the NEWEST run's binaries. Each run now
+            // keeps its own package.
+            const pubFab = path.join(runRoot, 'fab')
             fs.mkdirSync(pubFab, { recursive: true })
             // Order-ready PCBA package: fab outputs (gerbers/drill/STEP/renders)
             // + enriched pick-and-place & assembly BOM + sourcing report +
@@ -1114,7 +1118,7 @@ export async function GET(req: Request) {
               dest,
             ])
             const pm = pcba.out.match(/^PCBA_ZIP:.*\((\d+) files\)/m)
-            fabZip = '/fab/pcba-package.zip'
+            fabZip = `/runs/${runId}/fab/pcba-package.zip`
             log('validation', `PCBA package ready (${pm ? pm[1] : '?'} files: gerbers, drill, STEP, pick-and-place, assembly BOM, sourcing report, assembly readiness, FL-1 package) → ${fabZip}`, 'ok')
           } else {
             log('validation', 'PCBA package generation incomplete', 'warn')
@@ -1306,10 +1310,13 @@ export async function GET(req: Request) {
             ])
             const fwm = zipRes.out.match(/^FW_ZIP:(.+)$/m)
             if (fwm && fs.existsSync(fwm[1].trim())) {
-              const pubFw = path.join(appDir, 'public/firmware')
+              // RUN-SCOPED (public/runs/<runId>/firmware) — the old fixed
+              // public/firmware/firmware.zip was clobbered by every run, so old
+              // run reports served the newest run's firmware.
+              const pubFw = path.join(runRoot, 'firmware')
               fs.mkdirSync(pubFw, { recursive: true })
               fs.copyFileSync(fwm[1].trim(), path.join(pubFw, 'firmware.zip'))
-              fwZip = '/firmware/firmware.zip'
+              fwZip = `/runs/${runId}/firmware/firmware.zip`
               log('firmware', `firmware crate ready → ${fwZip}`, 'ok')
             }
             send({ type: 'stage', id: 'firmware', state: 'passed' })

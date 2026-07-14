@@ -87,9 +87,10 @@ async function applyGroundPlane(cj, gndPins, profileKey = 'standard') {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fl-gp-'))
     const inPcb = path.join(dir, 'b.kicad_pcb'), outPcb = path.join(dir, 'g.kicad_pcb')
     const gndJson = path.join(dir, 'gnd.json'), drcJson = path.join(dir, 'g.json')
-    fs.writeFileSync(inPcb, conv.getOutputString())
+    const hcNum = (FAB_PROFILES[profileKey] || FAB_PROFILES.standard).holeClearance ?? 0.5
+    fs.writeFileSync(inPcb, decorateMountingHoles(conv.getOutputString(), hcNum))
     fs.writeFileSync(gndJson, JSON.stringify(gndPins))
-    const hc = String((FAB_PROFILES[profileKey] || FAB_PROFILES.standard).holeClearance ?? 0.5)
+    const hc = String(hcNum)
     const r = spawnSync(KICAD_PY, [GROUND_PLANE_PY, inPcb, outPcb, gndJson, hc], { encoding: 'utf8', timeout: 120000 })
     if (!fs.existsSync(outPcb)) return { available: false, reason: 'ground plane pass produced no board', stderr: (r.stderr || '').slice(0, 200) }
     let gp = {}; try { gp = JSON.parse((r.stdout || '').trim().split('\n').pop() || '{}') } catch { /* keep defaults */ }
@@ -182,8 +183,6 @@ async function freeroute(cj, { layers = 2 } = {}) {
       '-jar', FR_JAR, '-de', dsnPath, '-do', sesPath, '-mp', '10',
     ], { encoding: 'utf8', timeout: 45000 })
     if (!fs.existsSync(sesPath)) return null
-    const m = [...(r.stdout || '').matchAll(/\((\d+) unrouted\)/g)]
-    const unroutedN = m.length ? Number(m[m.length - 1][1]) : 0
     const session = parseDsnToDsnJson(fs.readFileSync(sesPath, 'utf8'))
     const routed = convertDsnSessionToCircuitJson(dsnPcb, session, unrouted)
     // Take ONLY the routed copper (traces + vias) from the session and graft it
@@ -195,6 +194,21 @@ async function freeroute(cj, { layers = 2 } = {}) {
     // source refs); routing never moves pads, and the session traces share the
     // DSN coordinate space, so they land on the original pads exactly.
     const routedWires = routed.filter((e) => e.type === 'pcb_trace' || e.type === 'pcb_via')
+    // Structural unrouted count: input nets (source_trace) minus the nets that
+    // came back with routed copper (distinct source_trace_id on the session's
+    // pcb_traces — the same linkage completeUnroutedNets already relies on).
+    // The old stdout regex parse ("(N unrouted)") silently reads "fully routed"
+    // the day freerouting changes its log format, so it is demoted to a
+    // cross-check fallback, used only in the one degenerate case where the
+    // converter returned traces that carry no source ids at all (which would
+    // otherwise make the structural count claim EVERY net unrouted).
+    const sourceTraces = unrouted.filter((e) => e.type === 'source_trace')
+    const routedIds = new Set(routedWires.filter((e) => e.type === 'pcb_trace').map((t) => t.source_trace_id).filter(Boolean))
+    const structuralUnrouted = sourceTraces.filter((st) => !routedIds.has(st.source_trace_id)).length
+    const m = [...(r.stdout || '').matchAll(/\((\d+) unrouted\)/g)]
+    const stdoutUnrouted = m.length ? Number(m[m.length - 1][1]) : null
+    const idsMissing = routedIds.size === 0 && routedWires.some((e) => e.type === 'pcb_trace')
+    const unroutedN = idsMissing ? (stdoutUnrouted ?? sourceTraces.length) : structuralUnrouted
     return { cj: [...unrouted, ...routedWires], unrouted: unroutedN, layers }
   } catch { return null } finally {
     if (dir) try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* best effort */ }
@@ -232,6 +246,44 @@ const FAB_PROFILES = {
   },
 }
 
+/** Decorate every exported .kicad_pcb that carries our standalone mounting
+ *  holes (NPTH, from pcb_hole elements) with the two things the raw converter
+ *  output lacks:
+ *   1. a local pad clearance (the fab's hole-to-copper rule + 0.05mm) — the NPTH
+ *      pad is exactly hole-sized, and the ground-plane ZONE FILLER (pcbnew, which
+ *      does NOT read the .kicad_dru) would otherwise pour GND copper to within
+ *      its 0.2mm default of the hole, tripping the fab's hole_clearance rule at
+ *      every mounting hole. The pad-local clearance makes the filler keep real
+ *      hole-to-copper distance. Profile-aware (0.5mm standard / 0.4mm HDI): a
+ *      fixed over-tight value would make DRC flag copper the REAL fab rule allows.
+ *   2. a real F.CrtYd courtyard ring (hole radius + 0.5mm) so KiCad's courtyard
+ *      DRC sees the screw-head keep-out and flags any part placed over it.
+ *  Pure text pass on the exporter's output; a board with no NPTH holes is
+ *  returned unchanged. */
+function decorateMountingHoles(pcbString, holeClearanceMm = 0.5) {
+  if (!/np_thru_hole/.test(pcbString)) return pcbString
+  const cl = (holeClearanceMm + 0.05).toFixed(2)
+  let out = pcbString.replace(
+    /(\(pad "" np_thru_hole circle[\s\S]*?\(drill [\d.]+\))/g,
+    (m) => (/\(clearance /.test(m) ? m : `${m}\n      (clearance ${cl})`),
+  )
+  out = out.replace(
+    /(\(footprint\s*\n\s*"tscircuit:hole_circle_holeDiameter([\d.]+)mm"[\s\S]*?)(\n {2}\))/g,
+    (m, body, dia, close) => {
+      if (/F\.CrtYd/.test(body)) return m
+      const r = +dia / 2 + 0.5
+      const pts = []
+      for (let i = 0; i < 32; i++) {
+        const a = (2 * Math.PI * i) / 32
+        pts.push(`(xy ${(r * Math.cos(a)).toFixed(3)} ${(r * Math.sin(a)).toFixed(3)})`)
+      }
+      const poly = `\n    (fp_poly\n      (pts ${pts.join(' ')})\n      (layer F.CrtYd)\n      (width 0.05)\n      (fill none)\n    )`
+      return body + poly + close
+    },
+  )
+  return out
+}
+
 async function realDrc(cj, profileKey = 'standard') {
   if (!KICAD_CLI) return { available: false, reason: 'kicad-cli not installed' }
   const profile = FAB_PROFILES[profileKey] || FAB_PROFILES.standard
@@ -244,7 +296,7 @@ async function realDrc(cj, profileKey = 'standard') {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fl-drc-'))
     const pcbPath = path.join(dir, 'board.kicad_pcb')
     const drcPath = path.join(dir, 'drc.json')
-    fs.writeFileSync(pcbPath, conv.getOutputString())
+    fs.writeFileSync(pcbPath, decorateMountingHoles(conv.getOutputString(), profile.holeClearance ?? 0.5))
     fs.writeFileSync(path.join(dir, 'board.kicad_dru'), profile.rules)
     const r = spawnSync(KICAD_CLI, ['pcb', 'drc', '--format', 'json', '--output', drcPath, pcbPath], { encoding: 'utf8', timeout: 120000 })
     if (!fs.existsSync(drcPath)) return { available: false, reason: 'drc produced no report', stderr: (r.stderr || '').slice(0, 200) }
@@ -576,6 +628,192 @@ function fabRepair(cj, { pad = 0.5, hole = 0.2 } = {}) {
   return fixes
 }
 
+/** Board features pass — circular outline + mounting provisions. Runs AFTER
+ *  routing, on the final circuit JSON, and only ever mutates geometry the
+ *  router never touches:
+ *   - boardShape {type:'circle', marginMm?}: the board outline becomes a real
+ *     64-segment circle whose diameter circumscribes the packed rectangular
+ *     copper extent (diagonal + margin) — every courtyard/pad/trace/via is
+ *     inside the circle BY CONSTRUCTION, so routing quality is unchanged (the
+ *     copper simply lives in the circle's inscribed rectangle). Parts are never
+ *     moved; if anything somehow sticks out the diameter GROWS (honest: the
+ *     reported diameter is the as-built one). pcb_board.outline drives
+ *     Edge.Cuts in every KiCad export, so real DRC runs against the circle.
+ *   - mountingHoles {count, holeDiaMm, boltCircleDiaMm?}: N non-plated screw
+ *     holes (pcb_hole -> NPTH pads in the KiCad export) evenly on a bolt circle
+ *     (circle boards) or at the 4 corners (rect boards). Collision-checked
+ *     against every courtyard, pad, via and routed trace segment; a colliding
+ *     bolt pattern is rotated up to 45°, then the board grows — holes NEVER
+ *     overlap parts or copper, and the final DRC re-runs with the holes in the
+ *     board so hole_clearance is really checked.
+ *  Returns { boardShape, mountingHoles, notes } (mounting holes in
+ *  board-centered mm, +x right / +y up), or null when neither feature was
+ *  requested (or there is no board). */
+function applyBoardFeatures(cj, input, profileKey = 'standard') {
+  const wantCircle = input.boardShape?.type === 'circle'
+  const mhIn = input.mountingHoles
+  const wantHoles = mhIn && Number(mhIn.count) > 0
+  const board = cj.find((e) => e.type === 'pcb_board')
+  if (!board || (!wantCircle && !wantHoles)) return null
+  const notes = []
+
+  // ---- obstacle geometry: everything a hole must clear / the circle must contain
+  const boxes = [] // AABBs: courtyards, pads, vias, plated holes
+  for (const e of cj) {
+    if (e.type === 'pcb_courtyard_outline' && e.outline?.length) {
+      const xs = e.outline.map((p) => p.x), ys = e.outline.map((p) => p.y)
+      boxes.push([Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)])
+    } else if (e.type === 'pcb_courtyard_rect' && e.center) {
+      boxes.push([e.center.x - e.width / 2, e.center.y - e.height / 2, e.center.x + e.width / 2, e.center.y + e.height / 2])
+    } else if (e.type === 'pcb_smtpad' && e.x != null) {
+      const w = e.width || 0, h = e.height || 0
+      boxes.push([e.x - w / 2, e.y - h / 2, e.x + w / 2, e.y + h / 2])
+    } else if ((e.type === 'pcb_via' || e.type === 'pcb_plated_hole') && e.x != null) {
+      const r = (e.outer_diameter || e.hole_diameter || 0.6) / 2
+      boxes.push([e.x - r, e.y - r, e.x + r, e.y + r])
+    }
+  }
+  const segs = [] // routed copper segments [x1,y1,x2,y2,halfWidth]
+  for (const t of cj) {
+    if (t.type !== 'pcb_trace' || !Array.isArray(t.route)) continue
+    for (let i = 0; i + 1 < t.route.length; i++) {
+      const a = t.route[i], b = t.route[i + 1]
+      if (a?.x == null || b?.x == null) continue
+      segs.push([a.x, a.y, b.x, b.y, Math.max(a.width || 0.15, b.width || 0.15) / 2])
+    }
+  }
+  const distToBox = (x, y, b) => Math.hypot(Math.max(b[0] - x, 0, x - b[2]), Math.max(b[1] - y, 0, y - b[3]))
+  const distToSeg = (x, y, [x1, y1, x2, y2]) => {
+    const dx = x2 - x1, dy = y2 - y1, L2 = dx * dx + dy * dy
+    const t = L2 ? Math.max(0, Math.min(1, ((x - x1) * dx + (y - y1) * dy) / L2)) : 0
+    return Math.hypot(x - (x1 + t * dx), y - (y1 + t * dy))
+  }
+  const clearAt = (x, y, need) => {
+    for (const b of boxes) if (distToBox(x, y, b) < need) return false
+    for (const s of segs) if (distToSeg(x, y, s) < need + s[4]) return false
+    return true
+  }
+
+  // Packed copper extent (falls back to the board rect when the board is empty)
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (const b of boxes) { minX = Math.min(minX, b[0]); minY = Math.min(minY, b[1]); maxX = Math.max(maxX, b[2]); maxY = Math.max(maxY, b[3]) }
+  for (const s of segs) {
+    minX = Math.min(minX, s[0] - s[4], s[2] - s[4]); maxX = Math.max(maxX, s[0] + s[4], s[2] + s[4])
+    minY = Math.min(minY, s[1] - s[4], s[3] - s[4]); maxY = Math.max(maxY, s[1] + s[4], s[3] + s[4])
+  }
+  if (!isFinite(minX)) {
+    minX = (board.center?.x ?? 0) - board.width / 2; maxX = (board.center?.x ?? 0) + board.width / 2
+    minY = (board.center?.y ?? 0) - board.height / 2; maxY = (board.center?.y ?? 0) + board.height / 2
+  }
+
+  const holeClearance = (FAB_PROFILES[profileKey] || FAB_PROFILES.standard).holeClearance ?? 0.5
+  const holeDia = wantHoles ? (Number(mhIn.holeDiaMm) > 0 ? Number(mhIn.holeDiaMm) : 2.2) : 2.2
+  const holeR = holeDia / 2
+  const need = holeR + holeClearance + 0.1 // hole center -> nearest copper/courtyard
+  const count = wantHoles ? Math.max(1, Math.min(12, Math.round(Number(mhIn.count)))) : 0
+
+  let boardShape = { type: 'rect' }
+  let holes = [] // absolute [x,y]
+  let cx, cy
+
+  if (wantCircle) {
+    // circle center = center of the packed extent; diameter = its diagonal + margin
+    cx = (minX + maxX) / 2; cy = (minY + maxY) / 2
+    const margin = Number(input.boardShape?.marginMm) > 0 ? Number(input.boardShape.marginMm) : 2
+    let dia = Math.hypot(maxX - minX, maxY - minY) + margin
+    // guard: if any copper corner still sticks out (it can't, by construction,
+    // but never trust construction over measurement), grow to the real max
+    // radius + edge margin. The reported diameter is always the as-built one.
+    let maxR = 0
+    for (const b of boxes) for (const [px, py] of [[b[0], b[1]], [b[2], b[1]], [b[0], b[3]], [b[2], b[3]]]) maxR = Math.max(maxR, Math.hypot(px - cx, py - cy))
+    for (const s of segs) maxR = Math.max(maxR, Math.hypot(s[0] - cx, s[1] - cy) + s[4], Math.hypot(s[2] - cx, s[3] - cy) + s[4])
+    if (2 * (maxR + margin / 2) > dia) { dia = 2 * (maxR + margin / 2); notes.push('grew circle to contain all courtyards/copper') }
+
+    if (count) {
+      // bolt circle default: comfortably inside the rim (hole edge >=~2mm of board)
+      let boltFixed = Number(mhIn.boltCircleDiaMm) > 0 ? Number(mhIn.boltCircleDiaMm) : null
+      const RIM = holeR + 0.75 // min hole-center -> board-edge
+      let placed = null
+      for (let grow = 0; grow < 400 && !placed; grow++) {
+        const d = dia + grow * 0.5
+        const bolt = boltFixed ?? (d - 2 * (holeDia + 2)) // default bolt circle: board Ø − 2×(holeØ+2mm)
+        if (bolt <= holeDia || bolt / 2 + RIM > d / 2) continue // holes wouldn't fit inside this board
+        for (let rotDeg = 0; rotDeg <= 45 && !placed; rotDeg += 5) {
+          const pos = []
+          for (let k = 0; k < count; k++) {
+            const a = ((-90 + rotDeg + (k * 360) / count) * Math.PI) / 180
+            pos.push([cx + (bolt / 2) * Math.cos(a), cy + (bolt / 2) * Math.sin(a)])
+          }
+          if (pos.every(([x, y]) => clearAt(x, y, need))) placed = { pos, bolt, rotDeg, d }
+        }
+        // a FIXED bolt circle can never be relieved by growing the board —
+        // fall back to the auto bolt circle (and say so) instead of looping.
+        if (!placed && boltFixed != null) { notes.push(`requested bolt circle Ø${boltFixed}mm collides with parts — using auto bolt circle`); boltFixed = null }
+      }
+      if (placed) {
+        if (placed.d > dia + 1e-9) notes.push(`grew board Ø${dia.toFixed(1)}→Ø${placed.d.toFixed(1)}mm so mounting holes clear all parts`)
+        if (placed.rotDeg) notes.push(`rotated bolt pattern ${placed.rotDeg}° to clear parts`)
+        dia = placed.d
+        holes = placed.pos
+        boardShape = { type: 'circle', diameterMm: +dia.toFixed(2), boltCircleDiaMm: +placed.bolt.toFixed(2) }
+      } else {
+        notes.push('mounting holes could NOT be placed without collision — omitted (reported, not faked)')
+        boardShape = { type: 'circle', diameterMm: +dia.toFixed(2) }
+      }
+    } else {
+      boardShape = { type: 'circle', diameterMm: +dia.toFixed(2) }
+    }
+
+    // commit the circle: honest square bbox (w=h=diameter) + real polygon outline
+    const R = (boardShape.diameterMm) / 2
+    board.center = { x: +cx.toFixed(3), y: +cy.toFixed(3) }
+    board.width = boardShape.diameterMm
+    board.height = boardShape.diameterMm
+    const N = 64, outline = []
+    for (let i = 0; i < N; i++) {
+      const a = (2 * Math.PI * i) / N
+      outline.push({ x: +(cx + R * Math.cos(a)).toFixed(3), y: +(cy + R * Math.sin(a)).toFixed(3) })
+    }
+    board.outline = outline
+  } else {
+    // rect board: mounting holes at the corners; grow the board if a corner collides
+    cx = board.center?.x ?? (minX + maxX) / 2
+    cy = board.center?.y ?? (minY + maxY) / 2
+    if (count) {
+      const inset = holeR + 1.5 // hole center in from each board edge (1.5mm rim)
+      let placed = null
+      for (let grow = 0; grow < 400 && !placed; grow++) {
+        const w = board.width + grow * 0.5, h = board.height + grow * 0.5
+        const corners = [
+          [cx - w / 2 + inset, cy + h / 2 - inset], [cx + w / 2 - inset, cy + h / 2 - inset],
+          [cx + w / 2 - inset, cy - h / 2 + inset], [cx - w / 2 + inset, cy - h / 2 + inset],
+        ].slice(0, Math.min(count, 4))
+        if (corners.every(([x, y]) => clearAt(x, y, need))) placed = { corners, w, h }
+      }
+      if (placed) {
+        if (placed.w > board.width + 1e-9) notes.push(`grew board ${board.width.toFixed(1)}×${board.height.toFixed(1)}→${placed.w.toFixed(1)}×${placed.h.toFixed(1)}mm so corner mounting holes clear all parts`)
+        if (count > 4) notes.push(`rect board carries 4 corner holes (requested ${count})`)
+        board.width = +placed.w.toFixed(2)
+        board.height = +placed.h.toFixed(2)
+        holes = placed.corners
+      } else {
+        notes.push('mounting holes could NOT be placed without collision — omitted (reported, not faked)')
+      }
+    }
+  }
+
+  // real NPTH drills: standalone pcb_hole elements -> NPTH pads in every KiCad export
+  holes.forEach(([x, y], i) => {
+    cj.push({ type: 'pcb_hole', pcb_hole_id: `pcb_hole_mount_${i + 1}`, hole_shape: 'circle', hole_diameter: holeDia, x: +x.toFixed(3), y: +y.toFixed(3) })
+  })
+
+  return {
+    boardShape,
+    mountingHoles: holes.map(([x, y]) => ({ x: +(x - cx).toFixed(2), y: +(y - cy).toFixed(2), diaMm: holeDia })),
+    notes,
+  }
+}
+
 /** Last-net completion: for each net freerouting left unrouted, route it on an
  *  otherwise-empty inner layer (top pad -> via -> straight inner trace -> via ->
  *  top pad) so it becomes real, continuous copper. Mutates cj (adds the traces +
@@ -620,7 +858,13 @@ function completeUnroutedNets(cj) {
 function legalizeVias(cj, { minClear = 0.4, maxDisp = 0.4, iters = 80 } = {}) {
   const vias = cj.filter((e) => e.type === 'pcb_via')
   if (!vias.length) return { moved: 0 }
-  const pads = cj.filter((e) => e.type === 'pcb_smtpad')
+  // mounting holes (NPTH) count as pad copper keep-outs too, padded by the fab's
+  // hole-to-copper rule — otherwise this pass could nudge a via INTO a hole it
+  // was never near.
+  const pads = [
+    ...cj.filter((e) => e.type === 'pcb_smtpad'),
+    ...cj.filter((e) => e.type === 'pcb_hole').map((h) => ({ x: h.x, y: h.y, width: (h.hole_diameter || 2.2) + 1.0, height: (h.hole_diameter || 2.2) + 1.0 })),
+  ]
   const traces = cj.filter((e) => e.type === 'pcb_trace')
   const net = (v) => v.subcircuit_connectivity_map_key
   // link each via to its route-via-point (same trace, same x/y) so both move together
@@ -733,7 +977,7 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15 } = {}) {
     if (!drc.available) return { available: false, drc, trail, best: null }
     const score = drc.errors + unrouted * 5 // unrouted nets are worse than a DRC nit
     trail.push({ iter: i + 1, strategy: s.name, profile: FAB_PROFILES[s.profile].label, errors: drc.errors, errorTypes: drc.errorTypes, unrouted })
-    if (!best || score < best.score) best = { cj, drc, fixes, unrouted, score, strategy: s.name }
+    if (!best || score < best.score) best = { cj, drc, fixes, unrouted, score, strategy: s.name, layers: s.router === 'fr' ? s.layers : 2 }
     if (drc.errors === 0 && unrouted === 0) break // fully routed AND fab-clean — done
   }
   if (!best) return { available: false, drc: { available: false, reason: 'all routing strategies failed' }, trail }
@@ -751,6 +995,7 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15 } = {}) {
       if (drcTry.available && drcTry.errors === 0) {
         best = {
           ...best, cj: cjTry, drc: drcTry, unrouted: 0,
+          layers: Math.max(best.layers || 2, 4), // completion routes on an inner layer → 4-layer board
           fixes: [...best.fixes.filter((f) => !/left unrouted/.test(f)), `completed ${n} stranded net${n === 1 ? '' : 's'} on an inner layer (DRC-verified copper)`],
           strategy: best.strategy + ' + inner-layer completion',
         }
@@ -794,7 +1039,7 @@ async function main() {
 
   // Iterative DRC-driven redesign: search the strategy ladder for a real
   // fab-clean board; use the best one it finds as the reported result.
-  let cj, drc, drcRepair = null, code, kicadPcb = null
+  let cj, drc, drcRepair = null, code, kicadPcb = null, boardFeatures = null
   if (iterative) {
     // Design<->routing convergence: run the routing ladder at the TIGHTEST gap
     // first; if the best board still won't route clean (DRC errors or stranded
@@ -844,6 +1089,9 @@ async function main() {
         converged: res.converged,
         iterations: res.trail,
         winningStrategy: res.best.strategy,
+        // explicit copper layer count of the winning board (2 or 4) — consumers
+        // (lib/ground-board) previously had to regex winningStrategy for it.
+        layers: res.best.layers ?? null,
         errorsFirst: res.trail[0]?.errors ?? null,
         errorsBest: res.best.drc.errors,
         unrouted: res.best.unrouted,
@@ -852,6 +1100,27 @@ async function main() {
           : res.best.fixes,
         verdict: res.verdict,
         gapConvergence: { ladder: gapTrail, chosenGap: usedGap, loosened },
+      }
+      // Board features (circular outline / mounting holes): applied to the REAL
+      // routed geometry (res.best.cj — the same object the ground-plane pass and
+      // final export read), then real DRC RE-RUNS against the new outline+holes
+      // so hole_clearance / edge violations are caught, never hidden. Routing is
+      // untouched: the circle circumscribes the routed rect, holes avoid parts.
+      boardFeatures = applyBoardFeatures(cj, input, res.best.drc.profileKey || 'standard')
+      if (boardFeatures) {
+        const drcF = await realDrc(cj, res.best.drc.profileKey || 'standard')
+        if (drcF.available) { drc = drcF; drcRepair.errorsBest = drcF.errors }
+        const shapeBit = boardFeatures.boardShape.type === 'circle'
+          ? `circular board outline Ø${boardFeatures.boardShape.diameterMm}mm (routing inside the inscribed rect)`
+          : 'rect board outline'
+        const holeBit = boardFeatures.mountingHoles.length
+          ? `, ${boardFeatures.mountingHoles.length} NPTH mounting hole(s) ${boardFeatures.boardShape.type === 'circle' ? `on a Ø${boardFeatures.boardShape.boltCircleDiaMm}mm bolt circle` : 'at the corners'}`
+          : ''
+        drcRepair.fixes = [
+          ...drcRepair.fixes,
+          `${shapeBit}${holeBit} → re-ran real DRC: ${drcF.available ? `${drcF.errors} error(s)` : 'unavailable'}`,
+          ...boardFeatures.notes,
+        ]
       }
       // Via-legalization post-pass: if the best board has DRC errors, try nudging
       // over-packed vias off nearby other-net copper, then re-DRC. Keep it ONLY if
@@ -905,6 +1174,8 @@ async function main() {
   if (!cj) {
     code = input.code || (input.parts ? buildCode(input.parts, input.nets) : '')
     cj = await runTscircuitCode(code)
+    // board features BEFORE the DRC so the check runs against the real outline+holes
+    boardFeatures = applyBoardFeatures(cj, input, 'standard')
     drc = input.drc !== false && cj.find((e) => e.type === 'pcb_board') ? await realDrc(cj) : { available: false, reason: 'skipped' }
   }
 
@@ -934,19 +1205,39 @@ async function main() {
     try {
       const { CircuitJsonToKicadPcbConverter } = await import('circuit-json-to-kicad')
       const conv = new CircuitJsonToKicadPcbConverter(cj); conv.runUntilFinished()
-      kicadPcb = conv.getOutputString()
+      kicadPcb = decorateMountingHoles(conv.getOutputString(), (FAB_PROFILES[drc?.profileKey] || FAB_PROFILES.standard).holeClearance ?? 0.5)
     } catch { /* 3D export optional */ }
   }
   // Populate the board with 3D component bodies so it renders as a PCBA, not a
   // bare PCB.
   if (kicadPcb && input.parts) kicadPcb = attachModels(kicadPcb, input.parts)
 
-  const errorCount = Object.values(errors).reduce((a, b) => a + b, 0)
+  // `ok` means what the header docstring claims — the board is genuinely done:
+  //   * routed copper exists (when there are nets to route),
+  //   * REAL KiCad DRC ran and found zero errors,
+  //   * the router left zero nets unrouted (when the iterative loop ran).
+  // The old predicate (`traces>0 && cjErrorCount===0`) scored the DISCARDED
+  // builtin-autoroute pass's error records and ignored both real DRC errors and
+  // freerouting-unrouted nets — false positives (dirty board marked ok) and
+  // false negatives (stale builtin errors failing a freerouted board) alike.
+  // DRC unavailable (no kicad-cli) → ok is false: we cannot CLAIM clean unchecked.
+  const drcClean = !!(drc && drc.available === true && drc.errors === 0)
+  const unroutedNets = drcRepair ? (drcRepair.unrouted ?? 0) : 0
+  const needsTraces = Array.isArray(input.nets) ? input.nets.length > 0 : true
+  // circle boards report the honest square bbox (w = h = diameter) but the TRUE
+  // area is the disc's, not the bbox's.
+  const isCircle = boardFeatures?.boardShape?.type === 'circle'
   process.stdout.write(JSON.stringify({
-    ok: !!board && traces.length > 0 && errorCount === 0,
+    ok: !!board && (!needsTraces || traces.length > 0) && drcClean && unroutedNets === 0,
+    layers: drcRepair?.layers ?? board?.num_layers ?? null,
     kicadPcb,
     boardMm: board ? { w: Math.round(board.width * 10) / 10, h: Math.round(board.height * 10) / 10 } : null,
-    areaMm2: board ? Math.round(board.width * board.height) : null,
+    areaMm2: board ? Math.round((isCircle ? Math.PI / 4 : 1) * board.width * board.height) : null,
+    // real board shape + mounting provisions (see applyBoardFeatures): the
+    // diameter is the AS-BUILT one (post any grow-to-fit); hole coords are
+    // board-centered mm (+x right, +y up), drilled as NPTH in kicadPcb.
+    boardShape: boardFeatures?.boardShape ?? { type: 'rect' },
+    mountingHoles: boardFeatures?.mountingHoles ?? [],
     // freerouting's DSN round-trip drops pcb_component records; fall back to the
     // real part count so the UI never shows "0 components" for a routed board.
     components: comps.length || (Array.isArray(input.parts) ? input.parts.length : 0),

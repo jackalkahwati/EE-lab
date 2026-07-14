@@ -14,6 +14,10 @@ __v0_jsx-dev-runtime.ts
 # Common ignores
 node_modules
 .next/
+# isolated build output (NEXT_DIST_DIR=.next-build npm run build) — keeps a
+# build from clobbering a running dev server's .next. MUST stay ignored: the
+# Tailwind oxide scanner crashes on generated binaries in scanned paths.
+.next-build/
 .DS_Store
 # pipeline run download artifacts
 public/fab/

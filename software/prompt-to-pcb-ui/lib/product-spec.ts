@@ -44,6 +44,7 @@ export interface Budgets {
   power?: {
     activeMw?: number
     sleepUw?: number
+    dutyCycle?: number // active fraction (0-1) for duty-cycled runtime; sleepUw covers the rest
     batteryMah?: number
     runtimeHours?: number
   }

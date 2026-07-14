@@ -14,7 +14,11 @@
 export interface LLMOverride {
   provider?: string
   apiKey?: string
-  /** per-call model override (e.g. review uses claude-fable-5) */
+  /**
+   * Per-call model override. Recognised tiers: fable / opus / sonnet / haiku (see the
+   * alias chain in claudeCodeCall — an unrecognised string silently runs sonnet).
+   * Defaults live in lib/model-tiers.ts; prefer setting them there over hardcoding here.
+   */
   model?: string
 }
 
@@ -29,6 +33,15 @@ const LLM_TIMEOUT_MS = 120_000
 // take past the 120s fetch budget, and on timeout it wrongly falls through to the
 // (often out-of-credit) metered API. Give the CLI its own, longer wall.
 const CLAUDE_CLI_TIMEOUT_MS = 300_000
+
+/**
+ * Thrown when the Claude Code CLI child was killed by its execution wall.
+ * callLLMText treats this DIFFERENTLY from a spawn/output failure: a timed-out
+ * generation must NOT fall through to the metered API — the CLI wall exists
+ * precisely to avoid metered spend, and a generation that outran the 300s CLI
+ * wall would blow the API's 120s fetch wall anyway.
+ */
+export class CliTimeoutError extends Error {}
 
 async function openaiCall(system: string, user: string, key?: string): Promise<string> {
   const k = key || process.env.OPENAI_API_KEY
@@ -152,22 +165,40 @@ async function claudeCodeCall(system: string, user: string, _key?: string, model
     }
     return 'claude'
   })()
-  const alias = /opus/i.test(model || '') ? 'opus' : /haiku/i.test(model || '') ? 'haiku' : 'sonnet'
+  // Map the model string to a CLI alias. NOTE the trap in the final `: 'sonnet'`
+  // fallback: any string this chain does not recognise SILENTLY runs sonnet. That is
+  // why 'claude-fable-5' used to become sonnet with no error (the CLI does support a
+  // 'fable' alias — verified: `claude -p --model fable` returns cleanly). Keep this
+  // chain in sync when adding a tier, or the new model quietly never runs.
+  const alias = /fable/i.test(model || '') ? 'fable'
+    : /opus/i.test(model || '') ? 'opus'
+      : /haiku/i.test(model || '') ? 'haiku'
+        : 'sonnet'
   const env = { ...process.env }
   delete env.ANTHROPIC_API_KEY
   return await new Promise<string>((resolve, reject) => {
+    const t0 = Date.now()
     const cp = spawn(bin, ['-p', '--model', alias, '--output-format', 'json'], { env, timeout: CLAUDE_CLI_TIMEOUT_MS })
     let out = '', err = ''
     cp.stdout.on('data', (d) => (out += d))
     cp.stderr.on('data', (d) => (err += d))
     cp.on('error', (e) => reject(new Error(`claude-code spawn: ${e.message}`)))
     cp.on('close', () => {
+      // The spawn `timeout` kills the child with SIGTERM at the wall, which used
+      // to surface as a misleading generic "bad output" parse failure. Detect the
+      // kill (cp.killed + elapsed at/over the wall, with 1s scheduling slack) and
+      // report the timeout distinctly, as a CliTimeoutError.
+      const elapsed = Date.now() - t0
+      const timedOut = cp.killed && elapsed >= CLAUDE_CLI_TIMEOUT_MS - 1_000
       try {
         const d = JSON.parse(out.trim())
         if (d.is_error) return reject(new Error(`claude-code: ${String(d.result || err).slice(0, 140)}`))
         if (!d.result) return reject(new Error('claude-code empty'))
         resolve(d.result)
-      } catch { reject(new Error(`claude-code bad output: ${(err || out).slice(0, 140)}`)) }
+      } catch {
+        if (timedOut) return reject(new CliTimeoutError(`claude-code CLI timed out after ${Math.round(elapsed / 1000)}s (wall ${CLAUDE_CLI_TIMEOUT_MS / 1000}s)`))
+        reject(new Error(`claude-code bad output: ${(err || out).slice(0, 140)}`))
+      }
     })
     cp.stdin.write(`${system}\n\n${user}`)
     cp.stdin.end()
@@ -189,7 +220,15 @@ const useClaudeCodeCli = () =>
 export function overrideFromHeaders(headers: Headers): LLMOverride | undefined {
   const provider = headers.get('x-llm-provider')?.trim().toLowerCase() || undefined
   const apiKey = headers.get('x-llm-key')?.trim() || undefined
-  if (!apiKey) return undefined
+  if (!apiKey) {
+    // x-llm-provider WITHOUT x-llm-key is deliberately NOT honored: a bare
+    // provider pin would steer requests (and platform-key spend) by header
+    // without the caller bringing their own key, and BYOK's no-fallback
+    // guarantee only makes sense when the key is the caller's. Warn instead of
+    // silently ignoring, so a misconfigured client can see why its pin is inert.
+    if (provider) console.warn(`[llm] ignoring x-llm-provider="${provider}": no x-llm-key header (BYOK requires both)`)
+    return undefined
+  }
   return { provider, apiKey }
 }
 
@@ -213,7 +252,14 @@ export async function callLLMText(
   if (useClaudeCodeCli() && (!override?.apiKey || override.apiKey === process.env.ANTHROPIC_API_KEY)) {
     try {
       return { text: await claudeCodeCall(system, user, undefined, override?.model), provider: 'claude-code (subscription)' }
-    } catch { /* fall through to platform chain */ }
+    } catch (e) {
+      // A CLI TIMEOUT must NOT fall through to the metered API: the CLI wall
+      // exists precisely to avoid metered spend, and a generation that outran
+      // the 300s CLI wall would blow the API's 120s fetch wall anyway. Only
+      // genuine spawn/output failures (CLI missing, bad output) fall through.
+      if (e instanceof CliTimeoutError) throw e
+      /* fall through to platform chain */
+    }
   }
   if (override?.apiKey) {
     const name = override.provider && PROVIDERS[override.provider] ? override.provider : 'anthropic'

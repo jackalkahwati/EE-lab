@@ -54,7 +54,7 @@ export function EnterpriseSidebar() {
     <nav
       aria-label="Enterprise sections"
       className={cn(
-        'sticky top-11 flex h-[calc(100dvh-2.75rem)] shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border bg-card/30 py-2 transition-[width] duration-150',
+        'sticky top-9 flex h-[calc(100dvh-2.25rem)] shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border bg-card/30 py-2 transition-[width] duration-150',
         expanded ? 'w-48' : 'w-14',
       )}
     >

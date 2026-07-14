@@ -6,6 +6,7 @@
  * next question or a finalized spec.
  */
 import { callLLMText, overrideFromHeaders, type LLMOverride } from '@/lib/llm'
+import { MODEL } from '@/lib/model-tiers'
 import capabilities from '@/lib/block-capabilities.json'
 
 export const dynamic = 'force-dynamic'
@@ -19,7 +20,11 @@ const BLOCK_MENU = (capabilities.blocks as { key: string; label: string }[])
   .map((b) => `- ${b.label}`)
   .join('\n')
 
-const MAX_QUESTIONS = 4
+// Each clarifying turn is a full model round-trip (~50s) plus the user's own
+// think time, so questions are expensive. Three well-chosen ones (the SYSTEM
+// prompt orders them highest-impact first) pin down the board; the fourth was
+// mostly confirming defaults the finalize step picks anyway.
+const MAX_QUESTIONS = 3
 
 interface Answer {
   question: string
@@ -123,8 +128,16 @@ enough), finalize:
 {"enough":true,"board_class":"<short name>","blocks":["..."],"spec":{"<param>":"<value>"},"summary":"<one sentence>"}`
 
 /** Shared provider chain (lib/llm): OpenAI -> Anthropic -> Gemini -> Nemotron,
- *  or the caller's own key/provider via x-llm-provider / x-llm-key headers. */
+ *  or the caller's own key/provider via x-llm-provider / x-llm-key headers.
+ *
+ *  This endpoint does two jobs with very different cost profiles, so it picks
+ *  the model per job: asking the next clarifying question is a one-sentence
+ *  output that Haiku handles fine (and it is on the interactive path, up to
+ *  MAX_QUESTIONS round-trips deep), while FINALIZE MODE emits the product spec
+ *  the whole downstream pipeline builds from — quality-critical, stays Sonnet.
+ *  Either default yields to an explicit caller override (BYOK header model). */
 async function callLLM(userMsg: string, force: boolean, override?: LLMOverride) {
+  const model = force ? MODEL.interviewSpec : MODEL.interviewQuestion
   const sys = force
     ? SYSTEM +
       '\n\nFINALIZE MODE: the design has already been specified upstream. Do NOT ' +
@@ -140,7 +153,7 @@ async function callLLM(userMsg: string, force: boolean, override?: LLMOverride) 
         attempt === 0
           ? userMsg
           : userMsg + '\n\nYOUR PREVIOUS REPLY WAS NOT VALID JSON. Reply with ONLY the JSON object.',
-        override,
+        { model, ...override },
       )
       return { out: JSON.parse(firstJsonObject(text)), provider }
     } catch (e) {
@@ -212,7 +225,23 @@ export async function POST(req: Request) {
     // Architect sets it on the electronics hand-off: it already interviewed at
     // the product tier, so the board request is complete and needs no re-asking.
     const force = body.force === true || answers.length >= MAX_QUESTIONS
-    const { out, provider } = await callLLM(userMsg, force, overrideFromHeaders(req.headers))
+    const override = overrideFromHeaders(req.headers)
+    let { out, provider } = await callLLM(userMsg, force, override)
+
+    // Early-finalize tier guard: a non-forced turn runs on the cheap question
+    // tier (MODEL.interviewQuestion), but the model may decide "enough" on a
+    // fully-specified first request — which would ship a Haiku-written SPEC, the
+    // quality-critical artifact the whole downstream pipeline builds from. In
+    // that rare case RE-RUN the finalize on the strong spec tier (one extra
+    // call) and use ITS output. The normal question path is unchanged, and the
+    // re-run is skipped when the two tiers are configured identically.
+    let finalized = force
+    if (!force && out.enough && MODEL.interviewQuestion !== MODEL.interviewSpec) {
+      const rerun = await callLLM(userMsg, true, override)
+      out = rerun.out
+      provider = rerun.provider
+      finalized = true
+    }
 
     const blocks: string[] = Array.isArray(out.blocks) ? out.blocks : []
     const boardClass: string = out.board_class ?? 'custom board'
@@ -229,11 +258,12 @@ export async function POST(req: Request) {
       }
     }
 
-    // On the forced electronics hand-off, finalize even if the model tried to
-    // ask one more thing — as long as it has already proposed blocks. This keeps
-    // the Architect flow from stalling on a board-level question the product
-    // interview already covered.
-    if (out.enough || (force && blocks.length > 0)) {
+    // On the forced electronics hand-off (and on the strong-tier finalize
+    // re-run above), finalize even if the model tried to ask one more thing —
+    // as long as it has already proposed blocks. This keeps the Architect flow
+    // from stalling on a board-level question the product interview already
+    // covered.
+    if (out.enough || (finalized && blocks.length > 0)) {
       return Response.json({
         type: 'spec',
         boardClass,

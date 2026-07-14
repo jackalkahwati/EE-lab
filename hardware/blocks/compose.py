@@ -14,6 +14,7 @@ This is the general path: as the block library grows, more board classes become
 buildable. Today it covers the MCU + LoRa + USB-C power + antenna family.
 """
 import json
+import math
 import os
 import re
 import sys
@@ -62,6 +63,14 @@ _DEVICES = []
 # reusing synth's real MCU allocation + bus matching instead of a second,
 # independent LLM part-set guess. synth.netlist_from_design() resets + reads it.
 _NETLIST = []
+
+# Occupancy registry: the real courtyard box (mm, board coords) of every
+# footprint place() has emitted for the current board. The fiducials are added
+# AFTER every component, so they have to be able to see what is already there —
+# without this they were dropped at fixed coordinates and landed on top of parts
+# (FID1 inside U1's courtyard on the presence-sensor board). compose()/synth()
+# reset it per board.
+_PLACED = []
 
 
 def _load(lib, name):
@@ -121,7 +130,195 @@ def place(lib, name, ref, x, y, rot, netmap, nets):
     # library ref + the pad->net map; the exporter loads real pad geometry from
     # lib/name and derives the two-point nets from the maps.
     _NETLIST.append({"ref": ref, "lib": lib, "name": name, "netmap": dict(netmap)})
+    # record the real occupied area too, so anything placed LATER (the fiducials)
+    # can be put in genuinely free space instead of on top of a part.
+    _PLACED.append({"ref": ref, "box": courtyard_box(lib, name, x, y, rot)})
     return "  " + t.strip() + "\n"
+
+
+# ---- real courtyard geometry ------------------------------------------------
+# The placement gate scores a footprint by its F.CrtYd courtyard, which is NOT
+# the same as its body and is NOT centred on its origin (an ESP32-S3-WROOM-1's
+# courtyard carries the antenna keepout, so it reaches 27mm one side of the
+# origin and 20mm the other). Anything that needs to know where a part really
+# sits has to read that geometry from the library, not estimate it.
+_CRTYD_PT = re.compile(r"\((?:start|end|xy|center|mid)\s+(-?[\d.]+)\s+(-?[\d.]+)\)")
+
+
+def _subexprs(text, head):
+    """Yield each balanced top-level '(head...)' sub-expression of a .kicad_mod."""
+    i = 0
+    while True:
+        i = text.find("(" + head, i)
+        if i < 0:
+            return
+        depth, j = 0, i
+        while j < len(text):
+            if text[j] == "(":
+                depth += 1
+            elif text[j] == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        yield text[i:j + 1]
+        i = j + 1
+
+
+_crtyd_cache = {}
+
+
+def courtyard_rel(lib, name):
+    """(x0, y0, x1, y1) F.CrtYd bounding box of a library footprint in mm,
+    RELATIVE to the footprint origin, read from the same .kicad_mod text place()
+    emits. Falls back to the pad bbox when a footprint carries no courtyard."""
+    key = (lib, name)
+    if key in _crtyd_cache:
+        return _crtyd_cache[key]
+    t = _load(lib, name)
+    xs, ys = [], []
+    stroke = 0.0
+    for head in ("fp_line", "fp_rect", "fp_poly", "fp_circle", "fp_arc"):
+        for e in _subexprs(t, head):
+            if "F.CrtYd" not in e:
+                continue
+            w = re.search(r"\(width\s+([\d.]+)\)", e)
+            if w:
+                # pcbnew's courtyard bbox is the STROKED outline, so the drawn
+                # line's width counts; take it in or the box reads ~0.05mm small.
+                stroke = max(stroke, float(w.group(1)))
+            pts = [(float(a), float(b)) for a, b in _CRTYD_PT.findall(e)]
+            if e.startswith("(fp_circle") and len(pts) >= 2:
+                # (center cx cy) (end ex ey): the end point is ON the circle
+                (cx, cy), (ex, ey) = pts[0], pts[1]
+                r = ((ex - cx) ** 2 + (ey - cy) ** 2) ** 0.5
+                pts = [(cx - r, cy - r), (cx + r, cy + r)]
+            for px, py in pts:
+                xs.append(px)
+                ys.append(py)
+    if not xs:                                  # no courtyard -> use the pads
+        for e in _subexprs(t, "pad"):
+            m = re.search(r"\(at\s+(-?[\d.]+)\s+(-?[\d.]+)", e)
+            s = re.search(r"\(size\s+(-?[\d.]+)\s+(-?[\d.]+)\)", e)
+            if not m:
+                continue
+            px, py = float(m.group(1)), float(m.group(2))
+            hw = float(s.group(1)) / 2 if s else 0.0
+            hh = float(s.group(2)) / 2 if s else 0.0
+            xs += [px - hw, px + hw]
+            ys += [py - hh, py + hh]
+    s = stroke                                  # 0 on the pad fallback (no stroke)
+    box = ((min(xs) - s, min(ys) - s, max(xs) + s, max(ys) + s) if xs
+           else (0.0, 0.0, 0.0, 0.0))
+    _crtyd_cache[key] = box
+    return box
+
+
+def courtyard_box(lib, name, x, y, rot=0):
+    """The footprint's real courtyard bbox in BOARD coordinates once placed at
+    (x, y, rot). Rotation is applied to the relative box's corners and re-boxed,
+    which is what KiCad's own bbox does (a conservative superset for non-90s)."""
+    x0, y0, x1, y1 = courtyard_rel(lib, name)
+    corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    if rot:
+        a = math.radians(rot)                   # KiCad: CCW positive, y grows down
+        ca, sa = math.cos(a), math.sin(a)
+        corners = [(px * ca + py * sa, -px * sa + py * ca) for px, py in corners]
+    xs = [x + px for px, _ in corners]
+    ys = [y + py for _, py in corners]
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def free_spots(targets, fp_box, x0, y0, bw, bh, n=3, clear=1.0, edge=3.5,
+               apart=10.0, within=None):
+    """Find <= n placements for a part whose courtyard is `fp_box` (relative, from
+    courtyard_rel) that are REALLY free: clear of every courtyard place() has
+    already emitted, inside the board with `edge` mm to the outline, and `apart`
+    mm from each other. Each target is a preferred (x, y); the nearest free point
+    to it is taken by an outward ring search. `within` = (cx, cy, r) constrains
+    every accepted spot to r mm of (cx, cy) — for parts whose position IS their
+    function (a mounting hole far from its corner is structurally useless).
+    Returns the spots actually found — it never returns a colliding one, so a
+    caller that gets fewer than it asked for has a genuinely full board (or
+    region) and must say so rather than stack parts."""
+    fx0, fy0, fx1, fy1 = fp_box
+    taken = []
+
+    def ok(px, py):
+        if within is not None and ((px - within[0]) ** 2 + (py - within[1]) ** 2
+                                   > within[2] ** 2):
+            return False
+        bx0, by0 = px + fx0 - clear, py + fy0 - clear
+        bx1, by1 = px + fx1 + clear, py + fy1 + clear
+        if not (x0 + edge <= px + fx0 and px + fx1 <= x0 + bw - edge
+                and y0 + edge <= py + fy0 and py + fy1 <= y0 + bh - edge):
+            return False
+        for p in _PLACED:
+            ox0, oy0, ox1, oy1 = p["box"]
+            if bx0 < ox1 and ox0 < bx1 and by0 < oy1 and oy0 < by1:
+                return False
+        return all((px - tx) ** 2 + (py - ty) ** 2 >= apart ** 2 for tx, ty in taken)
+
+    for tx, ty in targets:
+        if len(taken) >= n:
+            break
+        hit = None
+        for r in [i * 0.5 for i in range(0, int(max(bw, bh) / 0.5) + 1)]:
+            cand = [(tx, ty)] if r == 0 else []
+            steps = max(8, int(r * 4))
+            for k in range(steps):                       # ring of radius r
+                th = 2 * math.pi * k / steps
+                cand.append((round(tx + r * math.cos(th), 2),
+                             round(ty + r * math.sin(th), 2)))
+            for px, py in cand:
+                if ok(px, py):
+                    hit = (px, py)
+                    break
+            if hit:
+                break
+        if hit:
+            taken.append(hit)
+    return taken
+
+
+def place_mounting_holes(X0, Y0, BW, BH, nets, inset=7.0, region=15.0):
+    """4x M3 corner mounting holes (Phase 15.6 role primitive), collision-aware.
+    The corners are the PREFERRED spots — that is their mechanical purpose — but
+    the corner margin band is only a preference: a part's real courtyard can
+    legally reach into it, and the old fixed 7mm insets put H2 inside J2's
+    courtyard on the default power/mcu/radio/antenna mix. Each hole gets the
+    same courtyard-occupancy search as the fiducials, confined to `region` mm
+    of its corner (a hole far from a corner is structurally useless). If a
+    corner region is genuinely full the hole is DROPPED and reported honestly —
+    never stacked on a part. Emits via place(), so the holes land in _PLACED
+    and everything placed later (test points, fiducials) sees them."""
+    hole_box = courtyard_rel("MountingHole", "MountingHole_3.2mm_M3")
+    body = ""
+    placed = 0
+    for cx, cy, sx, sy in ((X0, Y0, 1, 1), (X0 + BW, Y0, -1, 1),
+                           (X0, Y0 + BH, 1, -1), (X0 + BW, Y0 + BH, -1, -1)):
+        # clear=0.4 (not the fiducial default 1.0): the M3 screw head + washer
+        # keepout already lives INSIDE the hole's own ±3.5mm courtyard (the
+        # placement gate's HOLE_KEEPOUT is 3.5mm from the hole CENTER), so any
+        # non-overlapping neighbor is already screw-safe. 0.4 is dfm_check's
+        # CY_GAP_MM courtyard-to-courtyard rule — smaller would place holes the
+        # DFM gate then rejects, and the fiducial 1.0 was dropping corner holes
+        # both gates allow (an ESP32-class antenna courtyard leaves exactly
+        # 0.45mm at the preferred corner inset on real boards).
+        spot = free_spots([(cx + sx * inset, cy + sy * inset)], hole_box,
+                          X0, Y0, BW, BH, n=1, clear=0.4,
+                          within=(cx, cy, region))
+        if not spot:
+            continue
+        placed += 1
+        body += place("MountingHole", "MountingHole_3.2mm_M3", "H%d" % placed,
+                      spot[0][0], spot[0][1], 0, {}, nets)
+    if placed < 4:
+        # honest: mirror the FIDUCIALS shortfall report — fewer holes beats a
+        # hole overlapping a part.
+        print("MOUNTING: only %d of 4 holes placed — no free corner area on "
+              "the %sx%smm board" % (placed, BW, BH))
+    return body
 
 
 BOX_WRL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "generic_module.wrl")
@@ -1463,6 +1660,7 @@ def _unique_refs(body):
 def compose(spec, blocks, out_path):
     nets = Nets()
     _DEVICES[:] = []  # reset the per-board device manifest
+    _PLACED[:] = []   # occupancy for the fiducial free-space search
     _SILK[:] = []     # reset the per-board functional silkscreen labels
     keys, dropped, sensor_reqs = classify(blocks)
     dyn = {}
@@ -1596,6 +1794,7 @@ def compose(spec, blocks, out_path):
                 if kk in cds:
                     return build_chipdown(bx, by, cds[kk], n, nets)
                 return BLOCK_TABLE[kk](bx, by, n, nets)
+            _mark = len(_PLACED)
             txt, w, h = build(x, ytop)
             # wrap to a new sub-row if this band overflows the width budget
             if x > X0 + MARGIN and (x + w - X0) > ROW_BUDGET:
@@ -1603,6 +1802,10 @@ def compose(spec, blocks, out_path):
                 x = X0 + MARGIN
                 ytop += rowh + ROWGAP
                 rowh = 0
+                # the first build's text is thrown away, so drop the occupancy it
+                # registered too — otherwise the wrapped-away boxes haunt the
+                # fiducial search at coordinates nothing was ever emitted at.
+                del _PLACED[_mark:]
                 txt, w, h = build(x, ytop)
             body += txt
             x += w + GAP
@@ -1613,25 +1816,62 @@ def compose(spec, blocks, out_path):
     BW = round(maxright + MARGIN - X0, 1)
     BH = round(ytop - ROWGAP - (Y0 + MARGIN) + 2 * MARGIN, 1)
 
-    # mounting holes (Phase 15.6 role primitive): 4x M3 in the corners — every
-    # real FL-1 board must be mountable/fixturable. The corner margins are part
-    # of the outline margin band, clear of the part rows.
-    # 7mm inset: the M3 pad (~6.8mm dia) needs >=3.0mm edge clearance at the
-    # placement gate (7.0 - 3.4 pad radius = 3.6mm clear).
-    for i, (hx, hy) in enumerate([(7, 7), (BW - 7, 7), (7, BH - 7), (BW - 7, BH - 7)]):
-        body += place("MountingHole", "MountingHole_3.2mm_M3", "H" + str(i + 1),
-                      X0 + hx, Y0 + hy, 0, {}, nets)
+    # mounting holes (Phase 15.6 role primitive): 4x M3 near the corners — every
+    # real FL-1 board must be mountable/fixturable. Collision-aware: the 7mm
+    # inset is only the preferred spot (see place_mounting_holes).
+    body += place_mounting_holes(X0, Y0, BW, BH, nets)
+
+    # test points (Phase 15.6 role primitive): labeled probe pads on the rails +
+    # the shared buses/safety lines, along the bottom margin band. Placed (and
+    # registered in _PLACED) BEFORE the fiducial search — the fixed-position row
+    # used to go after it, so a ring-displaced fiducial could land exactly where
+    # a later TP was then stamped. Each TP is itself collision-checked: it
+    # shifts off anything already placed (within 12mm of its row slot) or is
+    # dropped honestly, never stacked.
+    tp_nets = ["+5V", "+3V3", "GND"]
+    for cand in ("I2C_SDA", "I2C_SCL", "FAULT", "INTERLOCK", "TRIG", "SR_OE"):
+        if cand in nets.idx:
+            tp_nets.append(cand)
+    _tp_box = courtyard_rel("TestPoint", "TestPoint_Pad_1.5x1.5mm")
+    tx, _tp_n = X0 + 22, 0
+    for tnet in tp_nets:
+        _tp_spot = free_spots([(tx, Y0 + BH - 5)], _tp_box, X0, Y0, BW, BH,
+                              n=1, within=(tx, Y0 + BH - 5, 12.0))
+        tx += 7
+        if not _tp_spot:
+            continue
+        _tp_n += 1
+        px, py = _tp_spot[0]
+        body += tp("TP%d" % _tp_n, px, py, tnet, nets)
+        label(tnet, px, py - 4, 0.6)
+    if _tp_n < len(tp_nets):
+        print("TESTPOINTS: only %d of %d placed — no free spot left in the "
+              "bottom band" % (_tp_n, len(tp_nets)))
 
     # assembly fiducials (3, inboard of the mounting holes, clear of the part band)
     # + a router keepout around each: the fiducial pad carries a 0.6mm clearance
     # ring the grid router does not model, so without the keepout a track can run
     # legally-by-grid but violate the fiducial's pad clearance (the FID3/+5V DRC
     # hits on the dc-measure fixture).
-    for i, (fx, fy) in enumerate([(13, 6), (BW - 13, 6), (13, BH - 6)]):
+    # The corner band is only a PREFERENCE: a part's real courtyard can legally
+    # reach into it, so the spots are collision-checked against everything
+    # already placed rather than assumed free (fixed offsets put FID1 inside the
+    # MCU courtyard on a dense board).
+    _fid_targets = [(X0 + 13, Y0 + 6), (X0 + BW - 13, Y0 + 6), (X0 + 13, Y0 + BH - 6),
+                    (X0 + BW - 13, Y0 + BH - 6)]
+    _fid_spots = free_spots(_fid_targets,
+                            courtyard_rel("Fiducial", "Fiducial_1mm_Mask2mm"),
+                            X0, Y0, BW, BH, n=3)
+    print("FIDUCIALS:%d placed" % len(_fid_spots))
+    if len(_fid_spots) < 3:
+        # honest: report the real shortfall, never stack one on a part to hit 3.
+        print("FIDUCIALS:only %d of 3 placed — no free area left on the %sx%smm "
+              "board" % (len(_fid_spots), BW, BH))
+    for i, (fx, fy) in enumerate(_fid_spots):
         body += place("Fiducial", "Fiducial_1mm_Mask2mm", "FID" + str(i + 1),
-                      X0 + fx, Y0 + fy, 0, {}, nets)
-        kx0, ky0 = X0 + fx - 1.4, Y0 + fy - 1.4
-        kx1, ky1 = X0 + fx + 1.4, Y0 + fy + 1.4
+                      fx, fy, 0, {}, nets)
+        kx0, ky0 = fx - 1.4, fy - 1.4
+        kx1, ky1 = fx + 1.4, fy + 1.4
         body += ('  (zone (net 0) (net_name "") (layer "F.Cu") (uuid "{}") (hatch edge 0.5)\n'
                  '    (connect_pads (clearance 0)) (min_thickness 0.25)\n'
                  '    (keepout (tracks not_allowed) (vias not_allowed) (pads allowed)'
@@ -1639,18 +1879,6 @@ def compose(spec, blocks, out_path):
                  '    (fill (thermal_gap 0.5) (thermal_bridge_width 0.5))\n'
                  '    (polygon (pts (xy {} {}) (xy {} {}) (xy {} {}) (xy {} {}))))\n'
                  ).format(U(), kx0, ky0, kx1, ky0, kx1, ky1, kx0, ky1)
-
-    # test points (Phase 15.6 role primitive): labeled probe pads on the rails +
-    # the shared buses/safety lines, along the bottom margin band.
-    tp_nets = ["+5V", "+3V3", "GND"]
-    for cand in ("I2C_SDA", "I2C_SCL", "FAULT", "INTERLOCK", "TRIG", "SR_OE"):
-        if cand in nets.idx:
-            tp_nets.append(cand)
-    tx = X0 + 22
-    for i, tnet in enumerate(tp_nets):
-        body += tp("TP%d" % (i + 1), tx, Y0 + BH - 5, tnet, nets)
-        label(tnet, tx, Y0 + BH - 9, 0.6)
-        tx += 7
 
     # board name + revision on silk (functional labels, not just refs)
     board_name = str((spec or {}).get("boardClass") or "FL-1 board")[:40]

@@ -91,6 +91,22 @@ def _profile_entities(prefix, prof):
     return rounded_rect(prefix, x0, y0, x1, y1, r * M)
 
 
+def _pcb_seat_z(ops):
+    """Resting Z (mm) for a PCB component: the top of the tallest standoff (the
+    board seats ON the bosses), else the cavity floor (largest pocket offset),
+    else None when the plan gives no reference. POSITION only — component sizes
+    are never altered here, so an oversized board still shows honestly."""
+    tops = [float(o.get("baseZ", 0) or 0) + float(o.get("height", 0) or 0)
+            for o in ops if o.get("op") == "standoff"]
+    if tops:
+        return max(tops)
+    floors = [float(o["offset"]) for o in ops
+              if o.get("op") == "pocket" and o.get("offset") is not None]
+    if floors:
+        return max(floors)
+    return None
+
+
 def render(plan, out_dir, name):
     c = Client()
     part_name = name or plan.get("part") or "Part"
@@ -167,6 +183,17 @@ def render(plan, out_dir, name):
             elif kind == "component":
                 x, y, z = float(op.get("cx", 0)), float(op.get("cy", 0)), float(op.get("cz", 0))
                 w, h, t = float(op.get("w", 1)), float(op.get("h", 1)), float(op.get("thickness", 1))
+                if op.get("kind") == "pcb":
+                    # A plan that leaves the PCB at z=0 embeds it in (or through)
+                    # the shell floor. Seat it at the standoff/floor height —
+                    # a position correction only; w/h stay the TRUE board size.
+                    seat = _pcb_seat_z(plan.get("operations", []))
+                    if seat is not None and z < seat:
+                        warnings_out.append(
+                            "pcb component raised from z=%.2f to z=%.2f (standoff/floor "
+                            "seat) so the board sits in the cavity, not through the floor"
+                            % (z, seat))
+                        z = seat
                 before = set(all_part_ids())
                 if op.get("shape") == "cyl":
                     sk = fb.add_sketch(nm + "_sk", PLANE["top"], [circle("cp%d" % i, x * M, y * M, (w / 2) * M)])

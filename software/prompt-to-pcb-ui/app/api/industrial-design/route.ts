@@ -14,6 +14,7 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { callLLMText, overrideFromHeaders, type LLMOverride } from '@/lib/llm'
+import { MODEL } from '@/lib/model-tiers'
 import { ID_BRIEF_SCHEMA, normalizeIdBrief } from '@/lib/id-brief'
 import { loadGroundBoard } from '@/lib/ground-board'
 
@@ -88,11 +89,14 @@ async function callLLM(userMsg: string, force: boolean, override?: LLMOverride, 
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const antKey = process.env.ANTHROPIC_API_KEY
-      const opts = override?.apiKey
-        ? override
-        : antKey
-          ? { apiKey: antKey, provider: 'anthropic' as const, model: 'claude-sonnet-5' }
-          : { model: 'claude-sonnet-5' }
+      // Compose, don't switch: tier default first, caller override spread LAST —
+      // a BYOK caller (provider+apiKey, no model) keeps the design tier, while
+      // an explicit caller model still wins over it.
+      const opts: LLMOverride = {
+        ...(antKey ? { apiKey: antKey, provider: 'anthropic' as const } : {}),
+        model: MODEL.design,
+        ...override,
+      }
       const { text, provider } = await callLLMText(
         sys,
         attempt === 0
@@ -177,7 +181,16 @@ export async function POST(req: Request) {
     }
     const { out, provider } = await callLLM(userMsg, force, overrideFromHeaders(req.headers), ground)
 
-    if (out.enough) {
+    // Finalize rescue (interview's pattern): under force the model MUST
+    // finalize, but it can keep replying enough:false — which used to loop the
+    // client past MAX_QUESTIONS forever. Accept a structurally-valid brief even
+    // when the model says enough:false; with no usable brief under force, error
+    // out rather than asking yet another question.
+    const briefOk =
+      !!out.brief && typeof out.brief === 'object' &&
+      typeof (out.brief as { formFactor?: unknown }).formFactor === 'string' &&
+      (out.brief as { formFactor: string }).formFactor.trim().length > 0
+    if (out.enough || (force && briefOk)) {
       const brief = normalizeIdBrief(out.brief)
       // Persist the brief so the Design tab shows it on reload / after a pipeline
       // run without regenerating (the brief was in-memory only before).
@@ -189,6 +202,12 @@ export async function POST(req: Request) {
         } catch { /* best effort */ }
       }
       return Response.json({ type: 'brief', brief, request, provider })
+    }
+    if (force) {
+      return Response.json(
+        { error: 'industrial-design failed to finalize: max questions reached but the model returned no valid ID brief' },
+        { status: 502 },
+      )
     }
     return Response.json({
       type: 'question',

@@ -7,7 +7,7 @@
  * and the ticking stage list reflect which disciplines have actually finished, so
  * it's honest progress, not a fake spinner. Self-contained (no external assets).
  */
-import { PIPE_ORDER } from '@/lib/run-pipeline'
+import { PIPE_ORDER, type PipeStatus } from '@/lib/run-pipeline'
 
 const LABELS: Record<string, { label: string; verb: string }> = {
   electronics: { label: 'Electronics', verb: 'Routing the chip-scale board' },
@@ -19,11 +19,33 @@ const LABELS: Record<string, { label: string; verb: string }> = {
   validation: { label: 'Validation', verb: 'Building the validation plan' },
 }
 
-type St = 'pending' | 'running' | 'passed' | 'failed' | 'blocked' | 'skipped'
+// Exhaustive over the orchestrator's real PipeStatus union: if the union ever
+// gains a value, the `never` defaults below turn into compile errors instead of
+// the UI silently stalling progress or dimming an unknown status as "pending".
+function isFinished(st: PipeStatus): boolean {
+  switch (st) {
+    case 'passed': case 'skipped': case 'failed': case 'blocked': return true
+    case 'pending': case 'running': return false
+    default: { const exhaustive: never = st; void exhaustive; return true }
+  }
+}
 
-export function PipelineLoader({ status }: { status: Record<string, { status: string; detail?: string }> }) {
-  const stages = PIPE_ORDER.map((key) => ({ key, ...LABELS[key], st: (status[key]?.status ?? 'pending') as St, detail: status[key]?.detail }))
-  const finished = stages.filter((s) => s.st === 'passed' || s.st === 'skipped' || s.st === 'failed' || s.st === 'blocked').length
+function dotColor(st: PipeStatus): string {
+  switch (st) {
+    case 'passed': return 'bg-emerald-400'
+    case 'failed': return 'bg-red-400'
+    case 'blocked': return 'bg-amber-400'
+    case 'running': return 'bg-[hsl(var(--primary))] animate-pulse'
+    case 'skipped': return 'bg-white/20'
+    case 'pending': return 'bg-white/15'
+    // unreachable by type; if a rogue value arrives at runtime, render it LOUD
+    default: { const exhaustive: never = st; void exhaustive; return 'bg-fuchsia-500 animate-pulse' }
+  }
+}
+
+export function PipelineLoader({ status }: { status: Record<string, { status: PipeStatus; detail?: string }> }) {
+  const stages = PIPE_ORDER.map((key) => ({ key, ...LABELS[key], st: status[key]?.status ?? 'pending', detail: status[key]?.detail }))
+  const finished = stages.filter((s) => isFinished(s.st)).length
   const total = stages.length
   const pct = Math.min(100, Math.round((finished / total) * 100))
   const running = stages.find((s) => s.st === 'running')
@@ -84,13 +106,7 @@ export function PipelineLoader({ status }: { status: Record<string, { status: st
       {/* live discipline checklist */}
       <div className="mt-6 grid max-w-md grid-cols-2 gap-x-6 gap-y-1.5 sm:grid-cols-3">
         {stages.map((s) => {
-          const color =
-            s.st === 'passed' ? 'bg-emerald-400'
-              : s.st === 'failed' ? 'bg-red-400'
-                : s.st === 'blocked' ? 'bg-amber-400'
-                  : s.st === 'running' ? 'bg-[hsl(var(--primary))] animate-pulse'
-                    : s.st === 'skipped' ? 'bg-white/20'
-                      : 'bg-white/15'
+          const color = dotColor(s.st)
           return (
             <div key={s.key} className="flex items-center gap-2">
               <span className={`fl-dot shrink-0 ${color}`} />

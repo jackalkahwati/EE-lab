@@ -314,6 +314,7 @@ def synth(design, out_path):
     specs = [s for s in design["final_design"] if s.get("pins")]
     nets = compose.Nets()
     compose._DEVICES[:] = []
+    compose._PLACED[:] = []     # occupancy for the fiducial free-space search
 
     # recovery hints (Phase 7): the recovery loop re-runs synth with these to try
     # to fix a failed board — a bigger board / more spacing gives the router room,
@@ -534,13 +535,46 @@ def synth(design, out_path):
     BW = round(right_extent[0] + MARGIN - X0, 1)
     BH = round(bottom_extent[0] + MARGIN - Y0, 1)
     # role primitives (Phase 16.7, matching the compose path): 4x M3 corner
-    # mounting holes (7mm inset clears the placement gate's 3.0mm edge rule)
-    for i, (hx, hy) in enumerate([(7, 7), (BW - 7, 7), (7, BH - 7), (BW - 7, BH - 7)]):
-        body += compose.place("MountingHole", "MountingHole_3.2mm_M3", "H%d" % (i + 1),
-                              X0 + hx, Y0 + hy, 0, {}, nets)
-    for i, (fx, fy) in enumerate([(13, 6), (BW - 13, 6), (13, BH - 6)]):
+    # mounting holes — collision-aware (the fixed 7mm insets could land a hole
+    # on a part's courtyard, exactly the FID1/U1 failure mode; see
+    # compose.place_mounting_holes). Drops + reports a hole whose corner region
+    # is genuinely full rather than overlapping a part.
+    body += compose.place_mounting_holes(X0, Y0, BW, BH, nets)
+    # assembly fiducials (3, spread out). The preferred spots are the corner
+    # margin band, but a part's real courtyard is not its body — an ESP32-S3-
+    # WROOM-1 carries its antenna keepout 27mm off its origin — so a part can
+    # legally reach into that band. Placing the fiducials at fixed offsets put
+    # FID1 INSIDE U1's courtyard. Search for genuinely free spots instead.
+    _fid_targets = [(X0 + 13, Y0 + 6), (X0 + BW - 13, Y0 + 6), (X0 + 13, Y0 + BH - 6),
+                    (X0 + BW - 13, Y0 + BH - 6)]
+    _fid_spots = compose.free_spots(
+        _fid_targets, compose.courtyard_rel("Fiducial", "Fiducial_1mm_Mask2mm"),
+        X0, Y0, BW, BH, n=3)
+    for i, (fx, fy) in enumerate(_fid_spots):
         body += compose.place("Fiducial", "Fiducial_1mm_Mask2mm", "FID%d" % (i + 1),
-                              X0 + fx, Y0 + fy, 0, {}, nets)
+                              fx, fy, 0, {}, nets)
+        # router keepout around each fiducial (same as the compose path): the
+        # fiducial pad carries a 0.6mm clearance ring the grid router does not
+        # model, so without the keepout a track can run legally-by-grid but
+        # violate the fiducial's pad clearance — a REAL DRC failure (the
+        # FID3/+5V hits on the dc-measure fixture).
+        kx0, ky0 = fx - 1.4, fy - 1.4
+        kx1, ky1 = fx + 1.4, fy + 1.4
+        body += ('  (zone (net 0) (net_name "") (layer "F.Cu") (uuid "{}") (hatch edge 0.5)\n'
+                 '    (connect_pads (clearance 0)) (min_thickness 0.25)\n'
+                 '    (keepout (tracks not_allowed) (vias not_allowed) (pads allowed)'
+                 ' (copperpour allowed) (footprints allowed))\n'
+                 '    (fill (thermal_gap 0.5) (thermal_bridge_width 0.5))\n'
+                 '    (polygon (pts (xy {} {}) (xy {} {}) (xy {} {}) (xy {} {}))))\n'
+                 ).format(compose.U(), kx0, ky0, kx1, ky0, kx1, ky1, kx0, ky1)
+    print("FIDUCIALS:%d placed" % len(_fid_spots))
+    if len(_fid_spots) < 3:
+        # honest: never stack a fiducial on a part to hit the count — report the
+        # real shortfall and let the DFM gate fail on it. (Its own prefix, not
+        # SYNTH_NOTES: that channel already carries the dropped-part report and
+        # the reader only takes the first match.)
+        print("FIDUCIALS:only %d of 3 placed — no free area left on the %sx%smm "
+              "board" % (len(_fid_spots), BW, BH))
     # functional silkscreen: board name + rev, cal-node labels, bus-header legend
     _silk = [("%s  rev A" % str((design.get("intent") or {}).get(
         "product_goal", "FL-1 board"))[:38], X0 + BW / 2, Y0 + 3, 1.0)]

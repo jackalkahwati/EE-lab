@@ -9,6 +9,7 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { callLLMText, overrideFromHeaders, type LLMOverride } from '@/lib/llm'
+import { MODEL } from '@/lib/model-tiers'
 import { DISCIPLINE_MODULES, DISCIPLINE_ARTIFACT_SCHEMA, normalizeDisciplineArtifact } from '@/lib/discipline-artifact'
 import { loadGroundBoard } from '@/lib/ground-board'
 import type { ProductSpec } from '@/lib/product-spec'
@@ -22,11 +23,21 @@ async function callLLM(sys: string, userMsg: string, override?: LLMOverride) {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const antKey = process.env.ANTHROPIC_API_KEY
-      const opts = override?.apiKey
-        ? override
-        : antKey
-          ? { apiKey: antKey, provider: 'anthropic' as const, model: 'claude-sonnet-5' }
-          : { model: 'claude-sonnet-5' }
+      // Haiku: these four modules do structured SUMMARIZATION of facts already
+      // decided by the spec + built board — they make no design decisions (those
+      // live in architect/electronics/industrial-design/mechanical). Haiku is much
+      // faster on long structured output, and this branch is the pipeline's
+      // slowest (~40-117s each, parallel, so branch cost = the slowest).
+      // NB: lib/llm claudeCodeCall maps the model string to a CLI alias by regex
+      // (/haiku/i -> 'haiku'), so the string must keep "haiku" in it.
+      // Compose, don't switch: tier default first, caller override spread LAST —
+      // a BYOK caller (provider+apiKey, no model) keeps the docs tier, while an
+      // explicit caller model still wins over it.
+      const opts: LLMOverride = {
+        ...(antKey ? { apiKey: antKey, provider: 'anthropic' as const } : {}),
+        model: MODEL.docs,
+        ...override,
+      }
       const { text } = await callLLMText(
         sys,
         attempt === 0 ? userMsg : userMsg + '\n\nYOUR PREVIOUS REPLY WAS NOT VALID JSON. Reply with ONLY the JSON object.',
@@ -119,8 +130,27 @@ GENERAL across product categories. Ground everything in the given product + boar
 When a CANONICAL DESIGN is given, describe the EXACT parts it lists (the real MCU
 and components actually placed) — never substitute the product spec's aspirational
 parts for what was really built, and never present an unsupported part as present.
-Be concrete and specific; no fluff. This artifact's fidelity is "${mod.fidelity}" —
-do not overclaim (it is generated/advisory, not validated).
+
+HONESTY — never trim any of this; it is the artifact's whole value:
+- This artifact's fidelity is "${mod.fidelity}" — carry that label and do not
+  overclaim. It is generated/advisory: not validated, not compiled, not
+  live-sourced, not executed against hardware.
+- Never invent hardware, suppliers, measurements or results the given product +
+  board do not support — no made-up part numbers, prices, lead times, pass/fail data.
+- Where the spec asks for something the board does not deliver, say so as an
+  explicit GAP. Never paper over it, never fake coverage.
+
+LENGTH — the reader is an engineer skimming; bloat is a defect. Be dense:
+- At most 5 sections; at most 5 items per section.
+- One tight bullet per item, ONE line (<= 20 words). Never a prose paragraph.
+- summary: one sentence.
+- Keep only high-signal content: real parts, numbers, risks, gaps, decisions.
+- Cut all padding: no preamble, no restating the product/spec/board back, no
+  overview / conclusion / next-steps filler sections, no hedging, no repeating a
+  point in two sections, no generic best-practice everyone already knows.
+- Shorten by dropping PADDING, never by dropping a real finding: every gap,
+  unmet requirement, traceability hole, single-source risk and missing-part
+  callout stays. Say it shorter, do not drop it.
 Output ONLY one JSON object, no prose, no markdown fences, EXACTLY this shape:
 ${DISCIPLINE_ARTIFACT_SCHEMA}`
 

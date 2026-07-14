@@ -1,11 +1,14 @@
 /**
- * Image-generation chain for the Industrial Design render. Order:
- *   1. Cloudflare Workers AI — FLUX.1-schnell, free daily quota (needs
- *      CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN). FLUX quality.
- *   2. Gemini  — conditions on the reference scaffold; billing-gated.
- *   3. OpenAI  — gpt-image-1 fallback; billing-gated.
+ * Image-generation chain for the Industrial Design render. Providers:
+ *   - Cloudflare Workers AI — FLUX.1-schnell, free daily quota (needs
+ *     CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN). Prompt-only, FLUX quality.
+ *   - Gemini  — conditions on the reference scaffold; billing-gated.
+ *   - OpenAI  — gpt-image-1, conditions on the reference scaffold; billing-gated.
  * The reference PNG (the to-scale ID scaffold) is used by providers that support
- * image conditioning; Cloudflare flux-1-schnell is prompt-only (FLUX quality).
+ * image conditioning. Order is chosen at call time (see generateImage): when a
+ * scaffold ref is present the conditioning providers run first so all four
+ * quadrants stay the SAME product; Cloudflare (prompt-only) leads only when
+ * there is no ref.
  *
  * HONEST GATING: the result distinguishes `unavailable` (quota/billing/no key —
  * a gated, not-broken state the UI shows plainly) from a real `error`. Nothing
@@ -40,7 +43,8 @@ async function cloudflareImage(prompt: string): Promise<ImageResult> {
       {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ prompt, steps: 8 }),
+        // Fixed seed so the prompt-only fallback path is deterministic run-to-run.
+        body: JSON.stringify({ prompt, steps: 8, seed: 42 }),
         signal: AbortSignal.timeout(60_000),
       },
     )
@@ -125,16 +129,29 @@ async function openaiImage(prompt: string, refPngBase64?: string): Promise<Image
 }
 
 /**
- * Generate an image: Cloudflare FLUX first, then the reference-conditioning
- * providers. Returns the first success, or — if all failed — a real `error` if
- * any hit a genuine fault, else the honest `unavailable` gate.
+ * Generate an image. Provider order depends on whether a scaffold reference is
+ * supplied:
+ *   - WITH a ref: the reference-conditioning providers run FIRST (Gemini →
+ *     OpenAI → Cloudflare). Conditioning on the scaffold geometry forces all
+ *     four quadrants to depict the SAME single product; Cloudflare flux-1-schnell
+ *     is prompt-only and ignores the ref, so it can only be the last resort.
+ *   - WITHOUT a ref: Cloudflare FLUX first (free quota, best prompt-only quality),
+ *     then Gemini → OpenAI.
+ * Returns the first success, or — if all failed — a real `error` if any hit a
+ * genuine fault, else the honest `unavailable` gate.
  */
 export async function generateImage(prompt: string, refPngBase64?: string): Promise<ImageResult> {
-  const attempts: Array<() => Promise<ImageResult>> = [
-    () => cloudflareImage(prompt),
-    () => geminiImage(prompt, refPngBase64),
-    () => openaiImage(prompt, refPngBase64),
-  ]
+  const attempts: Array<() => Promise<ImageResult>> = refPngBase64
+    ? [
+        () => geminiImage(prompt, refPngBase64),
+        () => openaiImage(prompt, refPngBase64),
+        () => cloudflareImage(prompt),
+      ]
+    : [
+        () => cloudflareImage(prompt),
+        () => geminiImage(prompt, refPngBase64),
+        () => openaiImage(prompt, refPngBase64),
+      ]
   const failures: ImageResult[] = []
   for (const run of attempts) {
     const res = await run()

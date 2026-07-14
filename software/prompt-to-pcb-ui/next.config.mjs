@@ -1,5 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // `next build` and `next dev` share `.next` by default, so a build run while
+  // someone is using the dev server clobbers its state. Set NEXT_DIST_DIR to
+  // build into a scratch dir instead (e.g. NEXT_DIST_DIR=.next-build npm run
+  // build). Unset -> normal `.next`, so deploy/deploy.sh is unaffected.
+  distDir: process.env.NEXT_DIST_DIR || '.next',
   // netlistsvg + its elkjs dep are CommonJS bundles that break under webpack;
   // keep them external so /api/schematic require()s them at runtime (works).
   serverExternalPackages: ['netlistsvg', 'elkjs'],

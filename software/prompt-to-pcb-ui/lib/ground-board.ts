@@ -8,6 +8,12 @@ export type GroundBoard = {
   components?: number
   parts?: { name: string; footprint?: string; kind?: string; lcsc?: string | null }[]
   source: 'chipscale' | 'flroute'
+  /** Honest board health: true only when real DRC ran clean AND no nets were
+   *  left unrouted. Undefined when the source carries no DRC record (flroute). */
+  ok?: boolean
+  /** Real (KiCad) DRC state, so consumers can CARRY the board's DRC status into
+   *  their artifacts instead of grounding on a dirty board as if it were clean. */
+  drc?: { available: boolean; errors: number | null; unrouted?: number }
 }
 
 /**
@@ -24,9 +30,17 @@ export async function loadGroundBoard(runId: string): Promise<GroundBoard | null
   try {
     const cs = JSON.parse(await fs.readFile(path.join(base, 'electronics', 'chipscale-board.json'), 'utf8'))
     if (cs?.boardMm?.w && cs?.boardMm?.h) {
-      // layer count lives in the winning strategy name ("... 4-layer ...")
+      // Prefer the explicit layer count run_board now records in drcRepair;
+      // the winning-strategy-name regex ("... 4-layer ...") is only a fallback
+      // for boards persisted before the field existed.
       const strat: string = cs?.drcRepair?.winningStrategy || ''
-      const layers = /4-layer/.test(strat) ? 4 : /2-layer/.test(strat) ? 2 : undefined
+      const layers = typeof cs?.drcRepair?.layers === 'number'
+        ? cs.drcRepair.layers
+        : /4-layer/.test(strat) ? 4 : /2-layer/.test(strat) ? 2 : undefined
+      // DRC state travels WITH the board so every consumer can carry it.
+      const drcAvailable = cs?.drc?.available === true
+      const drcErrors = typeof cs?.drc?.errors === 'number' ? cs.drc.errors : null
+      const unrouted = typeof cs?.drcRepair?.unrouted === 'number' ? cs.drcRepair.unrouted : 0
       return {
         wMm: cs.boardMm.w,
         hMm: cs.boardMm.h,
@@ -34,6 +48,8 @@ export async function loadGroundBoard(runId: string): Promise<GroundBoard | null
         components: cs.components,
         parts: Array.isArray(cs.parts) ? cs.parts : undefined,
         source: 'chipscale',
+        ok: drcAvailable && drcErrors === 0 && unrouted === 0,
+        drc: cs?.drc ? { available: drcAvailable, errors: drcErrors, unrouted } : undefined,
       }
     }
   } catch { /* no chip-scale board */ }

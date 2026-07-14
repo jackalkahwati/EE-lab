@@ -19,25 +19,28 @@ export function TopNav() {
   const pathname = usePathname()
   if (pathname === '/login') return null
 
+  // Programs also lights up on the enterprise console ('/' redirects there) —
+  // both are portfolio surfaces; /programs is the nav's canonical target.
   const active = (href: string) =>
-    href === '/' ? pathname === '/' || pathname.startsWith('/enterprise')
+    href === '/programs'
+      ? pathname.startsWith('/programs') || pathname === '/' || pathname.startsWith('/enterprise')
       : pathname.startsWith(href)
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur">
-      <div className="flex h-11 items-center gap-4 px-4">
+      <div className="flex h-9 items-center gap-3 px-3">
         <Link href="/" className="flex items-center">
-          <span className="text-sm font-semibold tracking-tight">Firstlight</span>
+          <span className="text-xs font-semibold tracking-tight">Firstlight</span>
         </Link>
-        <nav className="flex items-center gap-1" aria-label="Primary">
+        <nav className="flex h-full items-center" aria-label="Primary">
           {LINKS.map((l) => (
             <Link
               key={l.href}
               href={l.href}
               className={cn(
-                'rounded-md px-2.5 py-1 text-xs',
+                'flex h-full items-center px-2.5 text-[11.5px]',
                 active(l.href)
-                  ? 'bg-secondary font-medium text-foreground'
+                  ? 'text-foreground'
                   : 'text-muted-foreground hover:text-foreground')}
             >
               {l.label}
@@ -48,9 +51,9 @@ export function TopNav() {
           <button
             type="button"
             onClick={() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))}
-            className="hidden items-center gap-1.5 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground sm:flex"
+            className="hidden items-center gap-1.5 border border-border bg-card/50 px-2 py-0.5 font-mono text-[11px] text-muted-foreground hover:text-foreground sm:flex"
           >
-            Search <kbd className="rounded bg-muted px-1 font-mono text-[9px]">⌘K</kbd>
+            Search <kbd className="bg-muted px-1 font-mono text-[9px]">⌘K</kbd>
           </button>
           <ProfileMenu />
         </div>

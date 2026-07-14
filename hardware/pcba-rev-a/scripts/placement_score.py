@@ -34,7 +34,13 @@ for i, (ra, ba) in enumerate(boxes):
     for rb, bb2 in boxes[i + 1:]:
         if ba.Intersects(bb2):
             inter = ba.Intersect(bb2)
-            if inter.GetWidth() > pcbnew.FromMM(0.05) and inter.GetHeight() > pcbnew.FromMM(0.05):
+            w = pcbnew.ToMM(inter.GetWidth())
+            h = pcbnew.ToMM(inter.GetHeight())
+            # Real overlap = meaningfully two-dimensional OR a long knife-edge
+            # sliver by area. The old both-dims > 0.05mm test let a
+            # 10mm x 0.04mm edge-on overlap pass; the area term catches it
+            # while still tolerating rounding-level courtyard abutment.
+            if (w > 0.05 and h > 0.05) or w * h > 0.25:
                 overlaps.append((ra, rb))
 
 # --- gate 2: inside board outline ----------------------------------------------
@@ -43,9 +49,12 @@ edges = [d for d in b.GetDrawings() if d.GetLayer() == pcbnew.Edge_Cuts
 outside = []
 if edges:
     o = edges[0].GetBoundingBox()
-    for fp in fps:
-        if not o.Contains(fp.GetPosition()):
-            outside.append(fp.GetReference())
+    # the whole COURTYARD must sit inside the outline — checking only the
+    # footprint origin let a half-off-board part pass.
+    for ref, bb in boxes:
+        if (bb.GetLeft() < o.GetLeft() or bb.GetRight() > o.GetRight()
+                or bb.GetTop() < o.GetTop() or bb.GetBottom() > o.GetBottom()):
+            outside.append(ref)
 
 # --- gate 3: edge clearance + mounting-hole keepout ------------------------------
 # Defects in this class previously escaped to kicad-cli DRC (J7 pads 0.03mm
@@ -54,8 +63,29 @@ if edges:
 EDGE_KEEPOUT_MM = 3.0   # courtyard-to-board-edge (DFM conveyor rail)
 HOLE_KEEPOUT_MM = 3.5   # courtyard-to-hole-center radial (M3 head + washer)
 
-holes = [d for d in b.GetDrawings() if d.GetLayer() == pcbnew.Edge_Cuts
-         and d.GetShape() == pcbnew.SHAPE_T_CIRCLE]
+# Hole centers come from BOTH sources: bare Edge.Cuts circles (the hand
+# rev-a layout) AND mounting-hole FOOTPRINTS (what the generated boards emit
+# — the circle-only detection made this check dead code on them, so a screw
+# head crushing a neighboring part passed every gate).
+hole_centers = [d.GetCenter() for d in b.GetDrawings()
+                if d.GetLayer() == pcbnew.Edge_Cuts
+                and d.GetShape() == pcbnew.SHAPE_T_CIRCLE]
+
+
+def is_hole_fp(fp):
+    if "MountingHole" in str(fp.GetFPID().GetLibItemName()):
+        return True
+    if "MountingHole" in str(fp.GetFPID().GetLibNickname()):
+        return True
+    return any(p.GetAttribute() == pcbnew.PAD_ATTRIB_NPTH for p in fp.Pads())
+
+
+hole_refs = set()
+for fp in fps:
+    if is_hole_fp(fp):
+        hole_refs.add(fp.GetReference())
+        hole_centers.append(fp.GetPosition())
+
 keepout_fails = []
 if edges:
     o = edges[0].GetBoundingBox()
@@ -68,8 +98,9 @@ if edges:
         )
         if d_edge < EDGE_KEEPOUT_MM:
             keepout_fails.append((ref, "edge", d_edge))
-        for h in holes:
-            c = h.GetCenter()
+        if ref in hole_refs:
+            continue  # a hole is not crushed by its own (or a sibling's) screw
+        for c in hole_centers:
             dx = max(bb.GetLeft() - c.x, 0, c.x - bb.GetRight())
             dy = max(bb.GetTop() - c.y, 0, c.y - bb.GetBottom())
             d_hole = pcbnew.ToMM(int((dx * dx + dy * dy) ** 0.5))

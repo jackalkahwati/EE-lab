@@ -16,6 +16,8 @@ import { Plus, Menu, Loader2, Check, X, Circle, Square, Pencil, AlertTriangle, M
 import { boardIntentOf, disciplineRows, type ProductSpec } from '@/lib/product-spec'
 import { idBriefSummary, type IdBrief } from '@/lib/id-brief'
 import { loadRealBoard } from '@/lib/real-board'
+import { logLine } from '@/lib/terminal-log'
+import type { PipeStatus } from '@/lib/run-pipeline'
 
 /** Real board footprint handed to Industrial Design so its envelope contains
  *  the achievable geometry (the board is built first, then ID wraps it). */
@@ -53,7 +55,7 @@ function b64(json: string) {
     String.fromCharCode(parseInt(h, 16))))
 }
 
-export function ComposeChat({ threads, activeId, activeRunId, activeName, newDesign, revisePrefill, onSelectThread, onNew, onRunComplete, onRename, onPrefillConsumed, onIdBrief, onProductSpec, builtDisciplines, pipelineStatus, pipelineRunning, pipelineFeedback, onRunPipeline, onStopPipeline, onProductBuilt }: {
+export function ComposeChat({ threads, activeId, activeRunId, activeName, newDesign, revisePrefill, onSelectThread, onNew, onRunComplete, onRename, onPrefillConsumed, onIdBrief, onProductSpec, productSpec: productSpecProp, builtDisciplines, pipelineStatus, pipelineRunning, pipelineFeedback, onRunPipeline, onStopPipeline, onProductBuilt }: {
   threads: { id: string; label: string }[]
   activeId: string
   activeRunId?: string   // the real run currently on screen (revisable)
@@ -67,10 +69,17 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
   onPrefillConsumed?: () => void
   onIdBrief?: (brief: IdBrief | null) => void // lift the ID brief to the workspace panes
   onProductSpec?: (spec: ProductSpec | null) => void // lift the spec for the Explore stage
+  // The page's product spec (rehydrated from disk for a restored run). Chat-local
+  // spec wins during a live session; for a run selected after a reload the chat
+  // never built a local spec, so this prop keeps the product paths alive: the
+  // disciplines panel renders, and a chat message revises the PRODUCT through the
+  // architect instead of falling to the destructive legacy /api/revise block-ECO.
+  productSpec?: ProductSpec | null
   builtDisciplines?: Record<string, boolean> // discipline modules built this session (their tab produced an artifact)
   // full-pipeline orchestration (lifted from the page): live per-discipline status,
-  // the run flag, the feedback-loop outcome, and run/stop controls.
-  pipelineStatus?: Record<string, { status: string; detail?: string }>
+  // the run flag, the feedback-loop outcome, and run/stop controls. Status uses
+  // the orchestrator's real PipeStatus union — no shadow string type.
+  pipelineStatus?: Record<string, { status: PipeStatus; detail?: string }>
   pipelineRunning?: boolean
   pipelineFeedback?: { status: string; capabilityGaps: { gap: string }[]; remaining: string[] } | null
   onRunPipeline?: () => void
@@ -89,6 +98,11 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
   const [idBrief, setIdBrief] = useState<IdBrief | null>(null)
   const [groundBoard, setGroundBoard] = useState<GroundBoard | null>(null)
   const [productSpec, setProductSpec] = useState<ProductSpec | null>(null)
+  // the runId whose board grounds the in-flight Industrial Design interview, so
+  // every /api/industrial-design turn persists the brief to THAT run on disk
+  // (otherwise the live session's brief is never saved and the Design tab later
+  // regenerates a different one)
+  const [idRunId, setIdRunId] = useState<string | null>(null)
   // honest build substitutions from the electronics hand-off (RP2040-only block
   // library etc.), shown in the disciplines panel so the plan never silently
   // promises a part the built board doesn't have.
@@ -125,6 +139,15 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
     onPrefillConsumed?.()
   }, [revisePrefill, onPrefillConsumed])
 
+  // auto-grow the composer with its content: starts at 3 rows (min-height in
+  // CSS), grows to ~8 rows (160px), then scrolls internally.
+  useEffect(() => {
+    const ta = taRef.current
+    if (!ta) return
+    ta.style.height = 'auto'
+    ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`
+  }, [typed])
+
   const ask = useCallback(async (req: string, acc: Answer[]) => {
     setLoading(true); setErr(null)
     try {
@@ -142,11 +165,15 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
   function reset() {
     esRef.current?.close(); esRef.current = null
     setPhase('idle'); setBoardBuilt(false); setRequest(''); setAnswers([]); setCurrent(null); setSpec(null)
-    setIdBrief(null); setGroundBoard(null); setProductSpec(null); setRevSpec(null); setTyped(''); setErr(null); setStages({}); setLogs([]); onNew()
+    setIdBrief(null); setGroundBoard(null); setProductSpec(null); setIdRunId(null); setRevSpec(null); setTyped(''); setErr(null); setStages({}); setLogs([]); onNew()
   }
 
   // With a built board on screen (not a fresh +New), a chat message REVISES it.
   const reviseMode = !newDesign && !!activeRunId && (phase === 'idle' || phase === 'done')
+
+  // The product spec this chat operates on: the chat-local one from the live
+  // session when present, else the page's rehydrated spec for a restored run.
+  const prodSpec = productSpec ?? productSpecProp ?? null
 
   const revise = useCallback(async (req: string, runId: string) => {
     setLoading(true); setErr(null)
@@ -178,7 +205,7 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
     // silently reverted to the flroute (Pico) reference board with ChipScaleStage
     // and every discipline dark. Legacy flroute-only runs (no productSpec) keep
     // the block-level ECO path.
-    if (reviseMode && productSpec) { setRequest(v); reviseProduct(v) }
+    if (reviseMode && prodSpec) { setRequest(v); reviseProduct(v) }
     else if (reviseMode && activeRunId) { setRequest(v); revise(v, activeRunId) }
     // Every fresh design enters through the Product Architect, which decides which
     // discipline modules to invoke and builds the real board FIRST. Industrial
@@ -187,7 +214,7 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
     else if (phase === 'idle') { setRequest(v); askArchitect(v, []) }
     else if (phase === 'id' && current) {
       const next = [...answers, { question: current.question, answer: v }]
-      setAnswers(next); setCurrent(null); askIndustrialDesign(request, next, groundBoard)
+      setAnswers(next); setCurrent(null); askIndustrialDesign(request, next, groundBoard, idRunId ?? activeRunId)
     }
     else if (phase === 'architect' && current) {
       const next = [...answers, { question: current.question, answer: v }]
@@ -211,8 +238,11 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
     es.onmessage = (e) => {
       const ev = JSON.parse(e.data) as Ev
       if (ev.type === 'stage' && ev.id) setStages((s) => ({ ...s, [ev.id!]: ev.state as StageState }))
-      else if (ev.type === 'log' && ev.stage && ev.text)
+      else if (ev.type === 'log' && ev.stage && ev.text) {
+        logLine({ source: 'build', level: ev.level === 'err' ? 'error' : 'info',
+          text: `${ev.stage}: ${ev.text}`, runId: id })
         setLogs((l) => [...l.slice(-60), { stage: ev.stage!, text: ev.text!, level: ev.level }])
+      }
       else if (ev.type === 'done') { es.close(); esRef.current = null; setPhase('done'); if (ev.runDir) onRunComplete(ev.runDir, id) }
       else if (ev.type === 'error') { es.close(); esRef.current = null; setErr(ev.text ?? 'pipeline error'); setPhase('error') }
     }
@@ -237,8 +267,11 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
     es.onmessage = (e) => {
       const ev = JSON.parse(e.data) as Ev
       if (ev.type === 'stage' && ev.id) setStages((s) => ({ ...s, [ev.id!]: ev.state as StageState }))
-      else if (ev.type === 'log' && ev.stage && ev.text)
+      else if (ev.type === 'log' && ev.stage && ev.text) {
+        logLine({ source: 'build', level: ev.level === 'err' ? 'error' : 'info',
+          text: `${ev.stage}: ${ev.text}`, runId: id })
         setLogs((l) => [...l.slice(-60), { stage: ev.stage!, text: ev.text!, level: ev.level }])
+      }
       else if (ev.type === 'done') {
         es.close(); esRef.current = null; setPhase('done')
         if (ev.runDir) { setBoardBuilt(true); onRunComplete(ev.runDir, id) }
@@ -246,7 +279,7 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
         // AND kick off the full pipeline for THIS exact run. Signalling the runId
         // here (not via a page effect on selectedRun) avoids a race where the page
         // would fire the pipeline on the previously-selected run.
-        if (opts?.thenId && ev.runDir) { startIdFromBoard(ev.runDir); onProductBuilt?.(id) }
+        if (opts?.thenId && ev.runDir) { startIdFromBoard(ev.runDir, id); onProductBuilt?.(id) }
       } else if (ev.type === 'error') { es.close(); esRef.current = null; setErr(ev.text ?? 'pipeline error'); setPhase('error') }
     }
     es.onerror = () => { es.close(); esRef.current = null; setErr('connection lost'); setPhase('error') }
@@ -296,12 +329,15 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
    *  its real footprint (ground). A clarifying interview about form, ergonomics,
    *  CMF, and envelope; the finalized brief wraps the achievable geometry. The
    *  board is already on screen, so a finished brief returns to the 'done' state. */
-  async function askIndustrialDesign(req: string, acc: Answer[], ground: GroundBoard | null) {
+  async function askIndustrialDesign(req: string, acc: Answer[], ground: GroundBoard | null, runId?: string | null) {
     setLoading(true); setErr(null)
     try {
+      // runId makes the route ground on + PERSIST the brief to that run
+      // (disciplines/id-brief.json), so the brief that drove the live session is
+      // the one the Design tab shows later — not a freshly regenerated one.
       const r = await fetch('/api/industrial-design', {
         method: 'POST', headers: { 'content-type': 'application/json', ...llmHeaders() },
-        body: JSON.stringify({ request: req, answers: acc, realBoard: ground ?? undefined }),
+        body: JSON.stringify({ request: req, answers: acc, realBoard: ground ?? undefined, runId: runId ?? undefined }),
       })
       const d = await r.json()
       if (d.error) throw new Error(d.error)
@@ -317,21 +353,22 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
 
   /** After the electronics board finishes, kick off Industrial Design grounded in
    *  its real footprint so the form wraps what was actually built. */
-  async function startIdFromBoard(runDir: string) {
+  async function startIdFromBoard(runDir: string, runId: string) {
     const rb = await loadRealBoard(runDir).catch(() => null)
     const ground: GroundBoard | null = rb
       ? { wMm: rb.board.boardSize.wMm, hMm: rb.board.boardSize.hMm, layers: rb.board.layers, components: rb.board.components }
       : null
     setGroundBoard(ground)
+    setIdRunId(runId) // later interview turns keep persisting the brief to this run
     setAnswers([]); setCurrent(null)
     // Use a resilient intent: the raw prompt if present, else the product spec's
     // board intent / product name. An empty request here made industrial-design
     // 400 ("empty product intent"), which flipped the whole run to error and
     // showed "Electronics FAILED" even though the board built — and blocked the
     // flow from reaching Industrial Design / Mechanical.
-    const intent = request.trim() || (productSpec ? boardIntentOf(productSpec) : '') || productSpec?.product || ''
+    const intent = request.trim() || (prodSpec ? boardIntentOf(prodSpec) : '') || prodSpec?.product || ''
     if (!intent) { setPhase('done'); return }
-    await askIndustrialDesign(intent, [], ground)
+    await askIndustrialDesign(intent, [], ground, runId)
   }
 
   /** Product-tier interview: same shape as the board interview, one level up.
@@ -359,11 +396,11 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
    *  genuinely different product, and rebuilds accordingly. A fresh interview may
    *  run; that's honest for a product-level change. */
   function reviseProduct(req: string) {
-    if (!productSpec) return
-    const intent = boardIntentOf(productSpec)
+    if (!prodSpec) return
+    const intent = boardIntentOf(prodSpec)
     const combined =
-      `Current product: ${productSpec.product}.` +
-      (productSpec.description ? ` ${productSpec.description}` : '') +
+      `Current product: ${prodSpec.product}.` +
+      (prodSpec.description ? ` ${prodSpec.description}` : '') +
       (intent ? ` Electronics so far: ${intent}.` : '') +
       `\n\nRequested change: ${req}`
     setAnswers([]); setCurrent(null)
@@ -395,39 +432,40 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
 
   return (
     <div className="flex h-full flex-col">
-      {/* threads header */}
-      <div className="relative flex items-center gap-2 border-b border-border px-3 py-2">
+      {/* threads header — 28px IDE sidebar section bar (matches the terminal
+          panel header): uppercase mono title + integrated ☰ / rename / New */}
+      <div className="relative flex h-7 shrink-0 items-center border-b border-border bg-card/50">
         {editing ? (
           <input autoFocus value={editValue}
             onChange={(e) => setEditValue(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') saveName(); else if (e.key === 'Escape') setEditing(false) }}
             onBlur={saveName}
-            className="min-w-0 flex-1 rounded-sm border border-primary/50 bg-background px-1.5 py-0.5 text-[11px] outline-none" />
+            className="mx-1.5 min-w-0 flex-1 border border-primary/50 bg-background px-1.5 py-0.5 font-mono text-[10px] outline-none" />
         ) : (
           <button type="button" onClick={() => setThreadsOpen((v) => !v)}
-            className="flex min-w-0 flex-1 items-center gap-1.5 rounded-sm px-1 py-0.5 text-left hover:bg-secondary/50">
-            <Menu className="size-4 shrink-0 text-muted-foreground" />
-            <span className={cn('min-w-0 flex-1 truncate text-[11px]',
-              newDesign ? 'italic text-muted-foreground' : 'font-medium')}>{activeLabel}</span>
+            className="flex h-full min-w-0 flex-1 items-center gap-1.5 px-2 text-left hover:bg-secondary/50">
+            <Menu className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className={cn('min-w-0 flex-1 truncate font-mono text-[10px] uppercase tracking-wider',
+              newDesign ? 'italic text-muted-foreground' : 'text-foreground')}>{activeLabel}</span>
             <span className="shrink-0 font-mono text-[9px] text-muted-foreground">{threads.length}</span>
           </button>
         )}
         {!editing && canRename && (
           <button type="button" title="rename board"
             onClick={() => { setEditValue(activeLabel); setEditing(true) }}
-            className="shrink-0 rounded-sm p-1 text-muted-foreground hover:text-foreground">
+            className="flex h-full shrink-0 items-center px-1.5 text-muted-foreground hover:text-foreground">
             <Pencil className="size-3" />
           </button>
         )}
         <button type="button" onClick={reset}
-          className="flex shrink-0 items-center gap-1 rounded-sm border border-primary/40 bg-primary/10 px-2 py-1 text-[11px] text-primary hover:bg-primary/20">
+          className="flex h-full shrink-0 items-center gap-1 border-l border-border px-2 font-mono text-[10px] uppercase tracking-wider text-primary hover:bg-primary/10">
           <Plus className="size-3" /> New
         </button>
 
         {threadsOpen && (
           <>
             <div className="fixed inset-0 z-20" onClick={() => setThreadsOpen(false)} />
-            <div className="absolute left-2 top-full z-30 mt-1 max-h-80 w-64 overflow-y-auto rounded-md border border-border bg-card p-1 shadow-xl">
+            <div className="absolute left-2 top-full z-30 mt-1 max-h-80 w-64 overflow-y-auto border border-border bg-card p-1 shadow-xl">
               <div className="px-2 py-1 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">Threads</div>
               {threads.length === 0 && <p className="px-2 py-2 text-[11px] text-muted-foreground">No threads yet — start one with New.</p>}
               {threads.map((t) => (
@@ -445,7 +483,7 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
       </div>
 
       {/* thread body */}
-      <div ref={bodyRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 text-sm">
+      <div ref={bodyRef} className="min-h-0 flex-1 space-y-2.5 overflow-y-auto p-2.5 text-sm">
         {phase === 'idle' && !reviseMode && (
           <p className="text-muted-foreground">
             Describe a product or a board. I&apos;ll decompose it into engineering
@@ -529,16 +567,18 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
           </div>
         )}
 
-        {/* product decomposition — which disciplines the Architect routed to */}
-        {productSpec && (
+        {/* product decomposition — which disciplines the Architect routed to.
+            Renders from prodSpec so a restored run (spec rehydrated by the page)
+            gets its panel + "run full pipeline" button back, not just live builds. */}
+        {prodSpec && (
           <div className="space-y-2 rounded-md border border-border p-2.5">
             <div>
-              <div className="text-[13px] font-semibold text-foreground">{productSpec.product}</div>
-              {productSpec.description && (
-                <div className="text-[11px] text-muted-foreground">{productSpec.description}</div>
+              <div className="text-[13px] font-semibold text-foreground">{prodSpec.product}</div>
+              {prodSpec.description && (
+                <div className="text-[11px] text-muted-foreground">{prodSpec.description}</div>
               )}
-              {budgetLine(productSpec) && (
-                <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">{budgetLine(productSpec)}</div>
+              {budgetLine(prodSpec) && (
+                <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">{budgetLine(prodSpec)}</div>
               )}
             </div>
             {/* Honest substitutions: what the RP2040-only block library actually
@@ -578,7 +618,7 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
                   )
                 )}
               </div>
-              {disciplineRows(productSpec)
+              {disciplineRows(prodSpec)
                 .filter((r) => r.status !== 'not_applicable')
                 .map((r) => {
                   const isElec = r.discipline === 'electronics'
@@ -589,13 +629,22 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
                   const st = pipe
                     ? (pipe === 'passed' ? 'built' : pipe === 'running' ? 'building' : pipe)
                     : isElec
-                      ? boardBuilt
-                        ? 'built' // board really built — never show FAILED for a later ID/connection error
-                        : phase === 'error'
-                          ? 'failed'
-                          : phase === 'done'
-                            ? 'built'
-                            : 'building'
+                      ? phase === 'building'
+                        ? 'building'
+                        : builtDisciplines?.electronics // real chip-scale evidence (electronics/chipscale-board.json on disk)
+                          ? 'built'
+                          : boardBuilt
+                            // The EDA/variant reference board built, but the CHIP-SCALE
+                            // electronics (what this row reports) hasn't run yet — a
+                            // distinct honest state, never 'built'. Also never 'failed'
+                            // for a later ID/connection error: the board really exists.
+                            ? 'board ready'
+                            : phase === 'error'
+                              ? 'failed'
+                              // restored run (spec from the page, no live build in
+                              // flight) or 'done' without a board: NOT built — no
+                              // green check without chip-scale evidence, no spinner
+                              : 'pending'
                       : builtDisciplines?.[r.discipline] // its tab produced a real artifact
                         ? 'built'
                         : 'pending'
@@ -605,7 +654,8 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
                         : st === 'blocked' ? <AlertTriangle className="size-3.5 text-amber-500" />
                           : st === 'skipped' ? <Minus className="size-3 text-muted-foreground/40" />
                             : st === 'building' ? <Loader2 className="size-3.5 animate-spin text-primary" />
-                              : <Circle className="size-3 text-muted-foreground/40" />
+                              : st === 'board ready' ? <Circle className="size-3 text-sky-400" />
+                                : <Circle className="size-3 text-muted-foreground/40" />
                   return (
                     <div key={r.discipline} className="flex items-start gap-2">
                       <span className="mt-0.5 shrink-0">{icon}</span>
@@ -614,7 +664,8 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
                           <span className="text-[12px] text-foreground">{r.label}</span>
                           <span className={cn('font-mono text-[9px] uppercase tracking-wide',
                             st === 'failed' ? 'text-destructive' : st === 'blocked' ? 'text-amber-500' : 'text-muted-foreground')}>
-                            {st === 'pending' ? 'module not built yet' : st}
+                            {st === 'pending' ? 'module not built yet'
+                              : st === 'board ready' ? 'board ready · chip-scale pending' : st}
                           </span>
                         </div>
                         {/* live detail from the orchestrator (fit result, DRC count,
@@ -686,23 +737,23 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
 
       {/* input */}
       <div className="border-t border-border p-2">
-        <div className="flex items-end gap-2 rounded-md border border-border bg-background p-1.5 focus-within:border-primary/50">
+        <div className="flex flex-col gap-1.5 border border-border bg-background p-2 focus-within:border-primary/50">
           <textarea
             ref={taRef}
             value={typed}
             onChange={(e) => setTyped(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() } }}
             disabled={building || loading || phase === 'ready' || phase === 'revReady'}
-            rows={1}
+            rows={3}
             placeholder={phase === 'ready' ? 'press “Yes, build it” above'
               : phase === 'revReady' ? 'press “Build revision” above'
                 : phase === 'id' || phase === 'architect' || phase === 'interview' ? 'type your answer…'
                   : reviseMode ? 'Describe a change to revise this board…'
                     : phase === 'idle' ? 'Describe a product or a board…' : 'start a new thread with + New'}
-            className="max-h-24 min-h-[1.5rem] flex-1 resize-none bg-transparent text-[13px] outline-none placeholder:text-muted-foreground disabled:opacity-50"
+            className="max-h-40 min-h-[60px] w-full resize-none overflow-y-auto bg-transparent text-[12px] leading-5 outline-none placeholder:text-muted-foreground disabled:opacity-50"
           />
           <button type="button" onClick={submit} disabled={!typed.trim() || building || loading || phase === 'ready' || phase === 'revReady'}
-            className="shrink-0 rounded-md bg-primary px-2.5 py-1 text-[12px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-40">
+            className="self-end shrink-0 rounded-md bg-primary px-2.5 py-1 text-[12px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-40">
             Send ↵
           </button>
         </div>

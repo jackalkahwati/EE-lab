@@ -46,7 +46,10 @@ import { SimulationStage } from '@/components/simulation-stage'
 import { DisciplineStage } from '@/components/discipline-stage'
 import { ChipScaleStage } from '@/components/chipscale-stage'
 import { PipelineLoader } from '@/components/pipeline-loader'
-import { llmHeaders } from '@/components/llm-settings'
+import { TerminalPanel, type TerminalTab } from '@/components/terminal-panel'
+import { StatusBar } from '@/components/status-bar'
+import { logLine, useProblemCount } from '@/lib/terminal-log'
+import { llmHeaders, LLM_PROVIDERS } from '@/components/llm-settings'
 import { runFullPipeline, PIPE_ORDER, type PipeStatus } from '@/lib/run-pipeline'
 import type { IdBrief } from '@/lib/id-brief'
 import type { ProductSpec } from '@/lib/product-spec'
@@ -118,11 +121,30 @@ export default function Compose2Page() {
   // passed/failed/blocked/skipped) as the sequencer runs every discipline
   // end-to-end, plus a run flag + abort handle. `pipeStarted` guards auto-start to
   // once per run so re-renders don't re-fire the multi-minute pipeline.
-  const [pipeStatus, setPipeStatus] = useState<Record<string, { status: PipeStatus; detail?: string }>>({})
-  const [pipeRunning, setPipeRunning] = useState(false)
-  const [pipeFeedback, setPipeFeedback] = useState<{ status: string; capabilityGaps: { gap: string }[]; remaining: string[] } | null>(null)
+  //
+  // Status is keyed BY RUN ID (not session-global): the multi-minute pipeline can
+  // finish long after the user has switched threads, so every status update lands
+  // in its own run's map entry and the UI only ever renders the entry for the run
+  // currently selected — run A's pipeline can no longer narrate over run B.
+  const [pipeStatusByRun, setPipeStatusByRun] = useState<Record<string, Record<string, { status: PipeStatus; detail?: string }>>>({})
+  // runId of the pipeline currently in flight (null when idle)
+  const [pipelineRunId, setPipelineRunId] = useState<string | null>(null)
+  // bottom Terminal panel + status bar
+  const [termCollapsed, setTermCollapsed] = useState(true)
+  const [termTab, setTermTab] = useState<TerminalTab>('terminal')
+  const problemCount = useProblemCount()
+  // wall-clock start of the in-flight pipeline (drives the status-bar elapsed)
+  const [pipeStartedAt, setPipeStartedAt] = useState<number | null>(null)
+  // model tier shown in the status bar — plain strings, resolved client-side from
+  // the same localStorage llmHeaders() reads (never import server code here)
+  const [llmTiers, setLlmTiers] = useState<string[]>([])
+  const [pipeFeedbackByRun, setPipeFeedbackByRun] = useState<Record<string, { status: string; capabilityGaps: { gap: string }[]; remaining: string[] }>>({})
   const pipeAbort = useRef<AbortController | null>(null)
   const pipeStarted = useRef<Set<string>>(new Set())
+  // The pipeline's completion callbacks must read the selection AT FIRE TIME, not
+  // the selection captured when the pipeline started (a stale closure): keep the
+  // current selectedId in a ref for those async gates.
+  const selectedIdRef = useRef(selectedId)
   // Latest product spec in a ref, so the async onProductBuilt callback (which may
   // hold a stale closure from when the build started) always runs the pipeline
   // with the current spec, not a null captured before the spec was lifted.
@@ -174,12 +196,16 @@ export default function Compose2Page() {
   const [leftW, setLeftW] = useState(288)
   const [rightW, setRightW] = useState(480)
   const dragRef = useRef<null | 'left' | 'right'>(null)
+  // mirrors dragRef as state so the active Handle can stay highlighted while the
+  // pointer travels beyond it mid-drag
+  const [dragging, setDragging] = useState<null | 'left' | 'right'>(null)
 
   useEffect(() => {
     const l = Number(localStorage.getItem('c2-leftW'))
     const r = Number(localStorage.getItem('c2-rightW'))
     if (l >= 200) setLeftW(l)
     if (r >= 280) setRightW(r)
+    setTermCollapsed(localStorage.getItem('c2-termCollapsed') !== '0') // default collapsed
     const onMove = (e: MouseEvent) => {
       if (!dragRef.current) return
       if (dragRef.current === 'left') setLeftW(Math.min(600, Math.max(200, e.clientX)))
@@ -188,6 +214,7 @@ export default function Compose2Page() {
     const onUp = () => {
       if (!dragRef.current) return
       dragRef.current = null
+      setDragging(null)
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
       // persist current widths
@@ -202,12 +229,28 @@ export default function Compose2Page() {
     }
   }, [])
 
+  // Terminal panel collapse toggle, persisted alongside the pane widths
+  const toggleTerm = () => setTermCollapsed((c) => {
+    localStorage.setItem('c2-termCollapsed', c ? '0' : '1') // '0' = open
+    return !c
+  })
+
+  // model tier for the status bar (client-only read of the llm-settings storage)
+  useEffect(() => {
+    const id = localStorage.getItem('fl-llm-provider') ?? ''
+    setLlmTiers([LLM_PROVIDERS.find((p) => p.id === id)?.label ?? 'Platform default'])
+  }, [])
+
   const startDrag = (which: 'left' | 'right') => (e: React.MouseEvent) => {
     e.preventDefault()
     dragRef.current = which
+    setDragging(which)
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
   }
+  // Divider between panes: a 5px grab area (negative margins keep the layout at
+  // 1px — the pane's own border-border edge stays the visible line) that lights
+  // up amber on hover/drag, matching the terminal panel's drag edge.
   const Handle = ({ which }: { which: 'left' | 'right' }) => (
     <div
       role="separator"
@@ -215,7 +258,10 @@ export default function Compose2Page() {
       onMouseDown={startDrag(which)}
       onDoubleClick={() => which === 'left' ? setLeftW(288) : setRightW(480)}
       title="drag to resize · double-click to reset"
-      className="w-1 shrink-0 cursor-col-resize bg-border transition-colors hover:bg-primary/60"
+      className={cn(
+        'relative z-10 -mx-0.5 w-[5px] shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-primary/40',
+        dragging === which && 'bg-primary/40',
+      )}
     />
   )
 
@@ -240,6 +286,22 @@ export default function Compose2Page() {
   const selectedReal = selectedRun?.real
 
   useEffect(() => { productSpecRef.current = productSpec }, [productSpec])
+  useEffect(() => { selectedIdRef.current = selectedId }, [selectedId])
+
+  // What the UI renders: the SELECTED run's pipeline state. A pipeline running
+  // for a different run keeps streaming into its own map entry silently.
+  const pipeStatus = selectedId ? (pipeStatusByRun[selectedId] ?? {}) : {}
+  const pipeFeedback = selectedId ? (pipeFeedbackByRun[selectedId] ?? null) : null
+  const pipeRunning = !!pipelineRunId && pipelineRunId === selectedId
+
+  // A tab close would silently kill the multi-minute pipeline — ask first while
+  // ANY run's pipeline is in flight (not just the selected one).
+  useEffect(() => {
+    if (!pipelineRunId) return
+    const onBeforeUnload = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [pipelineRunId])
 
   // Restore a SAVED run's product state from disk when it's selected from the
   // menu. onSelectThread clears productSpec/builtDisc for an immediate reset;
@@ -255,7 +317,7 @@ export default function Compose2Page() {
     const j = (p: string) => fetch(p, { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null)
     const head = (p: string) => fetch(p, { method: 'HEAD', cache: 'no-store' }).then((r) => r.ok).catch(() => false)
     j(`/runs/${id}/product-spec.json`).then((s) => { if (!off && s?.product) setProductSpec(s) })
-    j(`/runs/${id}/id-brief.json`).then((b) => { if (!off && b?.product) setIdBrief(b) })
+    j(`/runs/${id}/disciplines/id-brief.json`).then((b) => { if (!off && b?.product) setIdBrief(b) })
     const probes: [string, string][] = [
       ['electronics', `/runs/${id}/electronics/chipscale-board.json`],
       ['mechanical', `/runs/${id}/mechanical/mechanical.json`],
@@ -283,25 +345,50 @@ export default function Compose2Page() {
     if (!spec || !runId || pipeAbort.current) return
     const ac = new AbortController()
     pipeAbort.current = ac
-    setPipeRunning(true)
-    setPipeFeedback(null)
-    setPipeStatus(Object.fromEntries(PIPE_ORDER.map((s) => [s, { status: 'pending' as PipeStatus }])))
+    setPipelineRunId(runId)
+    setPipeStartedAt(Date.now())
+    setPipeFeedbackByRun((prev) => { const next = { ...prev }; delete next[runId]; return next })
+    setPipeStatusByRun((prev) => ({
+      ...prev,
+      [runId]: Object.fromEntries(PIPE_ORDER.map((s) => [s, { status: 'pending' as PipeStatus }])),
+    }))
     try {
       const res = await runFullPipeline({
         spec, runId, headers: llmHeaders(), signal: ac.signal,
-        onStage: (e) => setPipeStatus((prev) => ({ ...prev, [e.stage]: { status: e.status, detail: e.detail } })),
+        // every status update lands in THIS run's entry only — never the
+        // session-global view — so switching threads mid-run can't cross-narrate.
+        // Each transition also lands in the bottom Terminal panel's log bus.
+        onStage: (e) => {
+          logLine({
+            source: 'pipeline',
+            level: e.status === 'failed' ? 'error' : e.status === 'blocked' ? 'warn'
+              : e.status === 'passed' ? 'ok' : 'info',
+            text: `${e.stage} → ${e.status}${e.detail ? ` — ${e.detail}` : ''}`,
+            runId,
+          })
+          setPipeStatusByRun((prev) => ({
+            ...prev,
+            [runId]: { ...prev[runId], [e.stage]: { status: e.status, detail: e.detail } },
+          }))
+        },
       })
-      if (res.updatedSpec) setProductSpec(res.updatedSpec)
-      if (res.feedback) setPipeFeedback(res.feedback)
-      setBuiltDisc((prev) => {
-        const next = { ...prev }
-        for (const [k, v] of Object.entries(res.stages)) if (v?.status === 'passed') next[k] = true
-        return next
-      })
+      if (res.feedback) setPipeFeedbackByRun((prev) => ({ ...prev, [runId]: res.feedback! }))
+      // Completion writes touch SELECTED-run state (productSpec, builtDisc), so
+      // they only apply when this pipeline's run is the one on screen at fire
+      // time. If the user switched away, the artifacts are on disk — reselecting
+      // the run rehydrates them (see the restore effect above).
+      if (selectedIdRef.current === runId) {
+        if (res.updatedSpec) setProductSpec(res.updatedSpec)
+        setBuiltDisc((prev) => {
+          const next = { ...prev }
+          for (const [k, v] of Object.entries(res.stages)) if (v?.status === 'passed') next[k] = true
+          return next
+        })
+      }
     } catch { /* aborted or fatal — status already reflects where it stopped */ }
-    finally { setPipeRunning(false); pipeAbort.current = null }
+    finally { setPipelineRunId(null); setPipeStartedAt(null); pipeAbort.current = null }
   }
-  const stopPipeline = () => { pipeAbort.current?.abort(); setPipeRunning(false) }
+  const stopPipeline = () => { pipeAbort.current?.abort(); setPipelineRunId(null); setPipeStartedAt(null) }
 
   // Auto-start the full pipeline the moment a PRODUCT's board finishes building.
   // compose-chat calls this with the exact runId it just built (from the build's
@@ -323,35 +410,178 @@ export default function Compose2Page() {
     return () => { cancelled = true }
   }, [selectedReal, selectedRunDir])
 
+  const real = realBoard && realBoard.base === (selectedRunDir ?? '') ? realBoard : null
+  const isReal = selectedRun?.real === true && real !== null
+
+  // RIGHT — the active stage's detailed results. One shared block for BOTH
+  // layout branches (blank slate + full workspace): resize handle + icon rail
+  // (VIEWS) + detail area. Every panel is behind the newDesign/!selectedRun
+  // guard, so with no run selected the rail renders a clean empty state.
+  const rightPane = (
+    <>
+      <Handle which="right" />
+      <section style={{ width: rightW }} className="flex shrink-0 border-l border-border">
+        {stage === 'electronics' ? (
+          <>
+            <nav className="flex w-12 shrink-0 flex-col overflow-y-auto border-r border-border bg-card/30 py-1">
+              {VIEWS.map((v) => {
+                const on = tab === v.tab
+                return (
+                  <button key={v.tab} type="button" onClick={() => setTab(v.tab)} title={v.label}
+                    className={cn('relative flex w-full flex-col items-center gap-0.5 px-0.5 py-2 text-[8px]',
+                      on ? 'text-foreground' : 'text-muted-foreground hover:text-foreground')}>
+                    {/* VS Code-style active indicator: 2px amber left edge, no pill */}
+                    {on && <span aria-hidden className="absolute inset-y-1 left-0 w-0.5 bg-primary" />}
+                    <v.Icon className={cn('size-4', on && 'text-primary')} />
+                    <span className="leading-none">{v.label}</span>
+                  </button>
+                )
+              })}
+            </nav>
+            <div className="flex min-w-0 flex-1 flex-col">
+              <div className="flex h-7 shrink-0 items-center border-b border-border bg-card/50 px-2.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                {VIEWS.find((v) => v.tab === tab)?.label ?? tab}
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                <ErrorBoundary>
+                  {(newDesign || !selectedRun) ? (
+                    <div className="flex h-full items-center justify-center p-6 text-center text-xs text-muted-foreground">
+                      {!selectedRun
+                        ? 'No run yet — panels populate as the build runs.'
+                        : 'No board yet — the overview appears once your new design builds.'}
+                    </div>
+                  ) : (
+                    <>
+                      {tab === 'Overview' && <RunOverview runId={selectedRun.runDir ? selectedRun.id : null} run={selectedRun} />}
+                      {tab === 'Objects' && <BoardObjects real={real} />}
+                      {tab === 'Artifacts' && <ArtifactExplorer runId={selectedRun.runDir ? selectedRun.id : null} />}
+                      {tab === 'Code' && <CodeViewer key={isReal ? 'real' : 'seed'} files={isReal ? real?.ato : null} />}
+                      {tab === 'BOM' && <BomTable lines={isReal ? real?.bom : null} />}
+                      {tab === 'Checks' && <BoardChecks real={real} />}
+                      {tab === 'Constraints' && <ConstraintsPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
+                      {tab === 'Pinout' && <PinoutPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
+                      {tab === 'Advanced' && <AdvancedRoutingPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
+                      {tab === 'Ingest' && <IngestPanel />}
+                      {tab === 'Patterns' && <PatternsPanel />}
+                      {tab === 'FL-1 Ready' && <FL1ReadinessPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
+                      {tab === 'Recovery' && <RecoveryPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
+                      {tab === 'Assembly' && <AssemblyPanel runId={selectedRun.runDir ? selectedRun.id : null} fabZip={null} />}
+                      {tab === 'Review' && <ReviewPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
+                      {tab === 'FL-1' && (
+                        <div className="flex h-full flex-col">
+                          <FL1ValidationView runId={selectedRun.runDir ? selectedRun.id : null} />
+                          <div className="border-t border-border">
+                            <FL1Loop
+                              runId={selectedRun.runDir ? selectedRun.id : null}
+                              onRevise={(eco) => setRevisePrefill(eco)}
+                            />
+                          </div>
+                        </div>
+                      )}
+                      {tab === 'Order' && <ProcurementPanel real={real} runDir={selectedRunDir ?? null} />}
+                    </>
+                  )}
+                </ErrorBoundary>
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="flex min-w-0 flex-1 flex-col">
+            <div className="flex h-7 shrink-0 items-center border-b border-border bg-card/50 px-2.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+              {STAGES.find((s) => s.key === stage)?.label ?? stage}
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto">
+            <ErrorBoundary>
+              {['firmware', 'manufacturing', 'supplyChain', 'validation'].includes(stage) ? (
+                <div className="flex h-full flex-col gap-3 p-4 text-[12px] text-muted-foreground">
+                  <div className="font-mono text-[9px] uppercase tracking-wide">specialist module</div>
+                  <p>A <span className="text-foreground">separate module</span> built on the shared generic engine: the product engine emits a structured artifact grounded in the spec + real board.</p>
+                  <p>Fidelity is honest — <span className="text-amber-600 dark:text-amber-400">generated / advisory</span>, not validated, compiled, or live-sourced. Each artifact carries its own fidelity label.</p>
+                </div>
+              ) : stage === 'explore' ? (
+                <div className="flex h-full flex-col gap-3 p-4 text-[12px] text-muted-foreground">
+                  <div className="font-mono text-[9px] uppercase tracking-wide">design-of-N</div>
+                  <p>The product engine turns your spec into a <span className="text-foreground">design problem</span> (variables · objectives · constraints), then the optimizer generates candidates, scores them, and picks the best off the Pareto frontier.</p>
+                  <p>Objectives with a real evaluator (cost, size, battery) are scored analytically. Objectives without one (audio, antenna, thermal…) are carried as <span className="text-amber-600 dark:text-amber-400">honest gaps</span> until their evaluator plugin lands — never faked.</p>
+                  <p>The selected design is what the discipline modules then build.</p>
+                </div>
+              ) : stage === 'id'
+                ? (idBrief ? <IdBriefPanel brief={idBrief} /> : <StagePlaceholder title="Industrial Design" Icon={Palette} />)
+                : stage === 'mechanical'
+                  ? (
+                    <div className="flex h-full flex-col gap-3 p-4 text-[12px] text-muted-foreground">
+                      <div className="font-mono text-[9px] uppercase tracking-wide">mechanical · CAD</div>
+                      <p>The product engine emits a <span className="text-foreground">mechanical build plan</span> (sketch · extrude · pocket · standoff · cutout) sized to the real board. A thin executor renders it in <span className="text-foreground">Onshape</span> and exports a real <span className="text-foreground">STEP</span> file.</p>
+                      <p>No fixed enclosure recipe — the plan (data) decides the form, so the same executor builds a shell, a bracket, or a potting box.</p>
+                      <p>Advisory CAD: a first-pass parametric part, <span className="text-amber-600 dark:text-amber-400">not tolerance/fit-validated</span>. Per-op failures are reported, never hidden.</p>
+                    </div>
+                  )
+                  : (
+                    <div className="flex h-full flex-col gap-3 p-4 text-[12px] text-muted-foreground">
+                      <div className="font-mono text-[9px] uppercase tracking-wide">simulation · physics</div>
+                      <p><span className="text-foreground">thermal</span> and <span className="text-foreground">drop</span> are real finite-element solves via <span className="text-foreground">scikit-fem</span> — a 2D FEM heat-conduction field and a Kirchhoff-plate modal FEM. Acoustics (sealed-box), RF (link budget) and battery (energy) are analytic. Each result is labeled by <span className="text-foreground">fidelity</span> and the tool that produced it.</p>
+                      <p>The analytic domains&apos; next-fidelity upgrade is 3D FEA/FDTD — <span className="text-amber-600 dark:text-amber-400">Elmer · CalculiX · openEMS · OpenFOAM</span> (gmsh present) — install-gated.</p>
+                      <p>The runner only reports metrics it can compute — nothing faked.</p>
+                    </div>
+                  )}
+            </ErrorBoundary>
+            </div>
+          </div>
+        )}
+      </section>
+    </>
+  )
+
   // Blank slate: shown on a fresh load (no run selected) and on a zero-run
-  // install. Just the conversation pane — describing a board builds one; the full
-  // three-pane layout takes over once it finishes. Past runs stay reachable from
+  // install. The conversation pane (resizable, like the workspace) + empty
+  // center + the same right rail in its empty state — describing a board builds
+  // one; the panels populate once it finishes. Past runs stay reachable from
   // the ☰ menu (real threads + select handler), so this is a clean start, not a
   // dead end.
   if (!selectedRun) {
     return (
-      <main className="flex h-[calc(100dvh-2.75rem)] bg-background text-foreground">
-        <aside className="flex w-96 shrink-0 flex-col border-r border-border">
-          <ComposeChat
-            threads={runs.map((r) => ({ id: r.id, label: r.name || r.id }))}
-            activeId=""
-            newDesign
-            onSelectThread={(id) => { setSelectedId(id); setNewDesign(false); setIdBrief(null); setProductSpec(null); setStage('electronics'); setBuiltDisc({}); setPipeStatus({}); setPipeFeedback(null) }}
-            onNew={() => {}}
-            onRunComplete={onRunComplete}
-            onIdBrief={onIdBrief}
-            onProductSpec={setProductSpec}
-          />
-        </aside>
-        <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-muted-foreground">
-          Describe a board on the left to design your first one.
+      <main className="flex h-[calc(100dvh-2.25rem)] flex-col overflow-hidden bg-background text-foreground">
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          <aside style={{ width: leftW }} className="flex shrink-0 flex-col border-r border-border">
+            <ComposeChat
+              threads={runs.map((r) => ({ id: r.id, label: r.name || r.id }))}
+              activeId=""
+              newDesign
+              onSelectThread={(id) => { setSelectedId(id); setNewDesign(false); setIdBrief(null); setProductSpec(null); setStage('electronics'); setBuiltDisc({}) }}
+              onNew={() => {}}
+              onRunComplete={onRunComplete}
+              onIdBrief={onIdBrief}
+              onProductSpec={setProductSpec}
+              productSpec={productSpec}
+              onProductBuilt={onProductBuilt}
+            />
+          </aside>
+          <Handle which="left" />
+          <div className="flex min-w-0 flex-1 items-center justify-center p-6 text-center text-sm text-muted-foreground">
+            Describe a board on the left to design your first one.
+          </div>
+          {rightPane}
         </div>
+
+        <TerminalPanel
+          collapsed={termCollapsed}
+          onToggle={toggleTerm}
+          tab={termTab}
+          onTabChange={setTermTab}
+        />
+        <StatusBar
+          runId={pipelineRunId ?? (selectedId || null)}
+          pipeline={pipelineRunId ? pipeStatusByRun[pipelineRunId] : pipeStatus}
+          running={!!pipelineRunId}
+          tiers={llmTiers}
+          problemCount={problemCount}
+          onProblemsClick={() => { setTermTab('problems'); if (termCollapsed) toggleTerm() }}
+          startedAt={pipeStartedAt}
+        />
       </main>
     )
   }
 
-  const real = realBoard && realBoard.base === (selectedRunDir ?? '') ? realBoard : null
-  const isReal = selectedRun?.real === true && real !== null
   const boardBase = selectedRunDir ? `${selectedRunDir}/board` : '/board'
   // The run has a bespoke chip-scale board — point Layout + Schematic at ITS
   // artwork (the flroute reference schematic/layout still shows a Pico otherwise).
@@ -360,7 +590,8 @@ export default function Compose2Page() {
   const chipSchemSvg = selectedRun ? `/runs/${selectedRun.id}/electronics/chipscale-schematic.svg` : ''
 
   return (
-    <main className="flex h-[calc(100dvh-2.75rem)] overflow-hidden bg-background text-foreground">
+    <main className="flex h-[calc(100dvh-2.25rem)] flex-col overflow-hidden bg-background text-foreground">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
       {/* LEFT — conversation (real interview + live agent step feed) */}
       <aside style={{ width: leftW }} className="flex shrink-0 flex-col border-r border-border">
         <ComposeChat
@@ -371,8 +602,8 @@ export default function Compose2Page() {
           newDesign={newDesign}
           revisePrefill={revisePrefill}
           onPrefillConsumed={() => setRevisePrefill('')}
-          onSelectThread={(id) => { setSelectedId(id); setNewDesign(false); setIdBrief(null); setProductSpec(null); setStage('electronics'); setBuiltDisc({}); setPipeStatus({}); setPipeFeedback(null) }}
-          onNew={() => { setNewDesign(true); setBuiltDisc({}); setPipeStatus({}); setPipeFeedback(null) }}
+          onSelectThread={(id) => { setSelectedId(id); setNewDesign(false); setIdBrief(null); setProductSpec(null); setStage('electronics'); setBuiltDisc({}) }}
+          onNew={() => { setNewDesign(true); setBuiltDisc({}) }}
           builtDisciplines={builtDisc}
           pipelineStatus={pipeStatus}
           pipelineRunning={pipeRunning}
@@ -383,6 +614,7 @@ export default function Compose2Page() {
           onRunComplete={onRunComplete}
           onIdBrief={onIdBrief}
           onProductSpec={setProductSpec}
+          productSpec={productSpec}
           onRename={async (id, name) => {
             await fetch('/api/runs/rename', {
               method: 'POST', headers: { 'content-type': 'application/json' },
@@ -398,8 +630,10 @@ export default function Compose2Page() {
       {/* CENTER — stage bar over the middle pane ONLY, then the active stage's
           visualization. The right pane is a full-height sibling (like the left). */}
       <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {/* stage bar — scoped to the middle pane */}
-        <div className="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-border px-2 py-1.5">
+        {/* stage bar — editor-style tab strip scoped to the middle pane: each tab
+            carries its own bottom border; the ACTIVE tab drops it (bg-background)
+            so it reads connected to the content below, with a 1px amber top edge */}
+        <div className="flex h-9 shrink-0 items-stretch overflow-x-auto bg-card/40">
           {STAGES.map((s) => {
             const needsSpec = ['explore', 'firmware', 'manufacturing', 'supplyChain', 'validation'].includes(s.key)
             // Design (id) is now one-click like the other disciplines: reachable as
@@ -411,15 +645,19 @@ export default function Compose2Page() {
               <button key={s.key} type="button" disabled={locked}
                 onClick={() => setStage(s.key)}
                 title={s.key === 'id' && !idBrief && !productSpec ? 'describe a product first' : s.key === 'explore' && !productSpec ? 'describe a product first' : s.label}
-                className={cn('flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11px]',
-                  on ? 'bg-secondary font-medium text-foreground' : 'text-muted-foreground hover:text-foreground',
+                className={cn('relative flex shrink-0 items-center gap-1.5 border-b border-r border-border px-3 text-[11.5px]',
+                  on ? 'border-b-transparent bg-background font-medium text-foreground'
+                    : 'bg-card/40 text-muted-foreground hover:text-foreground',
                   locked && 'cursor-not-allowed opacity-40 hover:text-muted-foreground')}>
+                {on && <span aria-hidden className="absolute inset-x-0 top-0 h-px bg-primary" />}
                 <s.Icon className={cn('size-3.5 shrink-0', on && 'text-primary')} />
                 {s.label}
-                {!s.built && <span className="rounded-sm bg-muted px-1 text-[8px] uppercase tracking-wide text-muted-foreground">soon</span>}
+                {!s.built && <span className="bg-muted px-1 text-[8px] uppercase tracking-wide text-muted-foreground">soon</span>}
               </button>
             )
           })}
+          {/* filler completes the tab strip's bottom border after the last tab */}
+          <div aria-hidden className="min-w-4 flex-1 border-b border-border" />
         </div>
 
         {/* active stage visualization (middle pane only). While the full pipeline
@@ -445,19 +683,19 @@ export default function Compose2Page() {
                   <div className="flex min-w-0 flex-1 items-center gap-3 overflow-hidden">
                     {!newDesign && isReal && tab !== 'Overview' && <ReviewsPill real={real} />}
                     {!newDesign && isReal && real?.board?.bomTotal ? (
-                      <span className="shrink-0 rounded-full border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground"
+                      <span className="shrink-0 border border-border px-2 py-0.5 font-mono text-[10px] text-muted-foreground"
                         title="component BOM estimate — not fab, not a quote">
                         ~${Number(real.board.bomTotal).toFixed(2)} BOM
                       </span>
                     ) : null}
                     <button type="button" onClick={() => setTab('Patterns')}
-                      className="flex shrink-0 items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+                      className="flex shrink-0 items-center gap-1 border border-border px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
                       title="reusable patterns & ingested knowledge">
                       <BookOpen className="size-3" /> Knowledge
                     </button>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    <div className="flex overflow-hidden rounded-sm border border-border">
+                    <div className="flex overflow-hidden border border-border">
                       {([['3d', '3D'], ['layout', 'Layout'], ['schematic', 'Schematic']] as const).map(([v, label]) => (
                         <button key={v} type="button" onClick={() => setView(v)}
                           className={cn('px-2.5 py-0.5 text-[11px]',
@@ -467,7 +705,7 @@ export default function Compose2Page() {
                       ))}
                     </div>
                     <button type="button" onClick={toggleFullscreen} title="fullscreen board"
-                      className="rounded-sm border border-border p-1 text-muted-foreground hover:text-foreground">
+                      className="border border-border p-1 text-muted-foreground hover:text-foreground">
                       <Maximize2 className="size-3.5" />
                     </button>
                   </div>
@@ -527,113 +765,25 @@ export default function Compose2Page() {
         )}
           </section>
 
-          <Handle which="right" />
+          {rightPane}
+      </div>
 
-          {/* RIGHT — the active stage's detailed results */}
-          <section style={{ width: rightW }} className="flex shrink-0 border-l border-border">
-            {stage === 'electronics' && !productSpec ? (
-              <>
-                <nav className="flex w-16 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border bg-card/30 py-2">
-                  {VIEWS.map((v) => {
-                    const on = tab === v.tab
-                    return (
-                      <button key={v.tab} type="button" onClick={() => setTab(v.tab)} title={v.label}
-                        className={cn('mx-1.5 flex flex-col items-center gap-0.5 rounded-md px-1 py-1.5 text-[8px]',
-                          on ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground')}>
-                        <v.Icon className={cn('size-4', on && 'text-primary')} />
-                        <span className="leading-none">{v.label}</span>
-                      </button>
-                    )
-                  })}
-                </nav>
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <div className="min-h-0 flex-1 overflow-y-auto">
-                    <ErrorBoundary>
-                      {newDesign ? (
-                        <div className="flex h-full items-center justify-center p-6 text-center text-xs text-muted-foreground">
-                          No board yet — the overview appears once your new design builds.
-                        </div>
-                      ) : (
-                        <>
-                          {tab === 'Overview' && <RunOverview runId={selectedRun.runDir ? selectedRun.id : null} run={selectedRun} />}
-                          {tab === 'Objects' && <BoardObjects real={real} />}
-                          {tab === 'Artifacts' && <ArtifactExplorer runId={selectedRun.runDir ? selectedRun.id : null} />}
-                          {tab === 'Code' && <CodeViewer key={isReal ? 'real' : 'seed'} files={isReal ? real?.ato : null} />}
-                          {tab === 'BOM' && <BomTable lines={isReal ? real?.bom : null} />}
-                          {tab === 'Checks' && <BoardChecks real={real} />}
-                          {tab === 'Constraints' && <ConstraintsPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
-                          {tab === 'Pinout' && <PinoutPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
-                          {tab === 'Advanced' && <AdvancedRoutingPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
-                          {tab === 'Ingest' && <IngestPanel />}
-                          {tab === 'Patterns' && <PatternsPanel />}
-                          {tab === 'FL-1 Ready' && <FL1ReadinessPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
-                          {tab === 'Recovery' && <RecoveryPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
-                          {tab === 'Assembly' && <AssemblyPanel runId={selectedRun.runDir ? selectedRun.id : null} fabZip={null} />}
-                          {tab === 'Review' && <ReviewPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
-                          {tab === 'FL-1' && (
-                            <div className="flex h-full flex-col">
-                              <FL1ValidationView runId={selectedRun.runDir ? selectedRun.id : null} />
-                              <div className="border-t border-border">
-                                <FL1Loop
-                                  runId={selectedRun.runDir ? selectedRun.id : null}
-                                  onRevise={(eco) => setRevisePrefill(eco)}
-                                />
-                              </div>
-                            </div>
-                          )}
-                          {tab === 'Order' && <ProcurementPanel real={real} runDir={selectedRunDir ?? null} />}
-                        </>
-                      )}
-                    </ErrorBoundary>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <div className="flex min-w-0 flex-1 flex-col">
-                <ErrorBoundary>
-                  {['firmware', 'manufacturing', 'supplyChain', 'validation'].includes(stage) ? (
-                    <div className="flex h-full flex-col gap-3 p-4 text-[12px] text-muted-foreground">
-                      <div className="font-mono text-[9px] uppercase tracking-wide">specialist module</div>
-                      <p>A <span className="text-foreground">separate module</span> built on the shared generic engine: the product engine emits a structured artifact grounded in the spec + real board.</p>
-                      <p>Fidelity is honest — <span className="text-amber-600 dark:text-amber-400">generated / advisory</span>, not validated, compiled, or live-sourced. Each artifact carries its own fidelity label.</p>
-                    </div>
-                  ) : stage === 'electronics' && productSpec ? (
-                    <div className="flex h-full flex-col gap-3 p-4 text-[12px] text-muted-foreground">
-                      <div className="font-mono text-[9px] uppercase tracking-wide">electronics · bespoke chip-down board</div>
-                      <p>The real electronics for this product: the engine picks a minimal, highly-integrated part set (bare SoC + passives), and it's placed (net-aware) + routed (freerouting) into a <span className="text-foreground">true chip-scale board</span> — not the fixed RP2040 reference board.</p>
-                      <p>Every board is checked with <span className="text-foreground">real KiCad DRC</span> against a real fab process, and the redesign loop iterates until it converges or honestly reports what's left.</p>
-                      <p>Honest: generic footprints where no LCSC part is resolved, not yet WLCSP/rigid-flex — a real step toward the earbud, <span className="text-amber-600 dark:text-amber-400">not EVT silicon</span>.</p>
-                    </div>
-                  ) : stage === 'explore' ? (
-                    <div className="flex h-full flex-col gap-3 p-4 text-[12px] text-muted-foreground">
-                      <div className="font-mono text-[9px] uppercase tracking-wide">design-of-N</div>
-                      <p>The product engine turns your spec into a <span className="text-foreground">design problem</span> (variables · objectives · constraints), then the optimizer generates candidates, scores them, and picks the best off the Pareto frontier.</p>
-                      <p>Objectives with a real evaluator (cost, size, battery) are scored analytically. Objectives without one (audio, antenna, thermal…) are carried as <span className="text-amber-600 dark:text-amber-400">honest gaps</span> until their evaluator plugin lands — never faked.</p>
-                      <p>The selected design is what the discipline modules then build.</p>
-                    </div>
-                  ) : stage === 'id'
-                    ? (idBrief ? <IdBriefPanel brief={idBrief} /> : <StagePlaceholder title="Industrial Design" Icon={Palette} />)
-                    : stage === 'mechanical'
-                      ? (
-                        <div className="flex h-full flex-col gap-3 p-4 text-[12px] text-muted-foreground">
-                          <div className="font-mono text-[9px] uppercase tracking-wide">mechanical · CAD</div>
-                          <p>The product engine emits a <span className="text-foreground">mechanical build plan</span> (sketch · extrude · pocket · standoff · cutout) sized to the real board. A thin executor renders it in <span className="text-foreground">Onshape</span> and exports a real <span className="text-foreground">STEP</span> file.</p>
-                          <p>No fixed enclosure recipe — the plan (data) decides the form, so the same executor builds a shell, a bracket, or a potting box.</p>
-                          <p>Advisory CAD: a first-pass parametric part, <span className="text-amber-600 dark:text-amber-400">not tolerance/fit-validated</span>. Per-op failures are reported, never hidden.</p>
-                        </div>
-                      )
-                      : (
-                        <div className="flex h-full flex-col gap-3 p-4 text-[12px] text-muted-foreground">
-                          <div className="font-mono text-[9px] uppercase tracking-wide">simulation · physics</div>
-                          <p><span className="text-foreground">thermal</span> and <span className="text-foreground">drop</span> are real finite-element solves via <span className="text-foreground">scikit-fem</span> — a 2D FEM heat-conduction field and a Kirchhoff-plate modal FEM. Acoustics (sealed-box), RF (link budget) and battery (energy) are analytic. Each result is labeled by <span className="text-foreground">fidelity</span> and the tool that produced it.</p>
-                          <p>The analytic domains' next-fidelity upgrade is 3D FEA/FDTD — <span className="text-amber-600 dark:text-amber-400">Elmer · CalculiX · openEMS · OpenFOAM</span> (gmsh present) — install-gated.</p>
-                          <p>The runner only reports metrics it can compute — nothing faked.</p>
-                        </div>
-                      )}
-                </ErrorBoundary>
-              </div>
-            )}
-          </section>
+      {/* bottom Terminal panel + status bar — full width, below the 3-pane row */}
+      <TerminalPanel
+        collapsed={termCollapsed}
+        onToggle={toggleTerm}
+        tab={termTab}
+        onTabChange={setTermTab}
+      />
+      <StatusBar
+        runId={pipelineRunId ?? (selectedId || null)}
+        pipeline={pipelineRunId ? pipeStatusByRun[pipelineRunId] : pipeStatus}
+        running={!!pipelineRunId}
+        tiers={llmTiers}
+        problemCount={problemCount}
+        onProblemsClick={() => { setTermTab('problems'); if (termCollapsed) toggleTerm() }}
+        startedAt={pipeStartedAt}
+      />
     </main>
   )
 }

@@ -11,7 +11,9 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { callLLMText, overrideFromHeaders, type LLMOverride } from '@/lib/llm'
+import { MODEL } from '@/lib/model-tiers'
 import type { ProductSpec } from '@/lib/product-spec'
+import { normalizeIdBrief } from '@/lib/id-brief'
 
 export const dynamic = 'force-dynamic'
 // A realistic multi-sensor chip-scale board (~14 parts) takes ~3.5 min through the
@@ -77,13 +79,37 @@ RULES:
   and pours the ground plane; you list the parts, the signal/power connections, and
   the ground pins.`
 
-async function emitPartsNets(userMsg: string, override?: LLMOverride): Promise<{ parts: any[]; nets: any[]; gnd: string[]; note?: string; droppedCapabilities?: string[] }> {
+/**
+ * Two tiers, because these are two different jobs:
+ *  - DESIGN_MODEL: the FIRST call, which is the actual design decision (part set +
+ *    topology). Raising this tier is what buys board quality — on Opus this call
+ *    produced correct USB-C CC1/CC2 sink pulldowns, a 74LVC1T45 level shifter for the
+ *    LED ring, and RF keep-out under the radar; Sonnet did not.
+ *  - REPLAN_MODEL: the density re-plan rounds, which only coarsen/shed an ALREADY-decided
+ *    design so it routes clean. Kept cheap so re-plan rounds can never multiply the design
+ *    tier's cost across iterations.
+ *
+ * HONEST CAVEAT on the latency of the design tier: an all-Opus run appeared to take ~11min
+ * vs a ~117s Sonnet baseline, but that comparison does NOT hold up. Two proposed mechanisms
+ * (this re-plan loop multiplying, and the 300s CLI timeout) were both investigated and both
+ * were FALSE — no re-plan round ever ran, and no claude process belonged to the app. The
+ * apparent slowdown was partly a measurement error (watching the wrong run directory). So
+ * the design tier's real cost is UNMEASURED, not "too slow". Default stays fast (see
+ * lib/model-tiers.ts) until one clean end-to-end run gives a real number.
+ */
+const DESIGN_MODEL = MODEL.design
+const REPLAN_MODEL = MODEL.replan
+
+async function emitPartsNets(userMsg: string, override?: LLMOverride, model: string = DESIGN_MODEL): Promise<{ parts: any[]; nets: any[]; gnd: string[]; note?: string; droppedCapabilities?: string[] }> {
   const antKey = process.env.ANTHROPIC_API_KEY
-  const opts = override?.apiKey
-    ? override
-    : antKey
-      ? { apiKey: antKey, provider: 'anthropic' as const, model: 'claude-sonnet-5' }
-      : { model: 'claude-sonnet-5' }
+  // Compose, don't switch: tier default first, caller override spread LAST — so
+  // a BYOK caller (provider+apiKey, no model) keeps this stage's model tier,
+  // while an explicit caller model still wins over the tier.
+  const opts: LLMOverride = {
+    ...(antKey ? { apiKey: antKey, provider: 'anthropic' as const } : {}),
+    model,
+    ...override,
+  }
   let lastErr: unknown
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -157,14 +183,29 @@ function plannerNetlist(designPath: string): Promise<{ parts: any[]; nets: any[]
 function runBoard(payload: object, svgPath: string, timeoutMs = 285_000): Promise<any> {
   const script = path.join(process.cwd(), '..', '..', 'tools', 'tscircuit', 'run_board.mjs')
   return new Promise((resolve, reject) => {
-    const py = spawn('node', [script], { timeout: timeoutMs })
+    // process.execPath, not 'node': run_board.mjs is an EXTERNAL tool (two dirs
+    // up, outside the Next root) that we shell out to, never import. A literal
+    // 'node' first arg makes Turbopack's build-time tracer treat args[0] as a
+    // module to resolve and bundle, which fails the build (it partially
+    // evaluates process.cwd() away to "/../tools/.../run_board.mjs"). Spawning
+    // the running server's own interpreter is also strictly more correct: it
+    // can't pick up a different node off PATH (systemd's PATH is minimal).
+    const t0 = Date.now()
+    const py = spawn(process.execPath, [script], { timeout: timeoutMs })
     let out = '', err = ''
     py.stdout.on('data', (d) => (out += d))
     py.stderr.on('data', (d) => (err += d))
     py.on('error', reject)
     py.on('close', () => {
       try { resolve(JSON.parse(out.trim().split('\n').pop() || '{}')) }
-      catch { reject(new Error('runner produced no JSON: ' + (err || out).slice(0, 300))) }
+      catch {
+        // Distinguish the spawn-timeout kill (SIGTERM at the wall → truncated/no
+        // JSON) from a genuinely bad runner output, so the UI shows the real cause.
+        const elapsed = Date.now() - t0
+        if (py.killed && elapsed >= timeoutMs - 1_000)
+          return reject(new Error(`runner timed out after ${Math.round(elapsed / 1000)}s (wall ${Math.round(timeoutMs / 1000)}s)`))
+        reject(new Error('runner produced no JSON: ' + (err || out).slice(0, 300)))
+      }
     })
     py.stdin.write(JSON.stringify({ ...payload, svgPath }))
     py.stdin.end()
@@ -213,9 +254,16 @@ function describeDesignChange(before: any[], after: any[]): string {
   return bits.join('; ') || 'no net change in the part set'
 }
 
+// Board shape + mounting provisions requested from the runner (derived from the
+// run's ID brief — see POST). Passed verbatim into every run_board invocation.
+type BoardOpts = {
+  boardShape: { type: 'rect' } | { type: 'circle'; marginMm?: number }
+  mountingHoles: { count: number; holeDiaMm: number }
+}
+
 /** One full board candidate: part-set engine → real footprints → routed board. */
-async function buildCandidate(userMsg: string, req: Request, dir: string, svgName: string, timeoutMs: number) {
-  const { parts, nets, gnd, note, droppedCapabilities } = await emitPartsNets(userMsg, overrideFromHeaders(req.headers))
+async function buildCandidate(userMsg: string, req: Request, dir: string, svgName: string, timeoutMs: number, boardOpts: BoardOpts, model?: string) {
+  const { parts, nets, gnd, note, droppedCapabilities } = await emitPartsNets(userMsg, overrideFromHeaders(req.headers), model)
   // pull REAL LCSC footprints for any part the engine tagged with a valid id;
   // attach as part.kicadMod so the runner uses the true pad geometry + size.
   // Fetch each distinct id ONCE (duplicate ids would race on the same /tmp file).
@@ -227,11 +275,15 @@ async function buildCandidate(userMsg: string, req: Request, dir: string, svgNam
     const m = p?.lcsc ? mods.get(String(p.lcsc)) : undefined
     if (m) { p.kicadMod = m; realFootprints++ }
   }
-  const result = await runBoard({ parts, nets, gnd }, path.join(dir, svgName), timeoutMs)
+  const result = await runBoard({ parts, nets, gnd, ...boardOpts }, path.join(dir, svgName), timeoutMs)
   return { parts, nets, gnd, note, droppedCapabilities, realFootprints, result, svgName }
 }
 
 export async function POST(req: Request) {
+  // Time origin for ALL budget accounting in this route — set at ENTRY so the
+  // first candidate build (LLM + up to 285s route) counts against the budget
+  // too, not just the re-plan loop. maxDuration=600 covers the whole route.
+  const routeStart = Date.now()
   try {
     const body = await req.json()
     const spec = body.spec as ProductSpec | undefined
@@ -257,6 +309,25 @@ export async function POST(req: Request) {
     const dir = path.join(process.cwd(), 'public', 'runs', runId, 'electronics')
     await fs.mkdir(dir, { recursive: true })
 
+    // BOARD SHAPE + MOUNTING PROVISIONS — derived from the run's ID brief (same
+    // loader as the mechanical route). A round/puck/disc/cylindrical form factor
+    // gets a CIRCULAR board so it fits the round enclosure; anything else stays
+    // rect. EVERY board carries NPTH screw holes (M2 clearance = 2.2mm): 3 on a
+    // bolt circle for round boards, 4 corner holes for rect — so the mechanical
+    // stage has something real to bolt to. The runner places them collision-free
+    // and re-runs real DRC with them in the board.
+    let idText = ''
+    try {
+      const brief = normalizeIdBrief(JSON.parse(
+        await fs.readFile(path.join(process.cwd(), 'public', 'runs', runId, 'disciplines', 'id-brief.json'), 'utf8')))
+      idText = [brief.formFactor, ...(brief.keyFeatures ?? []), ...(brief.constraints ?? [])].filter(Boolean).join(' ')
+    } catch { /* no ID brief — default rect */ }
+    const roundForm = /\b(round|circular|puck|disc|disk|coin|cylind\w*)\b/i.test(idText)
+    const boardOpts: BoardOpts = {
+      boardShape: roundForm ? { type: 'circle' } : { type: 'rect' },
+      mountingHoles: { count: roundForm ? 3 : 4, holeDiaMm: 2.2 },
+    }
+
     // MERGER (Stage E): if the planner produced a real UCS design for this run,
     // build the chip-scale board from THAT — its real parts, MCU pin allocation
     // and bus connectivity, exported to a netlist by synth's bridge — so the board
@@ -269,13 +340,13 @@ export async function POST(req: Request) {
     if (!keepCapabilities && await exists(plannerDesignPath)) {
       const nl = await plannerNetlist(plannerDesignPath)
       if (nl?.parts?.length) {
-        const result = await runBoard({ parts: nl.parts, nets: nl.nets, gnd: nl.gnd }, path.join(dir, 'chipscale.svg'), 285_000)
+        const result = await runBoard({ parts: nl.parts, nets: nl.nets, gnd: nl.gnd, ...boardOpts }, path.join(dir, 'chipscale.svg'), 285_000)
         cand = { parts: nl.parts, nets: nl.nets, gnd: nl.gnd, note: undefined, droppedCapabilities: undefined, realFootprints: 0, result, svgName: 'chipscale.svg' }
         boardSource = 'planner-merged'
       }
     }
     // FIRST PASS (fallback) — LLM part set, routed.
-    if (!cand) cand = await buildCandidate(baseMsg, req, dir, 'chipscale.svg', 285_000)
+    if (!cand) cand = await buildCandidate(baseMsg, req, dir, 'chipscale.svg', 285_000, boardOpts)
     let designConvergence: any = null
 
     // OUTER LOOP (design↔routing): the routing layer already loosens placement to
@@ -288,8 +359,12 @@ export async function POST(req: Request) {
     // sets, not the model's say-so). One bounded iteration so it can't run away.
     if (DENSITY_REPLAN && !keepCapabilities && boardSource === 'llm' && densityFailed(cand.result)) {
       const first = cand.result
-      const T_START = Date.now()
-      const OUTER_BUDGET_MS = 520_000 // stay under maxDuration=600 with margin for post-processing
+      // Budget arithmetic: measured from ROUTE ENTRY (routeStart above), so the
+      // first pass's real cost (LLM emit + up to 285s route) is already counted.
+      // 520s total leaves ≥80s of maxDuration=600 for SVG promotion, persistence
+      // and the response. The old origin (set HERE, after the first build) let
+      // first-pass time + 520s of re-planning stack past the 600s wall.
+      const OUTER_BUDGET_MS = 520_000
       const MAX_REPLANS = 3
       const iterations: any[] = []
       const droppedCaps: string[] = [] // capabilities shed across the KEPT re-plan path (Stage D)
@@ -302,7 +377,7 @@ export async function POST(req: Request) {
       // run out, or when a build fails (fall back to the best so far).
       let round = 0
       while (round < MAX_REPLANS && densityFailed(best.result)) {
-        const elapsed = Date.now() - T_START
+        const elapsed = Date.now() - routeStart
         const estNext = iterations.length ? (iterations[iterations.length - 1].ms ?? 180_000) : 190_000
         if (elapsed + estNext > OUTER_BUDGET_MS) { iterations.push({ round: round + 1, skipped: 'time budget', elapsedMs: elapsed }); break }
         round++
@@ -328,7 +403,8 @@ export async function POST(req: Request) {
         const tA = Date.now()
         let next: Awaited<ReturnType<typeof buildCandidate>> | null = null
         let replanError: string | null = null
-        try { next = await buildCandidate(baseMsg + feedback, req, dir, `chipscale-replan${round}.svg`, 220_000) }
+        // re-plans are mechanical simplification of an already-decided design → cheaper model
+        try { next = await buildCandidate(baseMsg + feedback, req, dir, `chipscale-replan${round}.svg`, 220_000, boardOpts, REPLAN_MODEL) }
         catch (e) { replanError = String(e) }
         const ms = Date.now() - tA
 
@@ -346,14 +422,25 @@ export async function POST(req: Request) {
         if (best.result?.ok) break // clean route — genuinely converged
       }
 
-      // promote the winning board's SVGs to the canonical names the UI reads
+      // promote the winning board's SVGs to the canonical names the UI reads.
+      // A failed promotion is NOT silent: the stats below describe the re-planned
+      // board, so if chipscale.svg still shows the first-pass board the response
+      // must say so (svgStale) instead of letting image and numbers desync.
+      let svgStale = false
+      const svgStaleNotes: string[] = []
       if (best !== cand) {
         for (const [from, to] of [[best.svgName, 'chipscale.svg'], [best.svgName.replace(/\.svg$/, '-schematic.svg'), 'chipscale-schematic.svg']]) {
-          try { await fs.copyFile(path.join(dir, from), path.join(dir, to)) } catch { /* svg optional */ }
+          try { await fs.copyFile(path.join(dir, from), path.join(dir, to)) }
+          catch (e) {
+            svgStale = true
+            svgStaleNotes.push(`${to} still shows the FIRST-PASS board (copy of ${from} failed: ${String(e).slice(0, 120)})`)
+          }
         }
       }
 
       designConvergence = {
+        svgStale,
+        ...(svgStale ? { svgStaleNote: svgStaleNotes.join('; ') } : {}),
         triggered: true,
         reason: `first pass routed ${first.boardMm?.w}×${first.boardMm?.h}mm but held ${first.drc?.errors} DRC error(s) — over the density budget`,
         replans: round,
@@ -394,8 +481,16 @@ export async function POST(req: Request) {
       // manufacturing, validation) can ground on the REAL chip-scale parts (the
       // BLE SoC + mics + PMIC), not the flroute reference board's placeholder BOM.
       const partList = parts.map((p: any) => ({ name: p.name, footprint: p.footprint, kind: p.kind, lcsc: p.lcsc ?? null }))
+      // CONTRACT with the MECHANICAL stage (read from chipscale-board.json):
+      //   boardShape: {type:'rect'} | {type:'circle', diameterMm, boltCircleDiaMm?}
+      //     — the REAL as-built outline the runner exported to Edge.Cuts (for a
+      //     circle, boardMm.w = boardMm.h = the real diameter, grown if needed
+      //     to clear all courtyards; never the requested nominal).
+      //   mountingHoles: [{x, y, diaMm}] — non-plated screw holes actually
+      //     drilled in the .kicad_pcb, in BOARD-CENTERED mm (+x right, +y up).
+      //     The enclosure should put its bosses/standoffs exactly there.
       await fs.writeFile(path.join(dir, 'chipscale-board.json'),
-        JSON.stringify({ boardMm: result.boardMm, areaMm2: result.areaMm2, components: result.components, routedTraces: result.routedTraces, realFootprints, parts: partList, drc: result.drc ?? null, drcRepair: result.drcRepair ?? null, designConvergence, boardSource }))
+        JSON.stringify({ boardMm: result.boardMm, areaMm2: result.areaMm2, components: result.components, routedTraces: result.routedTraces, realFootprints, parts: partList, boardShape: result.boardShape ?? null, mountingHoles: result.mountingHoles ?? [], drc: result.drc ?? null, drcRepair: result.drcRepair ?? null, designConvergence, boardSource }))
       // the routed .kicad_pcb for the 3D render (the real chip-down board)
       if (result.kicadPcb) await fs.writeFile(path.join(dir, 'chipscale.kicad_pcb'), result.kicadPcb)
     }
@@ -404,6 +499,8 @@ export async function POST(req: Request) {
       ok: !!result.ok,
       boardMm: result.boardMm,
       areaMm2: result.areaMm2,
+      boardShape: result.boardShape ?? null,
+      mountingHoles: result.mountingHoles ?? [],
       components: result.components,
       routedTraces: result.routedTraces,
       errors: result.errors ?? {},
@@ -413,6 +510,10 @@ export async function POST(req: Request) {
       boardSource,
       realFootprints,
       svgUrl: result.svg ? `/runs/${runId}/electronics/chipscale.svg?t=${Date.now()}` : null,
+      // true when a re-planned board won but its SVG could not be promoted to
+      // chipscale.svg — the image then shows the first-pass board while the
+      // stats describe the re-plan (see designConvergence.svgStaleNote).
+      svgStale: !!designConvergence?.svgStale,
       code: result.code,
     })
   } catch (err) {

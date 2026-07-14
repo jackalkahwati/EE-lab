@@ -52,8 +52,10 @@
   --accent-foreground: #0a0c10;
   --destructive: #f25555;
   --success: #3fb950;
-  --border: #1c212c;
-  --input: #1c212c;
+  /* structural lines: warm amber-tinted grey, bright enough to actually read
+     as lines on the near-black background (was #1c212c — nearly invisible) */
+  --border: #5a5040;
+  --input: #5a5040;
   --ring: #e8a33d;
   --radius: 0.25rem;
 }

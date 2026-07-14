@@ -11,12 +11,19 @@
  * never fabricated. Same provider chain + JSON extraction as /api/interview.
  */
 import { callLLMText, overrideFromHeaders, type LLMOverride } from '@/lib/llm'
+import { MODEL } from '@/lib/model-tiers'
 import { PRODUCT_SPEC_SCHEMA, normalizeSpec } from '@/lib/product-spec'
 import { idBriefSummary, normalizeIdBrief, type IdBrief } from '@/lib/id-brief'
 
 export const dynamic = 'force-dynamic'
 
-const MAX_QUESTIONS = 4
+// Each clarifying turn is a full model round-trip (~50s) plus the user's own
+// think time, and this interview sits at the very front of a Compose run, so
+// questions are expensive. Three well-chosen ones (the SYSTEM prompt orders
+// them highest-impact first) pin down the product; the fourth mostly confirmed
+// defaults the finalize step picks anyway. Matches /api/interview and
+// /api/industrial-design, which are both already at 3.
+const MAX_QUESTIONS = 3
 
 interface Answer {
   question: string
@@ -70,7 +77,20 @@ finalize with EXACTLY this shape:
  *  its envelope becomes the size budget and its POV the product philosophy. */
 const ID_CONSTRAINT = `\n\nAn INDUSTRIAL DESIGN brief has already been established for this product and is a HARD constraint. Respect it: its envelope IS the product size budget (budgets.sizeMm must fit within it), its aesthetic IS the product philosophy, and every discipline (electronics maxBoardMm, mechanical, etc.) must fit the given form and CMF. Do not contradict or re-open the form; design the internals to serve it.\nINDUSTRIAL DESIGN BRIEF:\n`
 
-/** Shared provider chain (lib/llm), or the caller's own key/provider header. */
+/** Shared provider chain (lib/llm), or the caller's own key/provider header.
+ *
+ *  NOTE — deliberately NOT model-split the way /api/interview is. There, `force`
+ *  cleanly partitions the two jobs: the live Compose path always calls it with
+ *  body.force=true (the architect's electronics hand-off), so the spec turn is
+ *  always the strong tier and only the standalone board interview asks on Haiku.
+ *  Here `force` means ONLY "you have used up your questions" — there is no
+ *  body.force, and the SYSTEM prompt explicitly tells the model to finalize
+ *  EARLY on a clear single-discipline intent. So the Product Spec is routinely
+ *  emitted on a force=false turn. Putting force=false on MODEL.interviewQuestion
+ *  would silently drop the quality-critical spec — which the entire downstream
+ *  pipeline inherits — onto the cheap tier, precisely on the clearest intents.
+ *  Splitting this safely needs the ask/finalize decision separated from artifact
+ *  generation, not a `force ? strong : cheap` ternary. */
 async function callLLM(userMsg: string, force: boolean, override?: LLMOverride, idConstraint?: string) {
   let sys = force
     ? SYSTEM + '\nYou have asked enough questions, you MUST finalize now (enough:true).'
@@ -84,12 +104,14 @@ async function callLLM(userMsg: string, force: boolean, override?: LLMOverride, 
       // via the key path (the default chain falls through to nemotron in this
       // server even with a valid key). The caller's own x-llm-* override wins.
       const antKey = process.env.ANTHROPIC_API_KEY
-      const opts =
-        override?.apiKey
-          ? override
-          : antKey
-            ? { apiKey: antKey, provider: 'anthropic' as const, model: 'claude-sonnet-5' }
-            : { model: 'claude-sonnet-5' }
+      // Compose, don't switch: tier default first, caller override spread LAST —
+      // a BYOK caller (provider+apiKey, no model) keeps the design tier, while
+      // an explicit caller model still wins over it.
+      const opts: LLMOverride = {
+        ...(antKey ? { apiKey: antKey, provider: 'anthropic' as const } : {}),
+        model: MODEL.design,
+        ...override,
+      }
       const { text, provider } = await callLLMText(
         sys,
         attempt === 0
@@ -169,9 +191,24 @@ export async function POST(req: Request) {
     const force = answers.length >= MAX_QUESTIONS
     const { out, provider } = await callLLM(userMsg, force, overrideFromHeaders(req.headers), idConstraint)
 
-    if (out.enough) {
+    // Finalize rescue (interview's pattern): under force the model MUST
+    // finalize, but it can keep replying enough:false — which used to loop the
+    // client past MAX_QUESTIONS forever. Accept a structurally-valid spec even
+    // when the model says enough:false; with no usable spec under force, error
+    // out rather than asking question #4, #5, …
+    const specOk =
+      !!out.spec && typeof out.spec === 'object' &&
+      typeof (out.spec as { product?: unknown }).product === 'string' &&
+      (out.spec as { product: string }).product.trim().length > 0
+    if (out.enough || (force && specOk)) {
       const spec = normalizeSpec(out.spec)
       return Response.json({ type: 'spec', spec, request, provider })
+    }
+    if (force) {
+      return Response.json(
+        { error: 'architect failed to finalize: max questions reached but the model returned no valid product spec' },
+        { status: 502 },
+      )
     }
     return Response.json({
       type: 'question',

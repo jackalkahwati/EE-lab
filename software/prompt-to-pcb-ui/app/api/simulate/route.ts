@@ -51,28 +51,57 @@ export async function POST(req: Request) {
     if (!spec?.product) return Response.json({ error: 'missing product spec' }, { status: 400 })
 
     let boardAreaMm2: number | undefined
+    let boardMm: { w: number; h: number } | undefined
+    let layerCount: number | undefined
     if (runId && RUN_ID.test(runId)) {
-      // prefer the chip-scale board so thermal/RF/etc. use the real product area
+      // prefer the chip-scale board so thermal/RF/etc. use the real product area,
+      // the REAL w×h (no squaring), and the real layer count when known.
       const gb = await loadGroundBoard(runId)
-      if (gb) boardAreaMm2 = gb.wMm * gb.hMm
+      if (gb) {
+        boardAreaMm2 = gb.wMm * gb.hMm
+        boardMm = { w: gb.wMm, h: gb.hMm }
+        if (typeof gb.layers === 'number' && isFinite(gb.layers) && gb.layers > 0)
+          layerCount = gb.layers
+      }
     }
 
     const p = spec.budgets?.power ?? {}
     const num = (v: unknown) => (typeof v === 'number' && isFinite(v) ? v : undefined)
+    // A specified sleep power implies a duty-cycled sensor/wearable — default to a
+    // small realistic active fraction so runtime reflects average (not peak) draw.
+    // Prefer an explicit dutyCycle from the design/spec over this default. When the
+    // default IS injected, flag it (dutyCycleAssumed) so the runner labels the
+    // runtime result as resting on an assumption, not a spec value.
+    const DEFAULT_DUTY = 0.02
+    const sleepUw = num(design.sleepUw) ?? p.sleepUw
+    const specDuty = num(design.dutyCycle) ?? p.dutyCycle
+    const dutyCycleAssumed = specDuty == null && sleepUw != null
+    const dutyCycle = specDuty ?? (sleepUw != null ? DEFAULT_DUTY : undefined)
     // design (optimizer's selected candidate) overrides spec budgets where present
     const simReq: Record<string, unknown> = {
       activeMw: num(design.activeMw) ?? p.activeMw,
       batteryMah: num(design.batteryMah) ?? p.batteryMah,
       boardAreaMm2: num(design.boardAreaMm2) ?? boardAreaMm2,
+      boardMm,
+      layerCount,
       massG: num(design.massG) ?? spec.budgets?.massG,
       envelopeMm: spec.budgets?.sizeMm,
       enclosureMaterial: design.enclosureMaterial,
       antennaPlacement: design.antennaPlacement,
       runtimeTargetHours: p.runtimeHours,
+      sleepUw, dutyCycle, dutyCycleAssumed,
     }
 
     const out = await runSim(simReq)
-    const payload = { scipy: !!out.scipy, results: out.results ?? [], inputs: simReq }
+    const payload = {
+      scipy: !!out.scipy,
+      // FEM health passthrough: if scikit-fem failed to import or a FEM solve
+      // raised (and the runner degraded to lumped/analytic), the UI must see it.
+      femAvailable: !!out.femAvailable,
+      femErrors: Array.isArray(out.femErrors) ? out.femErrors : [],
+      results: out.results ?? [],
+      inputs: simReq,
+    }
 
     // Persist so the orchestrated sim result is durable + the tab shows it on
     // reload, and the feedback controller can read the real FAILs (was in-memory).
