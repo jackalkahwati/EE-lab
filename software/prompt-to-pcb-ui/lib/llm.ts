@@ -24,6 +24,11 @@ export interface LLMOverride {
 // cause of the "pipeline already in progress" lockups. On timeout the provider
 // throws, the chain falls through, and callers degrade honestly.
 const LLM_TIMEOUT_MS = 120_000
+// The Claude Code CLI path is slower than a raw fetch: full CLI spin-up (loads
+// the local config + MCP context) PLUS generation. A complex board's netlist can
+// take past the 120s fetch budget, and on timeout it wrongly falls through to the
+// (often out-of-credit) metered API. Give the CLI its own, longer wall.
+const CLAUDE_CLI_TIMEOUT_MS = 300_000
 
 async function openaiCall(system: string, user: string, key?: string): Promise<string> {
   const k = key || process.env.OPENAI_API_KEY
@@ -151,7 +156,7 @@ async function claudeCodeCall(system: string, user: string, _key?: string, model
   const env = { ...process.env }
   delete env.ANTHROPIC_API_KEY
   return await new Promise<string>((resolve, reject) => {
-    const cp = spawn(bin, ['-p', '--model', alias, '--output-format', 'json'], { env, timeout: LLM_TIMEOUT_MS })
+    const cp = spawn(bin, ['-p', '--model', alias, '--output-format', 'json'], { env, timeout: CLAUDE_CLI_TIMEOUT_MS })
     let out = '', err = ''
     cp.stdout.on('data', (d) => (out += d))
     cp.stderr.on('data', (d) => (err += d))
