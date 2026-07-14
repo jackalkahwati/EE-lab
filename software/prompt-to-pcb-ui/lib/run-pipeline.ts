@@ -189,13 +189,22 @@ export async function runFullPipeline(opts: RunOpts): Promise<PipelineResult> {
   if (aborted()) return { stages, feedback, updatedSpec: spec !== opts.spec ? spec : undefined }
 
   // ---- 5. Downstream advisory disciplines (each grounds on the real board) ----
-  for (const stage of DISCIPLINE_STAGES) {
-    if (aborted()) break
-    if (!applicable(stage)) { set(stage, 'skipped', 'not applicable to this product'); continue }
+  // These are INDEPENDENT — firmware, manufacturing, supply chain and validation
+  // each read the already-built board and don't depend on one another — so they
+  // run CONCURRENTLY instead of sequentially. That collapses the slow tail of the
+  // run (four ~1-min LLM calls back-to-back) into roughly one call's time; each
+  // reports its own status the moment it lands.
+  await Promise.all(DISCIPLINE_STAGES.map(async (stage) => {
+    if (aborted()) return
+    if (!applicable(stage)) { set(stage, 'skipped', 'not applicable to this product'); return }
     set(stage, 'running')
-    const ev = await runDiscipline(stage, opts)
-    set(stage, ev.status, ev.detail)
-  }
+    try {
+      const ev = await runDiscipline(stage, opts)
+      set(stage, ev.status, ev.detail)
+    } catch (e) {
+      set(stage, 'failed', String(e))
+    }
+  }))
 
   return { stages, feedback, updatedSpec: spec !== opts.spec ? spec : undefined }
 }

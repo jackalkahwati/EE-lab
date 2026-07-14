@@ -89,12 +89,36 @@ export async function POST(req: Request) {
           }
         }
       }
+      // Stage 4: ground on the CANONICAL design object — the real parts + MCU the
+      // planner/synth ACTUALLY built (design.json) — so every discipline
+      // describes what is truly on the board, not the architect's aspirational
+      // spec. This is what keeps board = design = BOM = discipline text coherent.
+      try {
+        const design = JSON.parse(await fs.readFile(
+          path.join(process.cwd(), 'public', 'runs', runId, 'data', 'design.json'), 'utf8'))
+        const parts: string[] = Array.isArray(design.parts)
+          ? design.parts.map((p: { mpn?: string }) => p.mpn).filter(Boolean) : []
+        if (design.mcu || parts.length) {
+          boardCtx += `\nCANONICAL DESIGN — the parts ACTUALLY on the board (describe THESE, not aspirational parts):`
+          if (design.mcu) boardCtx += `\n  MCU: ${design.mcu}`
+          if (parts.length) boardCtx += `\n  parts: ${parts.join(', ')}`
+          const subs = Array.isArray(design.substitutions) ? design.substitutions : []
+          if (subs.length) boardCtx += `\n  substitutions (requested → built): ${subs.map((s: { request?: string; mpn?: string }) => `${s.request} → ${s.mpn || '?'}`).join('; ')}`
+          if (Array.isArray(design.unsupported) && design.unsupported.length)
+            boardCtx += `\n  NOT on the board (unsupported, do not describe as present): ${design.unsupported.join(', ')}`
+          if (design.verification)
+            boardCtx += `\n  design verification: ${design.verification.converged ? 'converged (real checks pass)' : 'not converged'}`
+        }
+      } catch { /* no canonical design (non-plan run) — ground on the board/BOM above */ }
     }
 
     const sys = `detailed thinking off.
 You are the ${mod.label} specialist for an autonomous product-engineering platform.
 ${mod.guidance}
 GENERAL across product categories. Ground everything in the given product + board.
+When a CANONICAL DESIGN is given, describe the EXACT parts it lists (the real MCU
+and components actually placed) — never substitute the product spec's aspirational
+parts for what was really built, and never present an unsupported part as present.
 Be concrete and specific; no fluff. This artifact's fidelity is "${mod.fidelity}" —
 do not overclaim (it is generated/advisory, not validated).
 Output ONLY one JSON object, no prose, no markdown fences, EXACTLY this shape:
