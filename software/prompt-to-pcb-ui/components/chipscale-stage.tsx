@@ -40,6 +40,16 @@ type Result = {
     groundPlane?: { assigned: number; unconnected: number | null; stitched?: number; skipped?: number; errors: number | null } | null
     fixes: string[]
     verdict: string | null
+    designConvergence?: {
+      triggered: boolean
+      replans: number
+      converged: boolean
+      change: string
+      note?: string | null
+      droppedCapabilities?: string[]
+      before: { parts: number; drc: number | null }
+      after: { parts: number; drc: number | null }
+    } | null
   } | null
   errors?: Record<string, number>
   svgUrl?: string | null
@@ -80,13 +90,13 @@ export function ChipScaleStage({ spec, runId, asElectronics }: { spec: any; runI
     return () => { off = true }
   }, [runId])
 
-  async function run() {
+  async function run(opts?: { keepCapabilities?: boolean }) {
     if (!spec || !runId) return
     setState('loading'); setErr(null)
     try {
       const r = await fetch('/api/electronics-cs', {
         method: 'POST', headers: { 'content-type': 'application/json', ...llmHeaders() },
-        body: JSON.stringify({ spec, runId }),
+        body: JSON.stringify({ spec, runId, keepCapabilities: opts?.keepCapabilities === true }),
       })
       const d = await r.json()
       if (d.error && !d.boardMm) throw new Error(d.error)
@@ -112,7 +122,7 @@ export function ChipScaleStage({ spec, runId, asElectronics }: { spec: any; runI
             ))}
           </div>
         )}
-        <button type="button" onClick={run} disabled={!canRun || state === 'loading'}
+        <button type="button" onClick={() => run()} disabled={!canRun || state === 'loading'}
           className="ml-auto flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
           {state === 'loading' ? <Loader2 className="size-3 animate-spin" /> : <CircuitBoard className="size-3" />}
           {res ? 'Regenerate' : asElectronics ? 'Design the electronics' : 'Generate chip-scale board'}
@@ -213,6 +223,23 @@ export function ChipScaleStage({ spec, runId, asElectronics }: { spec: any; runI
                     {res.drcRepair.verdict && !res.drcRepair.converged && (
                       <div className="mt-0.5 opacity-90">{res.drcRepair.verdict}</div>
                     )}
+                  </div>
+                )}
+                {(res.drcRepair?.designConvergence?.droppedCapabilities?.length ?? 0) > 0 && (
+                  <div className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px]">
+                    <div className="font-medium text-amber-600 dark:text-amber-400">⚠ Capability dropped to fit at this size</div>
+                    <div className="mt-0.5 opacity-90">
+                      To route clean at the current size budget, the design re-plan removed:{' '}
+                      <span className="font-medium">{res.drcRepair!.designConvergence!.droppedCapabilities!.join(', ')}</span>.
+                      {' '}You can keep it on a larger board instead.
+                    </div>
+                    <button
+                      onClick={() => run({ keepCapabilities: true })}
+                      disabled={!canRun}
+                      className="mt-1.5 rounded border border-amber-500/50 px-2 py-1 text-[11px] font-medium hover:bg-amber-500/20 disabled:opacity-50"
+                    >
+                      Rebuild keeping it (larger board) →
+                    </button>
                   </div>
                 )}
                 <div className="mt-1 text-[10px] opacity-70">Same design-rule check a fab runs — not tscircuit&apos;s own router check.</div>

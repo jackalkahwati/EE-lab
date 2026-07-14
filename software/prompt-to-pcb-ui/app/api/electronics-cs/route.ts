@@ -77,7 +77,7 @@ RULES:
   and pours the ground plane; you list the parts, the signal/power connections, and
   the ground pins.`
 
-async function emitPartsNets(userMsg: string, override?: LLMOverride): Promise<{ parts: any[]; nets: any[]; gnd: string[]; note?: string }> {
+async function emitPartsNets(userMsg: string, override?: LLMOverride): Promise<{ parts: any[]; nets: any[]; gnd: string[]; note?: string; droppedCapabilities?: string[] }> {
   const antKey = process.env.ANTHROPIC_API_KEY
   const opts = override?.apiKey
     ? override
@@ -89,7 +89,11 @@ async function emitPartsNets(userMsg: string, override?: LLMOverride): Promise<{
     try {
       const { text } = await callLLMText(SYSTEM, attempt === 0 ? userMsg : userMsg + '\n\nReply with ONLY the JSON object.', opts)
       const o = JSON.parse(firstJson(text))
-      if (Array.isArray(o.parts) && o.parts.length) return { parts: o.parts, nets: Array.isArray(o.nets) ? o.nets : [], gnd: Array.isArray(o.gnd) ? o.gnd.map(String) : [], note: typeof o.note === 'string' ? o.note : undefined }
+      if (Array.isArray(o.parts) && o.parts.length) return {
+        parts: o.parts, nets: Array.isArray(o.nets) ? o.nets : [], gnd: Array.isArray(o.gnd) ? o.gnd.map(String) : [],
+        note: typeof o.note === 'string' ? o.note : undefined,
+        droppedCapabilities: Array.isArray(o.droppedCapabilities) ? o.droppedCapabilities.map(String).filter(Boolean) : undefined,
+      }
     } catch (e) { lastErr = e }
   }
   throw lastErr ?? new Error('parts model failed')
@@ -190,7 +194,7 @@ function describeDesignChange(before: any[], after: any[]): string {
 
 /** One full board candidate: part-set engine → real footprints → routed board. */
 async function buildCandidate(userMsg: string, req: Request, dir: string, svgName: string, timeoutMs: number) {
-  const { parts, nets, gnd, note } = await emitPartsNets(userMsg, overrideFromHeaders(req.headers))
+  const { parts, nets, gnd, note, droppedCapabilities } = await emitPartsNets(userMsg, overrideFromHeaders(req.headers))
   // pull REAL LCSC footprints for any part the engine tagged with a valid id;
   // attach as part.kicadMod so the runner uses the true pad geometry + size.
   // Fetch each distinct id ONCE (duplicate ids would race on the same /tmp file).
@@ -203,7 +207,7 @@ async function buildCandidate(userMsg: string, req: Request, dir: string, svgNam
     if (m) { p.kicadMod = m; realFootprints++ }
   }
   const result = await runBoard({ parts, nets, gnd }, path.join(dir, svgName), timeoutMs)
-  return { parts, nets, gnd, note, realFootprints, result, svgName }
+  return { parts, nets, gnd, note, droppedCapabilities, realFootprints, result, svgName }
 }
 
 export async function POST(req: Request) {
@@ -216,10 +220,17 @@ export async function POST(req: Request) {
 
     const b = spec.budgets ?? {}
     const elec = spec.disciplines?.electronics
+    // Stage D: when the user chooses to KEEP a capability the density re-plan would
+    // otherwise drop, rebuild with completeness prioritized over compactness and
+    // skip the density re-plan (a bigger board is the accepted tradeoff).
+    const keepCapabilities = body.keepCapabilities === true
     const baseMsg =
       `PRODUCT: ${spec.product}\n${spec.description || ''}\n` +
       `size budget: ${JSON.stringify(b.sizeMm ?? {})}\n` +
       `electronics: ${elec?.summary || elec?.boardIntent || '-'}\n` +
+      (keepCapabilities
+        ? `IMPORTANT: include EVERY capability this product needs — do NOT drop any peripheral to save space. A LARGER board is acceptable; completeness beats compactness here.\n`
+        : '') +
       `List the minimal chip-scale part set + nets.`
 
     const dir = path.join(process.cwd(), 'public', 'runs', runId, 'electronics')
@@ -237,12 +248,13 @@ export async function POST(req: Request) {
     // non-essential parts), then re-route. Keep whichever board is genuinely
     // better and report exactly what the re-plan changed (computed from the part
     // sets, not the model's say-so). One bounded iteration so it can't run away.
-    if (DENSITY_REPLAN && densityFailed(cand.result)) {
+    if (DENSITY_REPLAN && !keepCapabilities && densityFailed(cand.result)) {
       const first = cand.result
       const T_START = Date.now()
       const OUTER_BUDGET_MS = 520_000 // stay under maxDuration=600 with margin for post-processing
       const MAX_REPLANS = 3
       const iterations: any[] = []
+      const droppedCaps: string[] = [] // capabilities shed across the KEPT re-plan path (Stage D)
       let best = cand // the best candidate across all iterations (starts as the first pass)
 
       // Keep re-planning simpler while the best board is still over the density
@@ -271,7 +283,9 @@ export async function POST(req: Request) {
           `- INTEGRATE functions into fewer ICs where a real combined part exists;\n` +
           `- DROP a non-essential peripheral (keep the product's core function; shed nice-to-haves);\n` +
           `- fewer discrete parts overall.\n` +
-          `Keep it a REAL functional board for THIS product. Add a "note" field naming what you simplified and why.`
+          `Keep it a REAL functional board for THIS product. Add a "note" field naming what you simplified and why, ` +
+          `and a "droppedCapabilities" field: a list of any product CAPABILITIES you removed to fit ` +
+          `(e.g. "data logging (SPI flash)", "battery charging"), or [] if you only coarsened/consolidated packages.`
 
         const tA = Date.now()
         let next: Awaited<ReturnType<typeof buildCandidate>> | null = null
@@ -284,10 +298,12 @@ export async function POST(req: Request) {
         const improved = betterResult(best.result, next.result) === 'b'
         iterations.push({
           round, change: describeDesignChange(best.parts, next.parts), note: next.note ?? null,
+          droppedCapabilities: next.droppedCapabilities ?? [],
           parts: next.parts.length, drc: next.result?.drc?.errors ?? null, ok: !!next.result?.ok,
           kept: improved, ms,
         })
         if (!improved) break // this re-plan was no better than the current best — stop
+        for (const c of (next.droppedCapabilities ?? [])) if (!droppedCaps.includes(c)) droppedCaps.push(c) // shed on the kept path
         best = next
         if (best.result?.ok) break // clean route — genuinely converged
       }
@@ -305,6 +321,10 @@ export async function POST(req: Request) {
         replans: round,
         converged: !!best.result?.ok,
         iterations,
+        // Stage D: capabilities the kept re-plan path shed to fit — the user can
+        // rebuild keeping them (a larger board). Only counts if the re-plan was
+        // actually adopted; a rejected re-plan drops nothing.
+        droppedCapabilities: best !== cand ? droppedCaps : [],
         change: best !== cand ? describeDesignChange(cand.parts, best.parts) : 'no re-plan improved on the first board',
         note: best !== cand ? best.note ?? null : null,
         before: { parts: cand.parts.length, drc: first.drc?.errors ?? null, ok: !!first.ok },
