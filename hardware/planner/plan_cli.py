@@ -12,7 +12,7 @@ run it with the system python3 before handing the design to KiCad-python synth.
 import json
 import sys
 
-from planner import run
+from evaluate import converge
 from decompose import build_design_tree
 
 
@@ -21,13 +21,14 @@ def main():
     if not prompt:
         print(json.dumps({"error": "empty prompt"}))
         return
-    r = run(prompt)
+    # Stage 3: converge() runs the planner, then REAL design-level evaluators
+    # (mcu-fit / rail-compat / coverage / routing-risk) and a fixpoint loop; it
+    # reports converged only when the real checks pass, never fakes it.
+    r = converge(prompt)
     # Stage 2: the recursive subsystem tree rides alongside the flat design so the
     # pipeline can show HOW the product decomposes. synth still builds from
     # final_design; the tree is structure + rationale, it invents no parts.
     tree = build_design_tree(r["intent"], r["final_design"])
-    # synth.py reads final_design/intent/recovery_report; honest_report +
-    # overall_status ride along so the pipeline can report substitutions.
     print(json.dumps({
         "final_design": r["final_design"],
         "intent": r["intent"],
@@ -36,6 +37,9 @@ def main():
         "overall_status": r["overall_status"],
         "requires_approval": r.get("requires_approval", []),
         "design_tree": tree,
+        "checks": r["checks"],          # Stage 3: real design verification
+        "converged": r["converged"],
+        "warnings": r["warnings"],
     }))
 
 

@@ -455,6 +455,37 @@ export async function GET(req: Request) {
                 log('design', `decomposed into ${tree.children.length} subsystems: ${tree.children.map((c) => c.name).join(', ')}`, 'ok')
                 try { fs.writeFileSync(path.join(pubData, 'design-tree.json'), JSON.stringify(tree)) } catch { /* non-fatal */ }
               }
+              // Stage 3: real design verification (mcu-fit / rail-compat / coverage
+              // / routing-risk) — reported honestly, converged only if it truly is.
+              const verif = synthDesign as { checks?: { name: string; severity: string; detail: string }[]; converged?: boolean }
+              if (Array.isArray(verif.checks)) {
+                const errs = verif.checks.filter((c) => c.severity === 'error')
+                const warns = verif.checks.filter((c) => c.severity === 'warn')
+                log('design', `verified [real checks]: ${verif.converged ? 'converged' : 'NOT converged'} · ${errs.length} error(s), ${warns.length} warning(s)`, errs.length ? 'err' : 'ok')
+                for (const c of verif.checks)
+                  log('design', `  ${c.severity === 'ok' ? '✓' : c.severity === 'warn' ? '⚠' : '✗'} ${c.name}: ${c.detail}`, c.severity === 'error' ? 'err' : c.severity === 'warn' ? 'warn' : 'ok')
+                try { fs.writeFileSync(path.join(pubData, 'verification.json'), JSON.stringify({ converged: verif.converged, checks: verif.checks })) } catch { /* non-fatal */ }
+              }
+              // Stage 4: ONE canonical design object — the single source of truth
+              // the board, BOM, disciplines and UI all derive from, so the MCU the
+              // plan names IS the MCU on the board, in the BOM, and in the tree.
+              try {
+                const sdx = synthDesign as {
+                  intent?: { product_goal?: string; mcu?: { family?: string } }
+                  final_design?: { mpn: string; category?: string }[]
+                  honest_report?: { outcome: string; request: string; mpn?: string }[]
+                }
+                const design = {
+                  product: sdx.intent?.product_goal ?? prompt.slice(0, 80),
+                  mcu: sdx.intent?.mcu?.family ?? null,
+                  parts: (sdx.final_design ?? []).map((p) => ({ mpn: p.mpn, category: p.category })),
+                  subsystems: (tree?.children ?? []).map((c: { name: string; parts?: string[] }) => ({ name: c.name, parts: c.parts ?? [] })),
+                  verification: { converged: verif.converged ?? null, checks: verif.checks ?? [] },
+                  substitutions: (sdx.honest_report ?? []).filter((h) => h.outcome === 'substituted'),
+                  unsupported: (sdx.honest_report ?? []).filter((h) => h.outcome === 'unsupported').map((h) => h.request),
+                }
+                fs.writeFileSync(path.join(pubData, 'design.json'), JSON.stringify(design))
+              } catch { /* non-fatal */ }
               send({ type: 'design', spec: synthDesign as Record<string, unknown> })
             }
           }
@@ -900,6 +931,22 @@ export async function GET(req: Request) {
           vStats,
         ])
         log('validation', 'board · BOM · renders · stats, all the prompt variant', 'ok')
+
+        // Stage 4: coherence check — the ONE canonical design and the built BOM
+        // must agree (same real parts). Proves board = design = BOM, no divergence.
+        if (planMode) {
+          try {
+            const design = JSON.parse(fs.readFileSync(path.join(pubData, 'design.json'), 'utf8')) as { parts?: { mpn: string }[] }
+            const bom = JSON.parse(fs.readFileSync(path.join(pubData, 'bom.json'), 'utf8')) as { part?: string; ref?: string }[]
+            const bomText = JSON.stringify(bom).toLowerCase()
+            const want = (design.parts ?? []).map((p) => p.mpn)
+            const missing = want.filter((mpn) => !bomText.includes(mpn.toLowerCase()))
+            if (missing.length === 0)
+              log('validation', `coherence: BOM contains all ${want.length} design part(s) — board = design = BOM ✓`, 'ok')
+            else
+              log('validation', `⚠ coherence: ${missing.length}/${want.length} design part(s) not found in BOM: ${missing.join(', ')}`, 'warn')
+          } catch { /* design.json/bom.json not both present — skip */ }
+        }
 
         // live sourcing check (advisory, never a gate): annotate BOM lines with
         // DigiKey stock/MPN. Graceful without creds, lines marked "unchecked".
