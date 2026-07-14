@@ -11,6 +11,8 @@
  * form. Pure LLM — no geometry yet. Same provider chain + JSON extraction as
  * /api/architect.
  */
+import { promises as fs } from 'node:fs'
+import path from 'node:path'
 import { callLLMText, overrideFromHeaders, type LLMOverride } from '@/lib/llm'
 import { ID_BRIEF_SCHEMA, normalizeIdBrief } from '@/lib/id-brief'
 import { loadGroundBoard } from '@/lib/ground-board'
@@ -177,6 +179,15 @@ export async function POST(req: Request) {
 
     if (out.enough) {
       const brief = normalizeIdBrief(out.brief)
+      // Persist the brief so the Design tab shows it on reload / after a pipeline
+      // run without regenerating (the brief was in-memory only before).
+      if (typeof body.runId === 'string' && /^run-[A-Za-z0-9._-]{1,128}$/.test(body.runId)) {
+        try {
+          const dir = path.join(process.cwd(), 'public', 'runs', body.runId, 'disciplines')
+          await fs.mkdir(dir, { recursive: true })
+          await fs.writeFile(path.join(dir, 'id-brief.json'), JSON.stringify(brief))
+        } catch { /* best effort */ }
+      }
       return Response.json({ type: 'brief', brief, request, provider })
     }
     return Response.json({

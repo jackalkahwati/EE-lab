@@ -106,7 +106,25 @@ ${DISCIPLINE_ARTIFACT_SCHEMA}`
       `budgets: ${JSON.stringify(b)}${boardCtx}\n\nEmit the ${mod.label} artifact.`
 
     const out = await callLLM(sys, userMsg, overrideFromHeaders(req.headers))
-    return Response.json({ artifact: normalizeDisciplineArtifact(out, discipline) })
+    const artifact = normalizeDisciplineArtifact(out, discipline)
+
+    // Persist the artifact so the full-pipeline orchestrator's result is durable
+    // and the discipline tab shows it on reload without re-running (in-memory-only
+    // before). Grounded on the real board via boardCtx above, so it stays connected.
+    if (runId && RUN_ID.test(runId)) {
+      try {
+        const runDir = path.join(process.cwd(), 'public', 'runs', runId)
+        const dir = path.join(runDir, 'disciplines')
+        await fs.mkdir(dir, { recursive: true })
+        await fs.writeFile(path.join(dir, `${discipline}.json`), JSON.stringify(artifact))
+        // Persist the product spec itself so selecting this run later restores it
+        // (the tabs gate on productSpec; without this a saved run's disciplines
+        // show disabled/not-built even though every artifact is on disk).
+        await fs.writeFile(path.join(runDir, 'product-spec.json'), JSON.stringify(spec))
+      } catch { /* best effort — persistence failure must not fail the response */ }
+    }
+
+    return Response.json({ artifact })
   } catch (err) {
     return Response.json({ error: String(err) }, { status: 502 })
   }

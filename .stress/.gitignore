@@ -1,0 +1,4 @@
+# generated stress-test outputs (SVGs, logs, DRC/timing dumps) — regenerable by
+# running stress-run*.mjs; keep only the harnesses in git.
+out/
+out2/

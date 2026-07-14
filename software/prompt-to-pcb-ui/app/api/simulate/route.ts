@@ -8,6 +8,7 @@
  * fabricates a metric it can't compute. High-fidelity FEA/FDTD (Elmer /
  * CalculiX / openEMS / OpenFOAM) is the install-gated upgrade, not faked here.
  */
+import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { loadGroundBoard } from '@/lib/ground-board'
@@ -65,7 +66,19 @@ export async function POST(req: Request) {
     }
 
     const out = await runSim(simReq)
-    return Response.json({ scipy: !!out.scipy, results: out.results ?? [], inputs: simReq })
+    const payload = { scipy: !!out.scipy, results: out.results ?? [], inputs: simReq }
+
+    // Persist so the orchestrated sim result is durable + the tab shows it on
+    // reload, and the feedback controller can read the real FAILs (was in-memory).
+    if (runId && RUN_ID.test(runId)) {
+      try {
+        const dir = path.join(process.cwd(), 'public', 'runs', runId, 'disciplines')
+        await fs.mkdir(dir, { recursive: true })
+        await fs.writeFile(path.join(dir, 'simulation.json'), JSON.stringify(payload))
+      } catch { /* best effort */ }
+    }
+
+    return Response.json(payload)
   } catch (err) {
     return Response.json({ error: String(err) }, { status: 502 })
   }

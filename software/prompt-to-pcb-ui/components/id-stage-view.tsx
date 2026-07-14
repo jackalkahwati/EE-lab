@@ -9,7 +9,7 @@
  * it shows an honest "unavailable" state rather than faking a result. Nothing here
  * invents geometry — the scaffold is the mm values plotted.
  */
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import { Loader2, ImageIcon, Box } from 'lucide-react'
 import type { IdBrief } from '@/lib/id-brief'
@@ -68,6 +68,25 @@ export function IdStageView({
 }) {
   const [render, setRender] = useState<RenderState>({ status: 'idle' })
   const [showScaffold, setShowScaffold] = useState(false)
+  const autoTried = useRef<string | null>(null)
+
+  // Auto-render: load a persisted render on mount, else generate one once (the
+  // render then persists, so opening Design shows a real photorealistic render by
+  // default instead of the wireframe scaffold). Guarded to once per run.
+  useEffect(() => {
+    if (!runId) return
+    let off = false
+    fetch(`/runs/${runId}/id/render.json`, { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (off) return
+        if (d && d.url) { setRender({ status: 'done', url: `${d.url}?t=${runId}`, provider: d.provider }); return }
+        if (autoTried.current !== runId) { autoTried.current = runId; generate() }
+      })
+      .catch(() => {})
+    return () => { off = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runId])
 
   async function generate() {
     setRender({ status: 'loading' })

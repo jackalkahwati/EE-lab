@@ -7,7 +7,7 @@
  * rendered vs failed. Advisory CAD, not a tolerance-validated part. Generic:
  * nothing here is earbud-specific.
  */
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { cn } from '@/lib/utils'
 import { Loader2, Box, Download, ExternalLink } from 'lucide-react'
 import { llmHeaders } from '@/components/llm-settings'
@@ -30,6 +30,18 @@ export function MechanicalStage({ spec, runId, onBuilt }: { spec: ProductSpec | 
   const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
   const [res, setRes] = useState<Result | null>(null)
   const [err, setErr] = useState<string | null>(null)
+
+  // Load a persisted enclosure result on mount (written by /api/mechanical) so the
+  // orchestrator's run shows without re-generating the CAD.
+  useEffect(() => {
+    if (!runId) return
+    let off = false
+    fetch(`/runs/${runId}/mechanical/mechanical.json`, { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!off && d && d.part) { setRes({ ok: true, ...d }); setState('done') } })
+      .catch(() => {})
+    return () => { off = true }
+  }, [runId])
 
   async function run() {
     if (!spec || !runId) return

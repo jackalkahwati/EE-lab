@@ -68,12 +68,21 @@ def fl1_lcsc_index():
 
 
 def match_lcsc(keywords, rows):
+    # keywords is a LIST of match terms. A bare string is treated as ONE term —
+    # iterating a str yields characters, and a space/digit char matches almost
+    # every row, so a string keyword used to return the FIRST BOM row's LCSC and
+    # mislabel unrelated parts with a random rev-a part number.
+    if isinstance(keywords, str):
+        keywords = [keywords]
+    terms = [k.lower() for k in keywords if k]
+    if not terms:
+        return ""
     for r in rows:
         hay = " ".join([
             r.get("Footprint", ""), r.get("Manufacturer", ""),
             r.get("Partnumber", ""), r.get("Value", ""),
         ]).lower()
-        if any(k in hay for k in keywords):
+        if any(k in hay for k in terms):
             return r.get("LCSC Part #", "").strip()
     return ""
 
@@ -86,12 +95,15 @@ def main():
     # sourced_ic / datasheet resolution). Overrides the footprint-family
     # heuristic so a resolved CAN transceiver isn't labeled "Regulator SOIC-8".
     sourced = {}
+    sourced_mpn = {}  # resolved device name -> real MPN (for live source_check)
     try:
         dev = json.load(open(os.path.join(OUT, "devices.json")))
         for d in dev:
             nm = d.get("name") or d.get("mpn") or d.get("desc")
             if d.get("ref") and nm:
                 sourced[d["ref"]] = nm
+                if d.get("mpn"):
+                    sourced_mpn[nm] = d["mpn"]
     except Exception:
         pass
 
@@ -127,7 +139,7 @@ def main():
     bom = []
     bom_total = 0.0
 
-    def add_line(refs, name, kw, price):
+    def add_line(refs, name, kw, price, mpn=None):
         nonlocal bom_total
         refs.sort(key=lambda s: int(re.sub(r"[^0-9]", "", s) or 0))
         ref = (", ".join(refs) if len(refs) <= 4
@@ -135,17 +147,25 @@ def main():
         lcsc = match_lcsc(kw, rows) if kw else ""
         line_total = round(price * len(refs), 2)
         bom_total += line_total
-        bom.append({
+        line = {
             "ref": ref, "part": name, "lcsc": lcsc or "—",
             "qty": len(refs), "unitPrice": price, "lineTotal": line_total,
             "lineType": "ordered" if lcsc else "buyer-furnished",
-        })
+        }
+        if mpn:
+            line["mpn"] = mpn  # real MPN → source_check.py searches by this
+        bom.append(line)
 
     for i, refs in sorted(counts.items()):
         _key, name, kw, price = FAMILY[i]
         add_line(refs, name, kw, price)
     for name, refs in sorted(sourced_lines.items()):
-        add_line(refs, name, name, 0.60)  # resolved IC, real name + MPN keyword
+        # A resolved composed IC (RP2040, BME280, flash…) is NOT in the FL-1
+        # relay reference BOM, so we do NOT borrow an LCSC from it — doing so
+        # stamped every IC with a random rev-a cap's part number (C14663) and a
+        # false "ordered" status. Show it buyer-furnished with its real MPN when
+        # compose resolved one; source_check.py then adds live DigiKey stock.
+        add_line(refs, name, None, 0.60, mpn=sourced_mpn.get(name))
     for name, refs in sorted(generic.items()):
         # rough catalog price by class: modules/connectors > ICs > passives
         s = name.lower()

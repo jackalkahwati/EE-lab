@@ -42,13 +42,18 @@ export function MechanicalAssembly({ basePath }: { basePath: string }) {
         const boardGrp = gltf.scene
         boardGrp.traverse((o: any) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true } })
 
-        // board bbox (KiCad GLB is Y-up: X,Z = footprint, Y = height/components)
+        // board bbox (KiCad GLB is Y-up: X,Z = footprint, Y = height/components).
+        // NB: kicad-cli exports GLB in METERS (glTF convention) — a 20 mm board
+        // measures ~0.02 units — so every shell dimension is derived RELATIVE to
+        // the board footprint, never from absolute mm literals (a `1.0` floor
+        // would be one metre and balloon the enclosure to a giant empty box).
         const box = new THREE.Box3().setFromObject(boardGrp)
         const sz = box.getSize(new THREE.Vector3())
         const c = box.getCenter(new THREE.Vector3())
-        const wall = Math.max(1.0, Math.min(sz.x, sz.z) * 0.06)   // enclosure wall
-        const cell = Math.max(3.0, Math.min(sz.x, sz.z) * 0.35)   // Li-ion cell height
-        const gap = 0.6
+        const foot = Math.max(sz.x, sz.z) || 0.02                 // board footprint span
+        const wall = foot * 0.05                                  // enclosure wall ~5% of footprint
+        const cell = foot * 0.35                                  // Li-ion cell height ~⅓ of footprint
+        const gap = foot * 0.03                                   // component/cell clearance
 
         const asm = new THREE.Group()
         // board sits with its underside a wall+cell above the enclosure floor
@@ -118,13 +123,19 @@ export function MechanicalAssembly({ basePath }: { basePath: string }) {
         const scam: any = key.shadow.camera; const d = span * 0.9
         scam.left = -d; scam.right = d; scam.top = d; scam.bottom = -d; scam.near = span * 0.05; scam.far = span * 8; scam.updateProjectionMatrix()
         scene.add(key, key.target)
-        scene.add(Object.assign(new THREE.DirectionalLight(0xbfd4ff, 0.5), { position: new THREE.Vector3(acenter.x - span, acenter.y + span * 0.4, acenter.z - span) }))
+        // NB: three.js makes Object3D.position read-only (defineProperties, no
+        // setter), so Object.assign(light, {position}) throws — set it in place.
+        const fill = new THREE.DirectionalLight(0xbfd4ff, 0.5)
+        fill.position.set(acenter.x - span, acenter.y + span * 0.4, acenter.z - span)
+        scene.add(fill)
 
         const floorY = abox.min.y - span * 0.01
         const ground = new THREE.Mesh(new THREE.PlaneGeometry(span * 8, span * 8), new THREE.ShadowMaterial({ opacity: 0.4 }))
         ground.rotation.x = -Math.PI / 2; ground.position.set(acenter.x, floorY, acenter.z); ground.receiveShadow = true
         scene.add(ground)
-        scene.add(Object.assign(new THREE.GridHelper(span * 8, 32, 0x1b2530, 0x0f141b), { position: new THREE.Vector3(acenter.x, floorY, acenter.z) }))
+        const grid = new THREE.GridHelper(span * 8, 32, 0x1b2530, 0x0f141b)
+        grid.position.set(acenter.x, floorY, acenter.z)
+        scene.add(grid)
 
         const controls = new OrbitControls(camera, renderer.domElement)
         controls.target.copy(acenter); controls.enableDamping = true; controls.dampingFactor = 0.08

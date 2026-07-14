@@ -7,10 +7,11 @@
  * than the standard flroute pipeline. Its dimensions flow into the mechanical
  * fit-check + redesign loop. Honest: only "routed" with traces AND zero errors.
  */
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { cn } from '@/lib/utils'
 import { Loader2, CircuitBoard } from 'lucide-react'
 import { llmHeaders } from '@/components/llm-settings'
+import { Board3D } from '@/components/board-3d'
 
 type Result = {
   ok: boolean
@@ -51,6 +52,33 @@ export function ChipScaleStage({ spec, runId, asElectronics }: { spec: any; runI
   const [res, setRes] = useState<Result | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [showCode, setShowCode] = useState(false)
+  // the built board is a tabbed workspace: start on the 3D PCBA, tab to the 2D
+  // routed layout, the schematic, or the build report (DRC + redesign loop).
+  const [view, setView] = useState<'pcba' | 'layout' | 'schematic' | 'report'>('pcba')
+
+  // Load the already-built chip-scale board on mount (persisted by /api/electronics-cs
+  // as chipscale-board.json) so the stage shows the real board when the full-pipeline
+  // orchestrator built it via the API — before, the stage only reflected a board when
+  // ITS OWN button was clicked, so after an auto-run this view sat empty.
+  useEffect(() => {
+    if (!runId) return
+    let off = false
+    fetch(`/runs/${runId}/electronics/chipscale-board.json`, { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (off || !d?.boardMm?.w) return
+        setRes({
+          ok: (d.drc?.errors ?? 1) === 0,
+          boardMm: d.boardMm, areaMm2: d.areaMm2, components: d.components,
+          routedTraces: d.routedTraces, realFootprints: d.realFootprints,
+          drc: d.drc ?? null, drcRepair: d.drcRepair ?? null,
+          svgUrl: `/runs/${runId}/electronics/chipscale.svg?t=${runId}`,
+        })
+        setState('done')
+      })
+      .catch(() => {})
+    return () => { off = true }
+  }, [runId])
 
   async function run() {
     if (!spec || !runId) return
@@ -70,14 +98,19 @@ export function ChipScaleStage({ spec, runId, asElectronics }: { spec: any; runI
   const canRun = !!spec && !!runId
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto p-5">
-      <div className="mb-3 flex items-center gap-2">
+    <div className="flex h-full flex-col overflow-hidden">
+      <div className="flex items-center gap-2 border-b border-border px-4 py-2">
         <span className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">{asElectronics ? 'electronics · bespoke chip-down board' : 'chip-scale electronics · tscircuit'}</span>
-        {res?.code && (
-          <button type="button" onClick={() => setShowCode((s) => !s)}
-            className="rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground">
-            {showCode ? 'Hide code' : 'Show code'}
-          </button>
+        {res && state === 'done' && (
+          <div className="flex overflow-hidden rounded-sm border border-border">
+            {(([['pcba', 'PCBA'], ['layout', 'Layout'], ['schematic', 'Schematic'], ['report', 'Report']]) as const).map(([v, label]) => (
+              <button key={v} type="button" onClick={() => setView(v)}
+                className={cn('px-2.5 py-0.5 text-[11px]',
+                  view === v ? 'bg-secondary font-medium text-foreground' : 'text-muted-foreground hover:text-foreground')}>
+                {label}
+              </button>
+            ))}
+          </div>
         )}
         <button type="button" onClick={run} disabled={!canRun || state === 'loading'}
           className="ml-auto flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
@@ -86,17 +119,42 @@ export function ChipScaleStage({ spec, runId, asElectronics }: { spec: any; runI
         </button>
       </div>
 
-      {!canRun && <p className="text-sm text-muted-foreground">Describe a product on the left first — then the electronics are synthesized as a real bare-chip board.</p>}
+      {!canRun && <div className="p-5"><p className="text-sm text-muted-foreground">Describe a product on the left first — then the electronics are synthesized as a real bare-chip board.</p></div>}
       {state === 'idle' && canRun && (
-        <p className="text-sm text-muted-foreground">
+        <div className="p-5"><p className="text-sm text-muted-foreground">
           The product engine emits a code-defined board; <span className="text-foreground">tscircuit</span> autoroutes it in-process into an earbud-scale board. Its real size flows into the fit-check + redesign loop.
-        </p>
+        </p></div>
       )}
-      {state === 'loading' && <p className="mt-4 flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" /> emitting + autorouting the board…</p>}
-      {state === 'error' && <div className="mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px] text-destructive">{err}</div>}
+      {state === 'loading' && <div className="p-5"><p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" /> emitting + autorouting the board…</p></div>}
+      {state === 'error' && <div className="p-5"><div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px] text-destructive">{err}</div></div>}
 
       {res && state === 'done' && (
-        <div className="space-y-3">
+        <div className="min-h-0 flex-1">
+          {/* PCBA — the real populated chip-scale board in 3D (/api/board3d resolves
+              this run's chipscale.kicad_pcb with 3D component models attached) */}
+          {view === 'pcba' && (
+            <div className="h-full w-full bg-[#07090c]">
+              <Board3D basePath={`/runs/${runId}/board`}
+                fallback={<div className="flex h-full items-center justify-center text-xs text-muted-foreground">rendering the PCBA…</div>} />
+            </div>
+          )}
+          {/* Layout — the 2D routed board (copper) */}
+          {view === 'layout' && (
+            <div className="flex h-full items-center justify-center overflow-auto bg-white p-4">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={res.svgUrl ?? ''} alt="chip-scale PCB layout" className="max-h-full w-auto" />
+            </div>
+          )}
+          {/* Schematic — the generated chip-scale schematic */}
+          {view === 'schematic' && (
+            <div className="flex h-full items-center justify-center overflow-auto bg-white p-4">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={`/runs/${runId}/electronics/chipscale-schematic.svg?t=${runId}`} alt="chip-scale schematic" className="max-h-full w-auto" />
+            </div>
+          )}
+          {/* Report — routing verdict, real KiCad DRC, redesign loop */}
+          {view === 'report' && (
+          <div className="h-full space-y-3 overflow-y-auto p-5">
           <div className={cn('rounded-md border px-3 py-2 text-[13px]',
             res.ok ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
               : 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400')}>
@@ -165,15 +223,19 @@ export function ChipScaleStage({ spec, runId, asElectronics }: { spec: any; runI
               </div>
             )
           )}
-          {res.svgUrl && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={res.svgUrl} alt="chip-scale PCB" className="mx-auto max-h-[46vh] w-auto rounded-md border border-border bg-white p-2" />
-          )}
           {res.errors && errCount > 0 && (
             <div className="text-[11px] text-amber-600 dark:text-amber-400">issues: {Object.entries(res.errors).map(([k, v]) => `${k}×${v}`).join(', ')} (reported, not hidden)</div>
           )}
+          {res.code && (
+            <button type="button" onClick={() => setShowCode((s) => !s)}
+              className="rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground">
+              {showCode ? 'Hide code' : 'Show code'}
+            </button>
+          )}
           {showCode && (
             <pre className="max-h-[40vh] overflow-auto rounded-md border border-border bg-secondary/30 p-2 font-mono text-[10px] text-muted-foreground">{res.code}</pre>
+          )}
+          </div>
           )}
         </div>
       )}

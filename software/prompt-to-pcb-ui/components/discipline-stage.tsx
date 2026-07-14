@@ -7,7 +7,7 @@
  * (structured sections) with an honest fidelity label. Generic — nothing here is
  * domain-specific.
  */
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Loader2, FileText } from 'lucide-react'
 import { llmHeaders } from '@/components/llm-settings'
 import { DISCIPLINE_MODULES } from '@/lib/discipline-artifact'
@@ -22,6 +22,19 @@ export function DisciplineStage({ discipline, spec, runId, onBuilt }: { discipli
   const [art, setArt] = useState<Artifact | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const mod = DISCIPLINE_MODULES[discipline]
+
+  // Load a persisted artifact on mount so a discipline the full-pipeline
+  // orchestrator already ran shows its result without re-running (the artifact is
+  // written to /runs/<id>/disciplines/<discipline>.json). Manual "Generate" still works.
+  useEffect(() => {
+    if (!runId) return
+    let off = false
+    fetch(`/runs/${runId}/disciplines/${discipline}.json`, { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!off && d && Array.isArray(d.sections)) { setArt(d); setState('done') } })
+      .catch(() => {})
+    return () => { off = true }
+  }, [runId, discipline])
 
   async function run() {
     if (!spec) return

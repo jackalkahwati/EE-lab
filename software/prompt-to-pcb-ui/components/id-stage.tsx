@@ -8,7 +8,7 @@
  * brief is grounded on the real chip-scale board (the route resolves it from the
  * runId). Once a brief exists it renders the full IdStageView.
  */
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Loader2, Palette } from 'lucide-react'
 import { llmHeaders } from '@/components/llm-settings'
 import { IdStageView } from '@/components/id-stage-view'
@@ -26,6 +26,27 @@ export function IdStage({
 }) {
   const [state, setState] = useState<'idle' | 'loading' | 'error'>('idle')
   const [err, setErr] = useState<string | null>(null)
+  const autoTried = useRef<string | null>(null)
+
+  // Populate the Design tab automatically: load a persisted brief if one exists
+  // (written by /api/industrial-design), else finalize one in the background once
+  // (force:true, no interview). This mirrors how the other disciplines just show
+  // their result — the chat's auto ID interview can get orphaned at a question, so
+  // the tab no longer depends on it. Runs once per run; a real brief short-circuits.
+  useEffect(() => {
+    if (brief || !runId) return
+    let off = false
+    fetch(`/runs/${runId}/disciplines/id-brief.json`, { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (off) return
+        if (d && d.product) { onBrief?.(d as IdBrief); return }
+        if (spec && autoTried.current !== runId) { autoTried.current = runId; run() }
+      })
+      .catch(() => {})
+    return () => { off = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runId, brief])
 
   async function run() {
     if (!spec) return

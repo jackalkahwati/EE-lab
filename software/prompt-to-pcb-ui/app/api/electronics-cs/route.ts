@@ -14,7 +14,13 @@ import { callLLMText, overrideFromHeaders, type LLMOverride } from '@/lib/llm'
 import type { ProductSpec } from '@/lib/product-spec'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 200
+// A realistic multi-sensor chip-scale board (~14 parts) takes ~3.5 min through the
+// full ladder (net-aware placement runs several freerouting JVM passes, then the
+// redesign loop runs more). The old 200s cap + 150s runner timeout below cut a
+// real board off mid-route, so the UI showed a timeout instead of the (honest)
+// DRC result. Give the runner room to finish; the runner still enforces its own
+// hard wall so it can't hang forever.
+export const maxDuration = 300
 
 const RUN_ID = /^run-[A-Za-z0-9._-]{1,128}$/
 
@@ -124,7 +130,7 @@ function fetchFootprint(lcsc: string): Promise<string | null> {
 function runBoard(payload: object, svgPath: string): Promise<any> {
   const script = path.join(process.cwd(), '..', '..', 'tools', 'tscircuit', 'run_board.mjs')
   return new Promise((resolve, reject) => {
-    const py = spawn('node', [script], { timeout: 150_000 })
+    const py = spawn('node', [script], { timeout: 285_000 })
     let out = '', err = ''
     py.stdout.on('data', (d) => (out += d))
     py.stderr.on('data', (d) => (err += d))

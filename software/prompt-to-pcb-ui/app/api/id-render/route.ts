@@ -62,8 +62,12 @@ export async function POST(req: Request) {
       try {
         const dir = path.join(process.cwd(), 'public', 'runs', runId, 'id')
         await fs.mkdir(dir, { recursive: true })
+        const url = `/runs/${runId}/id/render.${ext}`
         await fs.writeFile(path.join(dir, `render.${ext}`), Buffer.from(result.dataBase64, 'base64'))
-        return Response.json({ ok: true, url: `/runs/${runId}/id/render.${ext}?t=${Date.now()}`, provider: result.provider })
+        // stable pointer so the client can load the render on mount without knowing
+        // the extension (which varies by provider: flux→jpg, gemini/openai→png).
+        await fs.writeFile(path.join(dir, 'render.json'), JSON.stringify({ url, provider: result.provider }))
+        return Response.json({ ok: true, url: `${url}?t=${Date.now()}`, provider: result.provider })
       } catch {
         // fall through to the inline data URL if the run dir isn't writable yet
       }

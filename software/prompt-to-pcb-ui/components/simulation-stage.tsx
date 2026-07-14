@@ -7,7 +7,7 @@
  * solvers (Elmer/CalculiX/openEMS/OpenFOAM) are an install-gated upgrade. Generic
  * — the runner picks whichever sims the product's inputs support.
  */
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { cn } from '@/lib/utils'
 import { Loader2, Gauge, Check, X, Minus } from 'lucide-react'
 
@@ -22,6 +22,18 @@ export function SimulationStage({ spec, runId, onBuilt }: { spec: any; runId?: s
   const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
   const [res, setRes] = useState<Result | null>(null)
   const [err, setErr] = useState<string | null>(null)
+
+  // Load a persisted sim result on mount (written by /api/simulate) so the
+  // orchestrator's run shows without re-running.
+  useEffect(() => {
+    if (!runId) return
+    let off = false
+    fetch(`/runs/${runId}/disciplines/simulation.json`, { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!off && d && Array.isArray(d.results)) { setRes(d); setState('done') } })
+      .catch(() => {})
+    return () => { off = true }
+  }, [runId])
 
   async function run() {
     if (!spec) return

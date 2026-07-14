@@ -45,6 +45,9 @@ import { MechanicalStage } from '@/components/mechanical-stage'
 import { SimulationStage } from '@/components/simulation-stage'
 import { DisciplineStage } from '@/components/discipline-stage'
 import { ChipScaleStage } from '@/components/chipscale-stage'
+import { PipelineLoader } from '@/components/pipeline-loader'
+import { llmHeaders } from '@/components/llm-settings'
+import { runFullPipeline, PIPE_ORDER, type PipeStatus } from '@/lib/run-pipeline'
 import type { IdBrief } from '@/lib/id-brief'
 import type { ProductSpec } from '@/lib/product-spec'
 import {
@@ -111,6 +114,19 @@ export default function Compose2Page() {
   // real artifact). Drives the left-panel checkboxes so a built discipline shows
   // complete, not "module not built yet". Reset when the thread/design changes.
   const [builtDisc, setBuiltDisc] = useState<Record<string, boolean>>({})
+  // Full-pipeline orchestration: live per-discipline status (pending/running/
+  // passed/failed/blocked/skipped) as the sequencer runs every discipline
+  // end-to-end, plus a run flag + abort handle. `pipeStarted` guards auto-start to
+  // once per run so re-renders don't re-fire the multi-minute pipeline.
+  const [pipeStatus, setPipeStatus] = useState<Record<string, { status: PipeStatus; detail?: string }>>({})
+  const [pipeRunning, setPipeRunning] = useState(false)
+  const [pipeFeedback, setPipeFeedback] = useState<{ status: string; capabilityGaps: { gap: string }[]; remaining: string[] } | null>(null)
+  const pipeAbort = useRef<AbortController | null>(null)
+  const pipeStarted = useRef<Set<string>>(new Set())
+  // Latest product spec in a ref, so the async onProductBuilt callback (which may
+  // hold a stale closure from when the build started) always runs the pipeline
+  // with the current spec, not a null captured before the spec was lifted.
+  const productSpecRef = useRef<ProductSpec | null>(null)
   // "+New" clears the stage to a blank slate (no board) while the chat stays
   // active; the board reappears when the new design finishes building.
   const [newDesign, setNewDesign] = useState(false)
@@ -130,7 +146,19 @@ export default function Compose2Page() {
       .catch(() => [])
   const onRunComplete = async (runDir: string, id: string) => {
     const disk = await refreshRuns()
-    if (Array.isArray(disk) && disk.find((r: Run) => r.id === id)) setSelectedId(id)
+    // ALWAYS select the just-built run. It definitely exists (we hold its
+    // runDir), but /api/runs is eventually consistent — a freshly-built run can
+    // be missing from that list for a beat. The old code guarded setSelectedId
+    // on the run appearing in that list, so on the race it silently kept the
+    // PREVIOUS run selected, and every discipline tab then fetched the wrong
+    // run's artifacts and 404'd (showing an empty "Generate" state though the
+    // pipeline had built everything). If the list missed it, inject a minimal
+    // entry so selectedRun resolves to it instead of falling back to runs[0].
+    if (!(Array.isArray(disk) && disk.find((r: Run) => r.id === id))) {
+      setRuns((prev: Run[]) =>
+        prev.some((r) => r.id === id) ? prev : [{ id, runDir, real: true, name: id }, ...prev])
+    }
+    setSelectedId(id)
     const d = await loadRealBoard(runDir); if (d) setRealBoard(d)
     setNewDesign(false) // the freshly-built board now takes the stage
     setStage('electronics') // show the real board first; ID advances the stage after
@@ -207,6 +235,82 @@ export default function Compose2Page() {
   const selectedRunDir = selectedRun?.runDir
   const selectedReal = selectedRun?.real
 
+  useEffect(() => { productSpecRef.current = productSpec }, [productSpec])
+
+  // Restore a SAVED run's product state from disk when it's selected from the
+  // menu. onSelectThread clears productSpec/builtDisc for an immediate reset;
+  // this re-hydrates them from the run's persisted artifacts (product-spec.json,
+  // id-brief.json, and which disciplines/*.json exist) so the discipline tabs
+  // re-enable and show their built content instead of a disabled "not built"
+  // state. Guarded on productSpecRef so a FRESH build (spec already in memory,
+  // disciplines still streaming to disk) is never clobbered by partial disk state.
+  useEffect(() => {
+    const id = selectedRun?.id
+    if (newDesign || !selectedRun?.real || !id || productSpecRef.current) return
+    let off = false
+    const j = (p: string) => fetch(p, { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null)
+    const head = (p: string) => fetch(p, { method: 'HEAD', cache: 'no-store' }).then((r) => r.ok).catch(() => false)
+    j(`/runs/${id}/product-spec.json`).then((s) => { if (!off && s?.product) setProductSpec(s) })
+    j(`/runs/${id}/id-brief.json`).then((b) => { if (!off && b?.product) setIdBrief(b) })
+    const probes: [string, string][] = [
+      ['electronics', `/runs/${id}/electronics/chipscale-board.json`],
+      ['mechanical', `/runs/${id}/mechanical/mechanical.json`],
+      ['simulation', `/runs/${id}/disciplines/simulation.json`],
+      ['firmware', `/runs/${id}/disciplines/firmware.json`],
+      ['manufacturing', `/runs/${id}/disciplines/manufacturing.json`],
+      ['supplyChain', `/runs/${id}/disciplines/supplyChain.json`],
+      ['validation', `/runs/${id}/disciplines/validation.json`],
+    ]
+    Promise.all(probes.map(([k, p]) => head(p).then((ok) => (ok ? k : null)))).then((found) => {
+      if (!off) setBuiltDisc(Object.fromEntries(found.filter(Boolean).map((k) => [k as string, true])))
+    })
+    return () => { off = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRun?.id, selectedRun?.real, newDesign])
+
+  // Run the WHOLE pipeline end-to-end: chip-scale electronics -> mechanical ->
+  // simulation -> feedback loop -> firmware -> mfg -> supply -> validation. Reuses
+  // each discipline's real API (the same the manual buttons call); the sequencer
+  // just orders them so each grounds on the real board, and wires the feedback
+  // loop. Live status streams into the disciplines panel via pipeStatus.
+  const runPipeline = async (runIdArg?: string) => {
+    const runId = runIdArg || selectedRun?.id
+    const spec = productSpecRef.current
+    if (!spec || !runId || pipeAbort.current) return
+    const ac = new AbortController()
+    pipeAbort.current = ac
+    setPipeRunning(true)
+    setPipeFeedback(null)
+    setPipeStatus(Object.fromEntries(PIPE_ORDER.map((s) => [s, { status: 'pending' as PipeStatus }])))
+    try {
+      const res = await runFullPipeline({
+        spec, runId, headers: llmHeaders(), signal: ac.signal,
+        onStage: (e) => setPipeStatus((prev) => ({ ...prev, [e.stage]: { status: e.status, detail: e.detail } })),
+      })
+      if (res.updatedSpec) setProductSpec(res.updatedSpec)
+      if (res.feedback) setPipeFeedback(res.feedback)
+      setBuiltDisc((prev) => {
+        const next = { ...prev }
+        for (const [k, v] of Object.entries(res.stages)) if (v?.status === 'passed') next[k] = true
+        return next
+      })
+    } catch { /* aborted or fatal — status already reflects where it stopped */ }
+    finally { setPipeRunning(false); pipeAbort.current = null }
+  }
+  const stopPipeline = () => { pipeAbort.current?.abort(); setPipeRunning(false) }
+
+  // Auto-start the full pipeline the moment a PRODUCT's board finishes building.
+  // compose-chat calls this with the exact runId it just built (from the build's
+  // 'done' event), so the pipeline always runs on the right run — no race with the
+  // previously-selected run. Fires regardless of whether the flroute reference
+  // board gate-failed (the chip-scale board the pipeline builds is what matters).
+  // `pipeStarted` guards to once per run.
+  const onProductBuilt = (runId: string) => {
+    if (!runId || pipeStarted.current.has(runId)) return
+    pipeStarted.current.add(runId)
+    runPipeline(runId)
+  }
+
   // load the selected run's own snapshot
   useEffect(() => {
     if (!selectedReal) { setRealBoard(null); return }
@@ -261,9 +365,15 @@ export default function Compose2Page() {
           newDesign={newDesign}
           revisePrefill={revisePrefill}
           onPrefillConsumed={() => setRevisePrefill('')}
-          onSelectThread={(id) => { setSelectedId(id); setNewDesign(false); setIdBrief(null); setProductSpec(null); setStage('electronics'); setBuiltDisc({}) }}
-          onNew={() => { setNewDesign(true); setBuiltDisc({}) }}
+          onSelectThread={(id) => { setSelectedId(id); setNewDesign(false); setIdBrief(null); setProductSpec(null); setStage('electronics'); setBuiltDisc({}); setPipeStatus({}); setPipeFeedback(null) }}
+          onNew={() => { setNewDesign(true); setBuiltDisc({}); setPipeStatus({}); setPipeFeedback(null) }}
           builtDisciplines={builtDisc}
+          pipelineStatus={pipeStatus}
+          pipelineRunning={pipeRunning}
+          pipelineFeedback={pipeFeedback}
+          onRunPipeline={() => runPipeline()}
+          onStopPipeline={stopPipeline}
+          onProductBuilt={onProductBuilt}
           onRunComplete={onRunComplete}
           onIdBrief={onIdBrief}
           onProductSpec={setProductSpec}
@@ -288,7 +398,7 @@ export default function Compose2Page() {
             const needsSpec = ['explore', 'firmware', 'manufacturing', 'supplyChain', 'validation'].includes(s.key)
             // Design (id) is now one-click like the other disciplines: reachable as
             // soon as there's a product spec, so its Generate button is accessible.
-            const avail = needsSpec ? !!productSpec : s.key === 'electronics' ? (!!selectedRun || !!productSpec) : s.key === 'id' ? (!!productSpec || !!idBrief) : true
+            const avail = needsSpec ? !!productSpec : s.key === 'electronics' ? (!!selectedRun || !!productSpec) : s.key === 'id' ? (!!productSpec || !!idBrief || !!selectedRun) : true
             const locked = !avail && (needsSpec || s.key === 'electronics' || s.key === 'id')
             const on = stage === s.key
             return (
@@ -306,7 +416,13 @@ export default function Compose2Page() {
           })}
         </div>
 
-        {/* active stage visualization (middle pane only) */}
+        {/* active stage visualization (middle pane only). While the full pipeline
+            runs end-to-end, the middle pane shows the live pipeline loader (real
+            per-discipline progress) instead of the active stage. */}
+        {pipeRunning ? (
+          <PipelineLoader status={pipeStatus} />
+        ) : (
+        <>
         {stage === 'explore' && (
               <ErrorBoundary><ExploreStage spec={productSpec} runId={selectedRun?.id} /></ErrorBoundary>
             )}
@@ -401,6 +517,8 @@ export default function Compose2Page() {
             {(stage === 'firmware' || stage === 'manufacturing' || stage === 'supplyChain' || stage === 'validation') && (
               <ErrorBoundary><DisciplineStage discipline={stage} spec={productSpec} runId={selectedRun?.id} onBuilt={() => setBuiltDisc((b) => ({ ...b, [stage]: true }))} /></ErrorBoundary>
             )}
+        </>
+        )}
           </section>
 
           <Handle which="right" />

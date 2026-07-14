@@ -35,6 +35,56 @@ function generatorFor(boardClass: string, blocks: string[]): 'matrix' | 'compose
   return /relay|probe|matrix|crosspoint|switch ?matrix/.test(hay) ? 'matrix' : 'compose'
 }
 
+/**
+ * Honest substitution report. The block library (block-capabilities.json) can
+ * only build an RP2040 MCU and has no display block, so when a request names a
+ * different MCU family or an OLED/screen the builder silently swaps it. That
+ * used to leave the architect's disciplines promising e.g. "STM32L0 + OLED"
+ * while the built board is an RP2040 with the panel broken out to a header —
+ * with no disclosure. Compute the swap here so the UI can SHOW it (never fake a
+ * capability, never hide a substitution). Deterministic, from the raw request.
+ */
+type Substitution = { requested: string; built: string; note: string }
+function detectSubstitutions(request: string, blocks: string[]): Substitution[] {
+  const subs: Substitution[] = []
+  const blocksL = blocks.join(' ').toLowerCase()
+  // MCU: the library builds only the RP2040. If the request names a different
+  // MCU family and the board came out RP2040, that is a real substitution.
+  const OTHER_MCU =
+    /\b(stm32[a-z]?\d*|esp32(?:-\w+)?|esp8266|nrf5\d\w*|nrf9\d\w*|at(?:mega|tiny)\d*\w*|\bavr\b|samd\d*\w*|\bpic(?:16|18|24|32)\w*|msp430\w*|gd32\w*|ch32\w*|rp2350|efm32\w*|efr32\w*|max32\d*\w*|apollo\d\w*|\brenesas\b|kinetis\w*|lpc\d\w*|\bimxrt\w*)\b/i
+  const mcu = request.match(OTHER_MCU)
+  // Fire whenever an MCU block is present — whether the interview labeled it
+  // "Bare RP2040" or preserved the requested name ("STM32L0 MCU"); compose.py
+  // builds the only MCU block it has (RP2040) either way.
+  const mcuBlock = /\b(rp2040|pico|mcu|microcontroller|\bsoc\b)\b/i.test(blocksL)
+  if (mcu && mcuBlock) {
+    subs.push({
+      requested: mcu[0],
+      built: 'RP2040 (bare QFN-56)',
+      note: 'the block library builds only the RP2040 MCU today — firmware target and pin map are RP2040, not ' +
+        mcu[0],
+    })
+  }
+  // Display: there is no display block in the library. If a screen was asked for
+  // and no display block landed, the panel is not on the board (bus on a header).
+  // A named panel (OLED/SSD1306/e-paper…) is an unambiguous positive; the generic
+  // words (display/screen/lcd) only count when not negated ("no display",
+  // "headless") so we never falsely claim we dropped a screen nobody wanted.
+  const namedDisplay = /\b(oled|ssd1306|sh1106|st77\d\d|epd|e-?paper|e-?ink)\b/i.test(request)
+  const genericDisplay =
+    /\b(display|screen|\blcd\b|tft)\b/i.test(request) &&
+    !/\b(no|without|not|headless|sans|zero)\b/i.test(request)
+  const builtDisplay = /\b(oled|display|screen|lcd|epaper|tft)\b/.test(blocksL)
+  if ((namedDisplay || genericDisplay) && !builtDisplay) {
+    subs.push({
+      requested: 'display / OLED panel',
+      built: 'omitted — bus broken out to a header',
+      note: 'no display block in the library yet; the screen is not placed on the board, its I2C/SPI bus is exposed on a header',
+    })
+  }
+  return subs
+}
+
 const SYSTEM = `detailed thinking off.
 You are an expert PCB design interviewer for an automated prompt-to-PCB tool.
 Given a board request, run a short clarifying interview, then output the
@@ -192,6 +242,7 @@ export async function POST(req: Request) {
         spec: out.spec ?? {},
         summary: out.summary ?? '',
         method: generatorFor(boardClass, blocks),
+        substitutions: detectSubstitutions(request, blocks),
         request,
         provider,
       })

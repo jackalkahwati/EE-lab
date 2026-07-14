@@ -180,7 +180,7 @@ async function freeroute(cj, { layers = 2 } = {}) {
       '-Dsun.net.client.defaultConnectTimeout=1500',
       '-Dsun.net.client.defaultReadTimeout=1500',
       '-jar', FR_JAR, '-de', dsnPath, '-do', sesPath, '-mp', '10',
-    ], { encoding: 'utf8', timeout: 120000 })
+    ], { encoding: 'utf8', timeout: 45000 })
     if (!fs.existsSync(sesPath)) return null
     const m = [...(r.stdout || '').matchAll(/\((\d+) unrouted\)/g)]
     const unroutedN = m.length ? Number(m[m.length - 1][1]) : 0
@@ -480,6 +480,33 @@ async function netAwarePlace(parts, nets, { maxW = 15, gap = 2.1 } = {}) {
     }
     return states
   }
+  // Compaction: legalize only ever PUSHES overlapping parts apart, so for a dense
+  // board it leaves a sprawl (a 13-part board spread to ~55mm). Pull every part
+  // back toward the centroid in small steps, reverting any move that would break
+  // the MIN_CLEAR courtyard gap. Shrink-wraps the legal placement back to compact
+  // (~25mm) without reintroducing overlaps.
+  const compact = (statesIn) => {
+    const states = statesIn.map((p) => ({ ...p }))
+    if (states.length < 3) return states
+    // Leave MORE routing channel on net-dense boards: the router needs room for
+    // traces + vias, and a too-tight board trips hole_clearance (62mm→drc20 vs
+    // 27mm→drc45 showed space buys clean routing). Scale the target gap with net
+    // count — sparse boards stay tight, dense boards get up to +1.2mm of channel.
+    const routeClear = MIN_CLEAR + Math.min(1.2, Math.max(0, ((nets?.length || 0) - 13) * 0.2))
+    const cx = states.reduce((a, p) => a + p.x, 0) / states.length
+    const cy = states.reduce((a, p) => a + p.y, 0) / states.length
+    const clashes = (s) => states.some((o) => o !== s && gapBetween(aabb(s), aabb(o)) < routeClear)
+    for (let iter = 0; iter < 120; iter++) {
+      let moved = false
+      for (const s of states) {
+        const ox = s.x, oy = s.y
+        s.x += (cx - s.x) * 0.12; s.y += (cy - s.y) * 0.12
+        if (clashes(s)) { s.x = ox; s.y = oy } else if (Math.abs(s.x - ox) + Math.abs(s.y - oy) > 0.02) moved = true
+      }
+      if (!moved) break
+    }
+    return states
+  }
   const byName = (states, n) => states.find((s) => s.name === n)
   const cost = (states) => {
     let wl = 0
@@ -504,24 +531,25 @@ async function netAwarePlace(parts, nets, { maxW = 15, gap = 2.1 } = {}) {
       const cc = cost(cand)
       if (cc < curCost || rnd() < Math.exp((curCost - cc) / (T * 0.3))) { cur = cand; curCost = cc; if (cc < bestCost) { best = cand.map((p) => ({ ...p })); bestCost = cc } }
     }
-    best = legalize(best) // guarantee no courtyard overlaps in the final placement
+    best = compact(legalize(best)) // resolve overlaps, then shrink-wrap back to compact
+    // Score the FINAL (legalized) placement so seeds are ranked on what actually
+    // gets routed — legalization can move parts and shift the real wirelength.
+    const finalCost = cost(best)
     const minX = Math.min(...best.map((p) => aabb(p)[0])), minY = Math.min(...best.map((p) => aabb(p)[1]))
-    return best.map((p) => ({ ...p, pcbX: +(p.x - minX).toFixed(2), pcbY: +(p.y - minY).toFixed(2), pcbRotation: p.rot || 0, layer: 'top' }))
+    const placed = best.map((p) => ({ ...p, pcbX: +(p.x - minX).toFixed(2), pcbY: +(p.y - minY).toFixed(2), pcbRotation: p.rot || 0, layer: 'top' }))
+    return { placed, cost: finalCost }
   }
 
-  // SA is stochastic: the default seed can strand a net a different seed would
-  // route. Try several, freeroute each on a 4-layer board, and keep the
-  // placement with the fewest unrouted nets — stop at 0 (fully routable).
+  // SA is stochastic, so run it for several seeds and keep the lowest-cost
+  // (wirelength + spacing) placement. We DELIBERATELY do NOT freeroute candidates
+  // here to rank them: SA cost is a strong routability proxy, and the redesign
+  // ladder freeroutes the chosen placement anyway — confirming here just repeated
+  // 1-2 ~15-120s JVM passes the ladder then redid, which is what pushed real
+  // boards past the timeout. Rank cheaply in-process; let the ladder do the one
+  // real routing pass.
   const SEEDS = [0x2545f491, 101, 5551, 31337, 8]
-  let bestPlaced = null, bestUn = Infinity
-  for (const s of SEEDS) {
-    const placed = saOptimize(s)
-    let un = Infinity
-    try { const cj = await runTscircuitCode(emitBoardCode(placed, nets)); const fr = await freeroute(cj, { layers: 4 }); un = fr ? fr.unrouted : Infinity } catch { un = Infinity }
-    if (un < bestUn) { bestUn = un; bestPlaced = placed }
-    if (un === 0) break
-  }
-  return bestPlaced
+  const candidates = SEEDS.map((s) => saOptimize(s)).sort((a, b) => a.cost - b.cost)
+  return candidates[0]?.placed ?? null
 }
 
 /** DRC-driven redesign: apply the real geometry fixes the platform CAN make to
@@ -578,6 +606,56 @@ function completeUnroutedNets(cj) {
   return n
 }
 
+/** Via-legalization post-pass (spike). The autorouter packs layer-transition vias
+ *  too close to OTHER-net copper (other vias, QFN pads), which KiCad flags as
+ *  hole_clearance / *_clearance. Nudge each via away from nearby different-net
+ *  copper, moving its matching trace route-via-point in lockstep so the net stays
+ *  connected (the adjacent wire segments just stretch). Displacement is capped so a
+ *  via can't wander off its own connection; the caller re-runs REAL DRC and keeps
+ *  the result only if errors drop without adding unconnected nets. Same-net copper
+ *  is never pushed apart — that IS the connection. Mutates cj in place. */
+function legalizeVias(cj, { minClear = 0.4, maxDisp = 0.4, iters = 80 } = {}) {
+  const vias = cj.filter((e) => e.type === 'pcb_via')
+  if (!vias.length) return { moved: 0 }
+  const pads = cj.filter((e) => e.type === 'pcb_smtpad')
+  const traces = cj.filter((e) => e.type === 'pcb_trace')
+  const net = (v) => v.subcircuit_connectivity_map_key
+  // link each via to its route-via-point (same trace, same x/y) so both move together
+  const rvp = new Map()
+  for (const v of vias) {
+    const t = traces.find((t) => t.pcb_trace_id === v.pcb_trace_id)
+    const p = t?.route?.find((q) => q.route_type === 'via' && Math.abs(q.x - v.x) < 1e-3 && Math.abs(q.y - v.y) < 1e-3)
+    if (p) rvp.set(v, p)
+  }
+  const orig = new Map(vias.map((v) => [v, { x: v.x, y: v.y }]))
+  const padBox = (p) => [p.x - (p.width || 0) / 2, p.y - (p.height || 0) / 2, p.x + (p.width || 0) / 2, p.y + (p.height || 0) / 2]
+  const gapToBox = (x, y, r, b) => Math.hypot(Math.max(b[0] - x, 0, x - b[2]), Math.max(b[1] - y, 0, y - b[3])) - r
+  for (let it = 0; it < iters; it++) {
+    let any = false
+    for (const v of vias) {
+      const r = (v.outer_diameter || 0.4) / 2
+      let px = 0, py = 0
+      for (const o of vias) { // other-net via copper
+        if (o === v || net(o) === net(v)) continue
+        const dx = v.x - o.x, dy = v.y - o.y, d = Math.hypot(dx, dy) || 1e-6
+        const need = r + (o.outer_diameter || 0.4) / 2 + minClear
+        if (d < need) { const f = need - d; px += (dx / d) * f; py += (dy / d) * f }
+      }
+      for (const p of pads) { // nearby pad copper (capped disp + re-DRC guard keep own net)
+        const g = gapToBox(v.x, v.y, r, padBox(p))
+        if (g < minClear) { const dx = v.x - p.x, dy = v.y - p.y, d = Math.hypot(dx, dy) || 1e-6; const f = (minClear - g); px += (dx / d) * f; py += (dy / d) * f }
+      }
+      if (!px && !py) continue
+      let nx = v.x + px * 0.5, ny = v.y + py * 0.5
+      const o = orig.get(v), ddx = nx - o.x, ddy = ny - o.y, disp = Math.hypot(ddx, ddy)
+      if (disp > maxDisp) { nx = o.x + (ddx / disp) * maxDisp; ny = o.y + (ddy / disp) * maxDisp }
+      if (Math.abs(nx - v.x) + Math.abs(ny - v.y) > 1e-4) { v.x = nx; v.y = ny; const q = rvp.get(v); if (q) { q.x = nx; q.y = ny }; any = true }
+    }
+    if (!any) break
+  }
+  return { moved: vias.filter((v) => { const o = orig.get(v); return Math.hypot(v.x - o.x, v.y - o.y) > 0.01 }).length }
+}
+
 /** The iterative DRC-driven redesign loop. Escalates through a ladder of real
  *  strategies — spread the board out, then step up to a finer (HDI) fab process
  *  — re-routing and re-checking each time. STOPS the instant a strategy passes
@@ -589,7 +667,13 @@ async function iterativeRedesign(parts, nets) {
   // the built-in router + geometry repair. Escalate the fab process (standard ->
   // HDI) within each router. A board only truly converges when DRC is clean AND
   // every net is routed.
-  const ladder = FR_JAR && JAVA
+  // A board with no signal nets has nothing to route — the freerouting ladder
+  // would spawn ~3 JVMs that route zero traces (~60s wasted, as the 1-chip profile
+  // showed). Skip straight to a single placement+DRC pass.
+  const noNets = !nets?.length
+  const ladder = noNets
+    ? [{ name: 'placement only (no signal nets)', router: 'tsci', place: { gap: 2.1, maxW: 15, clearance: 0.5 }, profile: 'standard' }]
+    : FR_JAR && JAVA
     ? [
         { name: 'freerouting 2-layer, standard fab', router: 'fr', layers: 2, place: { gap: 2.1, maxW: 15, singleSided: true }, profile: 'standard' },
         { name: 'freerouting 4-layer, standard fab', router: 'fr', layers: 4, place: { gap: 2.1, maxW: 15, singleSided: true }, profile: 'standard' },
@@ -680,6 +764,24 @@ async function iterativeRedesign(parts, nets) {
 
 async function main() {
   const input = JSON.parse(fs.readFileSync(0, 'utf8'))
+
+  // Validate footprints up front. tscircuit expands "qfn999" into a literal
+  // 999-pad part that hangs placement/routing for minutes — reject an absurd or
+  // unknown footprint with a clean error instead of spinning. Parts carrying a
+  // real LCSC kicadMod skip this (their geometry is explicit).
+  if (Array.isArray(input.parts)) {
+    for (const p of input.parts) {
+      if (p?.kicadMod) continue
+      const fp = String(p?.footprint ?? '')
+      const m = fp.match(/^qfn(\d+)$/)
+      const ok = m ? (+m[1] >= 4 && +m[1] <= 64) : /^0\d{3}$/.test(fp)
+      if (!ok) {
+        process.stdout.write(JSON.stringify({ ok: false, error: `unsupported footprint "${fp}" on ${p?.name ?? '?'} — use qfn4..qfn64 or an 0402-class passive (or supply a real LCSC kicadMod)` }))
+        return
+      }
+    }
+  }
+
   const iterative = input.parts && input.repair !== false && input.drc !== false && KICAD_CLI
 
   // Iterative DRC-driven redesign: search the strategy ladder for a real
@@ -700,6 +802,25 @@ async function main() {
         unrouted: res.best.unrouted,
         fixes: res.best.fixes,
         verdict: res.verdict,
+      }
+      // Via-legalization post-pass: if the best board has DRC errors, try nudging
+      // over-packed vias off nearby other-net copper, then re-DRC. Keep it ONLY if
+      // total errors drop and no new unconnected nets appear (a via that wandered
+      // off its connection would show up as unconnected). Real geometry, re-checked.
+      if ((drc?.errors ?? 0) > 0) {
+        const cjTry = JSON.parse(JSON.stringify(cj))
+        const { moved } = legalizeVias(cjTry, { minClear: 0.4, maxDisp: 0.8, iters: 200 })
+        if (moved > 0) {
+          const drc2 = await realDrc(cjTry, res.best.drc.profileKey || 'standard')
+          const unbefore = drc.errorTypes?.unconnected_items || 0
+          const unafter = drc2.errorTypes?.unconnected_items || 0
+          if (drc2.available && drc2.errors < drc.errors && unafter <= unbefore) {
+            cj = cjTry; drc = drc2
+            drcRepair.viaLegalization = { moved, errorsBefore: drcRepair.errorsBest, errorsAfter: drc2.errors }
+            drcRepair.errorsBest = drc2.errors
+            drcRepair.fixes = [...drcRepair.fixes, `via-legalization: nudged ${moved} via(s) off other-net copper → ${drc2.errors} DRC error(s)`]
+          }
+        }
       }
       // Real ground plane (pcbnew): assign GND to the ground pins and lay a
       // DRC-verified GND zone that bonds them. Signals stay freerouting-routed;
@@ -734,6 +855,7 @@ async function main() {
     drc = input.drc !== false && cj.find((e) => e.type === 'pcb_board') ? await realDrc(cj) : { available: false, reason: 'skipped' }
   }
 
+  if (process.env.FL_DUMP_CJ && cj) { try { fs.writeFileSync(process.env.FL_DUMP_CJ, JSON.stringify(cj)) } catch { /* dump best-effort */ } }
   const board = cj.find((e) => e.type === 'pcb_board')
   const traces = cj.filter((e) => e.type === 'pcb_trace')
   const comps = cj.filter((e) => e.type === 'pcb_component')

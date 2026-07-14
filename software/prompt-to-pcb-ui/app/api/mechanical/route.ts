@@ -157,7 +157,7 @@ export async function POST(req: Request) {
       return Response.json({ ok: false, error: result?.error || 'executor failed', opsFailed: result?.opsFailed ?? [], plan })
     }
     const base = `/runs/${runId}/mechanical`
-    return Response.json({
+    const payload = {
       ok: true,
       part: result.part,
       previewUrl: result.previewPath ? `${base}/enclosure.png?t=${Date.now()}` : null,
@@ -167,7 +167,17 @@ export async function POST(req: Request) {
       opsFailed: result.opsFailed ?? [],
       fitCheck,
       plan,
-    })
+    }
+
+    // Persist a summary (incl. the real fitCheck) so the stage loads on mount and
+    // the feedback controller can consume the actual fit result, not a recomputed
+    // one. The STEP/PNG are already written to this dir by renderPlan.
+    try {
+      await fs.writeFile(path.join(outDir, 'mechanical.json'),
+        JSON.stringify({ part: payload.part, previewUrl: payload.previewUrl, stepUrl: payload.stepUrl, onshapeUrl: payload.onshapeUrl, opsRendered: payload.opsRendered, opsFailed: payload.opsFailed, fitCheck }))
+    } catch { /* best effort */ }
+
+    return Response.json(payload)
   } catch (err) {
     return Response.json({ ok: false, error: String(err) }, { status: 502 })
   }

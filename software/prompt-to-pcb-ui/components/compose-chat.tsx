@@ -12,7 +12,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { llmHeaders } from '@/components/llm-settings'
 import { STAGE_DEFS, STAGE_PREFIX, type StageId, type StageState } from '@/lib/firstlight'
-import { Plus, Menu, Loader2, Check, X, Circle, Square, Pencil } from 'lucide-react'
+import { Plus, Menu, Loader2, Check, X, Circle, Square, Pencil, AlertTriangle, Minus, Play } from 'lucide-react'
 import { boardIntentOf, disciplineRows, type ProductSpec } from '@/lib/product-spec'
 import { idBriefSummary, type IdBrief } from '@/lib/id-brief'
 import { loadRealBoard } from '@/lib/real-board'
@@ -23,7 +23,11 @@ type GroundBoard = { wMm: number; hMm: number; layers?: number; components?: num
 
 type Answer = { question: string; answer: string }
 type Question = { type: 'question'; question: string; boardClass?: string; hints?: string[] }
-type Spec = { type: 'spec'; boardClass: string; blocks: string[]; summary: string; request: string; layers?: number }
+// Honest build substitution: a requested part the block library can't build and
+// what the builder used instead (e.g. STM32L0 → RP2040). Surfaced so the plan
+// never silently promises a part the board doesn't have.
+type Substitution = { requested: string; built: string; note: string }
+type Spec = { type: 'spec'; boardClass: string; blocks: string[]; summary: string; request: string; layers?: number; substitutions?: Substitution[] }
 type Ev = { type: string; id?: StageId; state?: StageState; stage?: StageId; text?: string
   level?: string; spec?: any; runDir?: string; status?: string }
 // 'id' = Industrial Design brief (the first stage: form/ergonomics/CMF/envelope).
@@ -49,7 +53,7 @@ function b64(json: string) {
     String.fromCharCode(parseInt(h, 16))))
 }
 
-export function ComposeChat({ threads, activeId, activeRunId, activeName, newDesign, revisePrefill, onSelectThread, onNew, onRunComplete, onRename, onPrefillConsumed, onIdBrief, onProductSpec, builtDisciplines }: {
+export function ComposeChat({ threads, activeId, activeRunId, activeName, newDesign, revisePrefill, onSelectThread, onNew, onRunComplete, onRename, onPrefillConsumed, onIdBrief, onProductSpec, builtDisciplines, pipelineStatus, pipelineRunning, pipelineFeedback, onRunPipeline, onStopPipeline, onProductBuilt }: {
   threads: { id: string; label: string }[]
   activeId: string
   activeRunId?: string   // the real run currently on screen (revisable)
@@ -64,6 +68,14 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
   onIdBrief?: (brief: IdBrief | null) => void // lift the ID brief to the workspace panes
   onProductSpec?: (spec: ProductSpec | null) => void // lift the spec for the Explore stage
   builtDisciplines?: Record<string, boolean> // discipline modules built this session (their tab produced an artifact)
+  // full-pipeline orchestration (lifted from the page): live per-discipline status,
+  // the run flag, the feedback-loop outcome, and run/stop controls.
+  pipelineStatus?: Record<string, { status: string; detail?: string }>
+  pipelineRunning?: boolean
+  pipelineFeedback?: { status: string; capabilityGaps: { gap: string }[]; remaining: string[] } | null
+  onRunPipeline?: () => void
+  onStopPipeline?: () => void
+  onProductBuilt?: (runId: string) => void // a product's board finished building — start its pipeline
 }) {
   const [phase, setPhase] = useState<Phase>('idle')
   // The electronics board actually built (a runDir exists). Kept separate from
@@ -77,6 +89,10 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
   const [idBrief, setIdBrief] = useState<IdBrief | null>(null)
   const [groundBoard, setGroundBoard] = useState<GroundBoard | null>(null)
   const [productSpec, setProductSpec] = useState<ProductSpec | null>(null)
+  // honest build substitutions from the electronics hand-off (RP2040-only block
+  // library etc.), shown in the disciplines panel so the plan never silently
+  // promises a part the built board doesn't have.
+  const [substitutions, setSubstitutions] = useState<Substitution[]>([])
   const [revSpec, setRevSpec] = useState<{ blocks: string[]; boardClass: string; note: string; request: string } | null>(null)
   const [typed, setTyped] = useState('')
   const [loading, setLoading] = useState(false)
@@ -155,7 +171,15 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
   function submit() {
     const v = typed.trim(); if (!v) return
     setTyped('')
-    if (reviseMode && activeRunId) { setRequest(v); revise(v, activeRunId) }
+    // A product is on screen (productSpec set) → a change request revises the
+    // PRODUCT through the architect, so it rebuilds through the chip-scale board
+    // + disciplines. Without this the message fell to the flroute block-ECO
+    // (/api/revise) below, which never sets productSpec, so a revised design
+    // silently reverted to the flroute (Pico) reference board with ChipScaleStage
+    // and every discipline dark. Legacy flroute-only runs (no productSpec) keep
+    // the block-level ECO path.
+    if (reviseMode && productSpec) { setRequest(v); reviseProduct(v) }
+    else if (reviseMode && activeRunId) { setRequest(v); revise(v, activeRunId) }
     // Every fresh design enters through the Product Architect, which decides which
     // discipline modules to invoke and builds the real board FIRST. Industrial
     // Design runs AFTER, grounded in that real board (form wraps achievable
@@ -214,7 +238,10 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
         es.close(); esRef.current = null; setPhase('done')
         if (ev.runDir) { setBoardBuilt(true); onRunComplete(ev.runDir, id) }
         // product flow: once the real board exists, wrap it with Industrial Design
-        if (opts?.thenId && ev.runDir) startIdFromBoard(ev.runDir)
+        // AND kick off the full pipeline for THIS exact run. Signalling the runId
+        // here (not via a page effect on selectedRun) avoids a race where the page
+        // would fire the pipeline on the previously-selected run.
+        if (opts?.thenId && ev.runDir) { startIdFromBoard(ev.runDir); onProductBuilt?.(id) }
       } else if (ev.type === 'error') { es.close(); esRef.current = null; setErr(ev.text ?? 'pipeline error'); setPhase('error') }
     }
     es.onerror = () => { es.close(); esRef.current = null; setErr('connection lost'); setPhase('error') }
@@ -250,6 +277,9 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
       const bs = await r.json()
       if (bs.error) throw new Error(bs.error)
       if (bs.type !== 'spec') throw new Error('electronics module could not finalize a board')
+      // honest substitutions (e.g. requested STM32L0 → built RP2040): show them on
+      // the plan instead of silently building a different part than promised.
+      setSubstitutions(Array.isArray(bs.substitutions) ? bs.substitutions : [])
       // build the real board first; Industrial Design wraps it once it exists.
       buildBoard(bs as Spec, boardIntentOf(ps), { thenId: true })
     } catch (e) { setErr(String(e)); setPhase('error') } finally { setLoading(false) }
@@ -312,6 +342,25 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
       if (d.type === 'spec') { await dispatchProduct(d.spec as ProductSpec) }
       else { setCurrent({ type: 'question', question: d.question, boardClass: d.product } as Question); setPhase('architect') }
     } catch (e) { setErr(String(e)); setPhase('error') } finally { setLoading(false) }
+  }
+
+  /** Revise a PRODUCT that's already on screen: layer the change request onto the
+   *  current product spec and re-enter the Product Architect, so the revision goes
+   *  back through the SAME pipeline that built it — flroute board → chip-scale board
+   *  → disciplines — instead of the flroute-only block ECO. The architect decides
+   *  whether the change is an incremental edit or (as the LLM already detects) a
+   *  genuinely different product, and rebuilds accordingly. A fresh interview may
+   *  run; that's honest for a product-level change. */
+  function reviseProduct(req: string) {
+    if (!productSpec) return
+    const intent = boardIntentOf(productSpec)
+    const combined =
+      `Current product: ${productSpec.product}.` +
+      (productSpec.description ? ` ${productSpec.description}` : '') +
+      (intent ? ` Electronics so far: ${intent}.` : '') +
+      `\n\nRequested change: ${req}`
+    setAnswers([]); setCurrent(null)
+    askArchitect(combined, [])
   }
 
   function stop() { esRef.current?.close(); esRef.current = null; setPhase('done') }
@@ -485,43 +534,105 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
                 <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">{budgetLine(productSpec)}</div>
               )}
             </div>
+            {/* Honest substitutions: what the RP2040-only block library actually
+                built vs. what the plan named, so the disciplines below never
+                silently promise a part the board doesn't have. */}
+            {substitutions.length > 0 && (
+              <div className="space-y-1 rounded-sm border border-amber-500/30 bg-amber-500/5 p-2">
+                <div className="flex items-center gap-1 font-mono text-[9px] uppercase tracking-wide text-amber-500/90">
+                  <AlertTriangle className="size-3" /> built with substitutions
+                </div>
+                {substitutions.map((s, i) => (
+                  <div key={i} className="text-[10px] leading-snug text-muted-foreground">
+                    <span className="text-foreground">{s.requested}</span>
+                    {' → '}
+                    <span className="text-foreground">{s.built}</span>
+                    <span className="text-muted-foreground"> — {s.note}</span>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="space-y-1.5 border-t border-border pt-1.5">
-              <div className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">disciplines</div>
+              <div className="flex items-center gap-1.5">
+                <span className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">disciplines</span>
+                {/* Run the WHOLE pipeline end-to-end (or stop it). Auto-runs once
+                    after Industrial Design; this re-runs it on demand. */}
+                {(onRunPipeline || onStopPipeline) && (
+                  pipelineRunning ? (
+                    <button type="button" onClick={onStopPipeline}
+                      className="ml-auto flex items-center gap-1 rounded-sm border border-border px-1.5 py-0.5 text-[9px] text-muted-foreground hover:text-foreground">
+                      <Square className="size-2.5" /> stop pipeline
+                    </button>
+                  ) : (
+                    <button type="button" onClick={onRunPipeline} disabled={!activeRunId}
+                      className="ml-auto flex items-center gap-1 rounded-sm bg-primary px-1.5 py-0.5 text-[9px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-40">
+                      <Play className="size-2.5" /> run full pipeline
+                    </button>
+                  )
+                )}
+              </div>
               {disciplineRows(productSpec)
                 .filter((r) => r.status !== 'not_applicable')
                 .map((r) => {
                   const isElec = r.discipline === 'electronics'
-                  const st = isElec
-                    ? boardBuilt
-                      ? 'built' // board really built — never show FAILED for a later ID/connection error
-                      : phase === 'error'
-                        ? 'failed'
-                        : phase === 'done'
-                          ? 'built'
-                          : 'building'
-                    : builtDisciplines?.[r.discipline] // its tab produced a real artifact
-                      ? 'built'
-                      : 'pending'
+                  // The full-pipeline orchestrator's live status wins when present;
+                  // else fall back to the per-tab built flag / electronics phase.
+                  const pipe = pipelineStatus?.[r.discipline]?.status
+                  const pipeDetail = pipelineStatus?.[r.discipline]?.detail
+                  const st = pipe
+                    ? (pipe === 'passed' ? 'built' : pipe === 'running' ? 'building' : pipe)
+                    : isElec
+                      ? boardBuilt
+                        ? 'built' // board really built — never show FAILED for a later ID/connection error
+                        : phase === 'error'
+                          ? 'failed'
+                          : phase === 'done'
+                            ? 'built'
+                            : 'building'
+                      : builtDisciplines?.[r.discipline] // its tab produced a real artifact
+                        ? 'built'
+                        : 'pending'
                   const icon =
                     st === 'built' ? <Check className="size-3.5 text-emerald-500" />
                       : st === 'failed' ? <X className="size-3.5 text-destructive" />
-                        : st === 'building' ? <Loader2 className="size-3.5 animate-spin text-primary" />
-                          : <Circle className="size-3 text-muted-foreground/40" />
+                        : st === 'blocked' ? <AlertTriangle className="size-3.5 text-amber-500" />
+                          : st === 'skipped' ? <Minus className="size-3 text-muted-foreground/40" />
+                            : st === 'building' ? <Loader2 className="size-3.5 animate-spin text-primary" />
+                              : <Circle className="size-3 text-muted-foreground/40" />
                   return (
                     <div key={r.discipline} className="flex items-start gap-2">
                       <span className="mt-0.5 shrink-0">{icon}</span>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-1.5">
                           <span className="text-[12px] text-foreground">{r.label}</span>
-                          <span className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
+                          <span className={cn('font-mono text-[9px] uppercase tracking-wide',
+                            st === 'failed' ? 'text-destructive' : st === 'blocked' ? 'text-amber-500' : 'text-muted-foreground')}>
                             {st === 'pending' ? 'module not built yet' : st}
                           </span>
                         </div>
-                        {r.summary && <div className="text-[10px] text-muted-foreground">{r.summary}</div>}
+                        {/* live detail from the orchestrator (fit result, DRC count,
+                            sim outcome), else the static discipline summary */}
+                        {(pipeDetail || r.summary) && (
+                          <div className="text-[10px] text-muted-foreground">{pipeDetail || r.summary}</div>
+                        )}
                       </div>
                     </div>
                   )
                 })}
+              {/* feedback-loop outcome — honest: converged, or capability gaps */}
+              {pipelineFeedback && (
+                <div className={cn('mt-1 rounded-sm border px-2 py-1.5 text-[10px]',
+                  pipelineFeedback.status === 'converged'
+                    ? 'border-emerald-500/40 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400'
+                    : 'border-amber-500/40 bg-amber-500/5 text-amber-600 dark:text-amber-400')}>
+                  <div className="font-medium">feedback loop: {pipelineFeedback.status}</div>
+                  {pipelineFeedback.capabilityGaps?.length > 0 && (
+                    <div className="mt-0.5 text-muted-foreground">
+                      capability gaps (reported, not faked): {pipelineFeedback.capabilityGaps.map((g) => g.gap).join('; ')}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}

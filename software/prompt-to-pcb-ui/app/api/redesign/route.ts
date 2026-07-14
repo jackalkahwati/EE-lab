@@ -43,13 +43,30 @@ function simInputs(b: Budgets, boardAreaMm2?: number) {
   }
 }
 
-/** Collect the current violations from fit + simulations. */
-async function violations(b: Budgets, board: { wMm?: number; hMm?: number }, boardAreaMm2?: number) {
+/** Read the mechanical stage's REAL fit result (does the real PCB fit the real
+ *  enclosure cavity) — the honest fit signal, more accurate than the board-vs-
+ *  envelope estimate. Null if the mechanical stage hasn't run for this run. */
+async function realMechFit(runId?: string): Promise<{ fits: boolean; enclosureMm: { w: number; h: number }; pcbMm: { w: number; h: number } } | null> {
+  if (!runId || !RUN_ID.test(runId)) return null
+  try {
+    const m = JSON.parse(await fs.readFile(path.join(process.cwd(), 'public', 'runs', runId, 'mechanical', 'mechanical.json'), 'utf8'))
+    return m?.fitCheck ?? null
+  } catch { return null }
+}
+
+/** Collect the current violations from fit + simulations. Prefers the mechanical
+ *  stage's real cavity fitCheck; falls back to the board-vs-envelope estimate. */
+async function violations(b: Budgets, board: { wMm?: number; hMm?: number }, boardAreaMm2?: number, runId?: string) {
   const v: { id: string; kind: string; detail: string }[] = []
-  const env = b?.sizeMm
-  if (board.wMm && board.hMm && env?.x && env?.y) {
-    const fits = board.wMm <= env.x + 0.5 && board.hMm <= env.y + 0.5
-    if (!fits) v.push({ id: 'fit', kind: 'fit', detail: `real board ${Math.round(board.wMm)}×${Math.round(board.hMm)}mm exceeds envelope ${env.x}×${env.y}mm` })
+  const mechFit = await realMechFit(runId)
+  if (mechFit && mechFit.fits === false) {
+    v.push({ id: 'fit', kind: 'fit', detail: `real PCB ${mechFit.pcbMm.w}×${mechFit.pcbMm.h}mm does not fit the enclosure cavity ${mechFit.enclosureMm.w}×${mechFit.enclosureMm.h}mm` })
+  } else if (!mechFit) {
+    const env = b?.sizeMm
+    if (board.wMm && board.hMm && env?.x && env?.y) {
+      const fits = board.wMm <= env.x + 0.5 && board.hMm <= env.y + 0.5
+      if (!fits) v.push({ id: 'fit', kind: 'fit', detail: `real board ${Math.round(board.wMm)}×${Math.round(board.hMm)}mm exceeds envelope ${env.x}×${env.y}mm` })
+    }
   }
   const sim = await runSim(simInputs(b, boardAreaMm2))
   for (const r of sim.results ?? []) {
@@ -127,7 +144,7 @@ export async function POST(req: Request) {
     let budgets = spec.budgets
     const iterations: any[] = []
     const capabilityGaps: { violation: string; module: string; gap: string }[] = []
-    let remaining = await violations(budgets, board, boardAreaMm2)
+    let remaining = await violations(budgets, board, boardAreaMm2, runId)
 
     for (let it = 0; it < MAX_ITERS && remaining.length > 0; it++) {
       const userMsg = `BUDGETS:\n${JSON.stringify(budgets)}\n\nVIOLATIONS:\n${JSON.stringify(remaining)}\n\nPropose fixes.`
@@ -149,7 +166,7 @@ export async function POST(req: Request) {
       }
 
       const before = remaining.map((v) => v.id)
-      remaining = await violations(budgets, board, boardAreaMm2)
+      remaining = await violations(budgets, board, boardAreaMm2, runId)
       const resolved = before.filter((id) => !remaining.some((v) => v.id === id))
       iterations.push({ iter: it + 1, applied, resolved, remaining: remaining.map((v) => v.detail), budgets })
 
@@ -159,14 +176,22 @@ export async function POST(req: Request) {
     }
 
     const converged = remaining.length === 0
-    return Response.json({
+    const out = {
       converged,
       status: converged ? 'converged' : (capabilityGaps.length ? 'blocked-capability-gap' : 'not-converged'),
       iterations,
       finalBudgets: budgets,
       remaining: remaining.map((v) => v.detail),
       capabilityGaps,
-    })
+    }
+    if (runId && RUN_ID.test(runId)) {
+      try {
+        const dir = path.join(process.cwd(), 'public', 'runs', runId, 'disciplines')
+        await fs.mkdir(dir, { recursive: true })
+        await fs.writeFile(path.join(dir, 'redesign.json'), JSON.stringify(out))
+      } catch { /* best effort */ }
+    }
+    return Response.json(out)
   } catch (err) {
     return Response.json({ error: String(err) }, { status: 502 })
   }
