@@ -104,6 +104,10 @@ def parse_intent(prompt):
     m = re.search(r"(?:build|design|make)\s+an?\s+(.+?)(?:\s+with\b|\.|$)", p)
     if m:
         di["product_goal"] = m.group(1).strip()
+    else:
+        # most prompts don't start with "build a …" — use the prompt itself as the
+        # goal so downstream keyword detection (wireless, low-power, …) still fires.
+        di["product_goal"] = p.strip()
 
     # MCU
     for fam in ("rp2040", "stm32", "esp32", "nrf52", "samd21"):

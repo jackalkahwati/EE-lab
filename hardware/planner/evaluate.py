@@ -99,8 +99,23 @@ def _apply_fix(check, intent, final_design):
         if ldo and not any(s["mpn"] == ldo["mpn"] for s in final_design):
             final_design.append(ldo)
             return "added %s LDO to make the %.1fV rail" % (ldo["mpn"], BOARD_RAIL_V)
-    # mcu substitution is already handled inside planner.run's recovery; nothing
-    # more we can do here without re-planning, so report honestly that we can't.
+    if check["name"] == "mcu_fit" and check.get("fix") == "substitute_mcu":
+        # real corrective: the requested MCU can't meet a hard requirement (e.g.
+        # no radio for a BLE product). Substitute the best QUALIFYING MCU and
+        # re-target the intent so the next iteration re-solves + re-checks against
+        # it. Reported honestly (what's lost), never silently.
+        from mcu_selector import requirements_from_design, select_mcu, propose_substitute
+        dec = select_mcu(requirements_from_design(intent, final_design))
+        if dec.get("needs_recovery"):
+            sub = propose_substitute(dec)
+            if sub:
+                intent.setdefault("mcu", {})["family"] = sub["substituted_mcu"]
+                lost = sub.get("lost") or []
+                return "substituted MCU %s → %s%s" % (
+                    sub.get("requested_mcu") or "requested MCU", sub["substituted_mcu"],
+                    " (lost: %s)" % lost[0] if lost else "")
+    # no corrective available for this error — the convergence loop will stop and
+    # report the capability gap honestly rather than fake convergence.
     return None
 
 
