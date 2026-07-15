@@ -37,6 +37,8 @@ export type Revision = {
   parentRunId: string | null
   createdAt: string
   note?: string
+  /** Checkpoint-sealed provenance (Phase 7): signed accepted snapshot. */
+  sealed?: { snapshotId: string; sessionId: string; at: string }
 }
 
 export type Product = {

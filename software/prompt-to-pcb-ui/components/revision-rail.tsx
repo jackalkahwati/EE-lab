@@ -8,9 +8,9 @@
  */
 import { useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
-import { GitBranch, Diff, X, Loader2, Pin as PinIcon, Plus, UserPlus, BadgeCheck } from 'lucide-react'
+import { GitBranch, Diff, X, Loader2, Pin as PinIcon, Plus, UserPlus, BadgeCheck, ShieldCheck } from 'lucide-react'
 
-type Revision = { runId: string; parentRunId: string | null; createdAt: string; note?: string }
+type Revision = { runId: string; parentRunId: string | null; createdAt: string; note?: string; sealed?: { snapshotId: string; sessionId: string; at: string } }
 type PinRec = { id: string; area: string; kind: string; value: Record<string, unknown>; label: string }
 type Product = { productId: string; name: string; revisions: Revision[]; activeRunId: string; pins: PinRec[]; sharedWith?: string[] }
 
@@ -113,6 +113,11 @@ export function RevisionRail({ runId, onSelectRun }: {
                   current ? 'text-foreground' : 'text-muted-foreground')}>
                   {r.note ?? (i === 0 ? 'initial build' : 'revision')}
                 </span>
+                {r.sealed && (
+                  <span className="shrink-0" title={`sealed · signed snapshot ${r.sealed.snapshotId} · session ${r.sealed.sessionId}`}>
+                    <ShieldCheck className="size-3 text-emerald-500" />
+                  </span>
+                )}
                 {current && <span className="shrink-0 font-mono text-[8px] uppercase text-primary">viewing</span>}
               </button>
               <button

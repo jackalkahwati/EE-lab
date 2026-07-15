@@ -12,6 +12,7 @@ import path from 'node:path'
 // @ts-ignore - plain ESM module shared with node scripts
 import * as ent from '@/lib/enterprise/store.mjs'
 import { trackRun, updateProduct, type Product } from '@/lib/design-state'
+import { sealRevision } from '@/lib/checkpoint-seal'
 
 const COMPOSE_PROGRAM = 'Compose Builds'
 
@@ -47,6 +48,7 @@ export async function trackAndSync(runId: string, ownerEmail: string | null): Pr
       if (run?.error) return { synced: false, reason: String(run.error) }
       ent.saveDb(db)
     }
+    void sealRevision(runId).catch(() => {}) // Phase 7 provenance — best-effort
     return { synced: true, productId: product.productId, boardId: product.boardId }
   }
 
@@ -82,6 +84,7 @@ export async function trackAndSync(runId: string, ownerEmail: string | null): Pr
   if (run?.error) return { synced: false, reason: String(run.error) }
   ent.saveDb(db)
   updateProduct(product.productId, (p: Product) => { p.boardId = board.board_id })
+  void sealRevision(runId).catch(() => {}) // Phase 7 provenance — best-effort
   return { synced: true, productId: product.productId, boardId: board.board_id }
 }
 
