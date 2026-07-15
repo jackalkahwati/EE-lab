@@ -39,15 +39,16 @@ export function CadViewer({ url }: { url: string }) {
 
         const gltf = await new GLTFLoader().parseAsync(buf, '')
         const part = gltf.scene
+        // Uniform neutral part shading, like a CAD package's default material.
+        // Onshape's per-part appearances arrive as blown-out whites and its
+        // default pale blue (unset parts) — on a dark scene they read as glare,
+        // and no per-material normalization handled both (verified in a live
+        // harness). One matte grey is deterministic and reads like a product.
+        const neutral = new THREE.MeshStandardMaterial({ color: 0x9a9da3, roughness: 0.6, metalness: 0.05 })
         part.traverse((o: any) => {
           if (o.isMesh) {
             o.castShadow = true; o.receiveShadow = true
-            // Onshape glTF materials come through flat/unlit-ish — nudge them
-            // toward a matte product finish without overriding part colors.
-            if (o.material && o.material.isMeshStandardMaterial) {
-              o.material.roughness = Math.min(0.85, Math.max(0.35, o.material.roughness ?? 0.6))
-              o.material.metalness = Math.min(0.25, o.material.metalness ?? 0.1)
-            }
+            o.material = neutral
           }
         })
         scene.add(part)
@@ -64,6 +65,7 @@ export function CadViewer({ url }: { url: string }) {
         renderer.shadowMap.enabled = true
         renderer.shadowMap.type = THREE.PCFSoftShadowMap
         renderer.toneMapping = THREE.ACESFilmicToneMapping
+        renderer.toneMappingExposure = 0.75
         renderer.outputColorSpace = THREE.SRGBColorSpace
         mount.appendChild(renderer.domElement)
 
@@ -71,10 +73,11 @@ export function CadViewer({ url }: { url: string }) {
           const { RoomEnvironment } = await import('three/examples/jsm/environments/RoomEnvironment.js')
           const pmrem = new THREE.PMREMGenerator(renderer)
           scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
+          ;(scene as any).environmentIntensity = 0.12
         } catch { /* analytic lights alone still render */ }
 
         scene.add(new THREE.AmbientLight(0xffffff, 0.35))
-        const key = new THREE.DirectionalLight(0xffffff, 2.4)
+        const key = new THREE.DirectionalLight(0xffffff, 2.0)
         key.position.set(center.x + span, center.y + span * 1.4, center.z + span * 0.7)
         key.target.position.copy(center); key.castShadow = true
         key.shadow.mapSize.set(2048, 2048); key.shadow.bias = -0.0004

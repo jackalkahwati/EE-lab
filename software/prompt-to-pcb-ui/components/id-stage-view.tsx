@@ -53,7 +53,10 @@ async function rasterizeScaffold(): Promise<string | null> {
     canvas.width = w; canvas.height = h
     const ctx = canvas.getContext('2d')
     if (!ctx) return null
-    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, w, h)
+    // Dark canvas to match the app theme AND the render prompt: providers that
+    // condition on this reference follow its background, so a white raster here
+    // produced white concept sheets no matter what the prompt asked for.
+    ctx.fillStyle = '#0f0f0f'; ctx.fillRect(0, 0, w, h)
     ctx.drawImage(img, 0, 0, w, h)
     return canvas.toDataURL('image/png')
   } catch {
@@ -144,18 +147,26 @@ export function IdStageView({
           While idle/loading we show a neutral placeholder. The scaffold SVG stays
           mounted (hidden when not the fallback) so rasterizeScaffold() can still
           read it for render conditioning. */}
-      <div className="mt-4 min-h-0 flex-1">
-        {showingRender && render.status === 'done' ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={render.url} alt={`${brief.product} concept render`} className="mx-auto max-h-[52vh] w-auto rounded-md border border-border" />
-        ) : scaffoldIsFallback ? (
-          <IdScaffold brief={brief} boardMm={boardMm} className="mx-auto max-h-[52vh] w-full" />
-        ) : (
-          <div className="mx-auto flex h-[52vh] max-h-[52vh] w-full flex-col items-center justify-center gap-3 rounded-md border border-border bg-muted/30">
-            <Loader2 className="size-6 animate-spin text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">generating render…</span>
-          </div>
-        )}
+      <div className="mt-4">
+        <div className="mb-1 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
+          concept — four views (front · perspective · top · side)
+        </div>
+        {/* Fixed-height dark panel like the PCBA/CAD viewers: the image is
+            object-contain INSIDE it (letterboxed on the scene background), so
+            it can never overflow and overlap the copy below it. */}
+        <div className="h-[52vh] w-full overflow-hidden rounded-md border border-border bg-[#0f0f0f]">
+          {showingRender && render.status === 'done' ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={render.url} alt={`${brief.product} concept render`} className="h-full w-full object-contain" />
+          ) : scaffoldIsFallback ? (
+            <IdScaffold brief={brief} boardMm={boardMm} className="h-full w-full" />
+          ) : (
+            <div className="flex h-full w-full flex-col items-center justify-center gap-3">
+              <Loader2 className="size-6 animate-spin text-muted-foreground" />
+              <span className="text-sm text-muted-foreground">generating render…</span>
+            </div>
+          )}
+        </div>
         {/* Keep the scaffold mounted (hidden) whenever it isn't the visible fallback,
             so rasterizeScaffold() can read the live SVG for render conditioning. */}
         {!scaffoldIsFallback && (

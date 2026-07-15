@@ -42,7 +42,7 @@ export default function Home() {
       <nav className="nav" aria-label="Primary navigation">
         <div className="container nav-inner">
           <a href="#top" className="wordmark">
-            <Starburst /> firstlight
+            <Starburst /> Firstlight
           </a>
           <div className="nav-center">
             <a href="#how">How it works</a>
@@ -341,7 +341,7 @@ export default function Home() {
       <footer className="footer">
         <div className="container footer-inner">
           <span className="wordmark small">
-            <Starburst /> firstlight
+            <Starburst /> Firstlight
           </span>
           <span className="footer-tag">Every board&apos;s first light.</span>
           <span className="footer-links">

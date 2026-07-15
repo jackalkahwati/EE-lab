@@ -74,7 +74,7 @@ export default function FL1Page() {
       <nav className="nav" aria-label="Primary navigation">
         <div className="container nav-inner">
           <Link href="/" className="wordmark">
-            <Starburst /> firstlight
+            <Starburst /> Firstlight
           </Link>
           <div className="nav-links">
             <Link href="/#how">Compose</Link>
@@ -270,7 +270,7 @@ export default function FL1Page() {
       <footer className="footer">
         <div className="container footer-inner">
           <span className="wordmark small">
-            <Starburst /> firstlight
+            <Starburst /> Firstlight
           </span>
           <span className="footer-tag">Every board&apos;s first light.</span>
           <span className="footer-links">
