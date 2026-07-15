@@ -8,10 +8,11 @@
  */
 import { useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
-import { GitBranch, Diff, X, Loader2 } from 'lucide-react'
+import { GitBranch, Diff, X, Loader2, Pin as PinIcon, Plus } from 'lucide-react'
 
 type Revision = { runId: string; parentRunId: string | null; createdAt: string; note?: string }
-type Product = { productId: string; name: string; revisions: Revision[]; activeRunId: string }
+type PinRec = { id: string; area: string; kind: string; value: Record<string, unknown>; label: string }
+type Product = { productId: string; name: string; revisions: Revision[]; activeRunId: string; pins: PinRec[] }
 
 type FieldDelta = { label: string; from: unknown; to: unknown }
 type DiffPayload = {
@@ -128,6 +129,8 @@ export function RevisionRail({ runId, onSelectRun }: {
         })}
       </div>
 
+      <PinsPanel product={product} onChange={(pins) => setProduct({ ...product, pins })} />
+
       {diffFor && (
         <div className="mt-2 rounded-md border border-border bg-card/60 p-2.5">
           <div className="mb-1.5 flex items-center gap-2">
@@ -164,6 +167,93 @@ export function RevisionRail({ runId, onSelectRun }: {
               <DeltaRows title="simulation" sec={diff.simulation} />
             </div>
           )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+/**
+ * Engineer-locked decisions (Phase 2). Pins are HARD constraints injected into
+ * the electronics/mechanical/redesign prompts and verified after builds — a
+ * violated pin fails its stage. Add/remove here; owner-only server-side.
+ */
+function PinsPanel({ product, onChange }: {
+  product: { productId: string; pins: PinRec[] }
+  onChange: (pins: PinRec[]) => void
+}) {
+  const [adding, setAdding] = useState(false)
+  const [kind, setKind] = useState<'part' | 'enclosure-dim' | 'budget'>('part')
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function post(body: Record<string, unknown>) {
+    setBusy(true)
+    try {
+      const r = await fetch('/api/products/pins', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ productId: product.productId, ...body }),
+      })
+      const d = await r.json()
+      if (Array.isArray(d.pins)) onChange(d.pins)
+    } catch { /* surface-less: the list simply doesn't change */ }
+    setBusy(false)
+  }
+
+  function add() {
+    const v = text.trim()
+    if (!v) return
+    const area = kind === 'part' ? 'electronics' : kind === 'enclosure-dim' ? 'mechanical' : 'budget'
+    const value = kind === 'part' ? { mpn: v } : { text: v }
+    void post({ add: { area, kind, value, label: kind === 'part' ? `part ${v}` : v } })
+    setText(''); setAdding(false)
+  }
+
+  return (
+    <div className="mt-2.5">
+      <div className="mb-1 flex items-center gap-1.5">
+        <PinIcon className="size-3 text-muted-foreground" />
+        <span className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
+          pins · {product.pins?.length ?? 0}
+        </span>
+        <button type="button" onClick={() => setAdding((v) => !v)}
+          className="ml-auto rounded-sm border border-border p-0.5 text-muted-foreground hover:text-foreground">
+          <Plus className="size-3" />
+        </button>
+      </div>
+      {(product.pins ?? []).map((pin) => (
+        <div key={pin.id} className="group flex items-center gap-1.5 rounded-sm px-1.5 py-0.5 hover:bg-secondary/30">
+          <span className="font-mono text-[9px] uppercase text-primary">{pin.kind}</span>
+          <span className="min-w-0 flex-1 truncate text-[11px] text-foreground">{pin.label}</span>
+          <button type="button" disabled={busy} onClick={() => void post({ removeId: pin.id })}
+            className="shrink-0 text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100">
+            <X className="size-3" />
+          </button>
+        </div>
+      ))}
+      {!product.pins?.length && !adding && (
+        <p className="px-1.5 text-[10.5px] text-muted-foreground">
+          Nothing locked — pin a part (MPN), an enclosure dimension, or a budget
+          and every regeneration must keep it.
+        </p>
+      )}
+      {adding && (
+        <div className="mt-1 flex items-center gap-1.5 px-1.5">
+          <select value={kind} onChange={(e) => setKind(e.target.value as any)}
+            className="rounded-sm border border-border bg-background px-1 py-0.5 font-mono text-[10px]">
+            <option value="part">part</option>
+            <option value="enclosure-dim">enclosure dim</option>
+            <option value="budget">budget</option>
+          </select>
+          <input autoFocus value={text} onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') add(); else if (e.key === 'Escape') setAdding(false) }}
+            placeholder={kind === 'part' ? 'MPN, e.g. RP2040' : kind === 'enclosure-dim' ? 'e.g. wall 2.0 mm' : 'e.g. unit cost <= $25'}
+            className="min-w-0 flex-1 rounded-sm border border-border bg-background px-1.5 py-0.5 text-[11px] outline-none focus:border-primary/60" />
+          <button type="button" onClick={add} disabled={busy || !text.trim()}
+            className="rounded-sm bg-primary px-1.5 py-0.5 text-[10px] font-medium text-primary-foreground disabled:opacity-50">
+            pin
+          </button>
         </div>
       )}
     </div>

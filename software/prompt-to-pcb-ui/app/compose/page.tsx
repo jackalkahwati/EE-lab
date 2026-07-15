@@ -356,6 +356,10 @@ export default function Compose2Page() {
     try {
       const res = await runFullPipeline({
         spec, runId, headers: llmHeaders(), signal: ac.signal,
+        // Phase 2: skip stages whose inputs are provably unchanged. The server
+        // decides currency (FL_INCREMENTAL gate) — with the flag off this is a
+        // no-op and every stage runs exactly as before.
+        dirtyOnly: true,
         // every status update lands in THIS run's entry only — never the
         // session-global view — so switching threads mid-run can't cross-narrate.
         // Each transition also lands in the bottom Terminal panel's log bus.

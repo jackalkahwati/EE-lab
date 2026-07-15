@@ -28,6 +28,7 @@ export class FirstlightClient {
   }
 
   createBoard(prompt) { return this.#json('POST', '/api/v1/boards', { prompt }) }
+  rebuildRun(runId) { return this.#json('POST', '/api/v1/boards', { rebuildRunId: runId }) }
   runStatus(runId) { return this.#json('GET', `/api/v1/runs/${encodeURIComponent(runId)}`) }
   listArtifacts(runId) { return this.#json('GET', `/api/v1/runs/${encodeURIComponent(runId)}/artifacts`) }
   listBoards() { return this.#json('GET', '/api/v1/boards') }

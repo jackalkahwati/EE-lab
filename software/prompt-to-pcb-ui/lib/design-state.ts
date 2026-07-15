@@ -165,3 +165,25 @@ export function updateProduct(
   saveProducts(all)
   return p
 }
+
+/**
+ * Render a product's pins for one area as a hard-constraint prompt block, or
+ * '' when none. Injected into the electronics planner / mechanical plan /
+ * redesign prompts — and VERIFIED after builds, never merely trusted.
+ */
+export function pinsPromptFor(runId: string, areas: Pin['area'][]): string {
+  const p = productForRun(runId)
+  const pins = (p?.pins ?? []).filter((x) => areas.includes(x.area))
+  if (!pins.length) return ''
+  const lines = pins.map((x) => `- ${x.label} (${x.kind}: ${JSON.stringify(x.value)})`)
+  return (
+    `\n\nPINNED CONSTRAINTS (hard — the engineer locked these; a design that ` +
+    `violates any of them is INVALID and will be rejected):\n${lines.join('\n')}`
+  )
+}
+
+/** Pins constraining a run's electronics, for post-build verification. */
+export function partPinsFor(runId: string): Pin[] {
+  const p = productForRun(runId)
+  return (p?.pins ?? []).filter((x) => x.area === 'electronics' && x.kind === 'part')
+}

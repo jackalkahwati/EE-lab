@@ -13,6 +13,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { callLLMText, overrideFromHeaders } from '@/lib/llm'
+import { pinsPromptFor } from '@/lib/design-state'
 import { MODEL } from '@/lib/model-tiers'
 import type { ProductSpec } from '@/lib/product-spec'
 
@@ -224,7 +225,10 @@ export async function POST(req: Request) {
       // 'sim-unavailable' left) — no budget change can help; don't burn an LLM
       // call proposing one.
       if (remaining.every((viol) => capabilityGaps.some((g) => g.violation === viol.id))) break
-      const userMsg = `BUDGETS:\n${JSON.stringify(budgets)}\n\nVIOLATIONS:\n${JSON.stringify(remaining)}\n\nPropose fixes.`
+      const userMsg = `BUDGETS:\n${JSON.stringify(budgets)}\n\nVIOLATIONS:\n${JSON.stringify(remaining)}\n\nPropose fixes.` +
+        // Phase 2: pinned budgets are IMMOVABLE — a redesign that can only
+        // converge by moving one must report a capability gap instead.
+        pinsPromptFor(runId, ['budget']).replace('INVALID and will be rejected', 'IMMOVABLE: if convergence requires moving one, report a capability gap instead')
       let adjustments: any[] = []
       try {
         const { text } = await callLLMText(CONTROLLER_SYS, userMsg, { model: MODEL.design, ...override })

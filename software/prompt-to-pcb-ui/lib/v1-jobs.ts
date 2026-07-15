@@ -24,6 +24,7 @@ import type { ProductSpec } from '@/lib/product-spec'
 
 export type V1Job = {
   runId: string
+  mode?: 'build' | 'rebuild'
   prompt: string
   owner: string
   status: 'queued' | 'running' | 'complete' | 'failed'
@@ -90,6 +91,30 @@ async function runJob(job: V1Job, baseUrl: string) {
   const cookie = `fl_session=${makeSession(job.owner)}`
   const headers = { cookie }
   try {
+    // REBUILD mode: the run already has its spec + artifacts (e.g. a fork) —
+    // skip ID/architect and go straight to the pipeline. With incremental
+    // enabled, unchanged stages skip as 'current'; changed ones re-run.
+    if (job.mode === 'rebuild') {
+      const spec = JSON.parse(
+        await fs.readFile(path.join(runDir(job.runId), 'product-spec.json'), 'utf8')) as ProductSpec
+      job.phase = 'pipeline'
+      await persist(job)
+      const result = await runFullPipeline({
+        spec, runId: job.runId, baseUrl, headers, dirtyOnly: true,
+        onStage: (e: StageEvent) => {
+          job.stages[e.stage] = { status: e.status, detail: e.detail }
+          void persist(job)
+        },
+      })
+      const bad = Object.entries(result.stages)
+        .filter(([, s]) => s?.status === 'failed' || s?.status === 'blocked')
+        .map(([k, s]) => `${k}: ${s?.detail ?? s?.status}`)
+      job.status = bad.length ? 'failed' : 'complete'
+      if (bad.length) job.error = bad.join(' | ')
+      job.phase = undefined
+      try { await trackAndSync(job.runId, job.owner) } catch { /* best effort */ }
+      return
+    }
     // 1. Industrial design brief (one-click force — persists id-brief.json).
     //    Best-effort: a product can proceed without a brief.
     job.phase = 'industrial design'
@@ -119,6 +144,7 @@ async function runJob(job: V1Job, baseUrl: string) {
     await persist(job)
     const result = await runFullPipeline({
       spec, runId: job.runId, baseUrl, headers,
+      dirtyOnly: true, // no-op unless FL_INCREMENTAL=1 (server-decided)
       onStage: (e: StageEvent) => {
         job.stages[e.stage] = { status: e.status, detail: e.detail }
         void persist(job)
@@ -143,9 +169,10 @@ async function runJob(job: V1Job, baseUrl: string) {
 
 /** Enqueue a build. Returns the job immediately; the pipeline runs serialized
  *  in the background of this long-lived server process. */
-export function enqueueBuild(prompt: string, owner: string, baseUrl: string): V1Job {
+export function enqueueBuild(prompt: string, owner: string, baseUrl: string, opts?: { rebuildRunId?: string }): V1Job {
   const job: V1Job = {
-    runId: `run-${randomUUID()}`,
+    runId: opts?.rebuildRunId ?? `run-${randomUUID()}`,
+    mode: opts?.rebuildRunId ? 'rebuild' : 'build',
     prompt, owner,
     status: 'queued',
     stages: {},

@@ -17,6 +17,7 @@ import { callLLMText, overrideFromHeaders, type LLMOverride } from '@/lib/llm'
 import { MODEL } from '@/lib/model-tiers'
 import { MECH_PLAN_SCHEMA, normalizeMechPlan, type MechPlan } from '@/lib/mechanical-plan'
 import { normalizeIdBrief, idBriefSummary, type IdBrief } from '@/lib/id-brief'
+import { pinsPromptFor } from '@/lib/design-state'
 import type { ProductSpec } from '@/lib/product-spec'
 
 export const dynamic = 'force-dynamic'
@@ -326,7 +327,9 @@ export async function POST(req: Request) {
       (board.wMm && board.hMm
         ? `REAL built board footprint: ${board.shape === 'circle' && board.diaMm ? `CIRCULAR, diameter ${Math.round(board.diaMm)} mm` : `${Math.round(board.wMm)} x ${Math.round(board.hMm)} mm`}, ${board.layers ?? '?'}-layer. ${idBrief ? 'This is the INTERNAL cavity requirement — the inner cavity must fit THIS board plus clearance; the OUTER body follows the ID envelope above.' : 'Size the cavity to fit THIS board plus clearance + walls.'}\n`
         : `No built board yet — size from the budget${idBrief ? ' and the ID envelope' : ''}.\n`) +
-      `Emit the mechanical build plan.`
+      `Emit the mechanical build plan.` +
+      // Phase 2: engineer-locked mechanical decisions are HARD plan inputs.
+      pinsPromptFor(runId, ['mechanical'])
 
     const plan = await callLLM(userMsg, overrideFromHeaders(req.headers))
 

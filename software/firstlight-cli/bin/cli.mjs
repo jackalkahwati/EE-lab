@@ -57,6 +57,22 @@ async function main() {
     })
     printStatus(final)
     process.exit(final.status === 'complete' ? 0 : 2)
+  } else if (cmd === 'rebuild') {
+    const runId = pos[1]
+    if (!runId) die('usage: firstlight rebuild <runId> [--wait]')
+    const r = await c.rebuildRun(runId)
+    out(`rebuild of ${r.runId} queued — unchanged stages skip as current`)
+    if (flags.has('--wait')) {
+      let lastLine = ''
+      const final = await c.waitForRun(r.runId, {
+        onTick: (s) => {
+          const line = `${s.status}${s.phase ? ` (${s.phase})` : ''}  ${stageLine(s)}`
+          if (line !== lastLine) { out(`  ${line}`); lastLine = line }
+        },
+      })
+      printStatus(final)
+      process.exit(final.status === 'complete' ? 0 : 2)
+    }
   } else if (cmd === 'status') {
     const runId = pos[1] || die('usage: firstlight status <runId> [--watch]')
     if (flags.has('--watch')) {
@@ -92,6 +108,7 @@ async function main() {
     out(`firstlight — prompt-to-product from the terminal
 
   firstlight build "<prompt>" [--wait]     build a product (PCBA + enclosure + docs)
+  firstlight rebuild <runId> [--wait]      re-verify a run; unchanged stages skip
   firstlight status <runId> [--watch]      run status / stage progress
   firstlight artifacts <runId>             list produced artifacts
   firstlight get <runId> <kind> [-o file]  download an artifact (step, glb, fab-package, …)

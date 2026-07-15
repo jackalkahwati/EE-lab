@@ -50,6 +50,11 @@ type RunOpts = {
   onStage: (e: StageEvent) => void
   /** If the chip-scale board already exists, don't rebuild it (~3 min). Default true. */
   reuseElectronics?: boolean
+  /** Incremental mode (Phase 2): skip any stage whose recorded inputs hash is
+   *  unchanged since it last PASSED. The server decides currency
+   *  (/api/runs/stage-hash, gated on FL_INCREMENTAL=1) — with the flag off the
+   *  endpoint always answers not-current and behavior is identical to today. */
+  dirtyOnly?: boolean
 }
 
 export type PipelineResult = {
@@ -70,6 +75,28 @@ function jsonHeaders(h?: Record<string, string>) {
 async function postJson(url: string, body: unknown, opts: RunOpts): Promise<any> {
   const r = await fetch(`${opts.baseUrl ?? ''}${url}`, { method: 'POST', headers: jsonHeaders(opts.headers), body: JSON.stringify(body), signal: opts.signal })
   return r.json()
+}
+
+/** dirtyOnly: ask the server whether a stage's artifact is current. Fail open
+ *  (re-run) on any error — skipping must never rest on a guess. */
+async function stageIsCurrent(stage: PipeStage, opts: RunOpts): Promise<string | null> {
+  if (!opts.dirtyOnly) return null
+  try {
+    const r = await fetch(
+      `${opts.baseUrl ?? ''}/api/runs/stage-hash?run=${encodeURIComponent(opts.runId)}&stage=${stage}`,
+      { headers: opts.headers, cache: 'no-store', signal: opts.signal })
+    const d = await r.json()
+    return d?.current ? String(d.reason ?? 'inputs unchanged') : null
+  } catch { return null }
+}
+
+/** Record a terminal stage build's inputs hash (server recomputes from disk). */
+function recordStageHash(stage: PipeStage, status: PipeStatus, opts: RunOpts) {
+  if (status !== 'passed' && status !== 'failed') return
+  fetch(`${opts.baseUrl ?? ''}/api/runs/stage-hash`, {
+    method: 'POST', headers: jsonHeaders(opts.headers),
+    body: JSON.stringify({ runId: opts.runId, stage, status }), keepalive: true,
+  }).catch(() => { /* telemetry-grade: never blocks the pipeline */ })
 }
 
 /** The persisted chip-scale board for this run (chipscale-board.json), or null. */
@@ -105,6 +132,7 @@ export function electronicsVerdict(d: any): { clean: boolean; detail: string } {
   }
   if (unrouted > 0) bits.push(`${unrouted} net(s) unrouted`)
   if (d?.drcRepair?.converged === false) bits.push('not converged')
+  for (const v of d?.pinViolations ?? []) bits.push(String(v)) // Phase 2: violated pins fail loudly
   if (!bits.length) bits.push(errs == null ? 'no real DRC report' : 'runner reported not ok')
   return { clean, detail: `board ${w}×${h}mm built but NOT clean: ${bits.join(', ')} — see Electronics tab` }
 }
@@ -295,6 +323,9 @@ async function runPipelineStages(opts: RunOpts, timer: RunTimer): Promise<Pipeli
     // place timing has to hook. Guarded: a telemetry fault must never take the
     // pipeline down with it.
     try { timer.stage(stage, status, detail) } catch { /* best-effort */ }
+    // Phase 2: terminal statuses record the stage's inputs hash server-side so
+    // a later dirtyOnly run can prove the artifact is still current.
+    try { recordStageHash(stage, status, opts) } catch { /* best-effort */ }
     onStage({ stage, status, detail })
   }
   const aborted = () => signal?.aborted
@@ -355,6 +386,10 @@ async function runPipelineStages(opts: RunOpts, timer: RunTimer): Promise<Pipeli
   const physicalBranch = async () => {
     // ---- 2. Mechanical (enclosure + real fit check) ----
     if (applicable('mechanical')) {
+      const cur = await stageIsCurrent('mechanical', opts)
+      if (cur) {
+        set('mechanical', 'passed', `current — ${cur}`)
+      } else {
       set('mechanical', 'running')
       try {
         const d = await postJson('/api/mechanical', { spec, runId: opts.runId }, opts)
@@ -367,11 +402,16 @@ async function runPipelineStages(opts: RunOpts, timer: RunTimer): Promise<Pipeli
           set('mechanical', 'failed', String(d?.error || 'enclosure build failed'))
         }
       } catch (e) { setCaught('mechanical', e) }
+      }
     }
     if (aborted()) return
 
     // ---- 3. Simulation (lumped physics) ----
     if (applicable('simulation' as PipeStage)) {
+      const cur = await stageIsCurrent('simulation', opts)
+      if (cur) {
+        set('simulation', 'passed', `current — ${cur}`)
+      } else {
       set('simulation', 'running')
       try {
         const d = await postJson('/api/simulate', { spec, runId: opts.runId }, opts)
@@ -382,6 +422,7 @@ async function runPipelineStages(opts: RunOpts, timer: RunTimer): Promise<Pipeli
             simFails.length ? `${simFails.length} sim(s) over limit: ${simFails.join('; ')}` : 'all sims within limits')
         }
       } catch (e) { setCaught('simulation', e) }
+      }
     }
     if (aborted()) return
 
@@ -457,6 +498,10 @@ async function runPipelineStages(opts: RunOpts, timer: RunTimer): Promise<Pipeli
     await Promise.all(DISCIPLINE_STAGES.map(async (stage) => {
       if (aborted()) return
       if (!applicable(stage)) { set(stage, 'skipped', 'not applicable to this product'); return }
+      if (!isRerun) {
+        const cur = await stageIsCurrent(stage, opts)
+        if (cur) { set(stage, 'passed', `current — ${cur}`); return }
+      }
       set(stage, 'running', note)
       try {
         const ev = await runDiscipline(stage, specNow, opts)

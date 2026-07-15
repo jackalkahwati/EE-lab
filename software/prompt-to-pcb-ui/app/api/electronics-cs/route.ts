@@ -11,6 +11,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { callLLMText, overrideFromHeaders, type LLMOverride } from '@/lib/llm'
+import { pinsPromptFor, partPinsFor } from '@/lib/design-state'
 import { MODEL } from '@/lib/model-tiers'
 import type { ProductSpec } from '@/lib/product-spec'
 import { normalizeIdBrief } from '@/lib/id-brief'
@@ -379,7 +380,9 @@ async function buildChipScale(
       (keepCapabilities
         ? `IMPORTANT: include EVERY capability this product needs — do NOT drop any peripheral to save space. A LARGER board is acceptable; completeness beats compactness here.\n`
         : '') +
-      `List the minimal chip-scale part set + nets.`
+      `List the minimal chip-scale part set + nets.` +
+      // Phase 2: engineer-locked decisions are HARD inputs to the part planner.
+      pinsPromptFor(runId, ['electronics'])
 
     const dir = path.join(process.cwd(), 'public', 'runs', runId, 'electronics')
     await fs.mkdir(dir, { recursive: true })
@@ -606,8 +609,28 @@ async function buildChipScale(
       if (result.kicadPcb) await fs.writeFile(path.join(dir, 'chipscale.kicad_pcb'), result.kicadPcb)
     }
 
+    // Phase 2 pin verification: a pinned part must actually appear in the
+    // built design's artifacts (planner design / part list / netlist text) —
+    // injection is prompt-level and therefore NEVER trusted. A violated pin
+    // fails the honest gate in run-pipeline.
+    const pinViolations: string[] = []
+    try {
+      const hay = [
+        JSON.stringify(parts ?? []),
+        await fs.readFile(path.join(process.cwd(), 'public', 'runs', runId, 'data', 'ato.json'), 'utf8').catch(() => ''),
+        await fs.readFile(path.join(process.cwd(), 'public', 'runs', runId, 'data', 'bom.json'), 'utf8').catch(() => ''),
+      ].join('\n').toLowerCase()
+      for (const pin of partPinsFor(runId)) {
+        const mpn = String((pin.value as any)?.mpn ?? (pin.value as any)?.part ?? '').trim()
+        if (mpn && !hay.includes(mpn.toLowerCase())) {
+          pinViolations.push(`pinned part "${mpn}" missing from the built design`)
+        }
+      }
+    } catch { /* verification is best-effort; absence of proof reports below */ }
+
     return {
-      ok: !!result.ok,
+      ok: !!result.ok && pinViolations.length === 0,
+      pinViolations,
       boardMm: result.boardMm,
       areaMm2: result.areaMm2,
       boardShape: result.boardShape ?? null,

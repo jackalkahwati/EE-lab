@@ -38,7 +38,11 @@ export async function POST(req: Request) {
   let body: any
   try { body = await req.json() } catch { body = {} }
   const prompt = typeof body?.prompt === 'string' ? body.prompt.trim() : ''
-  if (prompt.length < 8 || prompt.length > 2000) {
+  const rebuildRunId = typeof body?.rebuildRunId === 'string' ? body.rebuildRunId : undefined
+  if (rebuildRunId && !/^run-[A-Za-z0-9._-]{1,128}$/.test(rebuildRunId)) {
+    return Response.json({ error: 'invalid rebuildRunId' }, { status: 400 })
+  }
+  if (!rebuildRunId && (prompt.length < 8 || prompt.length > 2000)) {
     return Response.json({ error: 'prompt must be 8–2000 characters' }, { status: 400 })
   }
   const pending = queueDepth()
@@ -49,7 +53,14 @@ export async function POST(req: Request) {
   // first (behind the tunnel the request origin is the public host — looping
   // artifact-sized traffic through Cloudflare would be slow and fragile).
   const baseUrl = process.env.FL_SELF_URL || new URL(req.url).origin
-  const job = enqueueBuild(prompt, auth.email, baseUrl)
+  if (rebuildRunId) {
+    // rebuild only your own runs — fail closed like every run surface
+    const { runAccessByEmail } = await import('@/lib/auth')
+    if (runAccessByEmail(auth.email, rebuildRunId) === 'forbidden') {
+      return Response.json({ error: 'not your board' }, { status: 403 })
+    }
+  }
+  const job = enqueueBuild(prompt || `rebuild ${rebuildRunId}`, auth.email, baseUrl, { rebuildRunId })
   return Response.json({
     runId: job.runId,
     status: job.status,
