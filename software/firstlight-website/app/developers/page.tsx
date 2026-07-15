@@ -94,7 +94,10 @@ curl -X POST https://app.firstlight.build/api/v1/boards \\
             <Endpoint verb="POST" path="/api/v1/boards">
               Start a build from a prompt (read_write scope). Returns 202 with
               a runId immediately. The run is owned by the key&apos;s creator
-              and private to that account.
+              and private to that account. Pass{" "}
+              <code>rebuildRunId</code> instead of a prompt to re-verify an
+              existing run. Stages whose inputs are provably unchanged skip as
+              current, so a rebuild only pays for what changed.
             </Endpoint>
             <Endpoint verb="GET" path="/api/v1/runs/&lt;runId&gt;">
               Build status. Per stage progress across electronics, mechanical,
