@@ -115,6 +115,11 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
   const [logs, setLogs] = useState<{ stage: string; text: string; level?: string }[]>([])
   const [threadsOpen, setThreadsOpen] = useState(false)
   const esRef = useRef<EventSource | null>(null)
+  // Product-revision lineage: reviseProduct sets this to the run being revised;
+  // buildBoard threads it as &parent= so the run report records ancestry (the
+  // legacy startRev path already does this) and Phase-1 tracking can group
+  // revisions into one product. Cleared once consumed or on reset/new design.
+  const reviseParentRef = useRef<string | null>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
 
@@ -163,6 +168,7 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
   }, [])
 
   function reset() {
+    reviseParentRef.current = null
     esRef.current?.close(); esRef.current = null
     setPhase('idle'); setBoardBuilt(false); setRequest(''); setAnswers([]); setCurrent(null); setSpec(null)
     setIdBrief(null); setGroundBoard(null); setProductSpec(null); setIdRunId(null); setRevSpec(null); setTyped(''); setErr(null); setStages({}); setLogs([]); onNew()
@@ -258,7 +264,10 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
     // Stage 0: product builds go through the planner (plan=1) — real parts + the
     // requested MCU family via synth. The route runs planner.run(prompt) itself,
     // so no block spec is sent. Legacy/revise flows keep the compose block path.
-    const base = `/api/pipeline/run?prompt=${encodeURIComponent(req)}&runId=${encodeURIComponent(id)}`
+    const parent = reviseParentRef.current
+    reviseParentRef.current = null
+    const lineage = parent ? `&parent=${encodeURIComponent(parent)}&revNote=${encodeURIComponent(req.slice(0, 200))}` : ''
+    const base = `/api/pipeline/run?prompt=${encodeURIComponent(req)}&runId=${encodeURIComponent(id)}${lineage}`
     const payload = b64(JSON.stringify({ blocks: bspec.blocks, boardClass: bspec.boardClass, ...(bspec.layers ? { layers: bspec.layers } : {}) }))
     const url = opts?.plan
       ? `${base}&plan=1`
@@ -397,6 +406,7 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
    *  run; that's honest for a product-level change. */
   function reviseProduct(req: string) {
     if (!prodSpec) return
+    reviseParentRef.current = activeRunId || null
     const intent = boardIntentOf(prodSpec)
     const combined =
       `Current product: ${prodSpec.product}.` +

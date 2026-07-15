@@ -33,6 +33,7 @@ import { FL1Loop } from '@/components/fl1-loop'
 import { ErrorBoundary } from '@/components/error-boundary'
 import { ReviewPanel } from '@/components/review-panel'
 import { RunOverview } from '@/components/run-overview'
+import { RevisionRail } from '@/components/revision-rail'
 import { ArtifactExplorer } from '@/components/artifact-explorer'
 import { FL1ReadinessPanel } from '@/components/fl1-readiness-panel'
 import { BoardObjects } from '@/components/board-objects'
@@ -458,7 +459,15 @@ export default function Compose2Page() {
                     </div>
                   ) : (
                     <>
-                      {tab === 'Overview' && <RunOverview runId={selectedRun.runDir ? selectedRun.id : null} run={selectedRun} />}
+                      {tab === 'Overview' && (
+                        <>
+                          <RunOverview runId={selectedRun.runDir ? selectedRun.id : null} run={selectedRun} />
+                          <RevisionRail
+                            runId={selectedRun.runDir ? selectedRun.id : undefined}
+                            onSelectRun={(rid) => { setSelectedId(rid); setNewDesign(false); setIdBrief(null); setProductSpec(null); setStage('electronics'); setBuiltDisc({}) }}
+                          />
+                        </>
+                      )}
                       {tab === 'Objects' && <BoardObjects real={real} />}
                       {tab === 'Artifacts' && <ArtifactExplorer runId={selectedRun.runDir ? selectedRun.id : null} />}
                       {tab === 'Code' && <CodeViewer key={isReal ? 'real' : 'seed'} files={isReal ? real?.ato : null} />}

@@ -5,7 +5,7 @@
  * Session-authed; requires at least shared access to the run.
  */
 import { runAccess, isValidRunId } from '@/lib/auth'
-import { syncRunToPrograms } from '@/lib/programs-sync'
+import { trackAndSync } from '@/lib/programs-sync'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,7 +17,7 @@ export async function POST(req: Request) {
     const auth = runAccess(req, runId)
     if (auth.access === 'unauthenticated') return Response.json({ error: 'sign in required' }, { status: 401 })
     if (auth.access === 'forbidden') return Response.json({ error: 'not your board' }, { status: 403 })
-    return Response.json(await syncRunToPrograms(runId))
+    return Response.json(await trackAndSync(runId, auth.email))
   } catch (err) {
     return Response.json({ error: String(err) }, { status: 500 })
   }
