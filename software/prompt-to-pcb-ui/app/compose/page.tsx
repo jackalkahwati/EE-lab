@@ -36,6 +36,7 @@ import { ReviewPanel } from '@/components/review-panel'
 import { RunOverview } from '@/components/run-overview'
 import { RevisionRail } from '@/components/revision-rail'
 import { WorkQueue } from '@/components/work-queue'
+import { CommentsPanel } from '@/components/comments-panel'
 import { ArtifactExplorer } from '@/components/artifact-explorer'
 import { FL1ReadinessPanel } from '@/components/fl1-readiness-panel'
 import { BoardObjects } from '@/components/board-objects'
@@ -481,6 +482,7 @@ export default function Compose2Page() {
                             runId={selectedRun.runDir ? selectedRun.id : undefined}
                             onResolve={(prompt) => setRevisePrefill(prompt)}
                           />
+                          <CommentsPanel runId={selectedRun.runDir ? selectedRun.id : undefined} />
                         </>
                       )}
                       {tab === 'Objects' && <BoardObjects real={real} />}

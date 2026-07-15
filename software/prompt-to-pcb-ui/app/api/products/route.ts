@@ -5,7 +5,7 @@
  * keep their own access checks.
  */
 import { sessionEmail, isValidRunId } from '@/lib/auth'
-import { listProducts, productForRun } from '@/lib/design-state'
+import { listProducts, productForRun, productAccess } from '@/lib/design-state'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,7 +18,7 @@ export async function GET(req: Request) {
     if (!isValidRunId(run)) return Response.json({ error: 'invalid run id' }, { status: 400 })
     const p = productForRun(run)
     if (!p) return Response.json({ product: null })
-    if (p.owner && p.owner !== email.toLowerCase()) {
+    if (productAccess(email, p) === 'forbidden') {
       return Response.json({ error: 'not your product' }, { status: 403 })
     }
     return Response.json({ product: p })

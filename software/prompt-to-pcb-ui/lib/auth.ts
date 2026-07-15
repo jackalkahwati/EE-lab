@@ -326,12 +326,25 @@ export function runAccess(req: Request, runId: string): {
   const users = load()
   const owners = Object.values(users).filter((rec) => rec.runIds?.includes(runId))
   if (owners.length === 0) return { access: 'shared', email }
-  return {
-    // Duplicate ownership is corrupt state and fails closed for every account.
-    access: owners.length === 1 && norm(owners[0].email) === norm(email)
-      ? 'owner'
-      : 'forbidden',
-    email,
+  if (owners.length === 1 && norm(owners[0].email) === norm(email)) {
+    return { access: 'owner', email }
+  }
+  // Phase 5: a member a product was SHARED with reads its runs (never owner).
+  if (owners.length === 1 && sharedViaProduct(email, runId)) {
+    return { access: 'shared', email }
+  }
+  // Duplicate ownership is corrupt state and fails closed for every account.
+  return { access: 'forbidden', email }
+}
+
+/** Product-level sharing consult (lazy import breaks a lib cycle). */
+function sharedViaProduct(email: string, runId: string): boolean {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const ds = require('@/lib/design-state') as typeof import('@/lib/design-state')
+    return ds.runSharedWith(email, runId)
+  } catch {
+    return false
   }
 }
 
@@ -344,7 +357,9 @@ export function runAccessByEmail(email: string, runId: string): RunAccess {
   const users = load()
   const owners = Object.values(users).filter((rec) => rec.runIds?.includes(runId))
   if (owners.length === 0) return 'shared'
-  return owners.length === 1 && norm(owners[0].email) === norm(email) ? 'owner' : 'forbidden'
+  if (owners.length === 1 && norm(owners[0].email) === norm(email)) return 'owner'
+  if (owners.length === 1 && sharedViaProduct(email, runId)) return 'shared'
+  return 'forbidden'
 }
 
 export function sessionCookieHeader(token: string): string {

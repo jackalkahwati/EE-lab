@@ -8,11 +8,11 @@
  */
 import { useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
-import { GitBranch, Diff, X, Loader2, Pin as PinIcon, Plus } from 'lucide-react'
+import { GitBranch, Diff, X, Loader2, Pin as PinIcon, Plus, UserPlus, BadgeCheck } from 'lucide-react'
 
 type Revision = { runId: string; parentRunId: string | null; createdAt: string; note?: string }
 type PinRec = { id: string; area: string; kind: string; value: Record<string, unknown>; label: string }
-type Product = { productId: string; name: string; revisions: Revision[]; activeRunId: string; pins: PinRec[] }
+type Product = { productId: string; name: string; revisions: Revision[]; activeRunId: string; pins: PinRec[]; sharedWith?: string[] }
 
 type FieldDelta = { label: string; from: unknown; to: unknown }
 type DiffPayload = {
@@ -54,6 +54,9 @@ export function RevisionRail({ runId, onSelectRun }: {
   const [diffFor, setDiffFor] = useState<{ from: string; to: string } | null>(null)
   const [diff, setDiff] = useState<DiffPayload | null>(null)
   const [loading, setLoading] = useState(false)
+  const [approvalMsg, setApprovalMsg] = useState<string | null>(null)
+  const [sharing, setSharing] = useState(false)
+  const [shareEmail, setShareEmail] = useState('')
 
   useEffect(() => {
     setProduct(null); setDiffFor(null); setDiff(null)
@@ -112,6 +115,23 @@ export function RevisionRail({ runId, onSelectRun }: {
                 </span>
                 {current && <span className="shrink-0 font-mono text-[8px] uppercase text-primary">viewing</span>}
               </button>
+              <button
+                type="button"
+                title="request approval on this revision (enterprise console)"
+                onClick={() => {
+                  void fetch('/api/products/approve', {
+                    method: 'POST', headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({ productId: product.productId, runId: r.runId }),
+                  }).then(async (x) => {
+                    const d = await x.json().catch(() => null)
+                    setApprovalMsg(x.ok ? `approval requested (${d?.approvalId ?? 'ok'})` : (d?.error ?? 'approval request failed'))
+                    setTimeout(() => setApprovalMsg(null), 6000)
+                  })
+                }}
+                className="shrink-0 rounded-sm border border-border p-0.5 text-muted-foreground opacity-0 hover:text-primary group-hover:opacity-100"
+              >
+                <BadgeCheck className="size-3" />
+              </button>
               {prev && (
                 <button
                   type="button"
@@ -127,6 +147,53 @@ export function RevisionRail({ runId, onSelectRun }: {
             </div>
           )
         })}
+      </div>
+
+      {approvalMsg && (
+        <div className="mt-1.5 rounded-sm border border-primary/40 bg-primary/5 px-2 py-1 font-mono text-[10px] text-primary">{approvalMsg}</div>
+      )}
+
+      {/* sharing (owner-enforced server-side): members get read + comment */}
+      <div className="mt-2">
+        <div className="flex items-center gap-1.5">
+          <UserPlus className="size-3 text-muted-foreground" />
+          <span className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
+            shared · {product.sharedWith?.length ?? 0}
+          </span>
+          <button type="button" onClick={() => setSharing((v) => !v)}
+            className="ml-auto rounded-sm border border-border p-0.5 text-muted-foreground hover:text-foreground">
+            <Plus className="size-3" />
+          </button>
+        </div>
+        {(product.sharedWith ?? []).map((e) => (
+          <div key={e} className="group flex items-center gap-1.5 px-1.5 py-0.5">
+            <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{e}</span>
+            <button type="button" onClick={() => {
+              void fetch('/api/products/share', {
+                method: 'POST', headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ productId: product.productId, remove: e }),
+              }).then((x) => x.ok && x.json()).then((d) => d && setProduct({ ...product, sharedWith: d.sharedWith }))
+            }} className="shrink-0 text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100">
+              <X className="size-3" />
+            </button>
+          </div>
+        ))}
+        {sharing && (
+          <div className="mt-1 flex items-center gap-1.5 px-1.5">
+            <input autoFocus value={shareEmail} onChange={(e) => setShareEmail(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setSharing(false)
+                if (e.key === 'Enter' && shareEmail.trim()) {
+                  void fetch('/api/products/share', {
+                    method: 'POST', headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({ productId: product.productId, add: shareEmail.trim() }),
+                  }).then((x) => x.ok && x.json()).then((d) => { if (d) { setProduct({ ...product, sharedWith: d.sharedWith }); setShareEmail(''); setSharing(false) } })
+                }
+              }}
+              placeholder="teammate@company.com"
+              className="min-w-0 flex-1 rounded-sm border border-border bg-background px-1.5 py-0.5 text-[11px] outline-none focus:border-primary/60" />
+          </div>
+        )}
       </div>
 
       <PinsPanel product={product} onChange={(pins) => setProduct({ ...product, pins })} />

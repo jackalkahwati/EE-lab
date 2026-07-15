@@ -42,6 +42,7 @@ export type Revision = {
 export type Product = {
   productId: string
   owner: string | null // account email; null = shared/demo (mirrors run ownership)
+  sharedWith?: string[] // emails the owner invited: read + comment, never pins/edits
   name: string
   prompt?: string
   boardId?: string // enterprise portfolio board (Programs bridge)
@@ -81,11 +82,36 @@ export function productForRun(runId: string): Product | null {
   return null
 }
 
+export type ProductAccess = 'owner' | 'member' | 'demo' | 'forbidden'
+
+/** Access to a product: owner (full), member (sharedWith: read + comment),
+ *  demo (unowned product), forbidden. */
+export function productAccess(email: string | null, p: Product): ProductAccess {
+  if (!p.owner) return 'demo'
+  const e = (email ?? '').toLowerCase()
+  if (!e) return 'forbidden'
+  if (p.owner === e) return 'owner'
+  if ((p.sharedWith ?? []).includes(e)) return 'member'
+  return 'forbidden'
+}
+
 export function listProducts(email: string | null): Product[] {
-  // Owned products are private; unowned are shared (same rule as runs).
+  // Owned products are private; shared members see products shared with them;
+  // unowned products are demos (same rule as runs).
   return Object.values(loadProducts())
-    .filter((p) => !p.owner || (email && p.owner.toLowerCase() === email.toLowerCase()))
+    .filter((p) => productAccess(email, p) !== 'forbidden')
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+}
+
+/** True when a product shares this run with the given email (read access):
+ *  consulted by run-level access checks so shared members can see the
+ *  artifacts of every revision of a product shared with them. */
+export function runSharedWith(email: string, runId: string): boolean {
+  const e = email.toLowerCase()
+  for (const p of Object.values(loadProducts())) {
+    if ((p.sharedWith ?? []).includes(e) && p.revisions.some((r) => r.runId === runId)) return true
+  }
+  return false
 }
 
 function readRunJson(runId: string, rel: string): any | null {

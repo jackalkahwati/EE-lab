@@ -76,10 +76,24 @@ function ownedByAnotherAccount(runId: string, email: string): boolean {
     const users = JSON.parse(
       fs.readFileSync(path.join(process.cwd(), 'data', 'users.json'), 'utf8'),
     ) as Record<string, { email?: string; runIds?: string[] }>
-    return Object.values(users).some(
+    const foreign = Object.values(users).some(
       (user) => user.runIds?.includes(runId)
         && (user.email ?? '').trim().toLowerCase() !== email,
     )
+    if (!foreign) return false
+    // Phase 5: product-level sharing grants READ on all of its revisions.
+    try {
+      const products = JSON.parse(
+        fs.readFileSync(path.join(process.cwd(), 'data', 'products.json'), 'utf8'),
+      ) as Record<string, { sharedWith?: string[]; revisions?: { runId: string }[] }>
+      for (const p of Object.values(products)) {
+        if ((p.sharedWith ?? []).includes(email)
+            && (p.revisions ?? []).some((r) => r.runId === runId)) {
+          return false
+        }
+      }
+    } catch { /* no products store — plain ownership rules */ }
+    return true
   } catch (error) {
     return (error as NodeJS.ErrnoException).code !== 'ENOENT'
   }
