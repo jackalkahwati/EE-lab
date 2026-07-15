@@ -239,6 +239,23 @@ export default function Home() {
               <p>Export the STEP or the KiCad board, edit it by hand, and import it back as a revision. Compose strips exactly the claims your edit invalidated, and nothing regenerates over your work.</p>
             </div>
           </div>
+          <div className="provenance-strip">
+            <div className="provenance-copy">
+              <h3>Every revision is sealed.</h3>
+              <p>
+                Compose records each build as a signed session on the open
+                source{" "}
+                <a href="https://github.com/jackalkahwati/Checkpoint-Protocol" target="_blank" rel="noreferrer">
+                  Checkpoint Protocol
+                </a>
+                . An Ed25519 signed snapshot chain ties every revision to the
+                prompt, the artifacts, and the gate results that produced it,
+                and the whole history is verifiable on demand. A seal is
+                provenance, not approval. A failed check seals as failed.
+              </p>
+            </div>
+            <code className="provenance-proof">verify-history · all accepted snapshots have valid seals · 0 unsigned</code>
+          </div>
         </div>
       </section>
 
