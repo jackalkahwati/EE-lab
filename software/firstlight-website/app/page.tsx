@@ -7,18 +7,23 @@ const COMPOSE_URL =
 const CONTACT = "jack@thestardrive.com";
 
 const PIPELINE = [
-  "design",
-  "placement",
-  "routing",
-  "validation",
-  "erc",
+  "electronics",
+  "industrial design",
+  "mechanical",
+  "simulation",
   "firmware",
+  "manufacturing",
+  "sourcing",
+  "validation",
 ];
 
 const OUTPUTS = [
-  ["Manufacturable fab package", "Gerbers, drill, pick-and-place, STEP, BOM, accepted by any board house."],
-  ["Firmware", "A compiled, self-test firmware image generated for your board."],
-  ["FL-1 test plan", "A machine-readable probe map with pass/fail limits, ready for hardware validation."],
+  ["Manufacturable fab package", "Gerbers, drill, pick-and-place, BOM — routed and gated on real KiCad DRC. A board only goes green when the checks actually pass."],
+  ["Enclosure CAD", "A two-shell enclosure generated to match the industrial design — bosses aligned to the board's mounting holes, fit-checked, exported as real STEP."],
+  ["Boards shaped to the product", "A round product gets a circular board with mounting holes on a bolt circle — the PCB follows the enclosure, not the other way around."],
+  ["Physics simulation", "Real finite-element thermal and modal solves (scikit-fem), honestly labeled — a design that runs hot fails in simulation before anyone tools a mold."],
+  ["Firmware", "A compiled firmware image that targets the board that actually shipped — peripheral map, power states, USB reporting."],
+  ["Manufacturing, sourcing & test", "An NPI package sized to your volume, a sourcing plan with real parts and lead-time risks called out, and an FL-1 validation test plan with the gaps flagged — never papered over."],
 ];
 
 const FL1_INSTRUMENTS = [
@@ -57,15 +62,16 @@ export default function Home() {
       <header className="hero" id="top">
         <div className="container hero-grid">
           <div className="hero-copy">
-            <p className="kicker">FirstLight Compose · AI hardware design</p>
+            <p className="kicker">FirstLight Compose · AI product engineering</p>
             <h1>
-              Design a real PCB <span className="accent">from a sentence.</span>
+              Design a real product <span className="accent">from a sentence.</span>
             </h1>
             <p className="lede">
-              Describe what you&apos;re building in plain language. Compose places
-              the parts, routes the board, runs the electrical checks, generates
-              the firmware, and hands you a manufacturable fab package. Minutes,
-              not weeks.
+              Describe what you&apos;re building in plain language. Compose designs
+              and routes the board, wraps it in an enclosure that actually fits,
+              runs real physics simulation, generates firmware for the board that
+              shipped, and hands you the manufacturing, sourcing, and test plans
+              to build it. About seven minutes, end to end.
             </p>
             <TryCompose />
             <p className="run-caption">
@@ -76,13 +82,13 @@ export default function Home() {
             </p>
             <ul className="run-stats hero-stats">
               <li>
-                <strong>12/12</strong> nets routed
+                <strong>0</strong> DRC errors, gated — never assumed
               </li>
               <li>
-                <strong>0</strong> DRC violations
+                <strong>8</strong> engineering disciplines, one run
               </li>
               <li>
-                <strong>3 min</strong> prompt to fab package
+                <strong>~7 min</strong> prompt to product package
               </li>
             </ul>
           </div>
@@ -105,17 +111,21 @@ export default function Home() {
           <h2>
             AI can describe a circuit.
             <br />
-            Getting to a board you can build is the hard part.
+            Getting to a product you can build is the hard part.
           </h2>
           <p>
-            Schematic ideas are cheap. Turning one into placed, routed,
-            electrically-clean copper with the right parts, firmware, and a
-            fabrication package still means days of manual CAD, or a contract
-            engineer. Compose closes that gap in a single continuous run.
+            Schematic ideas are cheap. Turning one into routed copper, an
+            enclosure that actually fits it, firmware for the board that
+            shipped, and the manufacturing, sourcing, and test plans to build
+            it still means weeks across five disciplines — or a contract team.
+            Compose closes that gap in a single continuous run, and it does it
+            honestly: every stage is gated on real checks — KiCad DRC, geometric
+            fit, finite-element physics — and a gate that fails says so instead
+            of shipping a green lie.
           </p>
           <p className="statement">
             Describe it. Compose builds it.
-            <span className="accent"> A manufacturable board, checked and ready to order.</span>
+            <span className="accent"> A manufacturable product — board, enclosure, firmware, and the plans to ship it.</span>
           </p>
         </div>
       </section>
@@ -124,7 +134,7 @@ export default function Home() {
       <section className="section" id="how">
         <div className="container">
           <p className="kicker">How it works</p>
-          <h2>From a prompt to a manufacturable board, in one run.</h2>
+          <h2>From a prompt to a manufacturable product, in one run.</h2>
           <div className="pipeline">
             {PIPELINE.map((s) => (
               <span key={s} className="pipeline-stage">
@@ -133,10 +143,13 @@ export default function Home() {
             ))}
           </div>
           <p className="how-lede">
-            A short design interview fills in the details, MCU, radio, power,
-            connectors, with sensible defaults. Then the full pipeline runs in
-            front of you, gated at every stage: nothing ships unless the copper
-            is clean and every net connects.
+            A short design interview fills in what matters — size, volume,
+            connectivity — then the full pipeline runs in front of you, live
+            logs streaming, gated at every stage. The industrial design drives
+            the mechanical CAD; the board takes the enclosure&apos;s shape; the
+            firmware targets the board that shipped. Nothing goes green unless
+            its real checks pass — and when physics says a design runs hot,
+            you find out before tooling, not after.
           </p>
           <div className="outputs-grid">
             {OUTPUTS.map(([title, body]) => (

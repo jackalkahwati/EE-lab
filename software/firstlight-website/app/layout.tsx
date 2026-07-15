@@ -9,13 +9,13 @@ const siteUrl =
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
-  title: "FirstLight Compose — Design a real PCB from a sentence",
+  title: "FirstLight Compose — Design a real product from a sentence",
   description:
-    "FirstLight Compose turns a plain-language description into a manufacturable circuit board, placed, routed, checked, with firmware and a fab package. Start free.",
+    "FirstLight Compose turns a plain-language description into a manufacturable product: a routed, DRC-gated board, a fit-checked enclosure, real physics simulation, firmware, and the manufacturing, sourcing, and test plans to build it. Start free.",
   openGraph: {
-    title: "FirstLight Compose — Design a real PCB from a sentence",
+    title: "FirstLight Compose — Design a real product from a sentence",
     description:
-      "Describe what you're building. Compose places, routes, checks, and hands you a manufacturable fab package plus firmware. Minutes, not weeks.",
+      "Describe what you're building. Compose designs the board, the enclosure that fits it, the firmware, and the plans to manufacture, source, and test it. About seven minutes, end to end.",
     siteName: "FirstLight",
     type: "website",
     images: [
@@ -29,9 +29,9 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "FirstLight Compose — Design a real PCB from a sentence",
+    title: "FirstLight Compose — Design a real product from a sentence",
     description:
-      "Describe your board. Compose places, routes, checks, and generates firmware and a fab package.",
+      "Describe your product. Compose designs the board, enclosure, firmware, and the plans to build it — gated on real checks.",
     images: ["/media/fl1-front.png"],
   },
 };
