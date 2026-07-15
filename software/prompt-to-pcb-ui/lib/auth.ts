@@ -335,6 +335,18 @@ export function runAccess(req: Request, runId: string): {
   }
 }
 
+/**
+ * runAccess for a caller identified by EMAIL (API-key surface — the v1 API
+ * resolves a key to its owner and has no session cookie). Same rules:
+ * unowned runs are shared demos, duplicate ownership fails closed.
+ */
+export function runAccessByEmail(email: string, runId: string): RunAccess {
+  const users = load()
+  const owners = Object.values(users).filter((rec) => rec.runIds?.includes(runId))
+  if (owners.length === 0) return 'shared'
+  return owners.length === 1 && norm(owners[0].email) === norm(email) ? 'owner' : 'forbidden'
+}
+
 export function sessionCookieHeader(token: string): string {
   const secure = process.env.NODE_ENV === 'production' ? '; Secure' : ''
   return `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_MS / 1000}${secure}`

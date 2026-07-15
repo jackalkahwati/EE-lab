@@ -1,0 +1,15 @@
+{
+  "name": "firstlight-cli",
+  "version": "0.1.0",
+  "description": "FirstLight Compose from the terminal and from AI agents: build real PCBAs + enclosures from a prompt (CLI), or expose the pipeline as MCP tools (firstlight-mcp).",
+  "type": "module",
+  "bin": {
+    "firstlight": "./bin/cli.mjs",
+    "firstlight-mcp": "./bin/mcp.mjs"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0"
+  },
+  "license": "UNLICENSED"
+}

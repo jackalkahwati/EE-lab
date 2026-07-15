@@ -42,6 +42,9 @@ const DISCIPLINE_STAGES: PipeStage[] = ['firmware', 'manufacturing', 'supplyChai
 type RunOpts = {
   spec: ProductSpec
   runId: string
+  /** Absolute origin for API calls (e.g. http://127.0.0.1:4500) — REQUIRED when
+   *  running server-side (Node fetch rejects relative URLs); '' in the browser. */
+  baseUrl?: string
   headers?: Record<string, string>
   signal?: AbortSignal
   onStage: (e: StageEvent) => void
@@ -65,14 +68,14 @@ function jsonHeaders(h?: Record<string, string>) {
 }
 
 async function postJson(url: string, body: unknown, opts: RunOpts): Promise<any> {
-  const r = await fetch(url, { method: 'POST', headers: jsonHeaders(opts.headers), body: JSON.stringify(body), signal: opts.signal })
+  const r = await fetch(`${opts.baseUrl ?? ''}${url}`, { method: 'POST', headers: jsonHeaders(opts.headers), body: JSON.stringify(body), signal: opts.signal })
   return r.json()
 }
 
 /** The persisted chip-scale board for this run (chipscale-board.json), or null. */
-async function existingBoard(runId: string, signal?: AbortSignal): Promise<any | null> {
+async function existingBoard(runId: string, opts: RunOpts): Promise<any | null> {
   try {
-    const r = await fetch(`/runs/${runId}/electronics/chipscale-board.json`, { cache: 'no-store', signal })
+    const r = await fetch(`${opts.baseUrl ?? ''}/runs/${runId}/electronics/chipscale-board.json`, { cache: 'no-store', headers: opts.headers, signal: opts.signal })
     if (!r.ok) return null
     const d = await r.json()
     return d?.boardMm?.w && d?.boardMm?.h ? d : null
@@ -173,7 +176,7 @@ export type RunTiming = {
  */
 type RunTimer = ReturnType<typeof createTimer>
 
-function createTimer(runId: string) {
+function createTimer(runId: string, baseUrl?: string, headers?: Record<string, string>) {
   const t0 = Date.now()
   const startedAt = new Date(t0).toISOString()
   const stages: StageTiming[] = []
@@ -199,9 +202,9 @@ function createTimer(runId: string) {
         try {
           // No AbortSignal here on purpose: when the user stops the run we still
           // want the final timing to land. keepalive lets it survive a navigation.
-          await fetch('/api/runs/timing', {
+          await fetch(`${baseUrl ?? ''}/api/runs/timing`, {
             method: 'POST',
-            headers: { 'content-type': 'application/json' },
+            headers: { 'content-type': 'application/json', ...(headers ?? {}) },
             body: JSON.stringify(snapshot()),
             keepalive: true,
           })
@@ -271,7 +274,7 @@ function createTimer(runId: string) {
  * finally. The sequencer's behaviour is untouched.
  */
 export async function runFullPipeline(opts: RunOpts): Promise<PipelineResult> {
-  const timer = createTimer(opts.runId)
+  const timer = createTimer(opts.runId, opts.baseUrl, opts.headers)
   try {
     return await runPipelineStages(opts, timer)
   } finally {
@@ -304,7 +307,7 @@ async function runPipelineStages(opts: RunOpts, timer: RunTimer): Promise<Pipeli
   // ---- 1. Electronics (chip-scale board) — MUST be first (grounding) ----
   if (applicable('electronics')) {
     set('electronics', 'running')
-    const prev = opts.reuseElectronics !== false ? await existingBoard(opts.runId, signal) : null
+    const prev = opts.reuseElectronics !== false ? await existingBoard(opts.runId, opts) : null
     if (prev) {
       // Reuse skips the ~3-min rebuild, but the verdict still comes from the
       // persisted board's real DRC state — a dirty board reused is still dirty.
