@@ -57,24 +57,24 @@ export function BoardSchematic({ runDir }: { runDir: string | null }) {
   }
 
   return (
-    <div className="relative flex h-full flex-col bg-[#f7f7f4]">
+    <div className="relative flex h-full flex-col bg-[#0f0f0f]">
       {/* block tabs */}
-      <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-neutral-300 bg-[#eeeeea] px-2 py-1.5">
+      <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border bg-card px-2 py-1.5">
         <button type="button" onClick={() => setSel('all')}
           className={cn('shrink-0 rounded-sm px-2 py-0.5 font-mono text-[10px]',
-            sel === 'all' ? 'bg-neutral-800 text-white' : 'text-neutral-600 hover:bg-neutral-200')}>
+            sel === 'all' ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-secondary/50')}>
           Full sheet
         </button>
-        <span className="shrink-0 text-neutral-300">|</span>
+        <span className="shrink-0 text-border">|</span>
         {blocks.map((b) => (
           <button key={b.id} type="button" onClick={() => setSel(b.id)}
             title={`${b.label} · ${b.count} parts`}
             className={cn('shrink-0 rounded-sm px-2 py-0.5 font-mono text-[10px]',
-              sel === b.id ? 'bg-neutral-800 text-white' : 'text-neutral-600 hover:bg-neutral-200')}>
+              sel === b.id ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-secondary/50')}>
             {b.label}
           </button>
         ))}
-        {blocks.length === 0 && <span className="px-1 font-mono text-[9px] text-neutral-400">no blocks</span>}
+        {blocks.length === 0 && <span className="px-1 font-mono text-[9px] text-muted-foreground">no blocks</span>}
       </div>
 
       <div
@@ -129,7 +129,7 @@ export function BoardSchematic({ runDir }: { runDir: string | null }) {
             </button>
           ))}
         </div>
-        <span className="pointer-events-none absolute bottom-2 left-3 font-mono text-[9px] text-neutral-400">
+        <span className="pointer-events-none absolute bottom-2 left-3 font-mono text-[9px] text-muted-foreground">
           {sel === 'all' ? 'full board' : `${sel} block`} · symbols + wires from the netlist · drag to pan · scroll to zoom
         </span>
       </div>

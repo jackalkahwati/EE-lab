@@ -11,6 +11,7 @@ import { useState, useEffect } from 'react'
 import { cn } from '@/lib/utils'
 import { Loader2, CircuitBoard } from 'lucide-react'
 import { llmHeaders } from '@/components/llm-settings'
+import { BoardSchematic } from '@/components/board-schematic'
 import { Board3D } from '@/components/board-3d'
 
 type Result = {
@@ -57,20 +58,6 @@ type Result = {
   error?: string
 }
 
-/** Recolor the tscircuit schematic SVG for the dark theme: its stock palette
- *  is WHITE wires on a paper background — inside the app's white container that
- *  meant invisible lines. Black scene, wires stay white, accents brightened. */
-function darkSchematicSvg(svg: string): string {
-  return svg
-    .replaceAll('background-color: rgb(245, 241, 237)', 'background-color: #0f0f0f')
-    .replaceAll('rgb(245, 241, 237)', '#0f0f0f')          // boundary fill
-    .replaceAll('rgb(255, 255, 194)', '#26262a')          // chip body fill -> dark card
-    .replaceAll('rgb(132, 0, 0)', '#e2726e')              // component strokes -> readable red
-    .replaceAll('rgb(169, 0, 0)', '#e2726e')              // pin numbers
-    .replaceAll('rgb(0, 150, 0)', '#8ecf9d')              // value text -> soft green
-    .replaceAll('rgb(0, 100, 100)', '#6fc3cf')            // port labels -> cyan
-}
-
 export function ChipScaleStage({ spec, runId, asElectronics }: { spec: any; runId?: string; asElectronics?: boolean }) {
   const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
   const [res, setRes] = useState<Result | null>(null)
@@ -79,23 +66,6 @@ export function ChipScaleStage({ spec, runId, asElectronics }: { spec: any; runI
   // the built board is a tabbed workspace: start on the 3D PCBA, tab to the 2D
   // routed layout, the schematic, or the build report (DRC + redesign loop).
   const [view, setView] = useState<'pcba' | 'layout' | 'schematic' | 'report'>('pcba')
-  const [schemSvg, setSchemSvg] = useState<string | null>(null)
-
-  // Load + dark-recolor the schematic SVG (see darkSchematicSvg). Data URL so
-  // the existing <img> pan/zoom styling keeps working unchanged.
-  useEffect(() => {
-    setSchemSvg(null)
-    if (!runId) return
-    let off = false
-    fetch(`/runs/${runId}/electronics/chipscale-schematic.svg?t=${runId}`, { cache: 'no-store' })
-      .then((r) => (r.ok ? r.text() : null))
-      .then((t) => {
-        if (off || !t) return
-        setSchemSvg(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(darkSchematicSvg(t))}`)
-      })
-      .catch(() => {})
-    return () => { off = true }
-  }, [runId])
 
   // Load the already-built chip-scale board on mount (persisted by /api/electronics-cs
   // as chipscale-board.json) so the stage shows the real board when the full-pipeline
@@ -188,13 +158,10 @@ export function ChipScaleStage({ spec, runId, asElectronics }: { spec: any; runI
           )}
           {/* Schematic — the generated chip-scale schematic */}
           {view === 'schematic' && (
-            <div className="flex h-full items-center justify-center overflow-auto bg-[#0f0f0f] p-4">
-              {schemSvg ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={schemSvg} alt="chip-scale schematic" className="max-h-full w-auto" />
-              ) : (
-                <span className="font-mono text-[10px] text-muted-foreground">loading schematic…</span>
-              )}
+            /* netlist-driven schematic with per-block sub-sheets (tabs) and
+               pan/zoom — the flat tscircuit SVG had neither. */
+            <div className="h-full">
+              <BoardSchematic runDir={runId ? `/runs/${runId}` : null} />
             </div>
           )}
           {/* Report — routing verdict, real KiCad DRC, redesign loop */}

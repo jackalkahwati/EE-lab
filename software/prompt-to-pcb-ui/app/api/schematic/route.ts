@@ -235,6 +235,14 @@ export async function GET(req: Request) {
       if (/s:attribute="value"/.test(attrs)) return `<text${attrs}>${(refValue[m[1]] ?? refPart[m[1]] ?? '').slice(0, 20)}</text>`
       return full
     })
+    // Dark theme: the skin draws black strokes/text (paper convention); the
+    // app renders on near-black, so lift them to light grey. `fill: none`
+    // and everything else in the stylesheet is untouched.
+    svg = svg
+      .replaceAll('stroke: #000', 'stroke: #d9d9d9')
+      .replaceAll('fill: #000', 'fill: #d9d9d9')
+      .replaceAll('fill:#000000', 'fill:#d9d9d9')
+      .replaceAll('fill:#000', 'fill:#d9d9d9')
     cache.set(cacheKey, { mtime, svg })
     return new Response(svg, { headers: { 'content-type': 'image/svg+xml' } })
   } catch (e: any) {
