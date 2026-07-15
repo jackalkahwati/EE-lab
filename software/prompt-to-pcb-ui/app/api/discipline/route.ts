@@ -9,6 +9,7 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { callLLMText, overrideFromHeaders, type LLMOverride } from '@/lib/llm'
+import { sourcingPromptBlock } from '@/lib/sourcing'
 import { MODEL } from '@/lib/model-tiers'
 import { DISCIPLINE_MODULES, DISCIPLINE_ARTIFACT_SCHEMA, normalizeDisciplineArtifact } from '@/lib/discipline-artifact'
 import { loadGroundBoard } from '@/lib/ground-board'
@@ -17,6 +18,18 @@ import type { ProductSpec } from '@/lib/product-spec'
 export const dynamic = 'force-dynamic'
 
 const RUN_ID = /^run-[A-Za-z0-9._-]{1,128}$/
+
+/** Real part names from the run's BOM, for live sourcing lookups. */
+async function bomMpns(runId: string | undefined): Promise<string[]> {
+  if (!runId) return []
+  try {
+    const bom = JSON.parse(await fs.readFile(
+      path.join(process.cwd(), 'public', 'runs', runId, 'data', 'bom.json'), 'utf8'))
+    return (Array.isArray(bom) ? bom : [])
+      .map((r: any) => String(r.part ?? ''))
+      .filter((p: string) => p && !/generic|unknown|fiducial|—/i.test(p))
+  } catch { return [] }
+}
 
 /** Engineer change request scoped to this discipline (Phase 3 targeted edits). */
 async function changeRequestBlock(runId: string | undefined, stage: string): Promise<string> {
@@ -175,7 +188,10 @@ true|false} — blocking=true when shipping without resolving it would be wrong.
       `PRODUCT: ${spec.product}\n${spec.description || ''}\nphilosophy: ${spec.philosophy || '-'}\n` +
       `budgets: ${JSON.stringify(b)}${boardCtx}\n\nEmit the ${mod.label} artifact.` +
       // Phase 3: a targeted edit rides in as an explicit engineer instruction
-      (await changeRequestBlock(runId, discipline))
+      (await changeRequestBlock(runId, discipline)) +
+      // Phase 4: real distributor quotes when a provider is configured ('' when
+      // gated — the doc then keeps its honest "not live-sourced" caveat)
+      (discipline === 'supplyChain' ? await sourcingPromptBlock(await bomMpns(runId)) : '')
 
     const out = await callLLM(sys, userMsg, overrideFromHeaders(req.headers))
     const artifact = normalizeDisciplineArtifact(out, discipline)

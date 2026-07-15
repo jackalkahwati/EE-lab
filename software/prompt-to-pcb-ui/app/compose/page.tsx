@@ -18,6 +18,7 @@ import { BoardCanvas } from '@/components/board-canvas'
 import { Board3D } from '@/components/board-3d'
 import { CodeViewer } from '@/components/code-viewer'
 import { BomTable } from '@/components/bom-table'
+import { BomWorkspace } from '@/components/bom-workspace'
 import { BoardChecks } from '@/components/board-checks'
 import { BoardSchematic } from '@/components/board-schematic'
 import { ProcurementPanel } from '@/components/procurement-panel'
@@ -485,7 +486,13 @@ export default function Compose2Page() {
                       {tab === 'Objects' && <BoardObjects real={real} />}
                       {tab === 'Artifacts' && <ArtifactExplorer runId={selectedRun.runDir ? selectedRun.id : null} />}
                       {tab === 'Code' && <CodeViewer key={isReal ? 'real' : 'seed'} files={isReal ? real?.ato : null} />}
-                      {tab === 'BOM' && <BomTable lines={isReal ? real?.bom : null} />}
+                      {tab === 'BOM' && (
+                        <BomWorkspace
+                          lines={isReal ? real?.bom : null}
+                          runId={selectedRun.runDir ? selectedRun.id : undefined}
+                          onResolve={(prompt) => setRevisePrefill(prompt)}
+                        />
+                      )}
                       {tab === 'Checks' && <BoardChecks real={real} />}
                       {tab === 'Constraints' && <ConstraintsPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
                       {tab === 'Pinout' && <PinoutPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
