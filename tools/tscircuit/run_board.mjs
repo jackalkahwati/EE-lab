@@ -22,6 +22,47 @@ import { runTscircuitCode } from '@tscircuit/eval'
 // path finds nothing and silently drops freerouting.
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 
+// ---- per-phase timing instrumentation ----------------------------------------
+// Additive observability: every expensive phase (tscircuit build, freerouting JVM
+// pass, KiCad DRC, ground plane) logs a `[t] phase: Xs` stderr line and accumulates
+// into a `timings` object emitted in the output JSON. No schema change — new field.
+const T_RUN0 = Date.now()
+const TIMINGS = {
+  phases: {}, // name -> { ms, n }
+  counters: { tscircuitBuilds: 0, freeroutingPasses: 0, jvmStarts: 0, kicadDrcRuns: 0, kicadVersionCalls: 0, groundPlanePasses: 0, tscircuitBuildCacheHits: 0, freerouteCacheHits: 0 },
+}
+function tAdd(phase, ms, note) {
+  const p = (TIMINGS.phases[phase] = TIMINGS.phases[phase] || { ms: 0, n: 0 })
+  p.ms += ms; p.n++
+  process.stderr.write(`[t] ${phase}: ${(ms / 1000).toFixed(1)}s${note ? ` (${note})` : ''}\n`)
+}
+// FL_BASELINE=1 disables every wall-clock optimization (caches, routingDisabled
+// pre-route skip, JVM startup flags) so a before/after A-B on the SAME file is
+// one env var away. Results (routing, DRC) are identical either way — the
+// optimizations only skip provably redundant work.
+const OPT = process.env.FL_BASELINE !== '1'
+
+/** All tscircuit evaluations go through here so they're timed + cached. The cache
+ *  is exact-code-string keyed and stores the circuit JSON as a STRING, re-parsed
+ *  per hit — callers mutate their cj (fabRepair, board margins, features), so a
+ *  shared object would alias state across strategies; a parse is ~ms and safe. */
+const CJ_CACHE = new Map()
+async function buildCircuit(code, note) {
+  const t0 = Date.now()
+  const hit = OPT ? CJ_CACHE.get(code) : null
+  if (hit) {
+    TIMINGS.counters.tscircuitBuildCacheHits++
+    const cj = JSON.parse(hit)
+    tAdd('tscircuitBuild', Date.now() - t0, `${note ? note + ', ' : ''}cache hit`)
+    return cj
+  }
+  TIMINGS.counters.tscircuitBuilds++
+  const cj = await runTscircuitCode(code)
+  try { CJ_CACHE.set(code, JSON.stringify(cj)) } catch { /* cache best-effort */ }
+  tAdd('tscircuitBuild', Date.now() - t0, note)
+  return cj
+}
+
 // Real KiCad DRC — the honesty upgrade over tscircuit's own router check. We
 // convert the routed board to a real .kicad_pcb and run `kicad-cli pcb drc`
 // against realistic fab rules (JLCPCB 4-layer, 0.09mm), so "clean" means it
@@ -156,7 +197,21 @@ function setViaClearance(dsnPcb, um) {
   set('via_smd', Math.round(um * 1.4))
 }
 
-async function freeroute(cj, { layers = 2 } = {}) {
+/** Timing + dedupe wrapper around the real freerouting pass. The redesign ladder
+ *  legitimately asks for the SAME route twice (4-layer standard fab vs 4-layer HDI
+ *  fab differ only in DRC rules — the DSN handed to freerouting is byte-identical),
+ *  so identical-DSN calls are served from an in-process cache instead of paying a
+ *  second JVM start + route. The cache key is the exact DSN text: same input, same
+ *  routed copper — result quality is unchanged by construction. */
+async function freeroute(cj, opts = {}) {
+  const t0 = Date.now()
+  TIMINGS.counters.freeroutingPasses++
+  const r = await freerouteReal(cj, opts)
+  tAdd('freeroute', Date.now() - t0, `layers=${opts.layers ?? 2}, ${r ? `unrouted=${r.unrouted}${r.cached ? ', dsn cache hit' : ''}` : 'failed'}`)
+  return r
+}
+const FR_CACHE = new Map() // dsn text -> { wires: JSON string of routed traces+vias, unrouted }
+async function freerouteReal(cj, { layers = 2 } = {}) {
   if (!JAVA || !FR_JAR) return null
   let dir
   try {
@@ -168,20 +223,41 @@ async function freeroute(cj, { layers = 2 } = {}) {
     // so 0.3mm holes clear the 0.5mm hole_clearance with margin (was the residual
     // fab-DRC error on dense boards). freerouting honours this from the DSN.
     setViaClearance(dsnPcb, 250)
+    const dsnText = stringifyDsnJson(dsnPcb)
+    // Identical DSN already routed this run? Reuse its copper — the second JVM
+    // pass would route the exact same input (see wrapper docstring).
+    const cached = OPT ? FR_CACHE.get(dsnText) : null
+    if (cached) {
+      TIMINGS.counters.freerouteCacheHits++
+      return { cj: [...unrouted, ...JSON.parse(cached.wires)], unrouted: cached.unrouted, layers, cached: true }
+    }
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fl-fr-'))
     const dsnPath = path.join(dir, 'b.dsn'), sesPath = path.join(dir, 'b.ses')
-    fs.writeFileSync(dsnPath, stringifyDsnJson(dsnPcb))
+    fs.writeFileSync(dsnPath, dsnText)
     // -Djava.awt.headless=true: run with NO GUI window (freerouting otherwise
     //   pops its editor app on -de/-do) — pure backend subprocess.
     // Network timeouts: its startup "check for updates" call otherwise stalls
     //   ~2min on the socket; routing itself is sub-second.
     // Together these take a run from ~120s (+ a GUI window) to ~3s, headless.
+    // -XX:TieredStopAtLevel=1: C1-only JIT — a short-lived batch route never earns
+    //   back C2 compile time. Measured on this jar: ~0.5s faster per JVM start in
+    //   isolation (3.15s → 2.63s avg init), and per-pass routed results (unrouted
+    //   count, DRC errors) matched the C2 runs on the A/B board.
+    // A warm/daemon JVM was evaluated and REJECTED: freerouting's CLI is strictly
+    //   one-shot (-de/-do), so batching would require its HTTP API server — a
+    //   long-lived service this self-contained runner (which also runs headless)
+    //   shouldn't own for the ~2.6s/start it would save. The DSN cache below
+    //   already removes the fully redundant starts.
+    const tJvm = Date.now()
+    TIMINGS.counters.jvmStarts++
     const r = spawnSync(JAVA, [
       '-Djava.awt.headless=true',
       '-Dsun.net.client.defaultConnectTimeout=1500',
       '-Dsun.net.client.defaultReadTimeout=1500',
+      ...(OPT ? ['-XX:TieredStopAtLevel=1'] : []),
       '-jar', FR_JAR, '-de', dsnPath, '-do', sesPath, '-mp', '10',
     ], { encoding: 'utf8', timeout: 45000 })
+    tAdd('freeroute.jvm', Date.now() - tJvm)
     if (!fs.existsSync(sesPath)) return null
     const session = parseDsnToDsnJson(fs.readFileSync(sesPath, 'utf8'))
     const routed = convertDsnSessionToCircuitJson(dsnPcb, session, unrouted)
@@ -209,6 +285,9 @@ async function freeroute(cj, { layers = 2 } = {}) {
     const stdoutUnrouted = m.length ? Number(m[m.length - 1][1]) : null
     const idsMissing = routedIds.size === 0 && routedWires.some((e) => e.type === 'pcb_trace')
     const unroutedN = idsMissing ? (stdoutUnrouted ?? sourceTraces.length) : structuralUnrouted
+    // Cache the routed copper as a STRING keyed by the exact DSN text; a hit
+    // re-parses so callers can freely mutate their copy (no aliasing).
+    try { FR_CACHE.set(dsnText, { wires: JSON.stringify(routedWires), unrouted: unroutedN }) } catch { /* cache best-effort */ }
     return { cj: [...unrouted, ...routedWires], unrouted: unroutedN, layers }
   } catch { return null } finally {
     if (dir) try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* best effort */ }
@@ -284,12 +363,29 @@ function decorateMountingHoles(pcbString, holeClearanceMm = 0.5) {
   return out
 }
 
+/** kicad-cli's version can't change mid-run — probe it ONCE per process instead
+ *  of spawning a whole `kicad-cli version` subprocess before every DRC. */
+let KICAD_VER = null
+function kicadVersion() {
+  if (KICAD_VER && OPT) return KICAD_VER
+  TIMINGS.counters.kicadVersionCalls++
+  KICAD_VER = spawnSync(KICAD_CLI, ['version'], { encoding: 'utf8', timeout: 15000 }).stdout?.trim() || '?'
+  return KICAD_VER
+}
+
 async function realDrc(cj, profileKey = 'standard') {
+  const t0 = Date.now()
+  TIMINGS.counters.kicadDrcRuns++
+  const r = await realDrcInner(cj, profileKey)
+  tAdd('realDrc', Date.now() - t0, r.available ? `${profileKey}, ${r.errors} errors` : 'unavailable')
+  return r
+}
+async function realDrcInner(cj, profileKey = 'standard') {
   if (!KICAD_CLI) return { available: false, reason: 'kicad-cli not installed' }
   const profile = FAB_PROFILES[profileKey] || FAB_PROFILES.standard
   let dir
   try {
-    const ver = spawnSync(KICAD_CLI, ['version'], { encoding: 'utf8', timeout: 15000 }).stdout?.trim() || '?'
+    const ver = kicadVersion()
     const { CircuitJsonToKicadPcbConverter } = await import('circuit-json-to-kicad')
     const conv = new CircuitJsonToKicadPcbConverter(cj)
     conv.runUntilFinished()
@@ -403,7 +499,7 @@ function place(parts, maxW = 15, gap = 2.1, singleSided = false, nets = null) {
  *  KiCad board that DRC checks. So emit capacitors as <chip> — same 2-pad
  *  geometry/footprint, but it actually lands in the board so DRC/nets/planes
  *  see it. (The cap's electrical role lives in the netlist/BOM, not here.) */
-function emitBoardCode(placed, nets, { clearance = null } = {}) {
+function emitBoardCode(placed, nets, { clearance = null, routingDisabled = false } = {}) {
   const comps = placed.map((p) => {
     const kind = p.kind === 'resistor' ? 'resistor' : 'chip'
     const val = kind === 'resistor' ? ' resistance="10k"' : ''
@@ -421,14 +517,20 @@ function emitBoardCode(placed, nets, { clearance = null } = {}) {
   const tol = clearance
     ? ` minViaHoleEdgeToViaHoleEdgeClearance="${clearance}mm" minPlatedHoleDrillEdgeToDrillEdgeClearance="${clearance}mm" minViaEdgeToPadEdgeClearance="${clearance}mm" minTraceToPadEdgeClearance="${clearance}mm"`
     : ''
-  return `export default () => (\n  <board autorouter="auto"${tol}>\n${comps.join('\n')}\n${traces.join('\n')}\n  </board>\n)`
+  // routingDisabled: skip the built-in autorouter entirely. Used for boards whose
+  // routing is thrown away anyway — the freerouting path strips every pcb_trace/
+  // pcb_via before exporting the DSN, and the net-aware-placement probe only reads
+  // pad offsets + courtyards. Pads, ports, source_traces and courtyards are all
+  // still emitted (verified); only the discarded copper is skipped.
+  const rd = routingDisabled ? ' routingDisabled={true}' : ''
+  return `export default () => (\n  <board autorouter="auto"${tol}${rd}>\n${comps.join('\n')}\n${traces.join('\n')}\n  </board>\n)`
 }
 
 /** parts + nets -> tscircuit code (positions computed here, not by the LLM). */
-function buildCode(parts, nets, { maxW = 15, gap = 2.1, singleSided = false, clearance = null } = {}) {
+function buildCode(parts, nets, { maxW = 15, gap = 2.1, singleSided = false, clearance = null, routingDisabled = false } = {}) {
   // resolve real LCSC footprints (from part.kicadMod) before placement/sizing
   for (const p of parts) p._fp = p.kicadMod ? kicadModToFootprint(p.kicadMod) : null
-  return emitBoardCode(place(parts, maxW, gap, singleSided, nets), nets, { clearance })
+  return emitBoardCode(place(parts, maxW, gap, singleSided, nets), nets, { clearance, routingDisabled })
 }
 
 /** Read each part's pin -> [dx,dy] offset (pad position relative to its
@@ -490,7 +592,9 @@ async function netAwarePlace(parts, nets, { maxW = 15, gap = 2.1 } = {}) {
   for (const p of parts) p._fp = p.kicadMod ? kicadModToFootprint(p.kicadMod) : null
   const initPlaced = place(parts, maxW, gap, true, nets)
   let cj0
-  try { cj0 = await runTscircuitCode(emitBoardCode(initPlaced, nets)) } catch { return null }
+  // The probe board only feeds pin-offset + courtyard extraction — its routed
+  // copper is never used, so skip the built-in autoroute (routingDisabled).
+  try { cj0 = await buildCircuit(emitBoardCode(initPlaced, nets, { routingDisabled: OPT }), 'netAwarePlace probe') } catch { return null }
   const offsets = extractPinOffsets(cj0)
   if (Object.keys(offsets).length < parts.length) return null
   // True courtyard extent per part (what KiCad's courtyards_overlap check sees) —
@@ -941,7 +1045,9 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15 } = {}) {
   // front — it's what lets the router complete every net. Reused across the
   // freerouting passes (they differ only in layers/fab profile). Null -> the
   // strategies fall back to the connectivity shelf-pack.
+  const tNap = Date.now()
   const netAwarePlaced = FR_JAR && JAVA ? await netAwarePlace(parts, nets, { gap, maxW }) : null
+  if (FR_JAR && JAVA) tAdd('netAwarePlace', Date.now() - tNap, `gap=${gap}, ${netAwarePlaced ? 'ok' : 'fallback to shelf-pack'}`)
 
   const trail = []
   let best = null
@@ -951,10 +1057,14 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15 } = {}) {
     // connected pins adjacent so the router has short, uncrossed channels. Re-emit
     // it per strategy so the built-in router still gets its fab-aware clearances.
     // Falls back to the connectivity shelf-pack when net-aware isn't available.
+    // For freerouting strategies the built-in route is stripped before the DSN
+    // export — skip computing it (routingDisabled). The tsci strategies keep it:
+    // there the built-in router IS the router.
+    const rd = OPT && s.router === 'fr'
     const code = netAwarePlaced
-      ? emitBoardCode(netAwarePlaced, nets, { clearance: s.router === 'tsci' ? s.place.clearance : null })
-      : buildCode(parts, nets, s.place)
-    let cj = await runTscircuitCode(code)
+      ? emitBoardCode(netAwarePlaced, nets, { clearance: s.router === 'tsci' ? s.place.clearance : null, routingDisabled: rd })
+      : buildCode(parts, nets, { ...s.place, routingDisabled: rd })
+    let cj = await buildCircuit(code, s.name)
     let fixes = [], unrouted = 0
     if (s.router === 'fr') {
       const fr = await freeroute(cj, { layers: s.layers })
@@ -1145,7 +1255,10 @@ async function main() {
       // DRC-verified GND zone that bonds them. Signals stay freerouting-routed;
       // ground becomes a plane, the way a real board does it.
       if (input.gnd?.length) {
+        const tGp = Date.now()
+        TIMINGS.counters.groundPlanePasses++
         const gp = await applyGroundPlane(res.best.cj, input.gnd, res.best.drc.profileKey || 'standard')
+        tAdd('groundPlane', Date.now() - tGp, gp?.available ? `${gp.assigned} pins, ${gp.errors} errors` : 'unavailable')
         if (gp?.available) {
           if (gp.pcb) kicadPcb = gp.pcb // grounded board (with the GND plane) for the 3D render
           drcRepair.groundPlane = { assigned: gp.assigned, unconnected: gp.unconnected, stitched: gp.stitched, skipped: gp.skipped, errors: gp.errors }
@@ -1173,7 +1286,7 @@ async function main() {
   // Fallbacks: explicit code input, or iterative unavailable/failed.
   if (!cj) {
     code = input.code || (input.parts ? buildCode(input.parts, input.nets) : '')
-    cj = await runTscircuitCode(code)
+    cj = await buildCircuit(code, 'fallback build')
     // board features BEFORE the DRC so the check runs against the real outline+holes
     boardFeatures = applyBoardFeatures(cj, input, 'standard')
     drc = input.drc !== false && cj.find((e) => e.type === 'pcb_board') ? await realDrc(cj) : { available: false, reason: 'skipped' }
@@ -1227,6 +1340,8 @@ async function main() {
   // circle boards report the honest square bbox (w = h = diameter) but the TRUE
   // area is the disc's, not the bbox's.
   const isCircle = boardFeatures?.boardShape?.type === 'circle'
+  const totalMs = Date.now() - T_RUN0
+  process.stderr.write(`[t] total: ${(totalMs / 1000).toFixed(1)}s (${TIMINGS.counters.freeroutingPasses} freerouting passes, ${TIMINGS.counters.jvmStarts} jvm starts, ${TIMINGS.counters.kicadDrcRuns} kicad drc runs, ${TIMINGS.counters.tscircuitBuilds} tscircuit builds)\n`)
   process.stdout.write(JSON.stringify({
     ok: !!board && (!needsTraces || traces.length > 0) && drcClean && unroutedNets === 0,
     layers: drcRepair?.layers ?? board?.num_layers ?? null,
@@ -1247,6 +1362,9 @@ async function main() {
     drcRepair,
     svg,
     code,
+    // additive observability: wall-clock per phase + process/pass counters. No
+    // consumer depends on it; safe to extend.
+    timings: { totalMs, phases: TIMINGS.phases, counters: TIMINGS.counters },
   }))
 }
 

@@ -176,9 +176,26 @@ async function claudeCodeCall(system: string, user: string, _key?: string, model
         : 'sonnet'
   const env = { ...process.env }
   delete env.ANTHROPIC_API_KEY
+  // Fast headless mode (opt out with FL_CLI_FAST=0). Every call used to pay the
+  // FULL interactive-session spin-up: CLAUDE.md auto-discovery, skills/plugins,
+  // hooks, and MCP server init (the repo's colab MCP boots a uvx python env).
+  // Measured on a trivial prompt (3-sample medians, claude 2.1.209):
+  //   plain flags 6.0s -> with --safe-mode 2.4s  (~3.6s saved PER CALL).
+  // --safe-mode disables all customizations but explicitly keeps auth working
+  // (OAuth/keychain still read — verified live with ANTHROPIC_API_KEY stripped),
+  // and the JSON envelope is byte-for-byte the same shape (type/result/is_error).
+  // It ALSO stops the repo's CLAUDE.md leaking into these supposedly hermetic
+  // prompts (without it, "say OK" replies referenced this repo's contents).
+  // --no-session-persistence: don't write every pipeline call to disk as a
+  // resumable session (no timing cost, avoids session-list pollution).
+  // NOT used: --bare (never reads OAuth -> would break subscription auth);
+  // --resume/--continue session reuse (prior turns would leak into unrelated
+  // calls with different system prompts — a correctness regression — and it
+  // saves nothing anyway: each resume still pays full process spin-up).
+  const fastFlags = process.env.FL_CLI_FAST === '0' ? [] : ['--safe-mode', '--no-session-persistence']
   return await new Promise<string>((resolve, reject) => {
     const t0 = Date.now()
-    const cp = spawn(bin, ['-p', '--model', alias, '--output-format', 'json'], { env, timeout: CLAUDE_CLI_TIMEOUT_MS })
+    const cp = spawn(bin, ['-p', '--model', alias, '--output-format', 'json', ...fastFlags], { env, timeout: CLAUDE_CLI_TIMEOUT_MS })
     let out = '', err = ''
     cp.stdout.on('data', (d) => (out += d))
     cp.stderr.on('data', (d) => (err += d))

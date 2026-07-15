@@ -14,6 +14,12 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { callLLMText, extractRust } from '@/lib/llm'
+// In-process handle on the chip-scale board builder: plan mode kicks it EARLY
+// (the moment the merged design lands) so it overlaps the variant routing/
+// validation below instead of running after the whole SSE chain. Direct module
+// call, not an HTTP fetch — works headless and needs no origin guessing; the
+// electronics-cs in-flight lock keeps the client's later call from double-building.
+import { POST as electronicsCsBuild } from '@/app/api/electronics-cs/route'
 import {
   canRun,
   chargeCredits,
@@ -240,11 +246,75 @@ export async function GET(req: Request) {
   const encoder = new TextEncoder()
   let child: ChildProcess | null = null
   let cancelled = false
+  // plan mode: the early chip-scale build running concurrently with the EDA
+  // chain (see the kick after ucs_design.json lands). Abortable so a cancelled
+  // or timed-out run can't leave an orphaned builder writing into the run dir.
+  let earlyCs: Promise<Record<string, unknown>> | null = null
+  const earlyCsAbort = new AbortController()
 
   // Full record of the run, every event in order, persisted on completion so
   // the last iteration can be inspected later without re-running or screenshots.
   const startedAt = new Date().toISOString()
   const events: PipelineEvent[] = []
+
+  // ---- EDA-phase wall-clock instrumentation ---------------------------------
+  // Server-side per-stage timing for the EDA chain, persisted to
+  // public/runs/<id>/eda-timing.json — the same shape as the client-side
+  // timing.json but a DIFFERENT file on purpose: the client owns timing.json and
+  // two writers racing one file would corrupt it. Strictly best-effort: a
+  // recording fault must never break a run, and partial timings still land on
+  // failure/abort (persisted on every transition + closed out in finally).
+  type EdaStageTiming = {
+    stage: string; startedAt: string; endedAt?: string; ms?: number
+    status: string; failReason?: string; detail?: string; unfinished?: boolean
+  }
+  const edaT0 = Date.now()
+  const edaTiming: {
+    runId: string; mode: string; startedAt: string
+    finishedAt?: string; totalMs?: number; stages: EdaStageTiming[]
+  } = {
+    runId,
+    mode: planMode ? 'plan' : synthMode ? 'synth' : composeMode ? 'compose' : 'matrix',
+    startedAt,
+    stages: [],
+  }
+  const edaOpen = new Map<string, { entry: EdaStageTiming; at: number }>()
+  const persistEdaTiming = () => {
+    try {
+      fs.writeFileSync(path.join(runRoot, 'eda-timing.json'), JSON.stringify(edaTiming, null, 1))
+    } catch { /* run dir may not exist yet — telemetry is best-effort */ }
+  }
+  const edaMark = (stage: string, state: string, failReason?: string, detail?: string) => {
+    try {
+      const now = Date.now()
+      const iso = new Date(now).toISOString()
+      if (state === 'running') {
+        const prev = edaOpen.get(stage)
+        // defensive: close a leaked attempt rather than lose it
+        if (prev) { prev.entry.endedAt = iso; prev.entry.ms = now - prev.at; prev.entry.unfinished = true }
+        const entry: EdaStageTiming = { stage, startedAt: iso, status: 'running', ...(detail ? { detail } : {}) }
+        edaTiming.stages.push(entry)
+        edaOpen.set(stage, { entry, at: now })
+      } else {
+        const cur = edaOpen.get(stage)
+        if (cur) {
+          cur.entry.endedAt = iso
+          cur.entry.ms = now - cur.at
+          cur.entry.status = state
+          if (failReason) cur.entry.failReason = failReason
+          if (detail) cur.entry.detail = detail
+          edaOpen.delete(stage)
+        } else {
+          // terminal with no 'running' before it (e.g. 'blocked') — zero-duration mark
+          edaTiming.stages.push({
+            stage, startedAt: iso, endedAt: iso, ms: 0, status: state,
+            ...(failReason ? { failReason } : {}), ...(detail ? { detail } : {}),
+          })
+        }
+      }
+      persistEdaTiming()
+    } catch { /* never let timing take the run down */ }
+  }
 
   // count the run + attach ownership up front (a crashed run still consumed
   // pipeline time; artifact filtering keys off this ownership record)
@@ -260,6 +330,9 @@ export async function GET(req: Request) {
         if (ev.type === 'done' && runId) {
           ev.runDir = `/runs/${runId}`
         }
+        // every stage transition funnels through here — the one hook the EDA
+        // wall-clock recorder needs (running opens an attempt, terminal closes it)
+        if (ev.type === 'stage') edaMark(ev.id, ev.state, ev.failReason)
         events.push(ev)
         try {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(ev)}\n\n`))
@@ -312,6 +385,8 @@ export async function GET(req: Request) {
       const killTimer = setTimeout(() => {
         cancelled = true
         child?.kill('SIGKILL')
+        // a timed-out run must not leave the early chip-scale build orphaned
+        try { earlyCsAbort.abort() } catch { /* already settled */ }
         send({ type: 'error', message: 'run timed out (20 min safety limit)' })
       }, RUN_TIMEOUT_MS)
 
@@ -521,6 +596,48 @@ export async function GET(req: Request) {
           // chip-scale board engine (electronics-cs) can build from this SAME real
           // design via the netlist bridge, instead of a separate LLM part-set.
           try { fs.writeFileSync(path.join(pubData, 'ucs_design.json'), JSON.stringify(synthDesign)) } catch { /* non-fatal */ }
+
+          // ---- EARLY CHIP-SCALE BUILD (plan mode) ---------------------------
+          // The merged design just landed, and in plan mode the board that SHIPS
+          // is the chip-scale board built FROM it — so start that build NOW,
+          // concurrent with the variant routing/validation below, instead of
+          // after the whole SSE chain finishes (which used to serialize ~4 min
+          // of product-pipeline behind ~10 min of EDA). The client's later
+          // electronics stage reuses the persisted board (run-pipeline
+          // existingBoard) or joins this build via electronics-cs's in-flight
+          // lock, so nothing double-builds. plannerOnly: with ucs_design.json on
+          // disk this build uses the planner netlist bridge; if the bridge fails
+          // it stops instead of LLM-guessing from this minimal spec — the
+          // client's full-spec call keeps the LLM fallback.
+          if (planMode && !cancelled && fs.existsSync(path.join(pubData, 'ucs_design.json'))) {
+            const sdi = synthDesign as { intent?: { product_goal?: string } }
+            const csBody = {
+              runId,
+              plannerOnly: true,
+              spec: {
+                product: sdi.intent?.product_goal || prompt.slice(0, 120) || 'product',
+                description: prompt.slice(0, 300),
+                budgets: {},
+              },
+            }
+            edaMark('chipscale-early', 'running', undefined,
+              'merged chip-scale board build, concurrent with variant routing')
+            log('design', 'chip-scale product board: build started EARLY from the merged design (overlaps variant routing; the product pipeline will reuse it)', 'ok')
+            earlyCs = electronicsCsBuild(new Request('http://firstlight.internal/api/electronics-cs', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(csBody),
+              signal: earlyCsAbort.signal,
+            }))
+              .then(async (r) => (await r.json()) as Record<string, unknown>)
+              .catch((e) => ({ ok: false, error: String(e) } as Record<string, unknown>))
+              .then((r) => {
+                const built = !!(r as { boardMm?: unknown }).boardMm
+                edaMark('chipscale-early', built ? 'passed' : 'failed',
+                  built ? undefined : String((r as { error?: unknown }).error ?? 'no board'))
+                return r
+              })
+          }
           const comp = await exec('design', KPY, [
             path.resolve(hwDir, '../../hardware/planner/synth.py'),
             designPath,
@@ -1205,6 +1322,85 @@ export async function GET(req: Request) {
         // BSP + per-peripheral HAL (LoRa/IMU/motors) traced from the netlist.
         // Either way the hard gate is the same: `cargo build` for the RP2040.
         const fwGen = boardMode ? 'scripts/gen_firmware_compose.py' : 'scripts/gen_firmware.py'
+
+        // ---- plan mode: firmware targets the SHIPPED board ------------------
+        // In plan mode the variant board here is an INTERMEDIATE design view (see
+        // the validation-stage note); the board that ships is the merged
+        // chip-scale board electronics-cs builds from the SAME planner design.
+        // Firmware used to be generated from the variant regardless — a density
+        // re-plan could shed parts the firmware still drove. Now:
+        //   1. Sync with the chip-scale build (kicked early, so this normally
+        //      waits ~0s — it finished while the variant was still routing).
+        //   2. If the shipped board is planner-merged, its netlist comes from the
+        //      SAME synth net-assembly as this variant (synth.py's
+        //      netlist_from_design literally runs synth), so generating from the
+        //      variant file with the devices manifest FILTERED to the shipped
+        //      board's part refs IS firmware for the shipped board.
+        //   3. If the shipped board is NOT planner-merged (bridge failed → LLM
+        //      part-set) or doesn't exist, the generator has nothing that maps
+        //      onto it (the chip-scale .kicad_pcb carries no named nets, no
+        //      devices manifest, no recognizable MCU footprint) — keep the
+        //      variant-based crate but LABEL it honestly instead of silently
+        //      shipping firmware for the wrong board.
+        let fwTargetNote: string | null = null
+        if (planMode) {
+          log('firmware', 'plan mode: firmware targets the SHIPPED (merged chip-scale) board — syncing with its build…')
+          if (earlyCs) {
+            let waitTimer: ReturnType<typeof setTimeout> | undefined
+            const waited = await Promise.race([
+              earlyCs,
+              new Promise<null>((res) => { waitTimer = setTimeout(() => res(null), 300_000) }),
+            ])
+            clearTimeout(waitTimer)
+            if (waited === null)
+              log('firmware', 'chip-scale build still running after a 5 min wait — proceeding without it', 'warn')
+          }
+          let csBoard: {
+            boardSource?: string
+            parts?: { name: string }[]
+            boardMm?: { w: number; h: number }
+          } | null = null
+          try {
+            csBoard = JSON.parse(
+              fs.readFileSync(path.join(runRoot, 'electronics', 'chipscale-board.json'), 'utf8'),
+            )
+          } catch { /* no shipped board persisted (yet) */ }
+          if (csBoard?.boardSource === 'planner-merged' && Array.isArray(csBoard.parts)) {
+            const shipped = new Set(csBoard.parts.map((p) => String(p.name)))
+            // retarget the peripheral manifest: the generator derives its driver
+            // set from <board>.devices.json — filter it to devices actually ON
+            // the shipped board, so the crate never drives a part that didn't ship.
+            let excluded: string[] = []
+            try {
+              const manPath = variantBoard.replace(/\.kicad_pcb$/, '.devices.json')
+              const devs = JSON.parse(fs.readFileSync(manPath, 'utf8')) as { ref?: string }[]
+              excluded = devs.filter((d) => d.ref && !shipped.has(String(d.ref))).map((d) => String(d.ref))
+              if (excluded.length)
+                fs.writeFileSync(manPath, JSON.stringify(devs.filter((d) => !d.ref || shipped.has(String(d.ref)))))
+            } catch { /* manifest absent — generator falls back to net-name detection */ }
+            const dims = csBoard.boardMm
+              ? `${Math.round(csBoard.boardMm.w)}×${Math.round(csBoard.boardMm.h)}mm, `
+              : ''
+            fwTargetNote =
+              `This crate targets the SHIPPED board: the merged chip-scale board (${dims}planner-merged). ` +
+              `The shipped board and the intermediate design view are generated from the same planner ` +
+              `netlist (synth net-assembly), and the peripheral manifest was filtered to the shipped ` +
+              `board's ${shipped.size} part refs before generation` +
+              (excluded.length ? ` (${excluded.length} intermediate-only device(s) excluded: ${excluded.join(', ')})` : '') +
+              `.`
+            log('firmware', `target: shipped chip-scale board (planner-merged, ${shipped.size} parts) — same planner netlist as the design view${excluded.length ? `; excluded intermediate-only device(s): ${excluded.join(', ')}` : ''}`, 'ok')
+          } else {
+            fwTargetNote =
+              'HONEST LABEL: this crate was generated from the INTERMEDIATE design view (the synth ' +
+              'variant board), NOT the shipped chip-scale board' +
+              (csBoard
+                ? ` (shipped board source: ${csBoard.boardSource ?? 'unknown'})`
+                : ' (no shipped chip-scale board was available when firmware was generated)') +
+              ". The shipped board's part set may differ; verify the pin/peripheral map before flashing."
+            log('firmware', `⚠ shipped chip-scale board ${csBoard ? `is ${csBoard.boardSource ?? 'unknown'}-sourced` : 'not available'} — firmware targets the intermediate design view (labelled honestly in FIRMWARE-TARGET.md, not silently wrong)`, 'warn')
+          }
+        }
+
         log('firmware', `${boardMode ? 'composed BSP + peripheral HAL' : 'relay-matrix HAL'} from netlist…`)
         const gen = await exec('firmware', KPY, [
           path.join(appDir, fwGen),
@@ -1214,6 +1410,19 @@ export async function GET(req: Request) {
         if (!gen.out.includes('FIRMWARE:') || gen.out.includes('ERROR')) {
           send({ type: 'stage', id: 'firmware', state: 'failed', failReason: 'firmware generation failed' })
         } else {
+          // plan mode: stamp the crate with WHICH board it targets (shipped
+          // chip-scale vs intermediate view — set above), and carry the planner's
+          // real MCU pin allocation along, so the downloaded artifact is
+          // self-describing. Both best-effort; the crate gate is cargo below.
+          if (fwTargetNote) {
+            try {
+              fs.writeFileSync(path.join(fwDir, 'FIRMWARE-TARGET.md'), `# Firmware target\n\n${fwTargetNote}\n`)
+            } catch { /* label best-effort */ }
+            try {
+              const pinMd = path.join(pubData, 'pin-assignment.md')
+              if (fs.existsSync(pinMd)) fs.copyFileSync(pinMd, path.join(fwDir, 'PINMAP.md'))
+            } catch { /* optional rider */ }
+          }
           log('firmware', 'cargo build --target thumbv6m-none-eabi (RP2040)…')
           const fwBuild = await exec('firmware', CARGO, ['build', '--release'], {
             cwd: fwDir,
@@ -1255,7 +1464,7 @@ export async function GET(req: Request) {
                   `HARD RULES (each is a real, common cause of a failed build):\n${FW_RULES}\n\n` +
                   `REFERENCE SHAPE (adapt it to the real modules below):\n${FW_GOLDEN}`
                 const ask =
-                  `Board: ${composeMode ? composeSpec?.boardClass : 'FL-1 relay/probe matrix'}.\n\n` +
+                  `Board: ${composeMode ? composeSpec?.boardClass : planMode || synthMode ? (prompt.slice(0, 140) || 'planned product board') : 'FL-1 relay/probe matrix'}.\n\n` +
                   `The crate provides these modules — call ONLY their real public methods:\n\n${apiDump}\n\n` +
                   `Here is the full scaffold you are editing (do NOT change anything outside the ` +
                   `FL_APP_FILL markers — the struct fields tell you exactly what self.<field> you may use):\n\n` +
@@ -1337,6 +1546,22 @@ export async function GET(req: Request) {
       } finally {
         clearTimeout(killTimer)
         globalState.__pipelineRunning = false
+        // close out the EDA wall-clock record on EVERY exit path. Stages still
+        // open never reported a terminal state (abort/throw mid-stage) — keep
+        // their status and mark them unfinished rather than invent an outcome.
+        try {
+          const now = Date.now()
+          const iso = new Date(now).toISOString()
+          for (const { entry, at } of edaOpen.values()) {
+            entry.endedAt = iso
+            entry.ms = now - at
+            entry.unfinished = true
+          }
+          edaOpen.clear()
+          edaTiming.finishedAt = iso
+          edaTiming.totalMs = now - edaT0
+          persistEdaTiming()
+        } catch { /* telemetry only */ }
         try {
           // write the report INTO this run's own data dir (fixes the prior
           // off-by-one where the report landed in shared data and got snapshotted
@@ -1379,6 +1604,10 @@ export async function GET(req: Request) {
     cancel() {
       cancelled = true
       child?.kill('SIGKILL')
+      // client walked away — abort the concurrent chip-scale build too, so no
+      // orphaned builder keeps writing into this run's dir (same abort stance
+      // as the child-process kill above; electronics-cs skips its persist).
+      try { earlyCsAbort.abort() } catch { /* already settled */ }
       globalState.__pipelineRunning = false
     },
   })

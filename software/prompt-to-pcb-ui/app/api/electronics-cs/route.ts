@@ -141,8 +141,22 @@ function firstJson(text: string): string {
 }
 
 /** Pull a REAL KiCad footprint for an LCSC part via easyeda2kicad; null on any
- *  failure (invalid id / no network) so the runner falls back to a generic one. */
+ *  failure (invalid id / no network) so the runner falls back to a generic one.
+ *  Per-id promise cache: parallel re-plan candidates can ask for the SAME id at
+ *  the same time, and two easyeda2kicad runs would race on the same /tmp output
+ *  (the same hazard the per-candidate de-dupe already guards against) — so each
+ *  id is fetched once per process and everyone shares the result. */
+const fpCache = new Map<string, Promise<string | null>>()
 function fetchFootprint(lcsc: string): Promise<string | null> {
+  const cached = fpCache.get(lcsc)
+  if (cached) return cached
+  const p = fetchFootprintUncached(lcsc)
+  fpCache.set(lcsc, p)
+  // a failed fetch is not cached forever — a later build may have network back
+  p.then((m) => { if (m === null) fpCache.delete(lcsc) }).catch(() => fpCache.delete(lcsc))
+  return p
+}
+function fetchFootprintUncached(lcsc: string): Promise<string | null> {
   if (!/^C\d{2,10}$/.test(lcsc)) return Promise.resolve(null)
   const base = path.join('/tmp', `fl_fp_${lcsc}`)
   return new Promise((resolve) => {
@@ -180,7 +194,7 @@ function plannerNetlist(designPath: string): Promise<{ parts: any[]; nets: any[]
   })
 }
 
-function runBoard(payload: object, svgPath: string, timeoutMs = 285_000): Promise<any> {
+function runBoard(payload: object, svgPath: string, timeoutMs = 285_000, signal?: AbortSignal): Promise<any> {
   const script = path.join(process.cwd(), '..', '..', 'tools', 'tscircuit', 'run_board.mjs')
   return new Promise((resolve, reject) => {
     // process.execPath, not 'node': run_board.mjs is an EXTERNAL tool (two dirs
@@ -190,8 +204,11 @@ function runBoard(payload: object, svgPath: string, timeoutMs = 285_000): Promis
     // evaluates process.cwd() away to "/../tools/.../run_board.mjs"). Spawning
     // the running server's own interpreter is also strictly more correct: it
     // can't pick up a different node off PATH (systemd's PATH is minimal).
+    // `signal` lets a caller abort mid-route (the pipeline route's early build
+    // wires its cancel path here, so a cancelled EDA run can't leave an
+    // orphaned router writing into the run dir).
     const t0 = Date.now()
-    const py = spawn(process.execPath, [script], { timeout: timeoutMs })
+    const py = spawn(process.execPath, [script], { timeout: timeoutMs, signal })
     let out = '', err = ''
     py.stdout.on('data', (d) => (out += d))
     py.stderr.on('data', (d) => (err += d))
@@ -275,28 +292,86 @@ async function buildCandidate(userMsg: string, req: Request, dir: string, svgNam
     const m = p?.lcsc ? mods.get(String(p.lcsc)) : undefined
     if (m) { p.kicadMod = m; realFootprints++ }
   }
-  const result = await runBoard({ parts, nets, gnd, ...boardOpts }, path.join(dir, svgName), timeoutMs)
+  const result = await runBoard({ parts, nets, gnd, ...boardOpts }, path.join(dir, svgName), timeoutMs, req.signal ?? undefined)
   return { parts, nets, gnd, note, droppedCapabilities, realFootprints, result, svgName }
 }
+
+// ---- in-flight lock ----------------------------------------------------------
+// One chip-scale build per run at a time. The pipeline route (plan mode) kicks
+// the build EARLY — concurrent with the variant routing — and the client's
+// full-pipeline electronics stage may POST for the same runId while that build
+// is still routing (its persisted-board reuse check ran too soon to see it).
+// A second caller JOINS the in-flight build's result instead of double-building
+// into the same run dir. Entries are removed on settle; after that the persisted
+// chipscale-board.json reuse path (run-pipeline existingBoard) takes over.
+type CsInflight = { plannerOnly: boolean; promise: Promise<any> }
+const csGlobal = globalThis as unknown as { __csInflight?: Map<string, CsInflight> }
 
 export async function POST(req: Request) {
   // Time origin for ALL budget accounting in this route — set at ENTRY so the
   // first candidate build (LLM + up to 285s route) counts against the budget
   // too, not just the re-plan loop. maxDuration=600 covers the whole route.
   const routeStart = Date.now()
-  try {
-    const body = await req.json()
-    const spec = body.spec as ProductSpec | undefined
-    const runId = typeof body.runId === 'string' ? body.runId : undefined
-    if (!spec?.product) return Response.json({ error: 'missing product spec' }, { status: 400 })
-    if (!runId || !RUN_ID.test(runId)) return Response.json({ error: 'missing/invalid runId' }, { status: 400 })
+  let body: any
+  try { body = await req.json() } catch { return Response.json({ error: 'bad json body' }, { status: 400 }) }
+  const spec = body.spec as ProductSpec | undefined
+  const runId = typeof body.runId === 'string' ? body.runId : undefined
+  if (!spec?.product) return Response.json({ error: 'missing product spec' }, { status: 400 })
+  if (!runId || !RUN_ID.test(runId)) return Response.json({ error: 'missing/invalid runId' }, { status: 400 })
+  const keepCapabilities = body.keepCapabilities === true
+  // plannerOnly: the pipeline route's EARLY server-side kick. It only carries a
+  // minimal spec (product name + prompt), so if the planner netlist bridge fails
+  // it must NOT fall back to the LLM part-set — the client's later call, which
+  // has the architect's full product spec, keeps that fallback.
+  const plannerOnly = body.plannerOnly === true
 
+  const inflight = (csGlobal.__csInflight ??= new Map<string, CsInflight>())
+  // A keep-capabilities rebuild is a deliberate user rebuild — never joined to
+  // an in-flight default build (it would return the wrong tradeoff).
+  const existing = !keepCapabilities ? inflight.get(runId) : undefined
+  if (existing) {
+    try {
+      const r = await existing.promise
+      // Join the in-flight result — unless it was a planner-only attempt that
+      // produced no board; then this (full-spec) caller builds fresh below so
+      // the LLM fallback still exists.
+      if (r && (r.boardMm || !existing.plannerOnly)) return Response.json(r)
+    } catch (e) {
+      if (!existing.plannerOnly) return Response.json({ ok: false, error: String(e) }, { status: 502 })
+      // early planner-only build threw (e.g. aborted) — fall through, build fresh
+    }
+  }
+
+  const promise = buildChipScale(spec, runId, { keepCapabilities, plannerOnly }, req, routeStart)
+  const entry: CsInflight = { plannerOnly, promise }
+  inflight.set(runId, entry)
+  try {
+    return Response.json(await promise)
+  } catch (err) {
+    return Response.json({ ok: false, error: String(err) }, { status: 502 })
+  } finally {
+    if (inflight.get(runId) === entry) inflight.delete(runId)
+  }
+}
+
+/** The whole build (part set → route → density re-plan → persist), returning the
+ *  response payload. Extracted from POST so concurrent callers can share ONE
+ *  build via the in-flight lock above. */
+async function buildChipScale(
+  spec: ProductSpec,
+  runId: string,
+  flags: { keepCapabilities: boolean; plannerOnly: boolean },
+  req: Request,
+  routeStart: number,
+): Promise<any> {
+  const { keepCapabilities, plannerOnly } = flags
+  {
     const b = spec.budgets ?? {}
     const elec = spec.disciplines?.electronics
-    // Stage D: when the user chooses to KEEP a capability the density re-plan would
-    // otherwise drop, rebuild with completeness prioritized over compactness and
-    // skip the density re-plan (a bigger board is the accepted tradeoff).
-    const keepCapabilities = body.keepCapabilities === true
+    // Stage D (keepCapabilities): when the user chooses to KEEP a capability the
+    // density re-plan would otherwise drop, rebuild with completeness prioritized
+    // over compactness and skip the density re-plan (a bigger board is the
+    // accepted tradeoff).
     const baseMsg =
       `PRODUCT: ${spec.product}\n${spec.description || ''}\n` +
       `size budget: ${JSON.stringify(b.sizeMm ?? {})}\n` +
@@ -309,20 +384,27 @@ export async function POST(req: Request) {
     const dir = path.join(process.cwd(), 'public', 'runs', runId, 'electronics')
     await fs.mkdir(dir, { recursive: true })
 
-    // BOARD SHAPE + MOUNTING PROVISIONS — derived from the run's ID brief (same
-    // loader as the mechanical route). A round/puck/disc/cylindrical form factor
-    // gets a CIRCULAR board so it fits the round enclosure; anything else stays
-    // rect. EVERY board carries NPTH screw holes (M2 clearance = 2.2mm): 3 on a
-    // bolt circle for round boards, 4 corner holes for rect — so the mechanical
-    // stage has something real to bolt to. The runner places them collision-free
-    // and re-runs real DRC with them in the board.
+    // BOARD SHAPE + MOUNTING PROVISIONS — a round/puck/disc/cylindrical form
+    // factor gets a CIRCULAR board so it fits the round enclosure; anything else
+    // stays rect. EVERY board carries NPTH screw holes (M2 clearance = 2.2mm): 3
+    // on a bolt circle for round boards, 4 corner holes for rect — so the
+    // mechanical stage has something real to bolt to. The runner places them
+    // collision-free and re-runs real DRC with them in the board.
+    //
+    // Shape sources, in order: the ID brief when it exists, PLUS the product
+    // spec's own text. The spec text is load-bearing, not a nicety: the EARLY
+    // overlap build (kicked the moment ucs_design.json persists) runs BEFORE the
+    // ID brief is generated, so brief-only derivation silently produced rect
+    // boards for round products (measured on run-e93c6e0d: "round matte puck"
+    // spec → rect board). The spec is always available at overlap time.
     let idText = ''
     try {
       const brief = normalizeIdBrief(JSON.parse(
         await fs.readFile(path.join(process.cwd(), 'public', 'runs', runId, 'disciplines', 'id-brief.json'), 'utf8')))
       idText = [brief.formFactor, ...(brief.keyFeatures ?? []), ...(brief.constraints ?? [])].filter(Boolean).join(' ')
-    } catch { /* no ID brief — default rect */ }
-    const roundForm = /\b(round|circular|puck|disc|disk|coin|cylind\w*)\b/i.test(idText)
+    } catch { /* no ID brief yet (early-overlap build) — spec text below still applies */ }
+    const specText = [spec?.product, spec?.description, spec?.philosophy].filter(Boolean).join(' ')
+    const roundForm = /\b(round|circular|puck|disc|disk|coin|cylind\w*)\b/i.test(`${idText} ${specText}`)
     const boardOpts: BoardOpts = {
       boardShape: roundForm ? { type: 'circle' } : { type: 'rect' },
       mountingHoles: { count: roundForm ? 3 : 4, holeDiaMm: 2.2 },
@@ -340,10 +422,17 @@ export async function POST(req: Request) {
     if (!keepCapabilities && await exists(plannerDesignPath)) {
       const nl = await plannerNetlist(plannerDesignPath)
       if (nl?.parts?.length) {
-        const result = await runBoard({ parts: nl.parts, nets: nl.nets, gnd: nl.gnd, ...boardOpts }, path.join(dir, 'chipscale.svg'), 285_000)
+        const result = await runBoard({ parts: nl.parts, nets: nl.nets, gnd: nl.gnd, ...boardOpts }, path.join(dir, 'chipscale.svg'), 285_000, req.signal ?? undefined)
         cand = { parts: nl.parts, nets: nl.nets, gnd: nl.gnd, note: undefined, droppedCapabilities: undefined, realFootprints: 0, result, svgName: 'chipscale.svg' }
         boardSource = 'planner-merged'
       }
+    }
+    // plannerOnly (the pipeline route's early kick): if the bridge yielded no
+    // board, STOP here rather than falling back to the LLM part-set — this call's
+    // minimal spec lacks the architect's product context, so the fallback belongs
+    // to the client's later full-spec call (which the in-flight lock lets through).
+    if (!cand && plannerOnly) {
+      return { ok: false, error: 'planner netlist unavailable — early planner-only build skipped the LLM fallback', boardSource: 'llm' }
     }
     // FIRST PASS (fallback) — LLM part set, routed.
     if (!cand) cand = await buildCandidate(baseMsg, req, dir, 'chipscale.svg', 285_000, boardOpts)
@@ -365,62 +454,82 @@ export async function POST(req: Request) {
       // and the response. The old origin (set HERE, after the first build) let
       // first-pass time + 520s of re-planning stack past the 600s wall.
       const OUTER_BUDGET_MS = 520_000
-      const MAX_REPLANS = 3
+      const MAX_REPLANS = 3 // also the concurrency cap — one candidate per rung
       const iterations: any[] = []
-      const droppedCaps: string[] = [] // capabilities shed across the KEPT re-plan path (Stage D)
-      let best = cand // the best candidate across all iterations (starts as the first pass)
+      let best = cand // the best candidate across all rungs (starts as the first pass)
 
-      // Keep re-planning simpler while the best board is still over the density
-      // budget — each round feeds the CURRENT best board's failure back and asks
-      // for a further simplification, escalating how aggressive the cut is. Stop
-      // on a clean route, on no improvement, when the re-plan budget/iterations
-      // run out, or when a build fails (fall back to the best so far).
+      // PARALLEL re-plan ladder. The old loop chained up to 3 sequential ~3-min
+      // rounds, each informed by the PREVIOUS round's failure. Density failures
+      // share one root cause (too many fine-pitch parts for the area), so the
+      // escalation ladder is now written UP-FRONT from the FIRST failure and all
+      // candidates build CONCURRENTLY — wall cost ≈ one round instead of three.
+      // HONEST TRADEOFF: rungs 2-3 are pre-escalated ("assume a lighter cut won't
+      // be enough") rather than adaptively fed the prior rung's outcome; we trade
+      // that feedback for time. Selection is unchanged (betterResult, clean route
+      // wins, ties keep the incumbent) and every candidate's outcome is reported
+      // in `iterations` ordered by rung, exactly as before.
+      const hist = Object.entries(fpHistogram(cand.parts)).map(([k, v]) => `${v}×${k}`).join(', ')
+      const failLine =
+        `\n\nRE-PLAN — this part set did NOT route clean at chip-scale:\n` +
+        `${cand.parts.length} parts (${hist}) → ${first.boardMm?.w}×${first.boardMm?.h}mm with ${first.drc?.errors} DRC error(s), ` +
+        `mostly hole_clearance (fine-pitch packages packed too tight to route at this size).\n`
+      const escalations = [
+        `Re-design it SIMPLER so it can route clean:`,
+        `Assume a LIGHT simplification will NOT be enough for this failure. Cut HARDER — ` +
+          `integrate functions into fewer ICs and drop secondary peripherals:`,
+        `Assume moderate cuts will NOT be enough for this failure. Strip to the product's ` +
+          `ESSENTIAL core function only — the minimum part set that is still a REAL functional board:`,
+      ]
+      const commonAsk =
+        `\n- prefer a COARSER package where the function allows (a wider-pitch/larger IC over a fine-pitch qfn);\n` +
+        `- INTEGRATE functions into fewer ICs where a real combined part exists;\n` +
+        `- DROP a non-essential peripheral (keep the product's core function; shed nice-to-haves);\n` +
+        `- fewer discrete parts overall.\n` +
+        `Keep it a REAL functional board for THIS product. Add a "note" field naming what you simplified and why, ` +
+        `and a "droppedCapabilities" field: a list of any product CAPABILITIES you removed to fit ` +
+        `(e.g. "data logging (SPI flash)", "battery charging"), or [] if you only coarsened/consolidated packages.`
+
+      // Time budget still applies, measured from route entry: the batch's wall
+      // cost is ≈ one candidate (LLM emit + 220s route wall), so one up-front
+      // check replaces the per-round check.
       let round = 0
-      while (round < MAX_REPLANS && densityFailed(best.result)) {
-        const elapsed = Date.now() - routeStart
-        const estNext = iterations.length ? (iterations[iterations.length - 1].ms ?? 180_000) : 190_000
-        if (elapsed + estNext > OUTER_BUDGET_MS) { iterations.push({ round: round + 1, skipped: 'time budget', elapsedMs: elapsed }); break }
-        round++
-
-        const rb = best.result
-        const hist = Object.entries(fpHistogram(best.parts)).map(([k, v]) => `${v}×${k}`).join(', ')
-        const escalate = round === 1
-          ? `Re-design it SIMPLER so it can route clean:`
-          : `This is re-plan #${round}; the previous simplification still did NOT route clean. Cut HARDER — strip to the product's ESSENTIAL core function only:`
-        const feedback =
-          `\n\nRE-PLAN — this part set did NOT route clean at chip-scale:\n` +
-          `${best.parts.length} parts (${hist}) → ${rb.boardMm?.w}×${rb.boardMm?.h}mm with ${rb.drc?.errors} DRC error(s), ` +
-          `mostly hole_clearance (fine-pitch packages packed too tight to route at this size).\n` +
-          `${escalate}\n` +
-          `- prefer a COARSER package where the function allows (a wider-pitch/larger IC over a fine-pitch qfn);\n` +
-          `- INTEGRATE functions into fewer ICs where a real combined part exists;\n` +
-          `- DROP a non-essential peripheral (keep the product's core function; shed nice-to-haves);\n` +
-          `- fewer discrete parts overall.\n` +
-          `Keep it a REAL functional board for THIS product. Add a "note" field naming what you simplified and why, ` +
-          `and a "droppedCapabilities" field: a list of any product CAPABILITIES you removed to fit ` +
-          `(e.g. "data logging (SPI flash)", "battery charging"), or [] if you only coarsened/consolidated packages.`
-
-        const tA = Date.now()
-        let next: Awaited<ReturnType<typeof buildCandidate>> | null = null
-        let replanError: string | null = null
+      const elapsed = Date.now() - routeStart
+      if (elapsed + 190_000 > OUTER_BUDGET_MS) {
+        iterations.push({ round: 1, skipped: 'time budget', elapsedMs: elapsed })
+      } else {
+        round = MAX_REPLANS
         // re-plans are mechanical simplification of an already-decided design → cheaper model
-        try { next = await buildCandidate(baseMsg + feedback, req, dir, `chipscale-replan${round}.svg`, 220_000, boardOpts, REPLAN_MODEL) }
-        catch (e) { replanError = String(e) }
-        const ms = Date.now() - tA
-
-        if (!next) { iterations.push({ round, replanError, ms }); break } // build failed — keep best so far
-        const improved = betterResult(best.result, next.result) === 'b'
-        iterations.push({
-          round, change: describeDesignChange(best.parts, next.parts), note: next.note ?? null,
-          droppedCapabilities: next.droppedCapabilities ?? [],
-          parts: next.parts.length, drc: next.result?.drc?.errors ?? null, ok: !!next.result?.ok,
-          kept: improved, ms,
-        })
-        if (!improved) break // this re-plan was no better than the current best — stop
-        for (const c of (next.droppedCapabilities ?? [])) if (!droppedCaps.includes(c)) droppedCaps.push(c) // shed on the kept path
-        best = next
-        if (best.result?.ok) break // clean route — genuinely converged
+        const settled = await Promise.all(escalations.map(async (escalate, i) => {
+          const rung = i + 1
+          const tA = Date.now()
+          try {
+            const c = await buildCandidate(
+              baseMsg + failLine + escalate + commonAsk,
+              req, dir, `chipscale-replan${rung}.svg`, 220_000, boardOpts, REPLAN_MODEL)
+            return { rung, cand: c, ms: Date.now() - tA, error: null as string | null }
+          } catch (e) {
+            return { rung, cand: null as Awaited<ReturnType<typeof buildCandidate>> | null, ms: Date.now() - tA, error: String(e) }
+          }
+        }))
+        // Fold in rung order so `kept` keeps its old meaning (adopted over the
+        // best seen so far). All candidates derive from the FIRST design, so
+        // per-candidate `change` is computed against the first-pass part set.
+        for (const s of settled) {
+          if (!s.cand) { iterations.push({ round: s.rung, replanError: s.error, ms: s.ms }); continue }
+          const improved = betterResult(best.result, s.cand.result) === 'b'
+          iterations.push({
+            round: s.rung, change: describeDesignChange(cand.parts, s.cand.parts), note: s.cand.note ?? null,
+            droppedCapabilities: s.cand.droppedCapabilities ?? [],
+            parts: s.cand.parts.length, drc: s.cand.result?.drc?.errors ?? null, ok: !!s.cand.result?.ok,
+            kept: improved, ms: s.ms,
+          })
+          if (improved) best = s.cand
+        }
       }
+      // Capabilities shed by the ADOPTED candidate (Stage D). Candidates are
+      // independent simplifications of the first design, so the winner's own
+      // droppedCapabilities IS the shed set — no cross-candidate union.
+      const droppedCaps = best !== cand ? [...new Set(best.droppedCapabilities ?? [])] : []
 
       // promote the winning board's SVGs to the canonical names the UI reads.
       // A failed promotion is NOT silent: the stats below describe the re-planned
@@ -460,7 +569,7 @@ export async function POST(req: Request) {
     }
 
     const { parts, result, realFootprints } = cand
-    if (result?.error) return Response.json({ ok: false, error: result.error })
+    if (result?.error) return { ok: false, error: result.error }
 
     // fold the outer-loop outcome into drcRepair so the existing UI (which renders
     // drcRepair.fixes) shows the re-plan honestly, and keep the structured object.
@@ -468,15 +577,17 @@ export async function POST(req: Request) {
       result.drcRepair.designConvergence = designConvergence
       const dc = designConvergence
       const tail = dc.kept === 'replanned'
-        ? `re-planned the design ${dc.replans}× (${dc.change}) → ${dc.after?.drc} vs ${dc.before.drc} DRC error(s)${dc.converged ? ', routes clean' : ''}`
-        : `kept the original — ${dc.replans} re-plan attempt(s) were no better`
+        ? `re-planned the design (${dc.replans} parallel candidate(s); ${dc.change}) → ${dc.after?.drc} vs ${dc.before.drc} DRC error(s)${dc.converged ? ', routes clean' : ''}`
+        : `kept the original — ${dc.replans} parallel re-plan candidate(s) were no better`
       result.drcRepair.fixes = [
         ...(result.drcRepair.fixes ?? []),
         `design↔routing outer loop: ${dc.reason} → ${tail}`,
       ]
     }
 
-    if (result.boardMm) {
+    if (result.boardMm && !req.signal?.aborted) {
+      // (Persist is skipped on an aborted request — a cancelled run must not get
+      // a board written under it after the caller walked away.)
       // Persist the part set too, so downstream disciplines (supply chain BOM,
       // manufacturing, validation) can ground on the REAL chip-scale parts (the
       // BLE SoC + mics + PMIC), not the flroute reference board's placeholder BOM.
@@ -495,7 +606,7 @@ export async function POST(req: Request) {
       if (result.kicadPcb) await fs.writeFile(path.join(dir, 'chipscale.kicad_pcb'), result.kicadPcb)
     }
 
-    return Response.json({
+    return {
       ok: !!result.ok,
       boardMm: result.boardMm,
       areaMm2: result.areaMm2,
@@ -515,8 +626,6 @@ export async function POST(req: Request) {
       // stats describe the re-plan (see designConvergence.svgStaleNote).
       svgStale: !!designConvergence?.svgStale,
       code: result.code,
-    })
-  } catch (err) {
-    return Response.json({ ok: false, error: String(err) }, { status: 502 })
+    }
   }
 }
