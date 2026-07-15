@@ -71,6 +71,50 @@ GEOMETRY RULES (always, non-negotiable):
   board-centered hole coordinates ARE plan coordinates, and set the PCB
   component's cz to the standoff top so it seats on the bosses, not in the floor.
 
+REFINEMENT (non-negotiable for enclosures — the part must read as a finished
+product, not an extruded blank with a pocket). When the part is an enclosure
+(not a bracket / plate / fixture), design a TWO-SHELL assembly plus the
+finishing features below, all with the existing op vocabulary:
+- OP ORDER: the FIRST sketch+extrude pair is the BASE shell (the shell that
+  holds the board); then its cavity pocket, standoffs and wall cutouts; THEN
+  the lid/top shell as its own 'extrude' with "offset" = base height + 4 (the
+  lid is modelled floating 4 mm above the base so both shells are visible —
+  state the closed overall height in "notes").
+- Profile kind "ring" { "kind": "ring", "cx", "cy", "dOuter", "dInner" } is an
+  annulus. Use it with 'pocket' for grooves, channels and registration steps —
+  never a full-disc pocket where a ring of material must be removed.
+- REGISTRATION LIP at the parting line: ring-pocket the outer step off the base
+  rim — dOuter = outer dia + 2 (overshoot past the wall so the cut boundary is
+  not coincident with the outer face), dInner = outer dia − wall, offset = base
+  height − 1.2, depth 1.3 — leaving an inner lip standing proud. Cut the
+  matching ring groove into the lid underside (offset = lid start z, depth 1.4,
+  0.2 mm clearance per side on the lip).
+- LED / LIGHT-DIFFUSER CHANNEL when the ID calls for a light ring: ring pocket
+  ~2 wide × 1.5 deep at the ID's light location (lid top face or base rim).
+- RF WINDOW / RADOME: when the product carries a radar or RF sensor, thin the
+  lid over its field of view — a shallow circle pocket on the lid underside
+  (offset = lid start z) leaving ~1.0 mm of lid above it.
+- PORT CUTOUTS (USB-C, jacks, buttons): 'cutout' with face "front" and
+  "offsetMm" = (inner cavity radius, or half the cavity width) − 1, so the cut
+  spans [offsetMm, offsetMm+depth] and pierces ONE wall; depth = wall + 1;
+  cx = lateral position (0 = centred); cy = the connector's REAL height above
+  the base plane: floor + standoff height + board thickness + half the
+  connector height (USB-C ≈ floor + standoff + 1.6 + 1.7; opening ≈ 10 × 4).
+  WITHOUT "offsetMm" a side cutout cuts symmetrically about the CENTRE plane —
+  it misses both walls or pierces both. ALWAYS set "offsetMm" on side cutouts.
+- 'fillet' op { "op": "fillet", "body": <extrude op name>, "radiusMm",
+  "scope": "outer-top" | "outer-bottom" | "all-outer" }: round the lid's
+  outer-top edge (1–2 mm) and the base's outer-bottom edge (~0.8 mm). Place
+  fillet ops AFTER all pockets/cutouts that touch that body.
+- NON-SLIP PAD RECESS: a shallow circle pocket into the base underside (no
+  offset, depth 0.5, dia = outer − 6) for a rubber pad; make the floor ≥ 2.0
+  whenever you add it.
+- Vent slots only when the ID or thermal needs call for them.
+DEFAULT DIMS (adapt to the ID, keep proportions sane): wall 2.0, floor 2.0,
+lip 0.8 wide × 1.2 high, lid ≥ 2.5 thick, radome thinned to 1.0, LED channel
+2.0 wide × 1.5 deep, fillet 1.5. Rings/grooves must leave ≥ 0.6 mm of material
+on each side of the cut.
+
 Keep it manufacturable and realistic for the given size budget. Reference the
 real board dimensions given below so the cavity actually fits the board.
 
@@ -166,6 +210,7 @@ export async function POST(req: Request) {
     let board: {
       wMm?: number; hMm?: number; layers?: number
       shape?: 'circle' | 'rect'; diaMm?: number; mountingHoles?: MountingHole[]
+      usbRef?: string
     } = {}
     try {
       const cs = JSON.parse(await fs.readFile(path.join(process.cwd(), 'public', 'runs', runId, 'electronics', 'chipscale-board.json'), 'utf8'))
@@ -184,6 +229,12 @@ export async function POST(req: Request) {
         .filter((h: any) => typeof h?.x === 'number' && isFinite(h.x) && typeof h?.y === 'number' && isFinite(h.y))
         .map((h: any): MountingHole => ({ x: h.x, y: h.y, diaMm: typeof h.diaMm === 'number' && isFinite(h.diaMm) && h.diaMm > 0 ? h.diaMm : 2 }))
       if (holes.length) board.mountingHoles = holes
+      // real connector presence (no x/y in the parts list — position is
+      // edge-centred by convention, but the HEIGHT and the existence of the
+      // port cutout are grounded in the actual BOM)
+      const usb = (Array.isArray(cs?.parts) ? cs.parts : [])
+        .find((p: any) => /usb/i.test(`${p?.name ?? ''} ${p?.footprint ?? ''} ${p?.kind ?? ''}`))
+      if (usb?.name) board.usbRef = String(usb.name)
     } catch { /* no chip-scale board */ }
     if (!board.wMm) {
       try {
@@ -256,6 +307,11 @@ export async function POST(req: Request) {
       } else {
         lines.push(`- The board reports no mounting holes: still support it on ≥3 standoffs under its edge (no screw pilots), so it cannot rattle.`)
       }
+      if (board.usbRef) {
+        lines.push(
+          `- The built board carries a USB connector (${board.usbRef}). Emit a REAL port cutout: 'cutout' face "front", "offsetMm" = inner cavity ${board.shape === 'circle' ? 'radius' : 'half-width'} − 1, depth = wall + 1, cx = 0 (edge-centred — the parts list gives no lateral position), cy = floor + standoff height + 1.6 (board) + 1.7 (half a USB-C shell), w ≈ 10, h ≈ 4.`,
+        )
+      }
       boardGeomBlock =
         `\nBOARD GEOMETRY & FASTENING (HARD constraints from the real built board — these override any conflicting styling):\n` +
         lines.join('\n') + '\n'
@@ -308,16 +364,27 @@ export async function POST(req: Request) {
       s.kind === 'circle' ? { w: Math.round(s.d), h: Math.round(s.d) } : { w: Math.round(s.w), h: Math.round(s.h) }
     const shapeStr = (s: Shape) => (s.kind === 'circle' ? `⌀${Math.round(s.d)}` : `${Math.round(s.w)}×${Math.round(s.h)}`)
 
-    // outer = sketch of the first additive extrude (else first sketch);
-    // cavity = sketch of the largest pocket (the main cavity)
-    const firstExtrude = plan.operations.find((o) => o.op === 'extrude') as { sketch?: string } | undefined
+    // outer = sketch of the first additive extrude (else first sketch) — by
+    // contract the FIRST extrude is the BASE shell, the one that holds the board
+    const firstExtrude = plan.operations.find((o) => o.op === 'extrude') as { sketch?: string; depth?: number; offset?: number } | undefined
     const firstSketch = plan.operations.find((o) => o.op === 'sketch') as { profile?: Prof } | undefined
     const outer = asShape(sketchProf(firstExtrude?.sketch) ?? firstSketch?.profile ?? null)
     const areaOf = (s: Shape | null) => (!s ? 0 : s.kind === 'circle' ? (Math.PI * s.d * s.d) / 4 : s.w * s.h)
-    const cavity = (plan.operations.filter((o) => o.op === 'pocket') as { sketch?: string }[])
-      .map((p) => asShape(sketchProf(p.sketch)))
-      .filter((s): s is Shape => !!s)
-      .sort((a, b) => areaOf(b) - areaOf(a))[0] ?? null
+    // cavity = the BASE shell's board pocket. Two-shell aware: lid pockets
+    // (grooves / radome thin-zones start at or above the base top) are styling,
+    // not the board cavity; nor is a shallow base pad recess — so restrict to
+    // pockets starting below the base top, keep only meaningfully deep ones
+    // (≥ half the deepest), then take the largest. Ring pockets (channels)
+    // yield no containable shape and drop out naturally in asShape.
+    const baseTop = firstExtrude ? (firstExtrude.offset ?? 0) + (firstExtrude.depth ?? 0) : Infinity
+    const basePockets = (plan.operations.filter((o) => o.op === 'pocket') as { sketch?: string; depth?: number; offset?: number }[])
+      .filter((p) => (p.offset ?? 0) < baseTop - 0.01)
+      .map((p) => ({ shape: asShape(sketchProf(p.sketch)), depth: p.depth ?? 0 }))
+      .filter((p): p is { shape: Shape; depth: number } => !!p.shape)
+    const maxPocketDepth = basePockets.reduce((m, p) => Math.max(m, p.depth), 0)
+    const cavity = basePockets
+      .filter((p) => p.depth >= maxPocketDepth * 0.5)
+      .sort((a, b) => areaOf(b.shape) - areaOf(a.shape))[0]?.shape ?? null
     // the REAL board is ground truth; the plan's pcb component is only a fallback
     const pcbOp = plan.operations.find((o) => o.op === 'component' && (o as { kind?: string }).kind === 'pcb') as { w?: number; h?: number; shape?: string } | undefined
     const pcb: Shape | null =
@@ -386,6 +453,36 @@ export async function POST(req: Request) {
       return Response.json({ ok: false, error: result?.error || 'executor failed', opsFailed: result?.opsFailed ?? [], plan })
     }
     const base = `/runs/${runId}/mechanical`
+    // HONEST refinement inventory: a feature is listed only when its op(s)
+    // actually rendered in Onshape (opsRendered), never from plan intent alone.
+    const renderedOps = new Set<string>((result.opsRendered ?? []) as string[])
+    const features: string[] = []
+    {
+      const extrudeOps = plan.operations.filter((o) => o.op === 'extrude') as { name: string; offset?: number }[]
+      if (extrudeOps.some((e, i) => i > 0 && renderedOps.has(e.name) && (e.offset ?? 0) >= baseTop - 0.1))
+        features.push('two-shell')
+      const pocketOps = plan.operations.filter((o) => o.op === 'pocket') as { name: string; sketch?: string; depth?: number; offset?: number }[]
+      for (const p of pocketOps) {
+        if (!renderedOps.has(p.name)) continue
+        const prof = sketchProf(p.sketch)
+        const nm = p.name.toLowerCase()
+        if (prof?.kind === 'ring')
+          features.push(/led|light|diffus/.test(nm) ? 'led-channel' : /lip|regist|groove|step|seat/.test(nm) ? 'registration-lip' : 'ring-channel')
+        else if (/radome|radar|rf[-_ ]?window|antenna[-_ ]?window/.test(nm)) features.push('radome-zone')
+        else if ((p.depth ?? 0) <= 1 && (p.offset ?? 0) <= 0.01 && /pad|foot|grip|slip|recess/.test(nm)) features.push('base-pad-recess')
+      }
+      const cutoutOps = plan.operations.filter((o) => o.op === 'cutout') as { name: string; face?: string }[]
+      for (const cu of cutoutOps) {
+        if (!renderedOps.has(cu.name)) continue
+        const nm = cu.name.toLowerCase()
+        if (/usb/.test(nm)) features.push('usbc-cutout')
+        else if (/vent|louv/.test(nm)) features.push('vents')
+        else if (cu.face !== 'top') features.push('side-cutout')
+      }
+      if ((plan.operations.filter((o) => o.op === 'fillet') as { name: string }[]).some((f) => renderedOps.has(f.name)))
+        features.push('edge-fillets')
+    }
+    const featureList = [...new Set(features)]
     // Honest fastening report: snap-fit intent is followed, but the executor can
     // only render plain posts (no cantilever hooks) — say so, never pretend.
     const fastening = board.mountingHoles?.length
@@ -407,6 +504,7 @@ export async function POST(req: Request) {
       fitCheck,
       mountingAligned,
       fastening,
+      features: featureList,
       plan,
     }
 
@@ -415,7 +513,7 @@ export async function POST(req: Request) {
     // one. The STEP/PNG are already written to this dir by renderPlan.
     try {
       await fs.writeFile(path.join(outDir, 'mechanical.json'),
-        JSON.stringify({ part: payload.part, previewUrl: payload.previewUrl, stepUrl: payload.stepUrl, onshapeUrl: payload.onshapeUrl, opsRendered: payload.opsRendered, opsFailed: payload.opsFailed, fitCheck, mountingAligned, fastening }))
+        JSON.stringify({ part: payload.part, previewUrl: payload.previewUrl, stepUrl: payload.stepUrl, onshapeUrl: payload.onshapeUrl, opsRendered: payload.opsRendered, opsFailed: payload.opsFailed, fitCheck, mountingAligned, fastening, features: featureList }))
     } catch { /* best effort */ }
 
     return Response.json(payload)

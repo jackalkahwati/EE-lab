@@ -94,17 +94,37 @@ export function RunOverview({ runId, run }: { runId: string | null; run?: Run | 
   else if (status === 'GATE FAILED') verdict = 'failed'
   else if (status) verdict = 'needs_review'
 
+  // DRC + Routing tiles must reflect the SHIPPED board. In plan mode the
+  // chip-scale board is what ships; showing the vestigial variant board's DRC
+  // here painted a red "DRC: failed" chip next to a genuinely clean shipped
+  // board (and vice versa could paint false green). When a chip-scale board
+  // exists its real KiCad DRC + structural unrouted count win; the variant
+  // numbers remain the labeled fallback for runs without one.
+  const chipDoc = a['chipscale']
+  const chipDrcErrors: number | null =
+    chipDoc?.drc?.available ? (chipDoc.drc.errors ?? null) : null
+  const chipUnrouted: number | null =
+    typeof chipDoc?.drcRepair?.unrouted === 'number' ? chipDoc.drcRepair.unrouted : null
+
   const rows: [string, S, string][] = [
     ['Final verdict', verdict, status ?? '—'],
     [
       'Routing',
-      unconn === null ? 'not_generated' : unconn === 0 ? 'passed' : 'failed',
-      unconn === null ? 'not generated' : `${unconn} unconnected`,
+      chipUnrouted !== null
+        ? (chipUnrouted === 0 ? 'passed' : 'failed')
+        : unconn === null ? 'not_generated' : unconn === 0 ? 'passed' : 'failed',
+      chipUnrouted !== null
+        ? `${chipUnrouted} unrouted · shipped board`
+        : unconn === null ? 'not generated' : `${unconn} unconnected · variant`,
     ],
     [
       'DRC',
-      hardViol === null ? 'not_generated' : hardViol === 0 ? 'passed' : 'failed',
-      hardViol === null ? 'not generated' : `${hardViol} violation(s)`,
+      chipDrcErrors !== null
+        ? (chipDrcErrors === 0 ? 'passed' : 'failed')
+        : hardViol === null ? 'not_generated' : hardViol === 0 ? 'passed' : 'failed',
+      chipDrcErrors !== null
+        ? `${chipDrcErrors} error(s) · shipped board`
+        : hardViol === null ? 'not generated' : `${hardViol} violation(s) · variant`,
     ],
     [
       'Recovery',

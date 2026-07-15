@@ -15,6 +15,10 @@ export type MechProfile =
   | { kind: 'roundedRect'; cx: number; cy: number; w: number; h: number; r?: number }
   | { kind: 'rect'; cx: number; cy: number; w: number; h: number }
   | { kind: 'circle'; cx: number; cy: number; d: number }
+  // annulus (two concentric circles) — pocket it for grooves/channels/registration
+  // steps, extrude it for raised rims. Rendered with filterInnerLoops so only the
+  // ring of material between dInner and dOuter is touched.
+  | { kind: 'ring'; cx: number; cy: number; dOuter: number; dInner: number }
 
 /** One parametric operation. Generic across product categories. */
 export type MechOp =
@@ -22,7 +26,13 @@ export type MechOp =
   | { op: 'extrude'; name: string; sketch: string; depth: number; offset?: number; merge?: boolean }
   | { op: 'pocket'; name: string; sketch: string; depth: number; offset?: number } // material removal
   | { op: 'standoff'; name: string; x: number; y: number; height: number; od: number; holeDia?: number; baseZ?: number }
-  | { op: 'cutout'; name: string; face: 'top' | 'front' | 'right'; cx: number; cy: number; w: number; h: number; depth: number }
+  // offsetMm (side faces only): start the cut offsetMm from the centre datum
+  // plane so it pierces ONE wall ([offsetMm, offsetMm+depth] toward +Y for
+  // 'front'); without it the cut is symmetric about the centre plane.
+  | { op: 'cutout'; name: string; face: 'top' | 'front' | 'right'; cx: number; cy: number; w: number; h: number; depth: number; offsetMm?: number }
+  // round an outer edge of a previously extruded body (real Onshape fillet).
+  // body = the 'extrude' op name (defaults to the first extrude, the main shell)
+  | { op: 'fillet'; name: string; body?: string; radiusMm: number; scope?: 'outer-top' | 'outer-bottom' | 'all-outer' }
   // a representative internal component (PCB, battery, antenna, speaker…) placed
   // in the cavity as its own body, so the packaging is visible and fit is honest
   | { op: 'component'; name: string; kind: 'pcb' | 'battery' | 'antenna' | 'speaker' | 'generic'; shape?: 'box' | 'cyl'; cx: number; cy: number; cz: number; w: number; h: number; thickness: number }
@@ -49,6 +59,13 @@ export function normalizeMechPlan(raw: Partial<MechPlan> | undefined): MechPlan 
 function coerceProfile(p: any): MechProfile | null {
   if (!p || typeof p !== 'object') return null
   if (p.kind === 'circle') return { kind: 'circle', cx: num(p.cx), cy: num(p.cy), d: num(p.d) }
+  if (p.kind === 'ring') {
+    const dOuter = num(p.dOuter), dInner = num(p.dInner)
+    // a degenerate ring (inner ≥ outer, or non-positive) is meaningless — drop
+    // the op so the executor never cuts a full disc where a channel was meant
+    if (!(dOuter > 0 && dInner > 0 && dInner < dOuter)) return null
+    return { kind: 'ring', cx: num(p.cx), cy: num(p.cy), dOuter, dInner }
+  }
   if (p.kind === 'rect') return { kind: 'rect', cx: num(p.cx), cy: num(p.cy), w: num(p.w), h: num(p.h) }
   // default to rounded rect
   return { kind: 'roundedRect', cx: num(p.cx), cy: num(p.cy), w: num(p.w), h: num(p.h), r: num(p.r, 0) }
@@ -72,7 +89,13 @@ function coerceOp(o: any): MechOp | null {
     case 'standoff':
       return { op: 'standoff', name, x: num(o.x), y: num(o.y), height: num(o.height), od: num(o.od), holeDia: o.holeDia != null ? num(o.holeDia) : undefined, baseZ: o.baseZ != null ? num(o.baseZ) : undefined }
     case 'cutout':
-      return { op: 'cutout', name, face: o.face === 'front' || o.face === 'right' ? o.face : 'top', cx: num(o.cx), cy: num(o.cy), w: num(o.w), h: num(o.h), depth: num(o.depth) }
+      return { op: 'cutout', name, face: o.face === 'front' || o.face === 'right' ? o.face : 'top', cx: num(o.cx), cy: num(o.cy), w: num(o.w), h: num(o.h), depth: num(o.depth), offsetMm: o.offsetMm != null ? num(o.offsetMm) : undefined }
+    case 'fillet': {
+      const radiusMm = num(o.radiusMm)
+      if (!(radiusMm > 0)) return null
+      const scopes = ['outer-top', 'outer-bottom', 'all-outer']
+      return { op: 'fillet', name, body: typeof o.body === 'string' ? o.body : undefined, radiusMm, scope: scopes.includes(o.scope) ? o.scope : 'outer-top' }
+    }
     case 'component': {
       const kinds = ['pcb', 'battery', 'antenna', 'speaker', 'generic']
       return { op: 'component', name, kind: kinds.includes(o.kind) ? o.kind : 'generic', shape: o.shape === 'cyl' ? 'cyl' : 'box', cx: num(o.cx), cy: num(o.cy), cz: num(o.cz), w: num(o.w), h: num(o.h), thickness: num(o.thickness, 1) }
@@ -93,7 +116,10 @@ export const MECH_PLAN_SCHEMA = `{
     { "op": "sketch",   "name": "cavity", "plane": "top", "profile": { "kind": "roundedRect", "cx": 0, "cy": 0, "w": <board w + clearance>, "h": <board h + clearance>, "r": <r> } },
     { "op": "pocket",   "name": "innerCavity", "sketch": "cavity", "depth": <cavity depth>, "offset": <wall thickness> },
     { "op": "standoff", "name": "mount1", "x": <x>, "y": <y>, "height": <standoff h>, "od": <boss dia>, "holeDia": <screw dia>, "baseZ": <wall thickness> },
-    { "op": "cutout",   "name": "usbPort", "face": "front", "cx": <x>, "cy": <z>, "w": <port w>, "h": <port h>, "depth": <wall thickness> },
+    { "op": "cutout",   "name": "usbPort", "face": "front", "cx": <x>, "cy": <z of connector centre>, "w": <port w>, "h": <port h>, "depth": <wall + 1>, "offsetMm": <inner wall distance - 1, so the cut pierces ONE wall> },
+    { "op": "sketch",   "name": "ledChannel", "plane": "top", "profile": { "kind": "ring", "cx": 0, "cy": 0, "dOuter": <n>, "dInner": <n> } },
+    { "op": "pocket",   "name": "ledChannelCut", "sketch": "ledChannel", "depth": <channel depth>, "offset": <z where the channel starts> },
+    { "op": "fillet",   "name": "lidRound", "body": "<name of the extrude op to round>", "radiusMm": 1.5, "scope": "outer-top" },
     { "op": "component", "name": "PCB", "kind": "pcb", "shape": "box", "cx": 0, "cy": 0, "cz": <wall thickness>, "w": <REAL board width>, "h": <REAL board height>, "thickness": 1.6 },
     { "op": "component", "name": "battery", "kind": "battery", "shape": "box", "cx": <x>, "cy": <y>, "cz": <above PCB>, "w": <batt w>, "h": <batt h>, "thickness": <batt t> },
     { "op": "component", "name": "antenna", "kind": "antenna", "shape": "box", "cx": <x>, "cy": <y>, "cz": <z>, "w": <ant w>, "h": <ant h>, "thickness": 0.5 }
