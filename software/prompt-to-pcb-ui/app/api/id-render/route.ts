@@ -25,7 +25,9 @@ function buildPrompt(b: IdBrief): string {
   const feats = [...(b.controls ?? []), ...(b.keyFeatures ?? [])].join(', ')
   const env = e.x && e.y ? `outer envelope approximately ${Math.round(e.x)} x ${Math.round(e.y)} x ${Math.round(e.z ?? 0)} mm` : ''
   return [
-    'Studio industrial-design concept sheet: a 2x2 grid of four views of the SAME single product on a neutral light-grey seamless studio background.',
+    // Dark studio so the sheet sits naturally in the app's near-black UI —
+    // a white/grey JPEG reads as a pasted-in foreign object on the dark theme.
+    'Studio industrial-design concept sheet: a 2x2 grid of four views of the SAME single product on a dark charcoal (near-black) seamless studio background, product softly lit and clearly separated from the background.',
     'Top-left: FRONT elevation (straight-on). Top-right: THREE-QUARTER perspective. Bottom-left: TOP-DOWN. Bottom-right: SIDE elevation.',
     `Product: ${b.product}. Form: ${b.formFactor}.`,
     b.ergonomics ? `Ergonomics: ${b.ergonomics}.` : '',

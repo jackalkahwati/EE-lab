@@ -107,6 +107,12 @@ function hasEnterpriseMembership(email: string): boolean {
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl
+  // /api/run-file is reachable ONLY via the internal /runs/* rewrite below
+  // (rewrites don't re-enter the proxy). A direct external hit would bypass
+  // the run-ownership check, so it is unconditionally hidden.
+  if (pathname.startsWith('/api/run-file/') || pathname === '/api/run-file') {
+    return NextResponse.json({ error: 'not found' }, { status: 404 })
+  }
   if (PUBLIC_PATTERNS.some((p) => p.test(pathname))) return NextResponse.next()
 
   const email = await validSession(req.cookies.get('fl_session')?.value)
@@ -131,6 +137,15 @@ export async function proxy(req: NextRequest) {
     }
     if (run && ownedByAnotherAccount(run, email)) {
       return NextResponse.json({ error: 'not your board' }, { status: 403 })
+    }
+    if (run) {
+      // Serve run artifacts through the dynamic file route: `next start` only
+      // serves public/ paths that existed at build time, so artifacts written
+      // AFTER a deploy (renders, boards, CAD) 404'd in production until the
+      // next rebuild. The rewrite keeps /runs/... URLs while reading disk live.
+      const url = req.nextUrl.clone()
+      url.pathname = `/api/run-file${pathname}`
+      return NextResponse.rewrite(url)
     }
     return NextResponse.next()
   }

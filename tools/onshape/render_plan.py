@@ -367,12 +367,17 @@ def render(plan, out_dir, name):
 
     os.makedirs(out_dir, exist_ok=True)
     step_path = _export(c, did, wid, eid, "STEP", os.path.join(out_dir, "enclosure.step"))
+    # GLTF drives the in-app orbitable CAD viewer (three.js). Onshape's GLTF
+    # translation returns a single binary glTF; GLTFLoader sniffs the container,
+    # so the .glb name is safe either way. Best-effort: STEP stays the gate.
+    gltf_path = _export(c, did, wid, eid, "GLTF", os.path.join(out_dir, "enclosure.glb"))
     png_path = _shaded_png(c, did, wid, eid, os.path.join(out_dir, "enclosure.png"))
 
     return {
         "ok": bool(rendered) and step_path is not None,
         "part": part_name,
         "stepPath": step_path,
+        "gltfPath": gltf_path,
         "previewPath": png_path,
         "onshapeUrl": "%s/documents/%s/w/%s/e/%s" % (BASE_URL, did, wid, eid),
         "opsRendered": rendered,
@@ -405,10 +410,18 @@ def _shaded_png(c, did, wid, eid, out_path):
 def _export(c, did, wid, eid, fmt, out_path):
     """Export the part studio to fmt; write to out_path; return path or None."""
     try:
+        body = {"formatName": fmt, "storeInDocument": False, "flattenAssemblies": False,
+                "yAxisIsUp": False}
+        if fmt == "GLTF":
+            # Mesh formats REQUIRE detail parameters — without them the
+            # translation fails with "Invalid GLTF detail parameters". Y-up so
+            # the part sits upright in glTF/three.js convention viewers.
+            body.update({"resolution": "medium", "angularTolerance": 0.1,
+                         "distanceTolerance": 0.0001, "maximumChordLength": 0.01,
+                         "yAxisIsUp": True})
         tr = c._request(
             "POST", "/api/v6/partstudios/d/%s/w/%s/e/%s/translations" % (did, wid, eid),
-            json={"formatName": fmt, "storeInDocument": False, "flattenAssemblies": False,
-                  "yAxisIsUp": False})
+            json=body)
         tid = tr.get("id")
         for _ in range(30):
             time.sleep(3)

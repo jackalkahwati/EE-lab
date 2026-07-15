@@ -498,6 +498,7 @@ export async function POST(req: Request) {
       part: result.part,
       previewUrl: result.previewPath ? `${base}/enclosure.png?t=${Date.now()}` : null,
       stepUrl: result.stepPath ? `${base}/enclosure.step` : null,
+      gltfUrl: result.gltfPath ? `${base}/enclosure.glb?t=${Date.now()}` : null,
       onshapeUrl: result.onshapeUrl,
       opsRendered: result.opsRendered ?? [],
       opsFailed: result.opsFailed ?? [],
@@ -513,7 +514,7 @@ export async function POST(req: Request) {
     // one. The STEP/PNG are already written to this dir by renderPlan.
     try {
       await fs.writeFile(path.join(outDir, 'mechanical.json'),
-        JSON.stringify({ part: payload.part, previewUrl: payload.previewUrl, stepUrl: payload.stepUrl, onshapeUrl: payload.onshapeUrl, opsRendered: payload.opsRendered, opsFailed: payload.opsFailed, fitCheck, mountingAligned, fastening, features: featureList }))
+        JSON.stringify({ part: payload.part, previewUrl: payload.previewUrl, stepUrl: payload.stepUrl, gltfUrl: payload.gltfUrl, onshapeUrl: payload.onshapeUrl, opsRendered: payload.opsRendered, opsFailed: payload.opsFailed, fitCheck, mountingAligned, fastening, features: featureList }))
     } catch { /* best effort */ }
 
     return Response.json(payload)

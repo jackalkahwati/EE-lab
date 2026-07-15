@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils'
 import { Loader2, Box, Download, ExternalLink } from 'lucide-react'
 import { llmHeaders } from '@/components/llm-settings'
 import { MechanicalAssembly } from '@/components/mechanical-assembly'
+import { CadViewer } from '@/components/cad-viewer'
 import type { ProductSpec } from '@/lib/product-spec'
 
 type Result = {
@@ -19,6 +20,7 @@ type Result = {
   part?: string
   previewUrl?: string | null
   stepUrl?: string | null
+  gltfUrl?: string | null
   onshapeUrl?: string
   opsRendered?: string[]
   opsFailed?: { op: string; error: string }[]
@@ -90,10 +92,18 @@ export function MechanicalStage({ spec, runId, onBuilt }: { spec: ProductSpec | 
               </div>
             </div>
           )}
-          {res.previewUrl && (
+          {res.gltfUrl ? (
+            <div>
+              <div className="mb-1 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">enclosure CAD — real Onshape geometry (drag to rotate)</div>
+              <div className="h-[46vh] w-full overflow-hidden rounded-md border border-border bg-[#0f0f0f]">
+                <CadViewer url={res.gltfUrl} />
+              </div>
+            </div>
+          ) : res.previewUrl ? (
+            // legacy runs without a glTF export: the flat shaded preview
             // eslint-disable-next-line @next/next/no-img-element
             <img src={res.previewUrl} alt={`${res.part} CAD preview`} className="mx-auto max-h-[46vh] w-auto rounded-md border border-border bg-white" />
-          )}
+          ) : null}
           {res.fitCheck && (
             <div className={cn('rounded-md border px-3 py-2 text-[12px]',
               res.fitCheck.fits ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
