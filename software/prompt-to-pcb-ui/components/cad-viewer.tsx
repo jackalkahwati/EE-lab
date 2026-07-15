@@ -8,12 +8,13 @@
  * tolerance gate stays the STEP + the honest fitCheck, not this view.
  */
 import { useEffect, useRef, useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Plus, Minus, Maximize } from 'lucide-react'
 
 export function CadViewer({ url }: { url: string }) {
   const mountRef = useRef<HTMLDivElement>(null)
   const [phase, setPhase] = useState<'loading' | 'ready' | 'error'>('loading')
   const [err, setErr] = useState('')
+  const apiRef = useRef<{ zoom: (f: number) => void; fit: () => void } | null>(null)
 
   useEffect(() => {
     let disposed = false
@@ -112,6 +113,21 @@ export function CadViewer({ url }: { url: string }) {
         camera.position.set(center.x + fit * 0.5, center.y + fit * 0.55, center.z + fit * 0.75)
         camera.lookAt(center); controls.update()
 
+        // Zoom buttons (same capability as wheel-zoom, no click-arming needed)
+        apiRef.current = {
+          zoom: (f: number) => {
+            const dir = camera.position.clone().sub(controls.target)
+            const len = Math.min(Math.max(dir.length() * f, controls.minDistance), controls.maxDistance)
+            camera.position.copy(controls.target).add(dir.normalize().multiplyScalar(len))
+            controls.update()
+          },
+          fit: () => {
+            controls.target.copy(center)
+            camera.position.set(center.x + fit * 0.5, center.y + fit * 0.55, center.z + fit * 0.75)
+            camera.lookAt(center); controls.update()
+          },
+        }
+
         setPhase('ready')
         const loop = () => { if (disposed) return; controls.update(); renderer.render(scene, camera); raf = requestAnimationFrame(loop) }
         loop()
@@ -142,6 +158,21 @@ export function CadViewer({ url }: { url: string }) {
   return (
     <div className="relative h-full w-full">
       <div ref={mountRef} className="h-full w-full" />
+      <div className="absolute right-2 top-2 flex items-center gap-1">
+        {[
+          { I: Plus, act: () => apiRef.current?.zoom(1 / 1.25), label: 'zoom in' },
+          { I: Minus, act: () => apiRef.current?.zoom(1.25), label: 'zoom out' },
+          { I: Maximize, act: () => apiRef.current?.fit(), label: 'fit' },
+        ].map(({ I, act, label }) => (
+          <button key={label} type="button" onClick={act} aria-label={label} title={label}
+            className="rounded-sm border border-border bg-secondary/80 p-1.5 text-muted-foreground hover:text-foreground">
+            <I className="size-3.5" />
+          </button>
+        ))}
+      </div>
+      <span className="pointer-events-none absolute bottom-1.5 left-2.5 font-mono text-[9px] text-muted-foreground">
+        drag to rotate · click, then scroll to zoom
+      </span>
       {phase === 'loading' && (
         <div className="absolute inset-0 flex items-center justify-center gap-2 text-xs text-muted-foreground">
           <Loader2 className="size-4 animate-spin" /> loading CAD…
