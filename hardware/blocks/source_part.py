@@ -30,6 +30,14 @@ _REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 _SCRIPTS = os.path.join(_REPO, "software", "prompt-to-pcb-ui", "scripts")
 sys.path.insert(0, _SCRIPTS)
 
+# shared MPN/LCSC-keyed part registry (tools/parts) — the store BOTH board
+# engines read/write. Soft dependency: sourcing must keep working without it.
+sys.path.insert(0, os.path.join(_REPO, "tools", "parts"))
+try:
+    import registry as parts_registry
+except Exception:
+    parts_registry = None
+
 CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "parts_cache.json")
 
 # a known-good fallback part per interface (KiCad symbol path, no network needed)
@@ -120,11 +128,47 @@ def source(query, interface, nets, refresh=False):
     ckey = "%s::%s" % (interface, query.lower().strip())
     cached = None if refresh else cache.get(ckey)
 
+    # shared registry next: a part sourced by any engine (or bulk-ingested)
+    # answers here without a network trip
+    if cached is None and not refresh and parts_registry:
+        try:
+            reg = parts_registry.lookup_query(interface, query)
+            if reg and reg.get("pins"):
+                prov = reg.get("provenance") or {}
+                cached = {
+                    "mpn": reg.get("mpn"), "manufacturer": reg.get("manufacturer"),
+                    "price": reg.get("price"), "stock": reg.get("stock"),
+                    "datasheet": reg.get("datasheet"), "package": reg.get("package"),
+                    "pins": reg.get("pins"),
+                    "verified": prov.get("verified", "registry"),
+                    "_via": "registry",
+                }
+        except Exception:
+            pass
+
     if cached is None:
         cached = _source_live(query, interface)
         if cached:
             cache[ckey] = cached
             _save_cache(cache)
+            if parts_registry:
+                try:
+                    pid = parts_registry.upsert({
+                        "mpn": cached.get("mpn"),
+                        "manufacturer": cached.get("manufacturer"),
+                        "description": query,
+                        "package": cached.get("package"),
+                        "interface": interface,
+                        "pins": cached.get("pins"),
+                        "datasheet": cached.get("datasheet"),
+                        "price": cached.get("price") if isinstance(cached.get("price"), (int, float)) else None,
+                        "stock": cached.get("stock") if isinstance(cached.get("stock"), int) else None,
+                        "provenance": {"source": "digikey+datasheet",
+                                       "verified": cached.get("verified")},
+                    })
+                    parts_registry.remember_query(interface, query, pid)
+                except Exception:
+                    pass  # registry is a cache layer, never a build blocker
 
     if cached and cached.get("pins"):
         r = resolve_part.resolve_from_spec(
@@ -133,7 +177,9 @@ def source(query, interface, nets, refresh=False):
         if "error" not in r:
             r.update({k: cached[k] for k in
                       ("mpn", "manufacturer", "price", "stock", "datasheet", "verified")})
-            r["source"] = "digikey+datasheet"
+            # honest path label: a registry hit is not a fresh DigiKey source
+            r["source"] = ("registry (digikey+datasheet)"
+                           if cached.get("_via") == "registry" else "digikey+datasheet")
             return r
 
     # fallback: KiCad-symbol path for a known interface part

@@ -372,13 +372,17 @@ def _fp_pincount(name):
     return int(m.group(1)) if m else None
 
 
-def pick_footprint(fp_filters, npins=None):
-    """Choose the most routable footprint matching the symbol's fp_filters. When
-    `npins` (the symbol's pin count) is given, STRONGLY prefer a footprint whose
-    pad count matches — a 5-pin part must not land on a 3-pad SOT-23."""
+def pick_footprints(fp_filters, npins=None, limit=8):
+    """Ranked candidate footprints matching the symbol's fp_filters, best
+    first. When `npins` (the symbol's pin count) is given, STRONGLY prefer a
+    footprint whose pad count matches — a 5-pin part must not land on a 3-pad
+    SOT-23. Pad counts parsed from NAMES are heuristic (JEDEC names like
+    SOT-563 defeat them), which is exactly why callers that know the real pin
+    list should verify pad coverage across this ranked list rather than trust
+    entry #1."""
     idx = _fp_index()
     globs = [g for g in re.split(r"\s+", fp_filters.strip()) if g]
-    best = None  # (score, lib, name)
+    scored = {}  # name -> (score, lib)
     for g in globs:
         rx = _glob_to_re(g)
         for name, lib in idx.items():
@@ -397,16 +401,26 @@ def pick_footprint(fp_filters, npins=None):
             padn = _fp_pincount(name)
             mismatch = 0 if (npins is None or padn is None) else abs(padn - npins)
             score = mismatch * 10_000_000 + rank * 1000 + penalty * 100 + len(name)
-            if best is None or score < best[0]:
-                best = (score, lib, name)
-    return (best[1], best[2]) if best else (None, None)
+            if name not in scored or score < scored[name][0]:
+                scored[name] = (score, lib)
+    ranked = sorted(scored.items(), key=lambda kv: kv[1][0])
+    return [(lib, name) for name, (_, lib) in ranked[:limit]]
 
 
-def footprint_for_package(package, npins=None):
-    """Map a datasheet PACKAGE NAME (e.g. 'SOIC-8', 'QFN-24 4x4mm 0.5mm pitch')
-    to a verified KiCad land pattern. Geometry is REUSED, never generated — the
-    datasheet only tells us which standard package, and KiCad ships the IPC
-    footprint for it."""
+def pick_footprint(fp_filters, npins=None):
+    """First choice from pick_footprints (kept for the symbol path)."""
+    c = pick_footprints(fp_filters, npins, limit=1)
+    return c[0] if c else (None, None)
+
+
+def footprints_for_package(package, npins=None, limit=8):
+    """Ranked candidate KiCad land patterns for a datasheet PACKAGE NAME
+    (e.g. 'SOIC-8', 'SOT563-6 (DRL)', 'QFN-24 4x4mm'). Geometry is REUSED,
+    never generated — the datasheet only tells us which standard package, and
+    KiCad ships the IPC footprint for it. The tightest match (the literal
+    package token, e.g. SOT563 -> SOT-563) leads; family+pin-count matches
+    follow. Callers with a real pin list should take the first candidate whose
+    pads cover it."""
     p = package.upper().replace("-", " ").replace("/", " ")
     fams = ["SOIC", "TSSOP", "VSSOP", "MSOP", "SSOP", "SOT 23", "SOT", "QFN",
             "DFN", "WSON", "TQFP", "LQFP", "QFP", "BGA", "TO 92", "SON"]
@@ -414,9 +428,24 @@ def footprint_for_package(package, npins=None):
     if not npins:
         m = re.search(r"\b(\d{1,3})\b", package)
         npins = int(m.group(1)) if m else None
+    cands = []
+    # tightest first: the literal package designator (SOT563, DFN10, ...)
+    m = re.match(r"([A-Z]{2,6})\s?(\d{2,4})", p)
+    if m:
+        cands += pick_footprints("*%s?%s*" % (m.group(1), m.group(2)), npins, limit)
     fam_glob = (fam or "*").replace(" ", "?")
-    glob = "*%s*%s*" % (fam_glob, npins or "")
-    return pick_footprint(glob)
+    cands += pick_footprints("*%s*%s*" % (fam_glob, npins or ""), npins, limit)
+    seen, out = set(), []
+    for lib, name in cands:
+        if name not in seen:
+            seen.add(name)
+            out.append((lib, name))
+    return out[:limit]
+
+
+def footprint_for_package(package, npins=None):
+    c = footprints_for_package(package, npins, limit=1)
+    return c[0] if c else (None, None)
 
 
 def resolve_from_spec(spec, interface, nets):
@@ -429,27 +458,37 @@ def resolve_from_spec(spec, interface, nets):
     pmap, rep = bind(pins, interface, nets)
     if rep["missing"]:
         return {"error": "unbound required roles %s" % rep["missing"], "report": rep}
-    lib, fp = footprint_for_package(spec.get("package", ""), len(pins))
-    if not fp:
+    cands = footprints_for_package(spec.get("package", ""), len(pins))
+    if not cands:
         return {"error": "no footprint for package '%s'" % spec.get("package")}
     # CRITICAL: the chosen footprint's pads must include every bound pin number,
     # or some pins (e.g. SDA) silently never get a net — a disconnected part that
-    # passes DRC. Reject the mismatch so the caller falls back to a verified part.
-    fp_pads = _footprint_pads(lib, fp)
-    missing_pads = [num for num in pmap if num not in fp_pads]
-    if missing_pads:
-        return {"error": "footprint %s:%s lacks pads %s for package '%s' (pin/pad mismatch)"
-                % (lib, fp, missing_pads, spec.get("package"))}
-    return {"symbol": spec.get("part"), "lib": lib, "footprint": fp, "pmap": pmap,
-            "report": rep}
+    # passes DRC. The pad check SELECTS among ranked candidates (name-derived
+    # ranking can't tell SOT-563 from SOT-665); only if none covers do we reject.
+    last_missing = None
+    for lib, fp in cands:
+        try:
+            fp_pads = _footprint_pads(lib, fp)
+        except Exception:
+            continue
+        missing_pads = [num for num in pmap if num not in fp_pads]
+        if not missing_pads:
+            return {"symbol": spec.get("part"), "lib": lib, "footprint": fp,
+                    "pmap": pmap, "report": rep}
+        last_missing = (lib, fp, missing_pads)
+    lib, fp, missing_pads = last_missing if last_missing else (cands[0][0], cands[0][1], "?")
+    return {"error": "no candidate footprint covers the bound pins; closest "
+                     "%s:%s lacks pads %s for package '%s' (pin/pad mismatch)"
+            % (lib, fp, missing_pads, spec.get("package"))}
 
 
 def _footprint_pads(lib, name):
-    """Set of pad names declared in a footprint."""
-    try:
-        return set(re.findall(r'\(pad\s+"([^"]+)"', _load(lib, name)))
-    except Exception:
-        return set()
+    """Set of pad names declared in a footprint. An unreadable footprint must
+    NOT read as 'no pads' — that made resolve_from_spec reject every sourced
+    part with a phantom pin/pad mismatch (silent fallback to hardcoded parts).
+    Raise instead so the caller sees the real failure."""
+    text = open(os.path.join(FP_DIR, lib + ".pretty", name + ".kicad_mod")).read()
+    return set(re.findall(r'\(pad\s+"([^"]+)"', text))
 
 
 def symbol_pinmap(query):

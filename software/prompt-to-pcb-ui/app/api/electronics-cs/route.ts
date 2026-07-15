@@ -15,6 +15,7 @@ import { pinsPromptFor, partPinsFor } from '@/lib/design-state'
 import { MODEL } from '@/lib/model-tiers'
 import type { ProductSpec } from '@/lib/product-spec'
 import { normalizeIdBrief } from '@/lib/id-brief'
+import { registryFootprint, registrySaveFootprint } from '@/lib/parts-registry'
 
 export const dynamic = 'force-dynamic'
 // A realistic multi-sensor chip-scale board (~14 parts) takes ~3.5 min through the
@@ -157,21 +158,28 @@ function fetchFootprint(lcsc: string): Promise<string | null> {
   p.then((m) => { if (m === null) fpCache.delete(lcsc) }).catch(() => fpCache.delete(lcsc))
   return p
 }
-function fetchFootprintUncached(lcsc: string): Promise<string | null> {
-  if (!/^C\d{2,10}$/.test(lcsc)) return Promise.resolve(null)
-  const base = path.join('/tmp', `fl_fp_${lcsc}`)
-  return new Promise((resolve) => {
+async function fetchFootprintUncached(lcsc: string): Promise<string | null> {
+  if (!/^C\d{2,10}$/.test(lcsc)) return null
+  // shared part registry first: durable across restarts AND shared with the
+  // block-composition engine — a hit skips the LCSC network round-trip
+  const hit = await registryFootprint(lcsc)
+  if (hit) return hit
+  const mod = await new Promise<string | null>((resolve) => {
+    const base = path.join('/tmp', `fl_fp_${lcsc}`)
     const py = spawn(process.env.FL_PYTHON || 'python3', ['-m', 'easyeda2kicad', '--footprint', '--overwrite', `--lcsc_id=${lcsc}`, `--output=${base}`], { timeout: 30_000 })
     py.on('error', () => resolve(null))
     py.on('close', async () => {
       try {
         const dir = `${base}.pretty`
         const files = await fs.readdir(dir)
-        const mod = files.find((f) => f.endsWith('.kicad_mod'))
-        resolve(mod ? await fs.readFile(path.join(dir, mod), 'utf8') : null)
+        const f = files.find((f) => f.endsWith('.kicad_mod'))
+        resolve(f ? await fs.readFile(path.join(dir, f), 'utf8') : null)
       } catch { resolve(null) }
     })
   })
+  // persist for the next build / the other engine; failure is non-fatal
+  if (mod) registrySaveFootprint(lcsc, mod).catch(() => {})
+  return mod
 }
 
 const PLANNER_DIR = path.join(process.cwd(), '..', '..', 'hardware', 'planner')
