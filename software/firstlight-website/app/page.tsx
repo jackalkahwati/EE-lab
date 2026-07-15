@@ -22,7 +22,7 @@ const OUTPUTS = [
   ["Manufacturable fab package", "Gerbers, drill, pick-and-place, and BOM, routed and gated on real KiCad DRC. A board only goes green when the checks actually pass."],
   ["Enclosure CAD", "A two-shell enclosure generated to match the industrial design, with bosses aligned to the board's mounting holes, fit-checked and exported as real STEP."],
   ["Boards shaped to the product", "A round product gets a circular board with mounting holes on a bolt circle. The PCB follows the enclosure, not the other way around."],
-  ["Physics simulation", "Real finite-element thermal and modal solves with scikit-fem, honestly labeled. A design that runs hot fails in simulation before anyone tools a mold."],
+  ["Physics simulation", "Real solves, honestly labeled: FEM thermal and modal, 3D FEA in CalculiX, natural-convection CFD in OpenFOAM, cavity acoustics in Elmer, antenna FDTD in openEMS, rail impedance in ngspice. A design that runs hot fails in simulation before anyone tools a mold."],
   ["Firmware", "A compiled firmware image that targets the board that actually shipped, with the peripheral map, power states, and USB reporting."],
   ["Manufacturing, sourcing & test", "An NPI package sized to your volume, a sourcing plan with real parts and lead-time risks called out, and an FL-1 validation test plan with the gaps flagged, never papered over."],
 ];
@@ -37,6 +37,10 @@ const TOOLCHAIN: [string, string, string, number, number][] = [
   ["scipy", "SciPy", "thermal & modal FEM", 64, 64],
   ["gmsh", "gmsh", "FEA meshing", 128, 128],
   ["calculix", "CalculiX", "3D FEA solve", 0, 0],
+  ["ngspice", "ngspice", "PDN impedance", 128, 128],
+  ["openfoam", "OpenFOAM", "thermal CFD", 128, 128],
+  ["elmer", "Elmer", "acoustic FEM", 128, 128],
+  ["openems", "openEMS", "antenna FDTD", 135, 100],
   ["digikey", "DigiKey", "live sourcing", 32, 32],
   ["mouser", "Mouser", "live sourcing", 128, 128],
   ["octopart", "Octopart", "part intelligence", 128, 128],
@@ -169,10 +173,10 @@ export default function Home() {
           </ul>
           <p className="toolchain-note">
             Fab quotes come from PCBWay and JLCPCB&apos;s own price APIs.
-            Sourcing checks live distributor stock. FEA is meshed with gmsh
-            and solved with CalculiX. CFD, acoustic, and EM passes aren&apos;t
-            integrated yet, and the pipeline says so instead of pretending.
-            Real tools, real checks.
+            Sourcing checks live distributor stock. Every run solves real
+            physics: gmsh + CalculiX FEA, OpenFOAM natural-convection CFD,
+            Elmer cavity acoustics, openEMS antenna FDTD, and an ngspice
+            sweep of the rail decoupling network. Real tools, real checks.
           </p>
         </div>
       </section>

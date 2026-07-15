@@ -526,7 +526,11 @@ def _ccx_modal(workdir, mesh_inp, E, nu, rho, n_modes=12):
             "*SOLID SECTION, ELSET=PART, MATERIAL=MAT\n"
             "*STEP\n*FREQUENCY\n%d\n*END STEP\n"
             % (_os.path.basename(mesh_inp), E, nu, rho, n_modes))
-    env = dict(_os.environ, OMP_NUM_THREADS="4")
+    # OMP_NUM_THREADS=1 is deliberate: multithreaded ccx has a race that
+    # intermittently corrupts the free-free eigen solve (rigid-mode junk in
+    # place of elastic modes) — single-thread is deterministic AND faster
+    # on these small decks (0.7s vs 1.9s measured).
+    env = dict(_os.environ, OMP_NUM_THREADS="1")
     _sp.run([_ccx_bin(), "-i", "job"], cwd=workdir, env=env, timeout=120,
             stdout=_sp.DEVNULL, stderr=_sp.DEVNULL, check=False)
     dat = _os.path.join(workdir, "job.dat")
@@ -580,12 +584,17 @@ def structural3d(req):
                           "brew install costerwi/calculix/calculix-ccx")
     Lx, Ly = _plate_dims(req)
     t = 0.0016  # standard 1.6 mm stackup
-    with _tempfile.TemporaryDirectory() as wd:
-        mesh = _os.path.join(wd, "mesh.inp")
-        n_nodes, n_elems, _ = _mesh_to_inp(mesh, box=(Lx, Ly, t),
-                                           clmax=max(Lx, Ly) / 10.0)
-        freqs = _ccx_modal(wd, mesh, E=22e9, nu=0.13, rho=1850, n_modes=12)
-    f1 = _first_elastic(freqs)
+    # Large thin boards meshed coarsely give high-aspect tets whose eigen
+    # solve intermittently returns only rigid-mode junk — retry finer once.
+    f1 = None
+    for clmax in (max(Lx, Ly) / 10.0, max(Lx, Ly) / 16.0):
+        with _tempfile.TemporaryDirectory() as wd:
+            mesh = _os.path.join(wd, "mesh.inp")
+            n_nodes, n_elems, _ = _mesh_to_inp(mesh, box=(Lx, Ly, t), clmax=clmax)
+            freqs = _ccx_modal(wd, mesh, E=22e9, nu=0.13, rho=1850, n_modes=12)
+        f1 = _first_elastic(freqs)
+        if f1 is not None:
+            break
     if f1 is None:
         raise RuntimeError("no elastic mode found (all rigid)")
     return {

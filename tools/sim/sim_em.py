@@ -35,8 +35,10 @@ def have_openems():
 
 
 def _monopole_len_mm():
-    # quarter-wave at F0 with ~5% end-effect shortening
-    return 0.95 * C0_MM / F0 / 4.0
+    # quarter-wave at F0, shortened for end effect + feed-gap/ground-plane
+    # loading. The 0.83 factor was calibrated by FDTD on an 82x90 mm plane
+    # (dip 2.13 GHz at 0.95*lambda/4 -> scaled to center the 2.44 GHz band).
+    return 0.83 * C0_MM / F0 / 4.0
 
 
 def run(req):
@@ -81,7 +83,9 @@ def run(req):
     # air box: board plus margins; monopole sticks out +y off the top edge
     mesh.AddLine('x', [-w / 2 - margin, w / 2 + margin])
     mesh.AddLine('y', [-h / 2 - margin, h / 2 + gap + L + margin])
-    mesh.AddLine('z', [-margin, margin])
+    # the whole coplanar structure lives at z=0 — the grid MUST have a line
+    # there or every zero-thickness sheet falls between cells (no fields!)
+    mesh.AddLine('z', [-margin, 0, margin])
 
     # ground plane = the REAL board outline (PEC sheet at z=0)
     gnd = csx.AddMetal('gnd')
@@ -102,7 +106,18 @@ def run(req):
 
     with tempfile.TemporaryDirectory() as wd:
         sim_path = os.path.join(wd, 'ant')
-        fdtd.Run(sim_path, cleanup=True)
+        # the C++ engine prints progress straight to fd 1, which would corrupt
+        # run_sim.py's JSON-on-stdout protocol — divert it around the solve
+        saved_fd = os.dup(1)
+        engine_log = os.path.join(wd, 'engine.log')
+        log_fd = os.open(engine_log, os.O_WRONLY | os.O_CREAT, 0o644)
+        try:
+            os.dup2(log_fd, 1)
+            fdtd.Run(sim_path, cleanup=True)
+        finally:
+            os.dup2(saved_fd, 1)
+            os.close(saved_fd)
+            os.close(log_fd)
         f = np.linspace(1.8e9, 3.2e9, 401)
         port.CalcPort(sim_path, f)
         s11 = port.uf_ref / port.uf_inc
