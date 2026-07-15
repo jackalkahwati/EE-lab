@@ -249,14 +249,29 @@ export default function EnterprisePage() {
                 <span className="text-sm font-semibold">{board.name}</span>
                 <Badge s={board.readiness} />
                 <span className="text-muted-foreground">{board.board_class}</span>
-                <a
-                  href={`/api/enterprise/evidence-pack?board_id=${board.board_id}&format=md`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="ml-auto rounded-sm border border-border bg-secondary px-2 py-1 font-mono text-[10px] text-muted-foreground hover:text-foreground"
-                >
-                  evidence pack ↓
-                </a>
+                <span className="ml-auto flex items-center gap-1.5">
+                  {(() => {
+                    // Compose-built boards link back to their live run (the
+                    // portfolio bridge attaches runs with source_run_dir=run-…).
+                    const src = (db.runs ?? []).find((r: any) => r.run_id === board.latest_run_id)?.source_run_dir
+                    return src && /^run-/.test(src) ? (
+                      <a
+                        href={`/compose?run=${encodeURIComponent(src)}`}
+                        className="rounded-sm border border-border bg-secondary px-2 py-1 font-mono text-[10px] text-muted-foreground hover:text-foreground"
+                      >
+                        open in Compose →
+                      </a>
+                    ) : null
+                  })()}
+                  <a
+                    href={`/api/enterprise/evidence-pack?board_id=${board.board_id}&format=md`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-sm border border-border bg-secondary px-2 py-1 font-mono text-[10px] text-muted-foreground hover:text-foreground"
+                  >
+                    evidence pack ↓
+                  </a>
+                </span>
               </div>
               <StatusStrip board={board} db={db} />
               {(board.blocked_claims.length > 0

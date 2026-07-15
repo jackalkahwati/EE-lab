@@ -19,6 +19,7 @@ import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { makeSession, recordRun, getUser } from '@/lib/auth'
 import { runFullPipeline, type StageEvent } from '@/lib/run-pipeline'
+import { syncRunToPrograms } from '@/lib/programs-sync'
 import type { ProductSpec } from '@/lib/product-spec'
 
 export type V1Job = {
@@ -129,6 +130,8 @@ async function runJob(job: V1Job, baseUrl: string) {
     job.status = failed.length ? 'failed' : 'complete'
     if (failed.length) job.error = failed.join(' | ')
     job.phase = undefined
+    // Portfolio bridge: completed API builds appear in Programs too.
+    try { await syncRunToPrograms(job.runId) } catch { /* best effort */ }
   } catch (e) {
     job.status = 'failed'
     job.error = String(e)

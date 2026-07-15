@@ -48,6 +48,7 @@ export default function Home() {
             <a href="#how">How it works</a>
             <a href="#pricing">Pricing</a>
             <Link href="/fl1">FL-1 machine</Link>
+            <Link href="/developers">Developers</Link>
           </div>
           <div className="nav-actions">
             <a href={COMPOSE_URL} className="nav-signin">
@@ -346,6 +347,7 @@ export default function Home() {
           <span className="footer-tag">Every board&apos;s first light.</span>
           <span className="footer-links">
             <a href={COMPOSE_URL}>Sign in</a>
+            <Link href="/developers">Developers</Link>
             <Link href="/terms">Terms of Use</Link>
             <Link href="/privacy">Privacy Policy</Link>
             <a href={`mailto:${CONTACT}`}>Contact</a>

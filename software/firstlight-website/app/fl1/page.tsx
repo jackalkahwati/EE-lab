@@ -80,6 +80,7 @@ export default function FL1Page() {
             <Link href="/#how">Compose</Link>
             <Link href="/#pricing">Pricing</Link>
             <Link href="/fl1">FL-1 machine</Link>
+            <Link href="/developers">Developers</Link>
             <a href="#reserve" className="btn btn-small">
               Reserve
             </a>
@@ -275,6 +276,7 @@ export default function FL1Page() {
           <span className="footer-tag">Every board&apos;s first light.</span>
           <span className="footer-links">
             <Link href="/">Compose</Link>
+            <Link href="/developers">Developers</Link>
             <Link href="/terms">Terms of Use</Link>
             <Link href="/privacy">Privacy Policy</Link>
             <a href="mailto:jack@thestardrive.com">Contact</a>

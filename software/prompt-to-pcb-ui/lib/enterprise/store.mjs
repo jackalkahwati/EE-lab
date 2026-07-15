@@ -229,18 +229,33 @@ export function attachRun(db, { board_id, run_dir, prompt = null,
   const hardViol = drc
     ? (drc.violations ?? []).filter((v) => v.type !== 'solder_mask_bridge').length
     : null
+  // The SHIPPED board is the chip-scale one when it exists — its real KiCad
+  // DRC + routing state outrank the vestigial variant board's, so evidence
+  // must come from it first (same principle as the pipeline's honest gate).
+  let cs = null
+  try {
+    cs = JSON.parse(fs.readFileSync(
+      path.join(dataDir, '..', 'electronics', 'chipscale-board.json'), 'utf8'))
+  } catch { /* no chip-scale board — variant evidence stands */ }
+  const csUnrouted = typeof cs?.drcRepair?.unrouted === 'number' ? cs.drcRepair.unrouted : null
+  const csErrors = typeof cs?.drc?.errors === 'number' ? cs.drc.errors : null
   const run = {
     run_id: newId('run'), board_id,
     source_run_dir: run_dir,
     prompt: prompt ?? lr?.prompt ?? null,
     repo_commit: lr?.repoCommit ?? null,
-    tool_versions: { kicad: lr?.board?.drc?.kicadVersion ?? null },
-    route_evidence_state: lr
-      ? (lr.board?.unroutedNets?.length === 0 ? 'routed_in_sandbox'
-         : 'routed_with_open_nets')
-      : 'unknown',
-    drc_state: hardViol === null ? 'unknown'
-      : hardViol === 0 ? 'drc_clean' : `drc_violations:${hardViol}`,
+    tool_versions: { kicad: cs?.drc?.kicadVersion ?? lr?.board?.drc?.kicadVersion ?? null },
+    route_evidence_state: cs
+      ? (csUnrouted === 0 ? 'routed_in_sandbox' : 'routed_with_open_nets')
+      : lr
+        ? (lr.board?.unroutedNets?.length === 0 ? 'routed_in_sandbox'
+           : 'routed_with_open_nets')
+        : 'unknown',
+    drc_state: cs
+      ? (csErrors === null ? 'unknown'
+         : csErrors === 0 ? 'drc_clean' : `drc_violations:${csErrors}`)
+      : hardViol === null ? 'unknown'
+        : hardViol === 0 ? 'drc_clean' : `drc_violations:${hardViol}`,
     erc_state: lr?.stages?.erc?.state ?? 'unknown',
     firmware_state: lr?.stages?.firmware?.state ?? 'unknown',
     external_eda_state: readJson('external-analysis-run-report.json')
@@ -251,8 +266,10 @@ export function attachRun(db, { board_id, run_dir, prompt = null,
       ? ['fl1-testplan.json'] : [],
     credit_usage: null,
     approval_requirements: [],
-    readiness_state: lr?.status === 'PASSED'
-      ? 'routed_in_sandbox' : (lr ? 'blocked' : 'architecture_only'),
+    readiness_state: cs
+      ? (csErrors === 0 && csUnrouted === 0 ? 'routed_in_sandbox' : 'blocked')
+      : lr?.status === 'PASSED'
+        ? 'routed_in_sandbox' : (lr ? 'blocked' : 'architecture_only'),
     created_by,
     created_at: new Date().toISOString(),
   }

@@ -373,6 +373,12 @@ export default function Compose2Page() {
         },
       })
       if (res.feedback) setPipeFeedbackByRun((prev) => ({ ...prev, [runId]: res.feedback! }))
+      // Portfolio bridge: a completed run becomes an enterprise Programs board
+      // (fire-and-forget; the sync is idempotent and reads only real artifacts).
+      fetch('/api/programs/sync', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ runId }), keepalive: true,
+      }).catch(() => {})
       // Completion writes touch SELECTED-run state (productSpec, builtDisc), so
       // they only apply when this pipeline's run is the one on screen at fire
       // time. If the user switched away, the artifacts are on disk — reselecting
