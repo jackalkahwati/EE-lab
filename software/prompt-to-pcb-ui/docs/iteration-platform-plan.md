@@ -288,3 +288,35 @@ Phases 1→3 are the Cursor-parity core (~4 weeks of focused work) and each is
 independently shippable. Phase 2 is the only one with real technical risk
 (input hashing correctness) — it ships feature-flagged with Phase 1's diff
 view as the safety net.
+
+---
+
+## Phase 6 — as built (2026-07-15) + determinism audit
+
+**Shipped:** `POST /api/runs/import?parentRunId=&kind=step|pcb` (manual-edit
+round-trip: fork → replace artifact → strip invalidated claims — an imported
+STEP nulls fitCheck + removes the stale GLB and stales simulation; an
+imported .kicad_pcb clears DRC/routing claims so the board is not green until
+re-verified; nothing regenerates over the human's edit). `POST
+/api/runs/validation-results` ingests measured FL-1/bench outcomes into
+`disciplines/validation-results.json`; failed tests surface as BLOCKING
+work-queue items. Both tracked as revisions with honest notes.
+
+**Determinism audit (honest state):**
+- Deterministic today: gmsh meshing + CalculiX solves (same inputs → same
+  mesh/eigenvalues), scikit-fem solves, stage-hash currency (pure content
+  hashing), run forking, diffs.
+- NOT deterministic: every LLM stage (part planning, mechanical plan, docs —
+  temperature + provider variance), freerouting (its own heuristics/timing),
+  image renders. Same prompt can produce a different (both-valid) board.
+- Consequence: "current" (hash-proven unchanged) is the ONLY reuse mechanism
+  that is sound; re-RUNNING a stage never promises the same output. Pins
+  narrow the variance (verified constraints), they do not remove it.
+- Not attempted: seeding freerouting/LLMs for bit-reproducibility. If needed
+  later: pin provider+model+temperature per stage and record them in
+  stage-hashes.json, and run freerouting with a fixed thread count + seed
+  patch. Until then, reproducibility claims stay off the website.
+
+**Still open beyond this plan:** in-app editors (parameter round-trip UI on
+top of /api/runs/import), FL-1 hardware auto-ingestion (the machine POSTing
+validation-results itself), spec-hash currency surfaced in the UI per tab.

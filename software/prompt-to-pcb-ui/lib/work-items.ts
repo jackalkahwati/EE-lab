@@ -88,6 +88,17 @@ export async function harvestWorkItems(runId: string): Promise<WorkItem[]> {
     push('design', `capability gap (${g.module ?? 'module'}): ${g.gap ?? g.violation ?? ''}`, 'blocking', 'disciplines/redesign.json:capabilityGaps')
   }
 
+  // FL-1 measured results (Phase 6): a failed test is blocking, full stop —
+  // it's physical evidence, the strongest signal in the whole queue.
+  const vres = await readJson(runId, 'disciplines/validation-results.json')
+  for (const r of vres?.results ?? []) {
+    if (r.outcome === 'fail') {
+      push('validation',
+        `MEASURED FAIL: ${r.test}${r.measured ? ` (${r.measured})` : ''}${r.notes ? ` — ${r.notes}` : ''}`,
+        'blocking', 'disciplines/validation-results.json')
+    }
+  }
+
   // Docs: structured gaps[] when present (new contract), else honest-flag text
   for (const disc of ['firmware', 'manufacturing', 'supplyChain', 'validation'] as const) {
     const doc = await readJson(runId, `disciplines/${disc}.json`)
