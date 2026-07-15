@@ -27,26 +27,33 @@ const OUTPUTS = [
   ["Manufacturing, sourcing & test", "An NPI package sized to your volume, a sourcing plan with real parts and lead-time risks called out, and an FL-1 validation test plan with the gaps flagged, never papered over."],
 ];
 
-// Real third-party integrations in the pipeline: [slug, name, role, iconW, iconH]
-const TOOLCHAIN: [string, string, string, number, number][] = [
+// Real third-party tools in the pipeline: [slug, name, role, iconW, iconH]
+type Tool = [string, string, string, number, number];
+
+// Design, sourcing & manufacturing services the pipeline drives
+const TOOLCHAIN: Tool[] = [
   ["onshape", "Onshape", "enclosure CAD", 128, 128],
   ["kicad", "KiCad", "DRC signoff", 128, 128],
   ["freerouting", "freerouting", "autorouting", 128, 128],
   ["tscircuit", "tscircuit", "board build", 128, 128],
   ["atopile", "atopile", "hardware source", 128, 128],
-  ["scipy", "SciPy", "thermal & modal FEM", 64, 64],
-  ["gmsh", "gmsh", "FEA meshing", 128, 128],
-  ["calculix", "CalculiX", "3D FEA solve", 0, 0],
-  ["ngspice", "ngspice", "PDN impedance", 128, 128],
-  ["openfoam", "OpenFOAM", "thermal CFD", 128, 128],
-  ["elmer", "Elmer", "acoustic FEM", 128, 128],
-  ["openems", "openEMS", "antenna FDTD", 135, 100],
   ["digikey", "DigiKey", "live sourcing", 32, 32],
   ["mouser", "Mouser", "live sourcing", 128, 128],
   ["octopart", "Octopart", "part intelligence", 128, 128],
   ["pcbway", "PCBWay", "fab quotes", 128, 37],
   ["jlcpcb", "JLCPCB", "fab quotes", 48, 48],
   ["macrofab", "MacroFab", "assembly quotes", 128, 128],
+];
+
+// Physics solvers that gate every run
+const SIM_STACK: Tool[] = [
+  ["scipy", "SciPy", "thermal & modal FEM", 64, 64],
+  ["gmsh", "gmsh", "FEA meshing", 128, 128],
+  ["calculix", "CalculiX", "3D FEA solve", 0, 0],
+  ["openfoam", "OpenFOAM", "thermal CFD", 128, 128],
+  ["elmer", "Elmer", "acoustic FEM", 128, 128],
+  ["openems", "openEMS", "antenna FDTD", 135, 100],
+  ["ngspice", "ngspice", "PDN impedance", 128, 128],
 ];
 
 const FL1_INSTRUMENTS = [
@@ -144,39 +151,30 @@ export default function Home() {
             Every run drives the same tools professional hardware teams
             already trust.
           </p>
-          <ul className="toolchain-grid">
-            {TOOLCHAIN.map(([slug, name, role, w, h]) => (
-              <li
-                key={slug}
-                className={slug === "pcbway" ? "tool-chip tool-chip-wide" : "tool-chip"}
-              >
-                <span className="tool-tile">
-                  {w > 0 ? (
-                    <Image
-                      src={`/media/integrations/${slug}.png`}
-                      alt={`${name} logo`}
-                      width={w}
-                      height={h}
-                    />
-                  ) : (
-                    <span className="tool-glyph" aria-hidden="true">
-                      ccx
-                    </span>
-                  )}
-                </span>
-                <span className="tool-meta">
-                  <strong>{name}</strong>
-                  <small>{role}</small>
-                </span>
-              </li>
-            ))}
-          </ul>
+          <ToolStrip tools={TOOLCHAIN} />
           <p className="toolchain-note">
-            Fab quotes come from PCBWay and JLCPCB&apos;s own price APIs.
-            Sourcing checks live distributor stock. Every run solves real
-            physics: gmsh + CalculiX FEA, OpenFOAM natural-convection CFD,
-            Elmer cavity acoustics, openEMS antenna FDTD, and an ngspice
-            sweep of the rail decoupling network. Real tools, real checks.
+            Enclosure CAD is driven live in Onshape and boards only go green
+            on real KiCad DRC. Fab quotes come from PCBWay and JLCPCB&apos;s
+            own price APIs; sourcing checks live distributor stock.
+          </p>
+        </div>
+      </section>
+
+      {/* Simulation stack — real solvers behind the physics gates */}
+      <section className="toolchain toolchain-follow" aria-label="Simulation solvers Compose runs">
+        <div className="container center">
+          <p className="kicker">Simulation</p>
+          <p className="toolchain-lede">
+            Six real solvers gate every design. Nothing goes green without
+            a solve.
+          </p>
+          <ToolStrip tools={SIM_STACK} />
+          <p className="toolchain-note">
+            gmsh meshes and CalculiX solves the 3D FEA. OpenFOAM runs the
+            natural-convection CFD, Elmer the cavity acoustics, openEMS the
+            antenna FDTD, and ngspice sweeps the rail decoupling network.
+            Every result is labeled with the tool and fidelity that produced
+            it, and a gate that fails says so.
           </p>
         </div>
       </section>
@@ -465,6 +463,38 @@ export default function Home() {
         </div>
       </footer>
     </main>
+  );
+}
+
+function ToolStrip({ tools }: { tools: Tool[] }) {
+  return (
+    <ul className="toolchain-grid">
+      {tools.map(([slug, name, role, w, h]) => (
+        <li
+          key={slug}
+          className={slug === "pcbway" ? "tool-chip tool-chip-wide" : "tool-chip"}
+        >
+          <span className="tool-tile">
+            {w > 0 ? (
+              <Image
+                src={`/media/integrations/${slug}.png`}
+                alt={`${name} logo`}
+                width={w}
+                height={h}
+              />
+            ) : (
+              <span className="tool-glyph" aria-hidden="true">
+                ccx
+              </span>
+            )}
+          </span>
+          <span className="tool-meta">
+            <strong>{name}</strong>
+            <small>{role}</small>
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
 

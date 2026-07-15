@@ -395,6 +395,11 @@ p {
   padding: 96px 0 0;
 }
 
+/* second strip stacked under the first — tighter rhythm */
+.toolchain-follow {
+  padding-top: 72px;
+}
+
 .toolchain-lede {
   font-size: clamp(1.15rem, 1.8vw, 1.4rem);
   font-weight: 500;
