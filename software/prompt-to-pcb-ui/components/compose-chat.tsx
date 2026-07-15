@@ -120,6 +120,11 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
   // legacy startRev path already does this) and Phase-1 tracking can group
   // revisions into one product. Cleared once consumed or on reset/new design.
   const reviseParentRef = useRef<string | null>(null)
+  // Phase 3 edit router: a revise message is classified first; downstream-scoped
+  // changes offer a TARGETED fork+rebuild (unchanged stages skip as current)
+  // with the full architect redesign as the explicit alternative.
+  const [editPlan, setEditPlan] = useState<{ message: string; scope: string[]; note: string; estimate: string } | null>(null)
+  const [editBusy, setEditBusy] = useState(false)
   const bodyRef = useRef<HTMLDivElement>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
 
@@ -211,7 +216,7 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
     // silently reverted to the flroute (Pico) reference board with ChipScaleStage
     // and every discipline dark. Legacy flroute-only runs (no productSpec) keep
     // the block-level ECO path.
-    if (reviseMode && prodSpec) { setRequest(v); reviseProduct(v) }
+    if (reviseMode && prodSpec) { setRequest(v); void routeEdit(v) }
     else if (reviseMode && activeRunId) { setRequest(v); revise(v, activeRunId) }
     // Every fresh design enters through the Product Architect, which decides which
     // discipline modules to invoke and builds the real board FIRST. Industrial
@@ -404,6 +409,57 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
    *  whether the change is an incremental edit or (as the LLM already detects) a
    *  genuinely different product, and rebuilds accordingly. A fresh interview may
    *  run; that's honest for a product-level change. */
+  /** Phase 3: classify the change; narrow scopes offer a targeted re-run. */
+  async function routeEdit(req: string) {
+    if (!activeRunId) { reviseProduct(req); return }
+    setEditBusy(true)
+    try {
+      const r = await fetch('/api/runs/targeted', {
+        method: 'POST', headers: { 'content-type': 'application/json', ...llmHeaders() },
+        body: JSON.stringify({ runId: activeRunId, message: req, dryRun: true }),
+      })
+      const d = await r.json()
+      if (r.ok && d?.targetable) {
+        setEditPlan({ message: req, scope: d.scope ?? [], note: d.note ?? req, estimate: d.estimate ?? '' })
+        setEditBusy(false)
+        return
+      }
+    } catch { /* classification is best-effort — full path below */ }
+    setEditBusy(false)
+    reviseProduct(req)
+  }
+
+  async function runTargeted() {
+    if (!editPlan || !activeRunId) return
+    setEditBusy(true)
+    try {
+      const r = await fetch('/api/runs/targeted', {
+        method: 'POST', headers: { 'content-type': 'application/json', ...llmHeaders() },
+        body: JSON.stringify({ runId: activeRunId, message: editPlan.message }),
+      })
+      const d = await r.json()
+      if (!r.ok || !d?.runId) throw new Error(d?.error ?? 'targeted edit failed')
+      logLine({ source: 'pipeline', level: 'info', text: `targeted revision started: ${d.note} → re-runs ${(d.scope ?? []).join(', ')}`, runId: d.runId })
+      setEditPlan(null)
+      // select the fork; its server-side job persists progress to v1-job.json
+      onRunComplete(d.runId, d.runId)
+      // surface completion honestly in the terminal panel
+      const poll = setInterval(async () => {
+        try {
+          const j = await fetch(`/runs/${d.runId}/v1-job.json`, { cache: 'no-store' }).then((x) => (x.ok ? x.json() : null))
+          if (j && (j.status === 'complete' || j.status === 'failed')) {
+            clearInterval(poll)
+            logLine({ source: 'pipeline', level: j.status === 'complete' ? 'ok' : 'error',
+              text: `targeted revision ${j.status}${j.error ? ` — ${j.error}` : ''} (reselect the run to refresh panels)`, runId: d.runId })
+          }
+        } catch { /* poll is best-effort */ }
+      }, 5000)
+      setTimeout(() => clearInterval(poll), 15 * 60_000)
+    } catch (e) {
+      setErr(String(e))
+    } finally { setEditBusy(false) }
+  }
+
   function reviseProduct(req: string) {
     if (!prodSpec) return
     reviseParentRef.current = activeRunId || null
@@ -742,6 +798,35 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
             className="ml-auto flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground">
             <Square className="size-2.5" /> Stop
           </button>
+        </div>
+      )}
+
+      {/* Phase 3: targeted-edit preview — the cmd-K confirm. Shows exactly what
+          will re-run before anything is spent; full redesign stays one click away. */}
+      {editPlan && (
+        <div className="mx-2 mb-1 rounded-md border border-primary/40 bg-primary/5 p-2.5">
+          <div className="text-[11.5px] text-foreground">{editPlan.note}</div>
+          <div className="mt-1 font-mono text-[10px] text-muted-foreground">
+            will re-run: {editPlan.scope.join(', ')} · est {editPlan.estimate} · everything else stays current
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <button type="button" onClick={runTargeted} disabled={editBusy}
+              className="rounded-md bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+              {editBusy ? 'starting…' : 'Targeted revision'}
+            </button>
+            <button type="button" disabled={editBusy}
+              onClick={() => { const m = editPlan.message; setEditPlan(null); reviseProduct(m) }}
+              className="rounded-md border border-border px-2.5 py-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50">
+              Full redesign instead
+            </button>
+            <button type="button" onClick={() => setEditPlan(null)}
+              className="ml-auto text-[11px] text-muted-foreground hover:text-foreground">cancel</button>
+          </div>
+        </div>
+      )}
+      {editBusy && !editPlan && (
+        <div className="mx-2 mb-1 flex items-center gap-2 px-1 font-mono text-[10px] text-muted-foreground">
+          <Loader2 className="size-3 animate-spin" /> routing the change…
         </div>
       )}
 

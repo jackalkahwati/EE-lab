@@ -18,6 +18,19 @@ export const dynamic = 'force-dynamic'
 
 const RUN_ID = /^run-[A-Za-z0-9._-]{1,128}$/
 
+/** Engineer change request scoped to this discipline (Phase 3 targeted edits). */
+async function changeRequestBlock(runId: string | undefined, stage: string): Promise<string> {
+  if (!runId) return ''
+  try {
+    const cr = JSON.parse(await fs.readFile(
+      path.join(process.cwd(), 'public', 'runs', runId, 'data', 'change-request.json'), 'utf8'))
+    if (Array.isArray(cr.areas) && cr.areas.includes(stage) && cr.message) {
+      return `\n\nENGINEER CHANGE REQUEST (this revision — apply it): ${String(cr.message).slice(0, 400)}`
+    }
+  } catch { /* no change request — normal build */ }
+  return ''
+}
+
 async function callLLM(sys: string, userMsg: string, override?: LLMOverride) {
   let lastErr: unknown
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -152,15 +165,24 @@ LENGTH — the reader is an engineer skimming; bloat is a defect. Be dense:
   unmet requirement, traceability hole, single-source risk and missing-part
   callout stays. Say it shorter, do not drop it.
 Output ONLY one JSON object, no prose, no markdown fences, EXACTLY this shape:
-${DISCIPLINE_ARTIFACT_SCHEMA}`
+${DISCIPLINE_ARTIFACT_SCHEMA}
+ADDITIONALLY include a top-level "gaps" array (may be empty): every explicit
+GAP from the sections, structured as {"text":"<the gap, one line>","blocking":
+true|false} — blocking=true when shipping without resolving it would be wrong.`
 
     const b = spec.budgets ?? {}
     const userMsg =
       `PRODUCT: ${spec.product}\n${spec.description || ''}\nphilosophy: ${spec.philosophy || '-'}\n` +
-      `budgets: ${JSON.stringify(b)}${boardCtx}\n\nEmit the ${mod.label} artifact.`
+      `budgets: ${JSON.stringify(b)}${boardCtx}\n\nEmit the ${mod.label} artifact.` +
+      // Phase 3: a targeted edit rides in as an explicit engineer instruction
+      (await changeRequestBlock(runId, discipline))
 
     const out = await callLLM(sys, userMsg, overrideFromHeaders(req.headers))
     const artifact = normalizeDisciplineArtifact(out, discipline)
+    // structured gaps → work-queue items (lib/work-items); advisory unless flagged
+    ;(artifact as any).gaps = Array.isArray((out as any)?.gaps)
+      ? (out as any).gaps.slice(0, 10).map((g: any) => ({ text: String(g?.text ?? g).slice(0, 240), blocking: g?.blocking === true }))
+      : []
 
     // Persist the artifact so the full-pipeline orchestrator's result is durable
     // and the discipline tab shows it on reload without re-running (in-memory-only

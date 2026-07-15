@@ -34,6 +34,7 @@ import { ErrorBoundary } from '@/components/error-boundary'
 import { ReviewPanel } from '@/components/review-panel'
 import { RunOverview } from '@/components/run-overview'
 import { RevisionRail } from '@/components/revision-rail'
+import { WorkQueue } from '@/components/work-queue'
 import { ArtifactExplorer } from '@/components/artifact-explorer'
 import { FL1ReadinessPanel } from '@/components/fl1-readiness-panel'
 import { BoardObjects } from '@/components/board-objects'
@@ -384,6 +385,11 @@ export default function Compose2Page() {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ runId }), keepalive: true,
       }).catch(() => {})
+      // Phase 3: harvest the honest flags into the work queue.
+      fetch('/api/runs/work-items', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ runId }), keepalive: true,
+      }).catch(() => {})
       // Completion writes touch SELECTED-run state (productSpec, builtDisc), so
       // they only apply when this pipeline's run is the one on screen at fire
       // time. If the user switched away, the artifacts are on disk — reselecting
@@ -469,6 +475,10 @@ export default function Compose2Page() {
                           <RevisionRail
                             runId={selectedRun.runDir ? selectedRun.id : undefined}
                             onSelectRun={(rid) => { setSelectedId(rid); setNewDesign(false); setIdBrief(null); setProductSpec(null); setStage('electronics'); setBuiltDisc({}) }}
+                          />
+                          <WorkQueue
+                            runId={selectedRun.runDir ? selectedRun.id : undefined}
+                            onResolve={(prompt) => setRevisePrefill(prompt)}
                           />
                         </>
                       )}

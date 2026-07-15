@@ -33,6 +33,18 @@ export const maxDuration = 600
 
 const RUN_ID = /^run-[A-Za-z0-9._-]{1,128}$/
 
+/** Engineer change request scoped to this stage (Phase 3 targeted edits). */
+async function changeRequestBlock(runId: string, stage: string): Promise<string> {
+  try {
+    const cr = JSON.parse(await fs.readFile(
+      path.join(process.cwd(), 'public', 'runs', runId, 'data', 'change-request.json'), 'utf8'))
+    if (Array.isArray(cr.areas) && cr.areas.includes(stage) && cr.message) {
+      return `\n\nENGINEER CHANGE REQUEST (this revision — apply it): ${String(cr.message).slice(0, 400)}`
+    }
+  } catch { /* no change request — normal build */ }
+  return ''
+}
+
 const SYSTEM = `detailed thinking off.
 You are the mechanical specialist for an autonomous product-engineering platform.
 Given a PRODUCT and the REAL built PCB footprint, emit a parametric build plan
@@ -329,7 +341,9 @@ export async function POST(req: Request) {
         : `No built board yet — size from the budget${idBrief ? ' and the ID envelope' : ''}.\n`) +
       `Emit the mechanical build plan.` +
       // Phase 2: engineer-locked mechanical decisions are HARD plan inputs.
-      pinsPromptFor(runId, ['mechanical'])
+      pinsPromptFor(runId, ['mechanical']) +
+      // Phase 3: a targeted edit rides in as an explicit engineer instruction.
+      (await changeRequestBlock(runId, 'mechanical'))
 
     const plan = await callLLM(userMsg, overrideFromHeaders(req.headers))
 

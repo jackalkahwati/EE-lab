@@ -20,6 +20,7 @@ import { randomUUID } from 'node:crypto'
 import { makeSession, recordRun, getUser } from '@/lib/auth'
 import { runFullPipeline, type StageEvent } from '@/lib/run-pipeline'
 import { trackAndSync } from '@/lib/programs-sync'
+import { writeWorkItems } from '@/lib/work-items'
 import type { ProductSpec } from '@/lib/product-spec'
 
 export type V1Job = {
@@ -113,6 +114,7 @@ async function runJob(job: V1Job, baseUrl: string) {
       if (bad.length) job.error = bad.join(' | ')
       job.phase = undefined
       try { await trackAndSync(job.runId, job.owner) } catch { /* best effort */ }
+    try { await writeWorkItems(job.runId) } catch { /* best effort */ }
       return
     }
     // 1. Industrial design brief (one-click force — persists id-brief.json).
@@ -158,6 +160,7 @@ async function runJob(job: V1Job, baseUrl: string) {
     job.phase = undefined
     // Portfolio bridge: completed API builds appear in Programs too.
     try { await trackAndSync(job.runId, job.owner) } catch { /* best effort */ }
+    try { await writeWorkItems(job.runId) } catch { /* best effort */ }
   } catch (e) {
     job.status = 'failed'
     job.error = String(e)

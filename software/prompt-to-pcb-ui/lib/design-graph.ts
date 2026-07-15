@@ -38,6 +38,15 @@ function sha(v: unknown): string {
   return createHash('sha256').update(JSON.stringify(v ?? null)).digest('hex').slice(0, 24)
 }
 
+/** Engineer change-request text, an input to exactly the stages it targets
+ *  (Phase 3 targeted edits): writing it flips those stages stale; everything
+ *  else keeps its hash and skips. */
+function changeRequestFor(runId: string, stage: string): unknown {
+  const cr = readJson(runId, 'data/change-request.json')
+  if (!cr || !Array.isArray(cr.areas)) return null
+  return cr.areas.includes(stage) ? { message: cr.message, at: cr.createdAt } : null
+}
+
 /** Pins that constrain a stage (part of its input surface). */
 function pinsFor(runId: string, areas: Pin['area'][]): unknown {
   const p = productForRun(runId)
@@ -74,6 +83,7 @@ export function stageInputsHash(stage: PipeStageName, runId: string): string {
         elec: spec?.disciplines?.electronics ?? null,
         size: spec?.budgets?.sizeMm ?? null,
         pins: pinsFor(runId, ['electronics']),
+        change: changeRequestFor(runId, 'electronics'),
       })
     case 'mechanical':
       return sha({
@@ -82,6 +92,7 @@ export function stageInputsHash(stage: PipeStageName, runId: string): string {
         mech: spec?.disciplines?.mechanical ?? null,
         size: spec?.budgets?.sizeMm ?? null,
         pins: pinsFor(runId, ['mechanical']),
+        change: changeRequestFor(runId, 'mechanical'),
       })
     case 'simulation':
       return sha({
@@ -92,6 +103,7 @@ export function stageInputsHash(stage: PipeStageName, runId: string): string {
         enclosure: fs.existsSync(runPath(runId, 'mechanical/enclosure.step'))
           ? sha(fs.readFileSync(runPath(runId, 'mechanical/enclosure.step')).length)
           : null,
+        change: changeRequestFor(runId, 'simulation'),
       })
     case 'firmware':
     case 'manufacturing':
@@ -105,6 +117,7 @@ export function stageInputsHash(stage: PipeStageName, runId: string): string {
           disc: spec?.disciplines?.[stage] ?? null,
         },
         pins: pinsFor(runId, ['electronics', 'mechanical', 'budget']),
+        change: changeRequestFor(runId, stage),
       })
   }
 }

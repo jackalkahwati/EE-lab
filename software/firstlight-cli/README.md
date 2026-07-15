@@ -20,6 +20,7 @@ export FIRSTLIGHT_URL=https://app.firstlight.build   # default; omit unless self
 
 ```sh
 firstlight build "USB-C desk presence puck with a 60GHz radar and an LED ring" --wait
+firstlight rebuild <runId> --wait      # re-verify: unchanged stages skip as current
 firstlight status <runId> --watch
 firstlight artifacts <runId>
 firstlight get <runId> fab-package -o fab.zip
