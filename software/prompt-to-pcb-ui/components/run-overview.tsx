@@ -253,15 +253,19 @@ export function RunOverview({ runId, run }: { runId: string | null; run?: Run | 
         </span>
       </div>
 
-      <div className="grid gap-1.5 sm:grid-cols-2">
+      {/* Column count must follow the PANE width, not the viewport — `sm:grid-cols-2`
+          forced two columns into the ~300px right rail on wide screens and the tiles
+          overlapped. auto-fit sizes by actual container space, and flex-wrap lets a
+          badge drop below its label instead of colliding when a tile is still tight. */}
+      <div className="grid gap-1.5 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
         {rows.map(([label, s, detail]) => (
           <div
             key={label}
-            className="flex items-center justify-between rounded-md border border-border px-3 py-2"
+            className="flex min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-1 rounded-md border border-border px-3 py-2"
           >
-            <span className="text-muted-foreground">{label}</span>
+            <span className="min-w-0 truncate text-muted-foreground">{label}</span>
             <span
-              className={`inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 text-[10px] ${STYLE[s]}`}
+              className={`inline-flex shrink-0 items-center gap-1 rounded-sm border px-1.5 py-0.5 text-[10px] ${STYLE[s]}`}
               title={detail}
             >
               <Icon s={s} /> {s.replace(/_/g, ' ')}

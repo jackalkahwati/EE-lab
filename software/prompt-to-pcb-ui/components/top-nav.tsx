@@ -29,9 +29,11 @@ export function TopNav() {
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur">
       <div className="flex h-9 items-center gap-3 px-3">
-        <Link href="/" className="flex items-center">
-          <span className="text-xs font-semibold tracking-tight">Firstlight</span>
-        </Link>
+        {/* Brand mark exits the app back to the marketing site (firstlight.build) —
+            plain <a>, not next/link, since it's a cross-site navigation. */}
+        <a href="https://firstlight.build" className="flex items-center">
+          <span className="text-[15px] font-semibold tracking-tight">Firstlight</span>
+        </a>
         <nav className="flex h-full items-center" aria-label="Primary">
           {LINKS.map((l) => (
             <Link
