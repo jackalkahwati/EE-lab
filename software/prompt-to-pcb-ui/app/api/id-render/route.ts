@@ -74,6 +74,6 @@ export async function POST(req: Request) {
     }
     return Response.json({ ok: true, url: `data:${result.mime};base64,${result.dataBase64}`, provider: result.provider })
   } catch (err) {
-    return Response.json({ ok: false, reason: 'error', message: String(err) }, { status: 502 })
+    return Response.json({ ok: false, reason: 'error', message: String(err) }, { status: 500 })
   }
 }

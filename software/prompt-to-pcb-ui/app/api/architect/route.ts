@@ -207,7 +207,7 @@ export async function POST(req: Request) {
     if (force) {
       return Response.json(
         { error: 'architect failed to finalize: max questions reached but the model returned no valid product spec' },
-        { status: 502 },
+        { status: 500 },
       )
     }
     return Response.json({
@@ -219,6 +219,6 @@ export async function POST(req: Request) {
       provider,
     })
   } catch (err) {
-    return Response.json({ error: String(err) }, { status: 502 })
+    return Response.json({ error: String(err) }, { status: 500 })
   }
 }

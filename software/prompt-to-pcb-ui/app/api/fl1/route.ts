@@ -206,6 +206,6 @@ export async function POST(req: Request) {
       ...diag,
     })
   } catch (err) {
-    return Response.json({ error: `diagnosis failed: ${String(err)}` }, { status: 502 })
+    return Response.json({ error: `diagnosis failed: ${String(err)}` }, { status: 500 })
   }
 }

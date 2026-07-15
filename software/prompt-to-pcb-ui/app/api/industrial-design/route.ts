@@ -81,10 +81,18 @@ function boardGround(rb: { wMm?: number; hMm?: number; layers?: number; componen
  *  Forces Anthropic like the architect — the structured brief is emitted
  *  unreliably by the default nemotron fallback. */
 async function callLLM(userMsg: string, force: boolean, override?: LLMOverride, ground?: string) {
-  let sys = force
-    ? SYSTEM + '\nYou have asked enough questions, you MUST finalize now (enough:true).'
-    : SYSTEM
+  let sys = SYSTEM
   if (ground) sys += ground
+  // The finalize demand goes LAST — after the grounding block — so it is the
+  // final instruction the model reads. It used to sit before the grounding,
+  // where the model (especially via the CLI's --safe-mode) would drift back
+  // into asking a question, and the Design tab's one-click generate 502'd.
+  if (force) {
+    sys +=
+      '\n\nFINALIZE NOW: you have asked enough questions. Reply with enough:true and the ' +
+      'complete brief. A question / enough:false reply is INVALID and will be rejected — ' +
+      'resolve any remaining unknowns yourself with sensible defaults.'
+  }
   let lastErr: unknown
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -161,13 +169,16 @@ export async function POST(req: Request) {
       return Response.json({ error: 'empty product intent' }, { status: 400 })
     }
 
-    const qa = answers
-      .map((a, i) => `${i + 1}. Q: ${a.question}\n   A: ${a.answer}`)
-      .join('\n')
-    const userMsg =
-      `Product intent: ${request}\n\n` +
-      (qa ? `Clarifications so far:\n${qa}\n\n` : 'No clarifications yet.\n\n') +
-      `Questions already asked: ${answers.length} of max ${MAX_QUESTIONS}.`
+    const buildUserMsg = (all: Answer[]) => {
+      const qa = all
+        .map((a, i) => `${i + 1}. Q: ${a.question}\n   A: ${a.answer}`)
+        .join('\n')
+      return (
+        `Product intent: ${request}\n\n` +
+        (qa ? `Clarifications so far:\n${qa}\n\n` : 'No clarifications yet.\n\n') +
+        `Questions already asked: ${all.length} of max ${MAX_QUESTIONS}.`
+      )
+    }
 
     // force:true lets the Design tab finalize a brief in ONE click (no interview),
     // the same one-click behaviour every other discipline has.
@@ -179,19 +190,34 @@ export async function POST(req: Request) {
       const gb = await loadGroundBoard(body.runId)
       if (gb) ground = boardGround({ wMm: gb.wMm, hMm: gb.hMm, layers: gb.layers, components: gb.components })
     }
-    const { out, provider } = await callLLM(userMsg, force, overrideFromHeaders(req.headers), ground)
 
     // Finalize rescue (interview's pattern): under force the model MUST
-    // finalize, but it can keep replying enough:false — which used to loop the
-    // client past MAX_QUESTIONS forever. Accept a structurally-valid brief even
-    // when the model says enough:false; with no usable brief under force, error
-    // out rather than asking yet another question.
-    const briefOk =
-      !!out.brief && typeof out.brief === 'object' &&
-      typeof (out.brief as { formFactor?: unknown }).formFactor === 'string' &&
-      (out.brief as { formFactor: string }).formFactor.trim().length > 0
+    // finalize, but it sometimes replies with yet another question anyway — the
+    // Design tab's one-click generate used to hard-fail on that. Convergence
+    // loop: answer the model's own question with its own suggested default and
+    // ask again (each round removes an unknown, so it terminates). Accept a
+    // structurally-valid brief even when the model says enough:false.
+    const override = overrideFromHeaders(req.headers)
+    const selfAnswered = [...answers]
+    let out: { enough?: unknown; brief?: unknown; product?: unknown; question?: unknown; options?: unknown; default?: unknown }
+    let provider: string
+    let briefOk = false
+    for (let round = 0; ; round++) {
+      ;({ out, provider } = await callLLM(buildUserMsg(selfAnswered), force, override, ground))
+      briefOk =
+        !!out.brief && typeof out.brief === 'object' &&
+        typeof (out.brief as { formFactor?: unknown }).formFactor === 'string' &&
+        (out.brief as { formFactor: string }).formFactor.trim().length > 0
+      if (out.enough || briefOk || !force || round >= 2) break
+      selfAnswered.push({
+        question: String(out.question ?? 'remaining form/ergonomics unknowns'),
+        answer:
+          String(out.default || '') ||
+          (Array.isArray(out.options) && out.options.length ? String(out.options[0]) : 'use your best judgment'),
+      })
+    }
     if (out.enough || (force && briefOk)) {
-      const brief = normalizeIdBrief(out.brief)
+      const brief = normalizeIdBrief(out.brief as Parameters<typeof normalizeIdBrief>[0])
       // Persist the brief so the Design tab shows it on reload / after a pipeline
       // run without regenerating (the brief was in-memory only before).
       if (typeof body.runId === 'string' && /^run-[A-Za-z0-9._-]{1,128}$/.test(body.runId)) {
@@ -204,9 +230,12 @@ export async function POST(req: Request) {
       return Response.json({ type: 'brief', brief, request, provider })
     }
     if (force) {
+      // NOT 502: Cloudflare replaces origin 502/504 bodies with its own HTML
+      // error page, which the client's r.json() cannot parse (Safari surfaces
+      // it as "SyntaxError: The string did not match the expected pattern").
       return Response.json(
-        { error: 'industrial-design failed to finalize: max questions reached but the model returned no valid ID brief' },
-        { status: 502 },
+        { error: 'industrial-design failed to finalize: the model kept asking questions instead of returning an ID brief' },
+        { status: 500 },
       )
     }
     return Response.json({
@@ -218,6 +247,6 @@ export async function POST(req: Request) {
       provider,
     })
   } catch (err) {
-    return Response.json({ error: String(err) }, { status: 502 })
+    return Response.json({ error: String(err) }, { status: 500 })
   }
 }

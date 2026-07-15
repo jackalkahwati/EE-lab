@@ -57,7 +57,13 @@ export function IdStage({
         method: 'POST', headers: { 'content-type': 'application/json', ...llmHeaders() },
         body: JSON.stringify({ request: intent, answers: [], force: true, runId }),
       })
-      const d = await r.json()
+      // Parse via text so a non-JSON body (proxy/CDN error page) surfaces as a
+      // readable HTTP error instead of Safari's cryptic JSON SyntaxError.
+      const raw = await r.text()
+      let d: { error?: string; type?: string; brief?: unknown }
+      try { d = JSON.parse(raw) } catch {
+        throw new Error(`industrial design service returned HTTP ${r.status} (non-JSON response)`)
+      }
       if (d.error) throw new Error(d.error)
       if (d.type !== 'brief' || !d.brief) throw new Error('industrial design did not finalize a brief')
       onBrief?.(d.brief as IdBrief)

@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
   })
   const s = await r.json()
   if (!r.ok) {
-    return NextResponse.json({ error: `stripe: ${s.error?.message ?? r.status}` }, { status: 502 })
+    return NextResponse.json({ error: `stripe: ${s.error?.message ?? r.status}` }, { status: 500 })
   }
 
   const paid = s.payment_status === 'paid' && s.status === 'complete'

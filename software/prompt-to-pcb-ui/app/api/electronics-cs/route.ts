@@ -337,7 +337,7 @@ export async function POST(req: Request) {
       // the LLM fallback still exists.
       if (r && (r.boardMm || !existing.plannerOnly)) return Response.json(r)
     } catch (e) {
-      if (!existing.plannerOnly) return Response.json({ ok: false, error: String(e) }, { status: 502 })
+      if (!existing.plannerOnly) return Response.json({ ok: false, error: String(e) }, { status: 500 })
       // early planner-only build threw (e.g. aborted) — fall through, build fresh
     }
   }
@@ -348,7 +348,7 @@ export async function POST(req: Request) {
   try {
     return Response.json(await promise)
   } catch (err) {
-    return Response.json({ ok: false, error: String(err) }, { status: 502 })
+    return Response.json({ ok: false, error: String(err) }, { status: 500 })
   } finally {
     if (inflight.get(runId) === entry) inflight.delete(runId)
   }

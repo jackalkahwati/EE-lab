@@ -139,6 +139,6 @@ export async function POST(req: Request) {
       prompt: `${parent.prompt ?? 'board'}, rev: ${request}`,
     })
   } catch (err) {
-    return Response.json({ error: `revision failed: ${String(err)}` }, { status: 502 })
+    return Response.json({ error: `revision failed: ${String(err)}` }, { status: 500 })
   }
 }

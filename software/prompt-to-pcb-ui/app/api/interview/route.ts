@@ -287,6 +287,6 @@ export async function POST(req: Request) {
       provider,
     })
   } catch (err) {
-    return Response.json({ error: String(err) }, { status: 502 })
+    return Response.json({ error: String(err) }, { status: 500 })
   }
 }

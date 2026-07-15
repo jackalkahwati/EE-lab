@@ -234,6 +234,6 @@ export async function POST(req: Request) {
     fs.writeFileSync(reviewPath, JSON.stringify(result, null, 1))
     return Response.json(result)
   } catch (err) {
-    return Response.json({ error: `review generation failed: ${String(err)}` }, { status: 502 })
+    return Response.json({ error: `review generation failed: ${String(err)}` }, { status: 500 })
   }
 }

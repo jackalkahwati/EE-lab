@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
   if (!r.ok || !d.url) {
     return NextResponse.json(
       { error: `stripe error: ${d.error?.message ?? r.status}` },
-      { status: 502 },
+      { status: 500 },
     )
   }
   return NextResponse.json({ url: d.url })
