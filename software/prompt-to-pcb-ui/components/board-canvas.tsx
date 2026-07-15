@@ -204,7 +204,7 @@ export function BoardCanvas({
         </span>
       </div>
 
-      <div className="flex flex-1 items-center justify-center overflow-hidden bg-[#07090c] p-4">
+      <div className="flex flex-1 items-center justify-center overflow-hidden bg-[#0a0a0a] p-4">
         <svg
           viewBox="-6 -6 212 187"
           className="max-h-full w-full max-w-4xl"
@@ -296,7 +296,7 @@ export function BoardCanvas({
                   y1={r.y1}
                   x2={r.x2}
                   y2={r.y2}
-                  stroke="#79818f"
+                  stroke="#9a9a9a"
                   strokeOpacity="0.35"
                   strokeWidth="0.25"
                   strokeDasharray="1 1"
@@ -397,7 +397,7 @@ export function BoardCanvas({
             y="148.5"
             textAnchor="middle"
             fontSize="2.6"
-            fill="#79818f"
+            fill="#9a9a9a"
             fontFamily="monospace"
           >
             J1 USB-C
@@ -419,7 +419,7 @@ export function BoardCanvas({
             y="167.5"
             textAnchor="middle"
             fontSize="2.6"
-            fill="#79818f"
+            fill="#9a9a9a"
             fontFamily="monospace"
           >
             J2 24V
@@ -443,7 +443,7 @@ export function BoardCanvas({
             y="-2"
             textAnchor="middle"
             fontSize="3.2"
-            fill="#79818f"
+            fill="#9a9a9a"
             fontFamily="monospace"
           >
             200.0 mm
@@ -453,7 +453,7 @@ export function BoardCanvas({
             y="87"
             textAnchor="middle"
             fontSize="3.2"
-            fill="#79818f"
+            fill="#9a9a9a"
             fontFamily="monospace"
             transform="rotate(-90 -2 87)"
           >

@@ -288,7 +288,7 @@ export function RealBoardCanvas({
 
       <div
         className={cn(
-          'flex flex-1 items-center justify-center overflow-hidden bg-[#07090c]',
+          'flex flex-1 items-center justify-center overflow-hidden bg-[#0a0a0a]',
           view === 'copper' && 'p-4',
         )}
       >

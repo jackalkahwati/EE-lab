@@ -143,7 +143,7 @@ export function ChipScaleStage({ spec, runId, asElectronics }: { spec: any; runI
           {/* PCBA — the real populated chip-scale board in 3D (/api/board3d resolves
               this run's chipscale.kicad_pcb with 3D component models attached) */}
           {view === 'pcba' && (
-            <div className="h-full w-full bg-[#07090c]">
+            <div className="h-full w-full bg-[#0a0a0a]">
               <Board3D basePath={`/runs/${runId}/board`}
                 fallback={<div className="flex h-full items-center justify-center text-xs text-muted-foreground">rendering the PCBA…</div>} />
             </div>

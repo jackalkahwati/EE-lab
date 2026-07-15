@@ -85,7 +85,7 @@ export function MechanicalStage({ spec, runId, onBuilt }: { spec: ProductSpec | 
           {runId && (
             <div>
               <div className="mb-1 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">final assembly — populated board + Li-ion cell in the enclosure (drag to rotate)</div>
-              <div className="h-[46vh] w-full overflow-hidden rounded-md border border-border bg-[#07090c]">
+              <div className="h-[46vh] w-full overflow-hidden rounded-md border border-border bg-[#0a0a0a]">
                 <MechanicalAssembly basePath={`/runs/${runId}/board`} />
               </div>
             </div>

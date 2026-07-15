@@ -12,6 +12,7 @@
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-destructive: var(--destructive);
   --color-success: var(--success);
   --color-accent-foreground: var(--accent-foreground);
@@ -36,28 +37,32 @@
 
 :root {
   color-scheme: dark;
-  --background: #0a0c10;
-  --foreground: #dfe3e8;
-  --card: #0e1117;
-  --card-foreground: #dfe3e8;
-  --popover: #10141b;
-  --popover-foreground: #dfe3e8;
+  /* Cursor-grade neutral darks: no blue cast anywhere in the chrome.
+     bg → panel → elevated is a plain grey ramp; amber is the only accent. */
+  --background: #0f0f0f;
+  --foreground: #ededed;
+  --card: #161616;
+  --card-foreground: #ededed;
+  --popover: #1a1a1a;
+  --popover-foreground: #ededed;
   --primary: #e8a33d;
-  --primary-foreground: #0a0c10;
-  --secondary: #151923;
-  --secondary-foreground: #dfe3e8;
-  --muted: #131722;
-  --muted-foreground: #79818f;
-  --accent: #e8a33d;
-  --accent-foreground: #0a0c10;
-  --destructive: #f25555;
-  --success: #3fb950;
-  /* structural lines: warm amber-tinted grey, bright enough to actually read
-     as lines on the near-black background (was #1c212c — nearly invisible) */
-  --border: #5a5040;
-  --input: #5a5040;
+  --primary-foreground: #0f0f0f;
+  --secondary: #1f1f1f;
+  --secondary-foreground: #ededed;
+  --muted: #1a1a1a;
+  --muted-foreground: #9a9a9a;
+  /* neutral hover/selected fill (was amber) — chromatic accents stay on --primary */
+  --accent: #2a2a2a;
+  --accent-foreground: #ededed;
+  --destructive: #f87171;
+  --success: #34d399;
+  /* structural lines: neutral grey, deliberately brighter than Cursor's faintest
+     so panel seams stay legible on near-black; border-strong for hover/interactive */
+  --border: #3a3a3c;
+  --input: #3a3a3c;
+  --border-strong: #4a4a4e;
   --ring: #e8a33d;
-  --radius: 0.25rem;
+  --radius: 0.5rem;
 }
 
 @layer base {
@@ -69,6 +74,36 @@
   }
   html {
     @apply font-sans;
+    /* Firefox: thin neutral scrollbars to match the webkit styling below */
+    scrollbar-width: thin;
+    scrollbar-color: #3a3a3c transparent;
+  }
+
+  /* Cursor-style thin dark scrollbars (webkit) */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: #3a3a3c;
+    border: 3px solid transparent;
+    background-clip: padding-box;
+    border-radius: 5px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: #4a4a4e;
+  }
+
+  /* Lucide chrome icons: Cursor's lighter 1.5 stroke. Scoped to icons still on
+     the library default (stroke-width="2") so deliberate weights — e.g. the
+     bold strokeWidth={3} ticks in pipeline-tracker — are untouched, and raw
+     board/schematic SVGs (no .lucide class) never match. */
+  svg.lucide[stroke-width='2'] {
+    stroke-width: 1.5;
   }
 }
 

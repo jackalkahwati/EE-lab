@@ -50,7 +50,7 @@ export function Board3D({ basePath, fallback }: { basePath: string; fallback: Re
       if (disposed || !mount) return
 
       const scene = new THREE.Scene()
-      scene.background = new THREE.Color(0x07090c)
+      scene.background = new THREE.Color(0x0a0a0a)
 
       const gltf = await new GLTFLoader().parseAsync(buf, '')
       scene.add(gltf.scene)
@@ -228,7 +228,7 @@ export function Board3D({ basePath, fallback }: { basePath: string; fallback: Re
       <div ref={mountRef} className="h-full w-full" />
 
       {phase === 'loading' && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[#07090c]">
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[#0a0a0a]">
           <div className="size-5 animate-spin rounded-full border-2 border-border border-t-primary" />
           <p className="font-mono text-[10px] text-muted-foreground">
             building 3D model from variant.kicad_pcb… first open takes ~10 s

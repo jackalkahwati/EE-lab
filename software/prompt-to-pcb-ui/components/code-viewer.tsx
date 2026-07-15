@@ -88,7 +88,7 @@ export function CodeViewer({ files }: { files?: AtoFile[] | null }) {
           ))}
         </ul>
       </nav>
-      <div className="flex-1 overflow-auto bg-[#07090c]">
+      <div className="flex-1 overflow-auto bg-[#0a0a0a]">
         <pre className="p-4 font-mono text-xs leading-relaxed">
           <code>
             {lines.map((line, i) => (

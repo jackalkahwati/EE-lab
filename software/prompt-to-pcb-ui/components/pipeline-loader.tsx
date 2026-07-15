@@ -51,7 +51,7 @@ export function PipelineLoader({ status }: { status: Record<string, { status: Pi
   const running = stages.find((s) => s.st === 'running')
 
   return (
-    <div className="relative flex h-full w-full flex-col items-center justify-center overflow-hidden bg-[#07090c] px-6">
+    <div className="relative flex h-full w-full flex-col items-center justify-center overflow-hidden bg-[#0a0a0a] px-6">
       <style>{`
         @keyframes fl-spin { to { transform: rotate(360deg) } }
         @keyframes fl-spin-rev { to { transform: rotate(-360deg) } }

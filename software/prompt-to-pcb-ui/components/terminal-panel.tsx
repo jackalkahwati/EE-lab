@@ -32,9 +32,10 @@ function fmtTime(ts: number): string {
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
-// calm, token-matched colors: source chips stay muted; only warn/error shout
+// calm, token-matched colors: source chips stay neutral (amber = the only
+// chromatic chrome accent, reserved for pipeline); only warn/error shout
 const SOURCE_CHIP: Record<TerminalLine['source'], string> = {
-  build: 'text-sky-400/80 border-sky-400/25',
+  build: 'text-foreground/70 border-border',
   pipeline: 'text-primary/80 border-primary/25',
   system: 'text-muted-foreground border-border',
 }

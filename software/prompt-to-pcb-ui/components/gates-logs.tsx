@@ -136,7 +136,7 @@ export function GatesLogs({
   return (
     <div className="flex h-full flex-col gap-3 overflow-auto p-3 lg:flex-row">
       {/* terminal log */}
-      <div className="flex min-h-64 flex-1 flex-col overflow-hidden rounded-sm border border-border bg-[#07090c]">
+      <div className="flex min-h-64 flex-1 flex-col overflow-hidden rounded-sm border border-border bg-[#0a0a0a]">
         <div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
           <span className="size-2 rounded-full bg-destructive/60" />
           <span className="size-2 rounded-full bg-primary/60" />
@@ -221,7 +221,7 @@ export function GatesLogs({
               />
             </div>
             {result && (
-              <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-sm bg-[#07090c] p-2 font-mono text-[10px] leading-relaxed text-foreground/80">
+              <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-sm bg-[#0a0a0a] p-2 font-mono text-[10px] leading-relaxed text-foreground/80">
                 {result}
               </pre>
             )}

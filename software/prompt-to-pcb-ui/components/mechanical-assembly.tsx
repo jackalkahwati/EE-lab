@@ -36,7 +36,7 @@ export function MechanicalAssembly({ basePath }: { basePath: string }) {
         if (disposed || !mount) return
 
         const scene = new THREE.Scene()
-        scene.background = new THREE.Color(0x07090c)
+        scene.background = new THREE.Color(0x0a0a0a)
 
         const gltf = await new GLTFLoader().parseAsync(buf, '')
         const boardGrp = gltf.scene

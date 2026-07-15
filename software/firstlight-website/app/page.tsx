@@ -44,10 +44,12 @@ export default function Home() {
           <a href="#top" className="wordmark">
             <Starburst /> firstlight
           </a>
-          <div className="nav-links">
+          <div className="nav-center">
             <a href="#how">How it works</a>
             <a href="#pricing">Pricing</a>
             <Link href="/fl1">FL-1 machine</Link>
+          </div>
+          <div className="nav-actions">
             <a href={COMPOSE_URL} className="nav-signin">
               Sign in
             </a>
@@ -60,7 +62,7 @@ export default function Home() {
 
       {/* Hero, Compose */}
       <header className="hero" id="top">
-        <div className="container hero-grid">
+        <div className="container">
           <div className="hero-copy">
             <p className="kicker">FirstLight Compose · AI product engineering</p>
             <h1>
@@ -92,15 +94,19 @@ export default function Home() {
               </li>
             </ul>
           </div>
-          <div className="hero-image">
-            <Image
-              src="/media/board-top.png"
-              alt="A PCB designed and routed by FirstLight Compose from a plain-language prompt"
-              width={1568}
-              height={1376}
-              sizes="(max-width: 860px) calc(100vw - 48px), 520px"
-              priority
-            />
+        </div>
+        <div className="container hero-shot">
+          <div className="shot-stage">
+            <WindowFrame title="FirstLight Compose">
+              <Image
+                src="/media/compose-hero.jpg"
+                alt="The Compose workspace: a circular PCBA rendered in 3D, every pipeline discipline green, live logs streaming in the terminal"
+                width={1600}
+                height={914}
+                sizes="(max-width: 1248px) calc(100vw - 48px), 1152px"
+                priority
+              />
+            </WindowFrame>
           </div>
         </div>
       </header>
@@ -163,6 +169,52 @@ export default function Home() {
             Design and validation are one system.
             <span className="accent"> Testability is built in before the board is ever fabricated.</span>
           </p>
+        </div>
+      </section>
+
+      {/* Beyond the board — generated docs */}
+      <section className="section" id="docs">
+        <div className="container split">
+          <div className="split-copy">
+            <p className="statement statement-xl">
+              It doesn&apos;t stop at the board.
+              <span className="accent"> Manufacturing, sourcing, and test plans are generated from the same design — readable, honest, and flagged where an engineer is still needed.</span>
+            </p>
+            <a href={COMPOSE_URL} className="arrow-link">
+              Open Compose &rarr;
+            </a>
+          </div>
+          <div className="split-media">
+            <WindowFrame title="Manufacturing package">
+              <Image
+                src="/media/doc-mfg.jpg"
+                alt="A generated manufacturing package in Compose: SMT and reflow assembly notes, power and thermal constraints, DFM checks, NPI and yield drivers, and a cost and supply-chain breakdown"
+                width={1600}
+                height={980}
+                sizes="(max-width: 900px) calc(100vw - 48px), 620px"
+              />
+            </WindowFrame>
+          </div>
+        </div>
+        <div className="container doc-row">
+          <WindowFrame title="Sourcing plan">
+            <Image
+              src="/media/doc-sourcing.jpg"
+              alt="A generated sourcing plan in Compose, listing real parts with lead-time and substitution risks called out"
+              width={1600}
+              height={980}
+              sizes="(max-width: 900px) calc(100vw - 48px), 564px"
+            />
+          </WindowFrame>
+          <WindowFrame title="FL-1 validation plan">
+            <Image
+              src="/media/doc-validation.jpg"
+              alt="A generated FL-1 validation test plan in Compose, with functional, electrical, and reliability coverage and the remaining gaps flagged"
+              width={1600}
+              height={980}
+              sizes="(max-width: 900px) calc(100vw - 48px), 564px"
+            />
+          </WindowFrame>
         </div>
       </section>
 
@@ -267,17 +319,21 @@ export default function Home() {
             FL-1 in motion, a CAD-rendered concept film from the production
             design model: canopy, fixture drawer, and an autonomous probing run.
           </p>
-          <video
-            controls
-            playsInline
-            preload="none"
-            poster="/media/web-hero.png"
-            className="demo-video"
-            aria-label="CAD concept film of the FL-1 performing an autonomous probing run"
-          >
-            <source src="/media/promo.mp4" type="video/mp4" />
-            Your browser does not support embedded video.
-          </video>
+          <div className="demo-frame">
+            <WindowFrame title="FL-1 — concept film">
+              <video
+                controls
+                playsInline
+                preload="none"
+                poster="/media/web-hero.png"
+                className="demo-video"
+                aria-label="CAD concept film of the FL-1 performing an autonomous probing run"
+              >
+                <source src="/media/promo.mp4" type="video/mp4" />
+                Your browser does not support embedded video.
+              </video>
+            </WindowFrame>
+          </div>
         </div>
       </section>
 
@@ -300,6 +356,33 @@ export default function Home() {
         </div>
       </footer>
     </main>
+  );
+}
+
+function WindowFrame({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <figure className="window">
+      <div className="window-bar">
+        <span className="window-dots" aria-hidden="true">
+          <i />
+          <i />
+          <i />
+        </span>
+        <span className="window-title">{title}</span>
+        <span className="window-dots window-dots-ghost" aria-hidden="true">
+          <i />
+          <i />
+          <i />
+        </span>
+      </div>
+      <div className="window-body">{children}</div>
+    </figure>
   );
 }
 
