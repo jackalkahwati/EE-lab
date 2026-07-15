@@ -87,7 +87,7 @@ export function MechanicalStage({ spec, runId, onBuilt }: { spec: ProductSpec | 
           {runId && (
             <div>
               <div className="mb-1 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">final assembly — populated board + Li-ion cell in the enclosure (drag to rotate)</div>
-              <div className="h-[46vh] w-full overflow-hidden rounded-md border border-border bg-[#0a0a0a]">
+              <div className="mx-auto h-[32vh] max-w-2xl overflow-hidden rounded-md border border-border bg-[#0a0a0a]">
                 <MechanicalAssembly basePath={`/runs/${runId}/board`} />
               </div>
             </div>
@@ -95,14 +95,14 @@ export function MechanicalStage({ spec, runId, onBuilt }: { spec: ProductSpec | 
           {res.gltfUrl ? (
             <div>
               <div className="mb-1 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">enclosure CAD — real Onshape geometry (drag to rotate)</div>
-              <div className="h-[46vh] w-full overflow-hidden rounded-md border border-border bg-[#0f0f0f]">
+              <div className="mx-auto h-[32vh] max-w-2xl overflow-hidden rounded-md border border-border bg-[#0f0f0f]">
                 <CadViewer url={res.gltfUrl} />
               </div>
             </div>
           ) : res.previewUrl ? (
             // legacy runs without a glTF export: the flat shaded preview
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={res.previewUrl} alt={`${res.part} CAD preview`} className="mx-auto max-h-[46vh] w-auto rounded-md border border-border bg-white" />
+            <img src={res.previewUrl} alt={`${res.part} CAD preview`} className="mx-auto max-h-[32vh] w-auto rounded-md border border-border bg-white" />
           ) : null}
           {res.fitCheck && (
             <div className={cn('rounded-md border px-3 py-2 text-[12px]',

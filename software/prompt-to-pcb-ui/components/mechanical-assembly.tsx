@@ -138,6 +138,14 @@ export function MechanicalAssembly({ basePath }: { basePath: string }) {
         scene.add(grid)
 
         const controls = new OrbitControls(camera, renderer.domElement)
+        // Wheel-over the viewer should scroll the PAGE, not zoom the scene —
+        // zoom arms on click (pointerdown) and disarms when the cursor leaves,
+        // so the tab stays scrollable without hunting for a gutter.
+        controls.enableZoom = false
+        const armZoom = () => { controls.enableZoom = true }
+        const disarmZoom = () => { controls.enableZoom = false }
+        renderer.domElement.addEventListener('pointerdown', armZoom)
+        renderer.domElement.addEventListener('mouseleave', disarmZoom)
         controls.target.copy(acenter); controls.enableDamping = true; controls.dampingFactor = 0.08
         controls.minDistance = span * 0.15; controls.maxDistance = span * 6
         const sphere = abox.getBoundingSphere(new THREE.Sphere())
@@ -155,7 +163,11 @@ export function MechanicalAssembly({ basePath }: { basePath: string }) {
           renderer.setSize(mount.clientWidth, mount.clientHeight)
         }
         window.addEventListener('resize', onResize)
-        ;(mount as any).__cleanup = () => window.removeEventListener('resize', onResize)
+        ;(mount as any).__cleanup = () => {
+          window.removeEventListener('resize', onResize)
+          renderer.domElement?.removeEventListener('pointerdown', armZoom)
+          renderer.domElement?.removeEventListener('mouseleave', disarmZoom)
+        }
       } catch (e) { if (!disposed) { setErr(String(e)); setPhase('error') } }
     })()
 
