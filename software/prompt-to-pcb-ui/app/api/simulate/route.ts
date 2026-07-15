@@ -9,6 +9,8 @@
  *    resolved plate + convection, not a lumped node.
  *  - drop:    real Kirchhoff-plate modal FEM (scikit-fem) — the board's
  *    fundamental frequency (shock/flex robustness).
+ *  - structural3d / enclosure_fea: REAL 3D FEA (gmsh C3D10 mesh + CalculiX
+ *    modal solve) — the board slab and the run's actual Onshape STEP.
  *  - acoustic/rf: still analytic/surrogate — a real acoustic FEM (Elmer) and
  *    antenna FDTD (openEMS) are the install-gated next-fidelity upgrades.
  * The runner never fabricates a metric it can't compute; each result carries its
@@ -28,7 +30,7 @@ const RUN_ID = /^run-[A-Za-z0-9._-]{1,128}$/
 function runSim(req: Record<string, unknown>): Promise<any> {
   const script = path.join(process.cwd(), '..', '..', 'tools', 'sim', 'run_sim.py')
   return new Promise((resolve, reject) => {
-    const py = spawn('python3', [script], { timeout: 100_000 })
+    const py = spawn(process.env.FL_PYTHON || 'python3', [script], { timeout: 100_000 })
     let out = '', err = ''
     py.stdout.on('data', (d) => (out += d))
     py.stderr.on('data', (d) => (err += d))
@@ -53,7 +55,11 @@ export async function POST(req: Request) {
     let boardAreaMm2: number | undefined
     let boardMm: { w: number; h: number } | undefined
     let layerCount: number | undefined
+    let enclosureStep: string | undefined
     if (runId && RUN_ID.test(runId)) {
+      // real Onshape CAD (when the mechanical stage has run) → 3D FEA target
+      const stepPath = path.join(process.cwd(), 'public', 'runs', runId, 'mechanical', 'enclosure.step')
+      try { await fs.access(stepPath); enclosureStep = stepPath } catch { /* no enclosure yet */ }
       // prefer the chip-scale board so thermal/RF/etc. use the real product area,
       // the REAL w×h (no squaring), and the real layer count when known.
       const gb = await loadGroundBoard(runId)
@@ -90,6 +96,7 @@ export async function POST(req: Request) {
       antennaPlacement: design.antennaPlacement,
       runtimeTargetHours: p.runtimeHours,
       sleepUw, dutyCycle, dutyCycleAssumed,
+      enclosureStep,
     }
 
     const out = await runSim(simReq)
@@ -100,6 +107,7 @@ export async function POST(req: Request) {
       femAvailable: !!out.femAvailable,
       femErrors: Array.isArray(out.femErrors) ? out.femErrors : [],
       results: out.results ?? [],
+      solvers: out.solvers ?? {},
       inputs: simReq,
     }
 

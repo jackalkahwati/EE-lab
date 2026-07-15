@@ -2,11 +2,15 @@
 """Generic lumped-physics simulation runner (open-source: numpy + scipy).
 
 Reads a sim request JSON on stdin (product/board/selected-design parameters),
-runs the applicable REAL lumped-parameter simulations, and prints a JSON list of
-results. These are genuine physics (thermal RC network solved with scipy, drop
-impact, sealed-box acoustics, BLE link budget) at 'lumped'/'analytic' fidelity —
-NOT full 3D FEA/FDTD. High-fidelity solvers (Elmer/CalculiX/openEMS/OpenFOAM)
-are the install-gated upgrade; this never fabricates a number it can't compute.
+runs the applicable REAL simulations, and prints a JSON list of results.
+Fidelity tiers, each labeled on its result:
+  - fem3d:    TRUE 3D FEA — gmsh C3D10 tet mesh + CalculiX modal solve, on the
+              board slab and on the run's ACTUAL Onshape enclosure STEP.
+  - fem:      2D FEM (scikit-fem) — thermal plate solve, Kirchhoff modal.
+  - analytic/surrogate: genuine physics at lumped fidelity (acoustics, BLE
+              link budget, battery). Remaining install-gated upgrades:
+              Elmer (acoustic FEM), openEMS (FDTD), OpenFOAM (CFD).
+This never fabricates a number it can't compute.
 
 Usage:  python3 run_sim.py  < request.json
 """
@@ -406,7 +410,210 @@ def battery(req):
     return r
 
 
-SIMS = [thermal, drop, acoustic, rf, battery]
+# --------------------------------------------------------------------------
+# 3D FEA domains (gmsh + CalculiX). Install-gated: when the solver is absent
+# the domain reports a 'gated' row with the install path — never a fake number.
+# --------------------------------------------------------------------------
+import glob as _glob
+import os as _os
+import re as _re
+import shutil as _shutil
+import subprocess as _sp
+import tempfile as _tempfile
+
+
+def _ccx_bin():
+    p = _shutil.which("ccx")
+    if p:
+        return p
+    cands = sorted(_glob.glob("/opt/homebrew/bin/ccx_*") + _glob.glob("/usr/local/bin/ccx_*"))
+    return cands[-1] if cands else None
+
+
+def solver_inventory():
+    """Which high-fidelity solvers exist on this machine. Reported verbatim to
+    the UI so the install-gate copy reflects reality, not a hardcoded list."""
+    return {
+        "gmsh": _shutil.which("gmsh") or ("python-gmsh" if _HAVE_GMSH_PY else None),
+        "calculix": _ccx_bin(),
+        "elmer": _shutil.which("ElmerSolver"),
+        "openems": _shutil.which("openEMS"),
+        "openfoam": _shutil.which("foamRun") or _shutil.which("simpleFoam"),
+    }
+
+
+try:
+    import gmsh as _gmsh  # python API (pip gmsh) — meshing for the FEA domains
+    _HAVE_GMSH_PY = True
+except Exception:
+    _HAVE_GMSH_PY = False
+
+
+def _mesh_to_inp(out_inp, box=None, step=None, clmax=None):
+    """Mesh a box (meters) or the largest solid of a STEP file to a 2nd-order
+    tet mesh (C3D10), written as an Abaqus/CalculiX .inp with ELSET=PART.
+    Returns (nodes, elements, pickedVolumeNote)."""
+    _gmsh.initialize()
+    try:
+        _gmsh.option.setNumber("General.Terminal", 0)
+        _gmsh.model.add("part")
+        note = ""
+        if box is not None:
+            lx, ly, lz = box
+            _gmsh.model.occ.addBox(0, 0, 0, lx, ly, lz)
+            _gmsh.model.occ.synchronize()
+            vols = _gmsh.model.getEntities(3)
+        else:
+            _gmsh.option.setNumber("Geometry.OCCScaling", 0.001)  # STEP mm -> m
+            _gmsh.model.occ.importShapes(step)
+            _gmsh.model.occ.synchronize()
+            vols = _gmsh.model.getEntities(3)
+            if not vols:
+                raise RuntimeError("no solid volumes in STEP")
+            if len(vols) > 1:
+                # multi-body part (base + lid + features): analyze the LARGEST
+                # body — disconnected bodies would add 6 rigid modes each.
+                vols = [max(vols, key=lambda dt: _gmsh.model.occ.getMass(dt[0], dt[1]))]
+                note = "multi-body STEP: largest body analyzed"
+        _gmsh.model.addPhysicalGroup(3, [v[1] for v in vols], name="PART")
+        if clmax:
+            _gmsh.option.setNumber("Mesh.MeshSizeMax", clmax)
+            _gmsh.option.setNumber("Mesh.MeshSizeMin", clmax / 5.0)
+        _gmsh.option.setNumber("Mesh.ElementOrder", 2)  # C3D10
+        # midside nodes on STRAIGHT edges: curving them onto cylindrical faces
+        # at coarse sizes creates nonpositive-Jacobian tets that ccx rejects
+        _gmsh.option.setNumber("Mesh.SecondOrderLinear", 1)
+        _gmsh.model.mesh.generate(3)
+        _gmsh.write(out_inp)
+        n_nodes = len(_gmsh.model.mesh.getNodes()[0])
+        n_elems = sum(len(t) for t in _gmsh.model.mesh.getElements(3)[1])
+        return n_nodes, n_elems, note
+    finally:
+        _gmsh.finalize()
+
+
+def _ccx_modal(workdir, mesh_inp, E, nu, rho, n_modes=12):
+    """Free-free modal analysis in CalculiX; returns frequencies (Hz)."""
+    deck = _os.path.join(workdir, "job.inp")
+    with open(deck, "w") as f:
+        f.write(
+            "*INCLUDE, INPUT=%s\n"
+            "*MATERIAL, NAME=MAT\n*ELASTIC\n%g, %g\n*DENSITY\n%g\n"
+            "*SOLID SECTION, ELSET=PART, MATERIAL=MAT\n"
+            "*STEP\n*FREQUENCY\n%d\n*END STEP\n"
+            % (_os.path.basename(mesh_inp), E, nu, rho, n_modes))
+    env = dict(_os.environ, OMP_NUM_THREADS="4")
+    _sp.run([_ccx_bin(), "-i", "job"], cwd=workdir, env=env, timeout=120,
+            stdout=_sp.DEVNULL, stderr=_sp.DEVNULL, check=False)
+    dat = _os.path.join(workdir, "job.dat")
+    if not _os.path.exists(dat):
+        raise RuntimeError("ccx produced no .dat output")
+    freqs = []
+    in_table = False
+    for line in open(dat, errors="replace"):
+        if "E I G E N V A L U E" in line:
+            in_table = True
+            continue
+        if in_table:
+            nums = _re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", line)
+            if len(nums) >= 4 and _re.match(r"\s*\d+\s", line):
+                # columns: mode, eigenvalue, omega(rad/s), freq(Hz), [imag]
+                freqs.append(float(nums[3]))
+            elif freqs and not line.strip():
+                break
+    if not freqs:
+        raise RuntimeError("no eigenvalue table in ccx output")
+    return freqs
+
+
+def _first_elastic(freqs):
+    """First non-rigid frequency of a free-free solve. Rigid modes are ~0 Hz
+    but come out of ARPACK as up to a few Hz of numerical noise; elastic modes
+    of these small stiff parts are 100s-1000s of Hz, so 20 Hz separates them
+    cleanly."""
+    for f in freqs:
+        if f > 20.0:
+            return f
+    return None
+
+
+def _gated_row(sim, metric, solver_label, install_hint):
+    return {
+        "sim": sim, "physics": "3D FEA", "metric": metric,
+        "value": None, "unit": "", "limit": None, "pass": None,
+        "fidelity": "gated", "tool": solver_label,
+        "note": "install-gated: %s" % install_hint,
+    }
+
+
+def structural3d(req):
+    """Board 3D solid modal FEA (gmsh C3D10 mesh + CalculiX, free-free): the
+    board's first elastic mode from TRUE 3D elasticity — the next-fidelity
+    check above the 2D Kirchhoff plate in `drop`."""
+    if not (_ccx_bin() and _HAVE_GMSH_PY):
+        return _gated_row("structural 3D FEA", "board first elastic mode",
+                          "CalculiX + gmsh (not installed)",
+                          "brew install costerwi/calculix/calculix-ccx")
+    Lx, Ly = _plate_dims(req)
+    t = 0.0016  # standard 1.6 mm stackup
+    with _tempfile.TemporaryDirectory() as wd:
+        mesh = _os.path.join(wd, "mesh.inp")
+        n_nodes, n_elems, _ = _mesh_to_inp(mesh, box=(Lx, Ly, t),
+                                           clmax=max(Lx, Ly) / 10.0)
+        freqs = _ccx_modal(wd, mesh, E=22e9, nu=0.13, rho=1850, n_modes=12)
+    f1 = _first_elastic(freqs)
+    if f1 is None:
+        raise RuntimeError("no elastic mode found (all rigid)")
+    return {
+        "sim": "structural 3D FEA", "physics": "3D solid elasticity (modal)",
+        "metric": "board first elastic mode", "value": round(f1, 1), "unit": "Hz",
+        "limit": None, "pass": None,
+        "fidelity": "fem3d", "tool": "gmsh + CalculiX %s" % _os.path.basename(_ccx_bin() or ""),
+        "detail": {"modesHz": [round(f, 1) for f in freqs if f > 1.0][:5],
+                   "nodes": n_nodes, "elementsC3D10": n_elems,
+                   "boardMm": [round(Lx * 1e3, 1), round(Ly * 1e3, 1), t * 1e3]},
+        "note": ("REAL 3D FEA: gmsh C3D10 tets solved in CalculiX, free-free. "
+                 "ASSUMED FR4 E=22 GPa, nu=0.13, rho=1850 (bare laminate; "
+                 "components add mass -> real f1 is somewhat lower). Higher "
+                 "f1 = stiffer board = better shock/vibration margin."),
+    }
+
+
+def enclosure_fea(req):
+    """Enclosure 3D modal FEA on the REAL Onshape CAD (STEP) — meshes the
+    actual generated geometry, not an idealization. Skipped (None) when the
+    run has no enclosure yet; gated when the solver is missing."""
+    step = req.get("enclosureStep")
+    if not (isinstance(step, str) and _os.path.exists(step)):
+        return None  # no enclosure built for this run yet — nothing to claim
+    if not (_ccx_bin() and _HAVE_GMSH_PY):
+        return _gated_row("enclosure 3D FEA", "shell first elastic mode",
+                          "CalculiX + gmsh (not installed)",
+                          "brew install costerwi/calculix/calculix-ccx")
+    with _tempfile.TemporaryDirectory() as wd:
+        mesh = _os.path.join(wd, "mesh.inp")
+        n_nodes, n_elems, body_note = _mesh_to_inp(mesh, step=step, clmax=0.003)
+        freqs = _ccx_modal(wd, mesh, E=2.3e9, nu=0.37, rho=1120, n_modes=12)
+    f1 = _first_elastic(freqs)
+    if f1 is None:
+        raise RuntimeError("no elastic mode found (all rigid)")
+    return {
+        "sim": "enclosure 3D FEA", "physics": "3D solid elasticity (modal)",
+        "metric": "shell first elastic mode", "value": round(f1, 1), "unit": "Hz",
+        "limit": None, "pass": None,
+        "fidelity": "fem3d", "tool": "gmsh + CalculiX %s" % _os.path.basename(_ccx_bin() or ""),
+        "detail": {"modesHz": [round(f, 1) for f in freqs if f > 1.0][:5],
+                   "nodes": n_nodes, "elementsC3D10": n_elems,
+                   **({"body": body_note} if body_note else {})},
+        "note": ("REAL 3D FEA on the run's actual Onshape STEP (gmsh C3D10 + "
+                 "CalculiX, free-free%s). ASSUMED PC/ABS E=2.3 GPa, nu=0.37, "
+                 "rho=1120. A stiff shell (higher f1) resists drop flex and "
+                 "rattling; drive material/ribs from this, not from guesses."
+                 % ((", " + body_note) if body_note else "")),
+    }
+
+
+SIMS = [thermal, drop, structural3d, enclosure_fea, acoustic, rf, battery]
 
 
 def _json_default(o):
@@ -436,6 +643,7 @@ def main():
     print(json.dumps({"scipy": HAVE_SCIPY,
                       "femAvailable": HAVE_SKFEM and not FEM_ERRORS,
                       "femErrors": FEM_ERRORS,
+                      "solvers": solver_inventory(),
                       "results": results}, default=_json_default))
 
 

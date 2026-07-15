@@ -175,7 +175,7 @@ function renderPlan(plan: MechPlan, outDir: string, name: string): Promise<any> 
   return new Promise((resolve, reject) => {
     const TIMEOUT_MS = 280_000
     const t0 = Date.now()
-    const py = spawn('python3', [script, outDir, name], { timeout: TIMEOUT_MS })
+    const py = spawn(process.env.FL_PYTHON || 'python3', [script, outDir, name], { timeout: TIMEOUT_MS })
     let out = '', err = ''
     py.stdout.on('data', (d) => (out += d))
     py.stderr.on('data', (d) => (err += d))

@@ -160,7 +160,7 @@ function fetchFootprintUncached(lcsc: string): Promise<string | null> {
   if (!/^C\d{2,10}$/.test(lcsc)) return Promise.resolve(null)
   const base = path.join('/tmp', `fl_fp_${lcsc}`)
   return new Promise((resolve) => {
-    const py = spawn('python3', ['-m', 'easyeda2kicad', '--footprint', '--overwrite', `--lcsc_id=${lcsc}`, `--output=${base}`], { timeout: 30_000 })
+    const py = spawn(process.env.FL_PYTHON || 'python3', ['-m', 'easyeda2kicad', '--footprint', '--overwrite', `--lcsc_id=${lcsc}`, `--output=${base}`], { timeout: 30_000 })
     py.on('error', () => resolve(null))
     py.on('close', async () => {
       try {
@@ -181,7 +181,7 @@ const exists = (p: string) => fs.access(p).then(() => true).catch(() => false)
  *  any failure so the caller falls back to the LLM part-set. */
 function plannerNetlist(designPath: string): Promise<{ parts: any[]; nets: any[]; gnd: string[] } | null> {
   return new Promise((resolve) => {
-    const py = spawn('python3', [path.join(PLANNER_DIR, 'synth.py'), '--netlist', designPath], { cwd: PLANNER_DIR, timeout: 90_000 })
+    const py = spawn(process.env.FL_PYTHON || 'python3', [path.join(PLANNER_DIR, 'synth.py'), '--netlist', designPath], { cwd: PLANNER_DIR, timeout: 90_000 })
     let out = ''
     py.stdout.on('data', (d) => (out += d))
     py.on('error', () => resolve(null))

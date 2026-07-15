@@ -16,7 +16,7 @@ type SimResult = {
   limit?: number | null; pass?: boolean | null; fidelity?: string; tool?: string
   detail?: Record<string, unknown>; note?: string; error?: string
 }
-type Result = { scipy: boolean; results: SimResult[] }
+type Result = { scipy: boolean; results: SimResult[]; solvers?: Record<string, string | null> }
 
 export function SimulationStage({ spec, runId, onBuilt }: { spec: any; runId?: string; onBuilt?: () => void }) {
   const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
@@ -68,7 +68,7 @@ export function SimulationStage({ spec, runId, onBuilt }: { spec: any; runId?: s
       {!spec && <p className="text-sm text-muted-foreground">Describe a product first.</p>}
       {state === 'idle' && spec && (
         <p className="text-sm text-muted-foreground">
-          Run real physics simulations on the current design — thermal and drop are genuine finite-element solves (scikit-fem); acoustics, RF link and battery are analytic. Each result shows its fidelity and the tool that produced it.
+          Run real physics simulations on the current design — thermal and drop are finite-element solves (scikit-fem), and the board + real enclosure CAD get TRUE 3D FEA (gmsh mesh, CalculiX modal solve). Acoustics, RF link and battery are analytic. Each result shows its fidelity and the tool that produced it.
         </p>
       )}
       {state === 'error' && <div className="mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px] text-destructive">{err}</div>}
@@ -89,10 +89,10 @@ export function SimulationStage({ spec, runId, onBuilt }: { spec: any; runId?: s
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-2 pl-6">
                     <span className={cn('rounded-sm px-1 py-0.5 font-mono text-[9px] uppercase',
-                      r.fidelity === 'fem' ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-                        : r.fidelity === 'surrogate' ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                      r.fidelity === 'fem' || r.fidelity === 'fem3d' ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                        : r.fidelity === 'surrogate' || r.fidelity === 'gated' ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
                           : 'bg-secondary text-muted-foreground')}>
-                      {r.fidelity === 'fem' ? 'FEM ✓' : r.fidelity}
+                      {r.fidelity === 'fem' ? 'FEM ✓' : r.fidelity === 'fem3d' ? '3D FEA ✓' : r.fidelity === 'gated' ? 'install-gated' : r.fidelity}
                     </span>
                     <span className="font-mono text-[10px] text-muted-foreground">{r.tool}</span>
                     {r.note && <span className="text-[10px] text-muted-foreground">· {r.note}</span>}
@@ -102,7 +102,12 @@ export function SimulationStage({ spec, runId, onBuilt }: { spec: any; runId?: s
             </div>
           ))}
           <div className="rounded-md border border-border px-3 py-2 text-[11px] text-muted-foreground">
-            <span className="text-foreground">Real FEM (scikit-fem)</span> for thermal + drop; analytic/surrogate for acoustics, RF and battery. The next-fidelity upgrade for the analytic domains is 3D FEA/FDTD — <span className="text-foreground">Elmer · CalculiX · openEMS · OpenFOAM</span> (gmsh present for meshing) — install-gated. The runner only reports metrics it can compute, nothing faked.
+            <span className="text-foreground">Real FEM (scikit-fem)</span> for thermal + drop; <span className="text-foreground">real 3D FEA (gmsh + CalculiX)</span> for the board and the actual enclosure STEP; analytic/surrogate for acoustics, RF and battery. Still install-gated: acoustic FEM (Elmer), antenna FDTD (openEMS), CFD (OpenFOAM). The runner only reports metrics it can compute, nothing faked.
+            {res.solvers && (
+              <span className="mt-1 block font-mono text-[10px]">
+                solvers: {['gmsh', 'calculix', 'elmer', 'openems', 'openfoam'].map((k) => `${k} ${res.solvers?.[k] ? '✓' : '—'}`).join(' · ')}
+              </span>
+            )}
           </div>
         </div>
       )}

@@ -34,7 +34,7 @@ type Budgets = ProductSpec['budgets']
 function runSim(reqObj: Record<string, unknown>): Promise<any> {
   const script = path.join(process.cwd(), '..', '..', 'tools', 'sim', 'run_sim.py')
   return new Promise((resolve) => {
-    const py = spawn('python3', [script], { timeout: 90_000 })
+    const py = spawn(process.env.FL_PYTHON || 'python3', [script], { timeout: 90_000 })
     let out = ''
     py.stdout.on('data', (d) => (out += d))
     py.on('error', (e) => resolve({ error: `sim runner failed to spawn: ${String(e)}` }))
