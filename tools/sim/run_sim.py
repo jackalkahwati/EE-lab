@@ -420,6 +420,11 @@ import re as _re
 import shutil as _shutil
 import subprocess as _sp
 import tempfile as _tempfile
+import threading as _threading
+
+# gmsh's python API is a process-global singleton (initialize/finalize) —
+# concurrent meshing from the parallel sim executor would corrupt it.
+_GMSH_LOCK = _threading.Lock()
 
 
 def _ccx_bin():
@@ -430,15 +435,30 @@ def _ccx_bin():
     return cands[-1] if cands else None
 
 
+def _openems_py():
+    try:
+        import openEMS as _o  # python bindings are the integration surface
+        return "python-openEMS"
+    except Exception:
+        return None
+
+
 def solver_inventory():
     """Which high-fidelity solvers exist on this machine. Reported verbatim to
     the UI so the install-gate copy reflects reality, not a hardcoded list."""
     return {
         "gmsh": _shutil.which("gmsh") or ("python-gmsh" if _HAVE_GMSH_PY else None),
         "calculix": _ccx_bin(),
-        "elmer": _shutil.which("ElmerSolver"),
-        "openems": _shutil.which("openEMS"),
-        "openfoam": _shutil.which("foamRun") or _shutil.which("simpleFoam"),
+        "ngspice": _shutil.which("ngspice"),
+        "elmer": (_shutil.which("ElmerSolver")
+                  or (_os.path.expanduser("~/.local/elmer/bin/ElmerSolver")
+                      if _os.path.exists(_os.path.expanduser("~/.local/elmer/bin/ElmerSolver"))
+                      else None)),
+        "openems": _shutil.which("openEMS") or _openems_py(),
+        # native binaries on PATH, or the OpenFOAM.app launcher (brew
+        # gerlero/openfoam) which wraps the whole toolchain
+        "openfoam": (_shutil.which("foamRun") or _shutil.which("simpleFoam")
+                     or _shutil.which("openfoam")),
     }
 
 
@@ -453,7 +473,10 @@ def _mesh_to_inp(out_inp, box=None, step=None, clmax=None):
     """Mesh a box (meters) or the largest solid of a STEP file to a 2nd-order
     tet mesh (C3D10), written as an Abaqus/CalculiX .inp with ELSET=PART.
     Returns (nodes, elements, pickedVolumeNote)."""
-    _gmsh.initialize()
+    _GMSH_LOCK.acquire()
+    # interruptible=False: skip gmsh's SIGINT handler — illegal off the main
+    # thread, and these meshing calls run inside the parallel sim executor.
+    _gmsh.initialize(interruptible=False)
     try:
         _gmsh.option.setNumber("General.Terminal", 0)
         _gmsh.model.add("part")
@@ -490,6 +513,7 @@ def _mesh_to_inp(out_inp, box=None, step=None, clmax=None):
         return n_nodes, n_elems, note
     finally:
         _gmsh.finalize()
+        _GMSH_LOCK.release()
 
 
 def _ccx_modal(workdir, mesh_inp, E, nu, rho, n_modes=12):
@@ -613,7 +637,36 @@ def enclosure_fea(req):
     }
 
 
-SIMS = [thermal, drop, structural3d, enclosure_fea, acoustic, rf, battery]
+def pdn(req):
+    """Rail decoupling AC impedance — REAL ngspice sweep of the network built
+    from the run's actual netlist + power budget (see sim_spice.py)."""
+    import sim_spice
+    return sim_spice.run(req)
+
+
+def cfd_thermal(req):
+    """Natural-convection CFD — REAL OpenFOAM buoyant solve of the device in
+    ambient air; computes the convection the 2D FEM assumes (see sim_cfd.py)."""
+    import sim_cfd
+    return sim_cfd.run(req)
+
+
+def cavity_acoustic(req):
+    """Cavity acoustic FEM — REAL Elmer wave-equation eigenanalysis of the
+    enclosure's internal air volume (see sim_acoustic.py)."""
+    import sim_acoustic
+    return sim_acoustic.run(req)
+
+
+def antenna_fdtd(req):
+    """Antenna FDTD — REAL openEMS full-wave solve of a reference 2.4 GHz
+    monopole against the run's actual board outline (see sim_em.py)."""
+    import sim_em
+    return sim_em.run(req)
+
+
+SIMS = [thermal, drop, structural3d, enclosure_fea, pdn, cfd_thermal,
+        cavity_acoustic, antenna_fdtd, acoustic, rf, battery]
 
 
 def _json_default(o):
@@ -628,14 +681,20 @@ def _json_default(o):
 
 def main():
     req = json.load(sys.stdin)
-    results = []
-    for fn in SIMS:
+
+    # The high-fidelity passes are subprocess-bound (ccx, ngspice, OpenFOAM,
+    # docker solvers) — run them concurrently so the stage's wall time is the
+    # slowest solver, not the sum. Result order stays SIMS order.
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _guarded(fn):
         try:
-            r = fn(req)
-            if r:
-                results.append(r)
+            return fn(req)
         except Exception as e:
-            results.append({"sim": fn.__name__, "error": str(e)[:160]})
+            return {"sim": fn.__name__, "error": str(e)[:160]}
+
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        results = [r for r in ex.map(_guarded, SIMS) if r]
     # femAvailable: the advertised scikit-fem path was importable AND no FEM
     # solve failed this run. Any import failure or per-sim FEM exception lands
     # in femErrors (and the affected result's note says it degraded), so a

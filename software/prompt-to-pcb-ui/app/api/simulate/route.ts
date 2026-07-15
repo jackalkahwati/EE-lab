@@ -11,8 +11,14 @@
  *    fundamental frequency (shock/flex robustness).
  *  - structural3d / enclosure_fea: REAL 3D FEA (gmsh C3D10 mesh + CalculiX
  *    modal solve) — the board slab and the run's actual Onshape STEP.
- *  - acoustic/rf: still analytic/surrogate — a real acoustic FEM (Elmer) and
- *    antenna FDTD (openEMS) are the install-gated next-fidelity upgrades.
+ *  - pdn:     REAL SPICE (ngspice) — AC impedance sweep of the rail decoupling
+ *    network built from the run's netlist + power budget.
+ *  - cfd thermal: REAL CFD (OpenFOAM buoyantBoussinesqSimpleFoam) — natural
+ *    convection around the device; computes the h the 2D FEM assumes.
+ *  - cavity acoustic FEM: REAL Elmer wave-equation eigenanalysis of the
+ *    enclosure air cavity (upgrades the sealed-box estimate).
+ *  - rf: still a link-budget surrogate — antenna FDTD (openEMS) is the
+ *    install-gated next-fidelity upgrade.
  * The runner never fabricates a metric it can't compute; each result carries its
  * own tool + fidelity, so the panel shows exactly how each number was produced.
  */
@@ -23,14 +29,16 @@ import { loadGroundBoard } from '@/lib/ground-board'
 import type { ProductSpec } from '@/lib/product-spec'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 120
+// High-fidelity solvers (OpenFOAM CFD, docker-hosted Elmer/openEMS) run
+// concurrently inside run_sim.py but the slowest can take ~2 min cold.
+export const maxDuration = 300
 
 const RUN_ID = /^run-[A-Za-z0-9._-]{1,128}$/
 
 function runSim(req: Record<string, unknown>): Promise<any> {
   const script = path.join(process.cwd(), '..', '..', 'tools', 'sim', 'run_sim.py')
   return new Promise((resolve, reject) => {
-    const py = spawn(process.env.FL_PYTHON || 'python3', [script], { timeout: 100_000 })
+    const py = spawn(process.env.FL_PYTHON || 'python3', [script], { timeout: 280_000 })
     let out = '', err = ''
     py.stdout.on('data', (d) => (out += d))
     py.stderr.on('data', (d) => (err += d))
@@ -56,6 +64,7 @@ export async function POST(req: Request) {
     let boardMm: { w: number; h: number } | undefined
     let layerCount: number | undefined
     let enclosureStep: string | undefined
+    let pdn: Record<string, unknown> | undefined
     if (runId && RUN_ID.test(runId)) {
       // real Onshape CAD (when the mechanical stage has run) → 3D FEA target
       const stepPath = path.join(process.cwd(), 'public', 'runs', runId, 'mechanical', 'enclosure.step')
@@ -69,6 +78,39 @@ export async function POST(req: Request) {
         if (typeof gb.layers === 'number' && isFinite(gb.layers) && gb.layers > 0)
           layerCount = gb.layers
       }
+      // PDN inputs for the REAL ngspice rail-impedance sweep: per-rail load
+      // currents from the run's power budget + the decoupling caps the
+      // netlist actually places on each rail. Absent artifacts → the pdn sim
+      // skips itself; it never invents a network.
+      try {
+        const dataDir = path.join(process.cwd(), 'public', 'runs', runId, 'data')
+        const pb = JSON.parse(await fs.readFile(path.join(dataDir, 'power-budget.json'), 'utf8'))
+        const rails = Object.entries(pb?.rails ?? {}).map(([name, r]) => ({
+          name,
+          worstMa: typeof (r as any)?.worst_ma === 'number' ? (r as any).worst_ma : 0,
+        }))
+        // Fall back to the inlet budget for the input rail when its per-rail
+        // loads list is empty (the 5 V inlet current is still real demand).
+        const inlet = pb?.inlet_5v?.worst_ma
+        for (const r of rails)
+          if (r.worstMa === 0 && /5/.test(r.name) && typeof inlet === 'number') r.worstMa = inlet
+        const ato = JSON.parse(await fs.readFile(path.join(dataDir, 'ato.json'), 'utf8'))
+        const net: unknown = Array.isArray(ato)
+          ? ato.find((f: any) => f?.name === 'netlist.txt')?.content
+          : undefined
+        const railCaps: { rail: string; ref: string }[] = []
+        if (typeof net === 'string') {
+          for (const line of net.split('\n')) {
+            const m = line.match(/^(\S+)\s+(.+)$/)
+            if (!m || !rails.some((r) => r.name === m[1])) continue
+            for (const pin of m[2].split(',')) {
+              const cm = pin.trim().match(/^(C\d+)\./)
+              if (cm) railCaps.push({ rail: m[1], ref: cm[1] })
+            }
+          }
+        }
+        if (rails.length) pdn = { rails, railCaps }
+      } catch { /* run has no power budget / netlist artifacts */ }
     }
 
     const p = spec.budgets?.power ?? {}
@@ -97,6 +139,7 @@ export async function POST(req: Request) {
       runtimeTargetHours: p.runtimeHours,
       sleepUw, dutyCycle, dutyCycleAssumed,
       enclosureStep,
+      pdn,
     }
 
     const out = await runSim(simReq)
