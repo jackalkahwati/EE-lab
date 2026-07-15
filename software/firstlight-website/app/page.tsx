@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { TryCompose } from "./try-compose";
+import { MfgVignette, SourcingVignette, ValidationVignette } from "./vignettes";
 
 const COMPOSE_URL =
   process.env.NEXT_PUBLIC_COMPOSE_URL || "http://localhost:4500";
@@ -99,19 +100,14 @@ export default function Home() {
         <div className="container hero-shot">
           <div className="shot-stage">
             <WindowFrame title="FirstLight Compose">
-              {/* A real pipeline run at 4x, silent loop — motion like the
-                  cursor.com hero, but every frame is an actual Compose run. */}
-              <video
-                autoPlay
-                muted
-                loop
-                playsInline
-                preload="metadata"
-                poster="/media/compose-loop-poster.jpg"
-                aria-label="A real Compose pipeline run at four times speed, from prompt to routed board, enclosure, simulations and manufacturing docs"
-              >
-                <source src="/media/compose-loop.mp4" type="video/mp4" />
-              </video>
+              <Image
+                src="/media/compose-hero.jpg"
+                alt="The Compose workspace, with a circular PCBA rendered in 3D, every pipeline discipline green, live logs streaming in the terminal"
+                width={1600}
+                height={914}
+                sizes="(max-width: 1248px) calc(100vw - 48px), 1152px"
+                priority
+              />
             </WindowFrame>
           </div>
         </div>
@@ -192,34 +188,16 @@ export default function Home() {
           </div>
           <div className="split-media">
             <WindowFrame title="Manufacturing package">
-              <Image
-                src="/media/doc-mfg.jpg"
-                alt="A generated manufacturing package in Compose: SMT and reflow assembly notes, power and thermal constraints, DFM checks, NPI and yield drivers, and a cost and supply-chain breakdown"
-                width={1600}
-                height={980}
-                sizes="(max-width: 900px) calc(100vw - 48px), 620px"
-              />
+              <MfgVignette />
             </WindowFrame>
           </div>
         </div>
         <div className="container doc-row">
           <WindowFrame title="Sourcing plan">
-            <Image
-              src="/media/doc-sourcing.jpg"
-              alt="A generated sourcing plan in Compose, listing real parts with lead-time and substitution risks called out"
-              width={1600}
-              height={980}
-              sizes="(max-width: 900px) calc(100vw - 48px), 564px"
-            />
+            <SourcingVignette />
           </WindowFrame>
           <WindowFrame title="FL-1 validation plan">
-            <Image
-              src="/media/doc-validation.jpg"
-              alt="A generated FL-1 validation test plan in Compose, with functional, electrical, and reliability coverage and the remaining gaps flagged"
-              width={1600}
-              height={980}
-              sizes="(max-width: 900px) calc(100vw - 48px), 564px"
-            />
+            <ValidationVignette />
           </WindowFrame>
         </div>
       </section>

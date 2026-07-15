@@ -1078,3 +1078,112 @@ p {
 .doc-list li::marker {
   color: var(--accent);
 }
+
+/* ---- animated doc vignettes (rebuilt zoom-ins of real run output) ---- */
+.vignette {
+  background: var(--bg-raised);
+  padding: 26px 26px 20px;
+  min-height: 330px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 0.9rem;
+}
+.vg-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.vg-title {
+  font-weight: 600;
+  color: var(--heading);
+  letter-spacing: -0.01em;
+}
+.vg-kicker {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+}
+.vg-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 9px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  color: var(--text);
+  opacity: 0;
+  transform: translateY(7px);
+  animation: vg-in 11s ease-out infinite;
+}
+.vg-row b {
+  font-weight: 600;
+  color: var(--heading);
+}
+.vg-row-warn {
+  border-color: rgba(232, 163, 61, 0.35);
+  background: rgba(232, 163, 61, 0.06);
+}
+.vg-chip {
+  flex-shrink: 0;
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.03em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.vg-chip-ok {
+  color: #7ec699;
+  background: rgba(126, 198, 153, 0.12);
+}
+.vg-chip-warn {
+  color: var(--accent);
+  background: rgba(232, 163, 61, 0.14);
+}
+.vg-chip-dim {
+  color: var(--text-dim);
+  background: var(--bg-panel);
+  border: 1px solid var(--line-soft);
+}
+.vg-term {
+  margin-top: auto;
+  padding-top: 14px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+.vg-term-line::before {
+  content: "› ";
+  color: var(--accent);
+}
+.vg-caret {
+  width: 7px;
+  height: 13px;
+  margin-left: 4px;
+  background: var(--text-dim);
+  animation: vg-blink 1.1s steps(1) infinite;
+}
+@keyframes vg-in {
+  0% { opacity: 0; transform: translateY(7px); }
+  4% { opacity: 1; transform: translateY(0); }
+  90% { opacity: 1; transform: translateY(0); }
+  97% { opacity: 0; transform: translateY(-4px); }
+  100% { opacity: 0; transform: translateY(7px); }
+}
+@keyframes vg-blink {
+  0%, 55% { opacity: 1; }
+  56%, 100% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vg-row { animation: none; opacity: 1; transform: none; }
+  .vg-caret { animation: none; }
+}
