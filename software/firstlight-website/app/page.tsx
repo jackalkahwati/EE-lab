@@ -27,6 +27,22 @@ const OUTPUTS = [
   ["Manufacturing, sourcing & test", "An NPI package sized to your volume, a sourcing plan with real parts and lead-time risks called out, and an FL-1 validation test plan with the gaps flagged, never papered over."],
 ];
 
+// Real third-party integrations in the pipeline: [slug, name, role, iconW, iconH]
+const TOOLCHAIN: [string, string, string, number, number][] = [
+  ["onshape", "Onshape", "enclosure CAD", 128, 128],
+  ["kicad", "KiCad", "DRC signoff", 128, 128],
+  ["freerouting", "freerouting", "autorouting", 128, 128],
+  ["tscircuit", "tscircuit", "board build", 128, 128],
+  ["atopile", "atopile", "hardware source", 128, 128],
+  ["scipy", "SciPy", "FEA & physics", 64, 64],
+  ["digikey", "DigiKey", "live sourcing", 32, 32],
+  ["mouser", "Mouser", "live sourcing", 128, 128],
+  ["octopart", "Octopart", "part intelligence", 128, 128],
+  ["pcbway", "PCBWay", "fab quotes", 128, 37],
+  ["jlcpcb", "JLCPCB", "fab quotes", 48, 48],
+  ["macrofab", "MacroFab", "assembly quotes", 128, 128],
+];
+
 const FL1_INSTRUMENTS = [
   "Programmable multi-rail power & electronic load",
   "Oscilloscope, logic analyzer & DAQ",
@@ -113,6 +129,44 @@ export default function Home() {
           </div>
         </div>
       </header>
+
+      {/* Toolchain — real third-party integrations */}
+      <section className="toolchain" aria-label="Tools and services Compose integrates with">
+        <div className="container center">
+          <p className="kicker">Integrations</p>
+          <p className="toolchain-lede">
+            Every run drives the same tools professional hardware teams
+            already trust.
+          </p>
+          <ul className="toolchain-grid">
+            {TOOLCHAIN.map(([slug, name, role, w, h]) => (
+              <li
+                key={slug}
+                className={slug === "pcbway" ? "tool-chip tool-chip-wide" : "tool-chip"}
+              >
+                <span className="tool-tile">
+                  <Image
+                    src={`/media/integrations/${slug}.png`}
+                    alt={`${name} logo`}
+                    width={w}
+                    height={h}
+                  />
+                </span>
+                <span className="tool-meta">
+                  <strong>{name}</strong>
+                  <small>{role}</small>
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="toolchain-note">
+            Fab quotes come from PCBWay and JLCPCB&apos;s own price APIs.
+            Sourcing checks live distributor stock. FEA is meshed with gmsh
+            and solved with CalculiX, alongside scikit-fem thermal and modal
+            passes. Real tools, real checks.
+          </p>
+        </div>
+      </section>
 
       {/* Problem */}
       <section className="section section-dark">
