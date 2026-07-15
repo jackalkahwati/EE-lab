@@ -4,11 +4,11 @@ import Link from "next/link";
 import { ReserveButton } from "../reserve-button";
 
 export const metadata: Metadata = {
-  title: "FirstLight FL-1 — Autonomous hardware bring-up",
+  title: "FirstLight FL-1 | Autonomous hardware bring-up",
   description:
     "FL-1 is a single platform that grows with your lab. Bring-up, test, and validation in the box, expandable with tool heads and software packs. Reserve yours.",
   openGraph: {
-    title: "FirstLight FL-1 — Autonomous hardware bring-up",
+    title: "FirstLight FL-1 | Autonomous hardware bring-up",
     description:
       "Insert an assembled PCB. FL-1 powers it up, probes it, and produces an evidence-based diagnosis.",
     images: [
@@ -59,7 +59,7 @@ const ROI = [
     "A scope, logic analyzer, DMM, DAQ, electronic load, programmable supplies, a switch matrix, and a probe station is $40k to $80k of equipment that then sits idle between uses. FL-1 is one machine that does the work of all of them.",
   ],
   [
-    "Replaces the expensive thing: engineer time",
+    "Replaces the expensive thing, engineer time",
     "Board bring-up is days to weeks of a senior hardware engineer, per revision. A team doing regular spins burns a hundred engineer-days a year on it. FL-1 compresses each bring-up from weeks to hours.",
   ],
   [

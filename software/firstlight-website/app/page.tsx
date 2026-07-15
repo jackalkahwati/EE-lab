@@ -18,12 +18,12 @@ const PIPELINE = [
 ];
 
 const OUTPUTS = [
-  ["Manufacturable fab package", "Gerbers, drill, pick-and-place, BOM — routed and gated on real KiCad DRC. A board only goes green when the checks actually pass."],
-  ["Enclosure CAD", "A two-shell enclosure generated to match the industrial design — bosses aligned to the board's mounting holes, fit-checked, exported as real STEP."],
-  ["Boards shaped to the product", "A round product gets a circular board with mounting holes on a bolt circle — the PCB follows the enclosure, not the other way around."],
-  ["Physics simulation", "Real finite-element thermal and modal solves (scikit-fem), honestly labeled — a design that runs hot fails in simulation before anyone tools a mold."],
-  ["Firmware", "A compiled firmware image that targets the board that actually shipped — peripheral map, power states, USB reporting."],
-  ["Manufacturing, sourcing & test", "An NPI package sized to your volume, a sourcing plan with real parts and lead-time risks called out, and an FL-1 validation test plan with the gaps flagged — never papered over."],
+  ["Manufacturable fab package", "Gerbers, drill, pick-and-place, and BOM, routed and gated on real KiCad DRC. A board only goes green when the checks actually pass."],
+  ["Enclosure CAD", "A two-shell enclosure generated to match the industrial design, with bosses aligned to the board's mounting holes, fit-checked and exported as real STEP."],
+  ["Boards shaped to the product", "A round product gets a circular board with mounting holes on a bolt circle. The PCB follows the enclosure, not the other way around."],
+  ["Physics simulation", "Real finite-element thermal and modal solves with scikit-fem, honestly labeled. A design that runs hot fails in simulation before anyone tools a mold."],
+  ["Firmware", "A compiled firmware image that targets the board that actually shipped, with the peripheral map, power states, and USB reporting."],
+  ["Manufacturing, sourcing & test", "An NPI package sized to your volume, a sourcing plan with real parts and lead-time risks called out, and an FL-1 validation test plan with the gaps flagged, never papered over."],
 ];
 
 const FL1_INSTRUMENTS = [
@@ -84,7 +84,7 @@ export default function Home() {
             </p>
             <ul className="run-stats hero-stats">
               <li>
-                <strong>0</strong> DRC errors, gated — never assumed
+                <strong>0</strong> DRC errors, gated and never assumed
               </li>
               <li>
                 <strong>8</strong> engineering disciplines, one run
@@ -100,7 +100,7 @@ export default function Home() {
             <WindowFrame title="FirstLight Compose">
               <Image
                 src="/media/compose-hero.jpg"
-                alt="The Compose workspace: a circular PCBA rendered in 3D, every pipeline discipline green, live logs streaming in the terminal"
+                alt="The Compose workspace, with a circular PCBA rendered in 3D, every pipeline discipline green, live logs streaming in the terminal"
                 width={1600}
                 height={914}
                 sizes="(max-width: 1248px) calc(100vw - 48px), 1152px"
@@ -123,15 +123,15 @@ export default function Home() {
             Schematic ideas are cheap. Turning one into routed copper, an
             enclosure that actually fits it, firmware for the board that
             shipped, and the manufacturing, sourcing, and test plans to build
-            it still means weeks across five disciplines — or a contract team.
+            it still means weeks across five disciplines, or a contract team.
             Compose closes that gap in a single continuous run, and it does it
-            honestly: every stage is gated on real checks — KiCad DRC, geometric
-            fit, finite-element physics — and a gate that fails says so instead
-            of shipping a green lie.
+            honestly. Every stage is gated on real checks, from KiCad DRC to
+            geometric fit to finite-element physics, and a gate that fails says
+            so instead of shipping a green lie.
           </p>
           <p className="statement">
             Describe it. Compose builds it.
-            <span className="accent"> A manufacturable product — board, enclosure, firmware, and the plans to ship it.</span>
+            <span className="accent"> A manufacturable product. Board, enclosure, firmware, and the plans to ship it.</span>
           </p>
         </div>
       </section>
@@ -149,12 +149,12 @@ export default function Home() {
             ))}
           </div>
           <p className="how-lede">
-            A short design interview fills in what matters — size, volume,
-            connectivity — then the full pipeline runs in front of you, live
+            A short design interview fills in what matters, like size, volume,
+            and connectivity. Then the full pipeline runs in front of you, live
             logs streaming, gated at every stage. The industrial design drives
             the mechanical CAD; the board takes the enclosure&apos;s shape; the
             firmware targets the board that shipped. Nothing goes green unless
-            its real checks pass — and when physics says a design runs hot,
+            its real checks pass. When physics says a design runs hot,
             you find out before tooling, not after.
           </p>
           <div className="outputs-grid">
@@ -172,13 +172,13 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Beyond the board — generated docs */}
+      {/* Beyond the board, generated docs */}
       <section className="section" id="docs">
         <div className="container split">
           <div className="split-copy">
             <p className="statement statement-xl">
               It doesn&apos;t stop at the board.
-              <span className="accent"> Manufacturing, sourcing, and test plans are generated from the same design — readable, honest, and flagged where an engineer is still needed.</span>
+              <span className="accent"> Manufacturing, sourcing, and test plans are generated from the same design. Readable, honest, and flagged where an engineer is still needed.</span>
             </p>
             <a href={COMPOSE_URL} className="arrow-link">
               Open Compose &rarr;
@@ -225,7 +225,7 @@ export default function Home() {
           <h2>Start free. Go to production with us.</h2>
           <p className="pricing-note">
             Evaluate Compose free, every account gets the full design pipeline.
-            Production teams license the platform annually: board-program
+            Production teams license the platform annually, with board-program
             bundles, seats for the whole lab, and support that answers.
           </p>
           <div className="pricing-grid">
@@ -317,10 +317,10 @@ export default function Home() {
           <h2>First board, first light.</h2>
           <p>
             FL-1 in motion, a CAD-rendered concept film from the production
-            design model: canopy, fixture drawer, and an autonomous probing run.
+            design model. Canopy, fixture drawer, and an autonomous probing run.
           </p>
           <div className="demo-frame">
-            <WindowFrame title="FL-1 — concept film">
+            <WindowFrame title="FL-1 concept film">
               <video
                 controls
                 playsInline
