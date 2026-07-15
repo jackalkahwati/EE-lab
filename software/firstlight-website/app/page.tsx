@@ -34,7 +34,9 @@ const TOOLCHAIN: [string, string, string, number, number][] = [
   ["freerouting", "freerouting", "autorouting", 128, 128],
   ["tscircuit", "tscircuit", "board build", 128, 128],
   ["atopile", "atopile", "hardware source", 128, 128],
-  ["scipy", "SciPy", "FEA & physics", 64, 64],
+  ["scipy", "SciPy", "thermal & modal FEM", 64, 64],
+  ["gmsh", "gmsh", "FEA meshing", 128, 128],
+  ["calculix", "CalculiX", "3D FEA solve", 0, 0],
   ["digikey", "DigiKey", "live sourcing", 32, 32],
   ["mouser", "Mouser", "live sourcing", 128, 128],
   ["octopart", "Octopart", "part intelligence", 128, 128],
@@ -145,12 +147,18 @@ export default function Home() {
                 className={slug === "pcbway" ? "tool-chip tool-chip-wide" : "tool-chip"}
               >
                 <span className="tool-tile">
-                  <Image
-                    src={`/media/integrations/${slug}.png`}
-                    alt={`${name} logo`}
-                    width={w}
-                    height={h}
-                  />
+                  {w > 0 ? (
+                    <Image
+                      src={`/media/integrations/${slug}.png`}
+                      alt={`${name} logo`}
+                      width={w}
+                      height={h}
+                    />
+                  ) : (
+                    <span className="tool-glyph" aria-hidden="true">
+                      ccx
+                    </span>
+                  )}
                 </span>
                 <span className="tool-meta">
                   <strong>{name}</strong>
@@ -162,8 +170,9 @@ export default function Home() {
           <p className="toolchain-note">
             Fab quotes come from PCBWay and JLCPCB&apos;s own price APIs.
             Sourcing checks live distributor stock. FEA is meshed with gmsh
-            and solved with CalculiX, alongside scikit-fem thermal and modal
-            passes. Real tools, real checks.
+            and solved with CalculiX. CFD, acoustic, and EM passes aren&apos;t
+            integrated yet, and the pipeline says so instead of pretending.
+            Real tools, real checks.
           </p>
         </div>
       </section>

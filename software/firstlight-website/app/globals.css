@@ -409,7 +409,8 @@ p {
   flex-wrap: wrap;
   justify-content: center;
   gap: 18px 30px;
-  margin-top: 40px;
+  max-width: 1000px;
+  margin: 40px auto 0;
 }
 
 .tool-chip {
@@ -434,6 +435,14 @@ p {
   width: 26px;
   height: 26px;
   object-fit: contain;
+}
+
+.tool-glyph {
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #1c1c1c;
 }
 
 .tool-chip-wide .tool-tile {
