@@ -1187,3 +1187,18 @@ p {
   .vg-row { animation: none; opacity: 1; transform: none; }
   .vg-caret { animation: none; }
 }
+
+.vg-typed {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--heading);
+}
+.iterate-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-top: 40px;
+}
+@media (max-width: 900px) {
+  .iterate-grid { grid-template-columns: 1fr; }
+}

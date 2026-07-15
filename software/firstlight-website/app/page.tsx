@@ -1,7 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { TryCompose } from "./try-compose";
-import { MfgVignette, SourcingVignette, ValidationVignette } from "./vignettes";
+import { MfgVignette, SourcingVignette, ValidationVignette, EditLoopVignette } from "./vignettes";
 
 const COMPOSE_URL =
   process.env.NEXT_PUBLIC_COMPOSE_URL || "http://localhost:4500";
@@ -47,6 +47,7 @@ export default function Home() {
           </a>
           <div className="nav-center">
             <a href="#how">How it works</a>
+            <a href="#iterate">Iterate</a>
             <a href="#pricing">Pricing</a>
             <Link href="/fl1">FL-1 machine</Link>
             <Link href="/developers">Developers</Link>
@@ -199,6 +200,45 @@ export default function Home() {
           <WindowFrame title="FL-1 validation plan">
             <ValidationVignette />
           </WindowFrame>
+        </div>
+      </section>
+
+      {/* Iterate — the edit loop */}
+      <section className="section" id="iterate">
+        <div className="container split">
+          <div className="split-media">
+            <WindowFrame title="Targeted revision">
+              <EditLoopVignette />
+            </WindowFrame>
+          </div>
+          <div className="split-copy">
+            <p className="statement statement-xl">
+              Version one is the start, not the answer.
+              <span className="accent"> Describe a change in plain language. Compose routes it, rebuilds only what it touches, and shows you the diff.</span>
+            </p>
+            <p>
+              Every build is a revision of a durable product. Pin the decisions
+              you want kept, a part, a dimension, a budget, and every rebuild
+              must keep them. Pins are verified against the built design, never
+              just trusted.
+            </p>
+          </div>
+        </div>
+        <div className="container">
+          <div className="iterate-grid">
+            <div className="output-card">
+              <h3>A work queue, not a report</h3>
+              <p>Every honest flag the pipeline raises, a failed simulation, an unspecified part, a fit risk, becomes an actionable item. Click it, answer one question, and the fix routes back through the pipeline.</p>
+            </div>
+            <div className="output-card">
+              <h3>Built for the whole team</h3>
+              <p>Share a product read-only with comments anchored to the exact artifact, the fit check, a BOM line, a thermal result. Request approval on a revision and it lands in the enterprise console with evidence attached.</p>
+            </div>
+            <div className="output-card">
+              <h3>Hand edits round-trip</h3>
+              <p>Export the STEP or the KiCad board, edit it by hand, and import it back as a revision. Compose strips exactly the claims your edit invalidated, and nothing regenerates over your work.</p>
+            </div>
+          </div>
         </div>
       </section>
 

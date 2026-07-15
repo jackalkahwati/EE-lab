@@ -116,3 +116,38 @@ export function ValidationVignette() {
     </div>
   );
 }
+
+export function EditLoopVignette() {
+  return (
+    <div className="vignette" aria-label="Rebuilt zoom of a targeted revision in Compose, content from a real edit">
+      <div className="vg-head">
+        <span className="vg-title">Revise · Desk Presence Puck</span>
+        <Chip tone="dim">rev 1 → rev 2</Chip>
+      </div>
+      <Row i={1}>
+        <span className="vg-typed">&ldquo;reduce the enclosure height by 2 mm&rdquo;</span>
+        <Chip tone="dim">routed</Chip>
+      </Row>
+      <Row i={2}>
+        <span>re-runs mechanical, simulation · everything else stays current</span>
+        <Chip tone="ok">targeted</Chip>
+      </Row>
+      <Row i={3}>
+        <span>mechanical · fresh CAD, fit checked against the real board</span>
+        <Chip tone="ok">rebuilt</Chip>
+      </Row>
+      <Row i={4}>
+        <span>electronics, firmware, docs · inputs unchanged, proven by hash</span>
+        <Chip tone="ok">reused</Chip>
+      </Row>
+      <Row i={5}>
+        <span>rev 2 diff · enclosure height 22 → 20 mm, board untouched</span>
+        <Chip tone="ok">reviewable</Chip>
+      </Row>
+      <div className="vg-term">
+        <span className="vg-term-line">targeted revision complete · minutes, not a full rebuild</span>
+        <span className="vg-caret" aria-hidden="true" />
+      </div>
+    </div>
+  );
+}
