@@ -86,9 +86,14 @@ export function MechanicalStage({ spec, runId, onBuilt }: { spec: ProductSpec | 
           <div className="text-[13px] font-semibold text-foreground">{res.part}</div>
           {runId && (
             <div>
-              <div className="mb-1 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">final assembly — populated board + Li-ion cell in the enclosure (drag to rotate)</div>
+              <div className="mb-1 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
+                {res.gltfUrl
+                  ? 'final assembly — real board seated in the real enclosure, seating depth approximate (drag to rotate)'
+                  : 'final assembly — populated board in an approximate shell (drag to rotate)'}
+              </div>
               <div className="mx-auto h-[32vh] max-w-2xl overflow-hidden rounded-md border border-border bg-[#0a0a0a]">
-                <MechanicalAssembly basePath={`/runs/${runId}/board`} />
+                <MechanicalAssembly basePath={`/runs/${runId}/board`} enclosureUrl={res.gltfUrl}
+                  hasBattery={(spec?.budgets?.power?.batteryMah ?? 0) > 0} />
               </div>
             </div>
           )}

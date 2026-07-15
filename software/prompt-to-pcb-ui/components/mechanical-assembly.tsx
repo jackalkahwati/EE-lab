@@ -1,17 +1,21 @@
 'use client'
 
 /**
- * Final-product assembly viewer — the populated chip-scale PCBA (loaded from the
- * board3d GLB) sitting inside the generated enclosure, with the Li-ion cell. The
- * enclosure is a translucent shell sized from the real board's bounding box (walls
- * + head/tail room for components and the cell), so you see the whole product
- * assembled, not just the bare board. Interactive (orbit). Approximate shell for
- * visualization — the tolerance-validated CAD is the downloadable STEP.
+ * Final-product assembly viewer — the populated chip-scale PCBA (board3d GLB)
+ * seated inside the REAL Onshape-exported enclosure glTF (translucent), so the
+ * assembly shows the actual generated CAD, not an invented box. Seating depth
+ * is approximate (centered in the cavity) — the honest fit gate stays the
+ * fitCheck + STEP. A battery block is drawn ONLY when the spec has one.
+ * Fallback for legacy runs without a glTF: the old bbox-derived shell.
  */
 import { useEffect, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 
-export function MechanicalAssembly({ basePath }: { basePath: string }) {
+export function MechanicalAssembly({ basePath, enclosureUrl, hasBattery }: {
+  basePath: string
+  enclosureUrl?: string | null
+  hasBattery?: boolean
+}) {
   const mountRef = useRef<HTMLDivElement>(null)
   const [phase, setPhase] = useState<'loading' | 'ready' | 'error'>('loading')
   const [err, setErr] = useState('')
@@ -56,40 +60,74 @@ export function MechanicalAssembly({ basePath }: { basePath: string }) {
         const gap = foot * 0.03                                   // component/cell clearance
 
         const asm = new THREE.Group()
-        // board sits with its underside a wall+cell above the enclosure floor
-        const boardLiftY = (box.min.y) // keep board where it is; build shell around it
         asm.add(boardGrp)
 
-        // Li-ion cell: a dark box under the board
-        const cellW = sz.x * 0.62, cellD = sz.z * 0.62
-        const cellMesh = new THREE.Mesh(
-          new THREE.BoxGeometry(cellW, cell, cellD),
-          new THREE.MeshStandardMaterial({ color: 0x2b2f36, metalness: 0.5, roughness: 0.45 }))
-        cellMesh.position.set(c.x, box.min.y - gap - cell / 2, c.z)
-        cellMesh.castShadow = true; cellMesh.receiveShadow = true
-        asm.add(cellMesh)
+        // Battery: drawn ONLY when the spec actually includes one — inventing
+        // a Li-ion cell under a USB-powered product was misleading.
+        const contentBottom = hasBattery ? box.min.y - gap - cell : box.min.y
+        if (hasBattery) {
+          const cellW = sz.x * 0.62, cellD = sz.z * 0.62
+          const cellMesh = new THREE.Mesh(
+            new THREE.BoxGeometry(cellW, cell, cellD),
+            new THREE.MeshStandardMaterial({ color: 0x2b2f36, metalness: 0.5, roughness: 0.45 }))
+          cellMesh.position.set(c.x, box.min.y - gap - cell / 2, c.z)
+          cellMesh.castShadow = true; cellMesh.receiveShadow = true
+          asm.add(cellMesh)
+        }
 
-        // translucent enclosure shell wrapping board + cell
-        const encW = sz.x + wall * 2, encD = sz.z + wall * 2
-        const innerBottom = box.min.y - gap - cell - gap
-        const innerTop = box.max.y + gap
-        const encH = (innerTop - innerBottom) + wall * 2
-        const encCenterY = (innerTop + innerBottom) / 2
-        const shell = new THREE.Mesh(
-          new THREE.BoxGeometry(encW, encH, encD),
-          new THREE.MeshPhysicalMaterial({
-            color: 0x9fb4cc, transparent: true, opacity: 0.16,
-            roughness: 0.15, metalness: 0, transmission: 0.6,
-            side: THREE.DoubleSide, depthWrite: false,
-          }))
-        shell.position.set(c.x, encCenterY, c.z)
-        asm.add(shell)
-        // crisp edge lines so the enclosure reads clearly through the translucency
-        const edges = new THREE.LineSegments(
-          new THREE.EdgesGeometry(new THREE.BoxGeometry(encW, encH, encD)),
-          new THREE.LineBasicMaterial({ color: 0xbcd0e6, transparent: true, opacity: 0.5 }))
-        edges.position.copy(shell.position)
-        asm.add(edges)
+        let realEnclosure = false
+        if (enclosureUrl) {
+          // TRUE assembly: the real Onshape enclosure glTF, translucent so the
+          // board reads through it. Both models are in meters (glTF convention),
+          // so alignment is pure translation: center the enclosure on the board
+          // in XZ, and rest the content a floor-margin above the cavity bottom
+          // (seating depth approximate — the plan's boss heights aren't in the
+          // exported mesh).
+          try {
+            const encRes = await fetch(enclosureUrl)
+            if (!encRes.ok) throw new Error(`enclosure HTTP ${encRes.status}`)
+            const encBuf = await encRes.arrayBuffer()
+            const encGltf = await new GLTFLoader().parseAsync(encBuf, '')
+            const enc = encGltf.scene
+            const encMat = new THREE.MeshPhysicalMaterial({
+              color: 0x93a0ae, transparent: true, opacity: 0.22,
+              roughness: 0.3, metalness: 0, side: THREE.DoubleSide, depthWrite: false,
+            })
+            enc.traverse((o: any) => { if (o.isMesh) { o.material = encMat; o.castShadow = false; o.renderOrder = 2 } })
+            const encBox = new THREE.Box3().setFromObject(enc)
+            const encSz = encBox.getSize(new THREE.Vector3())
+            const encC = encBox.getCenter(new THREE.Vector3())
+            enc.position.x += c.x - encC.x
+            enc.position.z += c.z - encC.z
+            enc.position.y += (contentBottom - encSz.y * 0.15) - encBox.min.y
+            asm.add(enc)
+            realEnclosure = true
+          } catch { /* fall through to the approximate shell below */ }
+        }
+
+        if (!realEnclosure) {
+          // Legacy fallback (no glTF export): bbox-derived translucent shell.
+          const encW = sz.x + wall * 2, encD = sz.z + wall * 2
+          const innerBottom = contentBottom - gap
+          const innerTop = box.max.y + gap
+          const encH = (innerTop - innerBottom) + wall * 2
+          const encCenterY = (innerTop + innerBottom) / 2
+          const shell = new THREE.Mesh(
+            new THREE.BoxGeometry(encW, encH, encD),
+            new THREE.MeshPhysicalMaterial({
+              color: 0x9fb4cc, transparent: true, opacity: 0.16,
+              roughness: 0.15, metalness: 0, transmission: 0.6,
+              side: THREE.DoubleSide, depthWrite: false,
+            }))
+          shell.position.set(c.x, encCenterY, c.z)
+          asm.add(shell)
+          // crisp edge lines so the enclosure reads clearly through the translucency
+          const edges = new THREE.LineSegments(
+            new THREE.EdgesGeometry(new THREE.BoxGeometry(encW, encH, encD)),
+            new THREE.LineBasicMaterial({ color: 0xbcd0e6, transparent: true, opacity: 0.5 }))
+          edges.position.copy(shell.position)
+          asm.add(edges)
+        }
 
         scene.add(asm)
 
@@ -178,7 +216,7 @@ export function MechanicalAssembly({ basePath }: { basePath: string }) {
       mount?.__cleanup?.()
       if (renderer) { try { renderer.dispose(); renderer.domElement?.remove() } catch { /* */ } }
     }
-  }, [basePath])
+  }, [basePath, enclosureUrl, hasBattery])
 
   return (
     <div className="relative h-full w-full">
