@@ -99,14 +99,19 @@ export default function Home() {
         <div className="container hero-shot">
           <div className="shot-stage">
             <WindowFrame title="FirstLight Compose">
-              <Image
-                src="/media/compose-hero.jpg"
-                alt="The Compose workspace, with a circular PCBA rendered in 3D, every pipeline discipline green, live logs streaming in the terminal"
-                width={1600}
-                height={914}
-                sizes="(max-width: 1248px) calc(100vw - 48px), 1152px"
-                priority
-              />
+              {/* A real pipeline run at 4x, silent loop — motion like the
+                  cursor.com hero, but every frame is an actual Compose run. */}
+              <video
+                autoPlay
+                muted
+                loop
+                playsInline
+                preload="metadata"
+                poster="/media/compose-loop-poster.jpg"
+                aria-label="A real Compose pipeline run at four times speed, from prompt to routed board, enclosure, simulations and manufacturing docs"
+              >
+                <source src="/media/compose-loop.mp4" type="video/mp4" />
+              </video>
             </WindowFrame>
           </div>
         </div>
