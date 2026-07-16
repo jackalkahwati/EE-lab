@@ -10,7 +10,8 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
-import { llmHeaders } from '@/components/llm-settings'
+import { llmHeaders, selectedModelId } from '@/components/llm-settings'
+import { ModelSelector } from '@/components/model-selector'
 import { STAGE_DEFS, STAGE_PREFIX, type StageId, type StageState } from '@/lib/firstlight'
 import { Plus, Menu, Loader2, Check, X, Circle, Square, Pencil, AlertTriangle, Minus, Play } from 'lucide-react'
 import { boardIntentOf, disciplineRows, type ProductSpec } from '@/lib/product-spec'
@@ -242,9 +243,10 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
     setPhase('building'); setStages({}); setLogs([])
     const id = `run-${crypto.randomUUID()}`
     const payload = b64(JSON.stringify({ blocks: revSpec.blocks, boardClass: revSpec.boardClass }))
+    const mdl = selectedModelId() ? `&model=${encodeURIComponent(selectedModelId())}` : ''
     const url = `/api/pipeline/run?prompt=${encodeURIComponent(revSpec.request)}`
       + `&runId=${encodeURIComponent(id)}&compose=1&spec=${encodeURIComponent(payload)}`
-      + `&parent=${encodeURIComponent(activeRunId)}&revNote=${encodeURIComponent(revSpec.note || revSpec.request)}`
+      + `&parent=${encodeURIComponent(activeRunId)}&revNote=${encodeURIComponent(revSpec.note || revSpec.request)}${mdl}`
     const es = new EventSource(url); esRef.current = es
     es.onmessage = (e) => {
       const ev = JSON.parse(e.data) as Ev
@@ -272,7 +274,8 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
     const parent = reviseParentRef.current
     reviseParentRef.current = null
     const lineage = parent ? `&parent=${encodeURIComponent(parent)}&revNote=${encodeURIComponent(req.slice(0, 200))}` : ''
-    const base = `/api/pipeline/run?prompt=${encodeURIComponent(req)}&runId=${encodeURIComponent(id)}${lineage}`
+    const mdl = selectedModelId() ? `&model=${encodeURIComponent(selectedModelId())}` : ''
+    const base = `/api/pipeline/run?prompt=${encodeURIComponent(req)}&runId=${encodeURIComponent(id)}${lineage}${mdl}`
     const payload = b64(JSON.stringify({ blocks: bspec.blocks, boardClass: bspec.boardClass, ...(bspec.layers ? { layers: bspec.layers } : {}) }))
     const url = opts?.plan
       ? `${base}&plan=1`
@@ -847,10 +850,13 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
                     : phase === 'idle' ? 'Describe a product or a board…' : 'start a new thread with + New'}
             className="max-h-40 min-h-[60px] w-full resize-none overflow-y-auto bg-transparent text-[12px] leading-5 outline-none placeholder:text-muted-foreground disabled:opacity-50"
           />
-          <button type="button" onClick={submit} disabled={!typed.trim() || building || loading || phase === 'ready' || phase === 'revReady'}
-            className="self-end shrink-0 rounded-md bg-primary px-2.5 py-1 text-[12px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-40">
-            Send ↵
-          </button>
+          <div className="flex items-center justify-between gap-2">
+            <ModelSelector />
+            <button type="button" onClick={submit} disabled={!typed.trim() || building || loading || phase === 'ready' || phase === 'revReady'}
+              className="shrink-0 rounded-md bg-primary px-2.5 py-1 text-[12px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-40">
+              Send ↵
+            </button>
+          </div>
         </div>
       </div>
     </div>

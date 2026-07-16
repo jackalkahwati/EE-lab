@@ -32,10 +32,24 @@ import {
   sessionEmail,
 } from '@/lib/auth'
 import { hasByok } from '@/lib/byok'
+import { resolvePlanModel } from '@/lib/plan-llm'
 import { kicadCli, kicadPython } from '@/lib/toolchain'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 1800
+
+/** Forward the caller's identity/model/BYOK headers into an internal sub-call
+ *  (electronics-cs is invoked as a direct function call with a synthetic
+ *  Request) so plan routing resolves the SAME plan, model selection, and BYOK
+ *  there as it did here. Without this the sub-call would look anonymous. */
+function fwdHeaders(req: Request, base: Record<string, string>): Record<string, string> {
+  const h = { ...base }
+  for (const k of ['cookie', 'x-fl-model', 'x-llm-provider', 'x-llm-key']) {
+    const v = req.headers.get(k)
+    if (v) h[k] = v
+  }
+  return h
+}
 
 const KCLI = kicadCli()
 const KPY = kicadPython()
@@ -198,6 +212,15 @@ export async function GET(req: Request) {
       `Out of credits (${creditsAvailable(userRec)} left). Upgrade to Pro, buy a credit pack, or add your own model API key in settings to keep designing.`,
       { status: 402 },
     )
+  }
+  // Plan-gate the selected model: a free user picking a frontier model on
+  // platform credit is refused here (BYOK and admin bypass). resolvedModel also
+  // carries the credit multiplier used when the finished board is charged.
+  // The run is an EventSource GET (no custom headers), so the selected model
+  // rides as the `model` query param; pass it explicitly to the resolver.
+  const resolvedModel = resolvePlanModel(req, new URL(req.url).searchParams.get('model'))
+  if (resolvedModel.error) {
+    return new Response(resolvedModel.error, { status: resolvedModel.status ?? 402 })
   }
   if (globalState.__pipelineRunning) {
     return new Response('a pipeline run is already in progress', { status: 409 })
@@ -721,7 +744,10 @@ export async function GET(req: Request) {
             log('design', 'chip-scale product board: build started EARLY from the merged design (overlaps variant routing; the product pipeline will reuse it)', 'ok')
             earlyCs = electronicsCsBuild(new Request('http://firstlight.internal/api/electronics-cs', {
               method: 'POST',
-              headers: { 'content-type': 'application/json' },
+              // carry identity/BYOK AND the resolved model (the run's model came
+              // from the query param, so inject it as the header electronics-cs
+              // reads) so the sub-build designs on the same model.
+              headers: fwdHeaders(req, { 'content-type': 'application/json', 'x-fl-model': resolvedModel.model.id }),
               body: JSON.stringify(csBody),
               signal: earlyCsAbort.signal,
             }))
@@ -1746,7 +1772,7 @@ export async function GET(req: Request) {
             const bj = JSON.parse(
               fs.readFileSync(path.join(pubData, 'board.json'), 'utf8'),
             )
-            const cost = creditsForRun(bj.netsTotal ?? bj.netsRouted ?? 0, bj.components ?? 0)
+            const cost = creditsForRun(bj.netsTotal ?? bj.netsRouted ?? 0, bj.components ?? 0, resolvedModel.creditMult)
             chargeCredits(userEmail, cost)
           } catch {
             chargeCredits(userEmail, 1)

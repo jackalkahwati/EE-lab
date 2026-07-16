@@ -11,7 +11,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { callLLMText, type LLMOverride } from '@/lib/llm'
-import { overrideForRequest } from '@/lib/byok'
+import { resolvePlanModel } from '@/lib/plan-llm'
 import { pinsPromptFor, partPinsFor } from '@/lib/design-state'
 import { MODEL } from '@/lib/model-tiers'
 import type { ProductSpec } from '@/lib/product-spec'
@@ -106,10 +106,14 @@ const REPLAN_MODEL = MODEL.replan
 async function emitPartsNets(userMsg: string, override?: LLMOverride, model: string = DESIGN_MODEL): Promise<{ parts: any[]; nets: any[]; gnd: string[]; note?: string; droppedCapabilities?: string[] }> {
   const antKey = process.env.ANTHROPIC_API_KEY
   // Compose, don't switch: tier default first, caller override spread LAST — so
-  // a BYOK caller (provider+apiKey, no model) keeps this stage's model tier,
-  // while an explicit caller model still wins over the tier.
+  // a plan-routed caller (provider pin) or BYOK caller keeps their model, while
+  // the stage tier is the default when neither is set. Only inject the platform
+  // ANTHROPIC key when the override is NOT already pinned to a provider/key —
+  // otherwise a Gemini pin would inherit an Anthropic apiKey and get mis-routed
+  // as BYOK on the wrong provider.
+  const pinned = !!(override?.provider || override?.apiKey)
   const opts: LLMOverride = {
-    ...(antKey ? { apiKey: antKey, provider: 'anthropic' as const } : {}),
+    ...(!pinned && antKey ? { apiKey: antKey, provider: 'anthropic' as const } : {}),
     model,
     ...override,
   }
@@ -307,7 +311,7 @@ type BoardOpts = {
 
 /** One full board candidate: part-set engine → real footprints → routed board. */
 async function buildCandidate(userMsg: string, req: Request, dir: string, svgName: string, timeoutMs: number, boardOpts: BoardOpts, model?: string) {
-  const { parts, nets, gnd, note, droppedCapabilities } = await emitPartsNets(userMsg, overrideForRequest(req), model)
+  const { parts, nets, gnd, note, droppedCapabilities } = await emitPartsNets(userMsg, resolvePlanModel(req).override, model)
   const realFootprints = await attachRealFootprints(parts)
   const result = await runBoard({ parts, nets, gnd, ...boardOpts }, path.join(dir, svgName), timeoutMs, req.signal ?? undefined)
   return { parts, nets, gnd, note, droppedCapabilities, realFootprints, result, svgName }

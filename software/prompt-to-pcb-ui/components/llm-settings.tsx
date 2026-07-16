@@ -28,15 +28,29 @@ export const LLM_PROVIDERS = [
   { id: 'nemotron', label: 'NVIDIA (Nemotron)' },
 ]
 
-/** Headers to attach to any AI-backed request (browser-scope key only; an
- *  account-scope key is resolved server-side from the session). */
+/** localStorage key for the selected model id (see components/model-selector). */
+export const LS_MODEL = 'fl-model'
+
+/** The model id the user picked in the selector, or '' for the plan default. */
+export function selectedModelId(): string {
+  if (typeof window === 'undefined') return ''
+  return localStorage.getItem(LS_MODEL)?.trim() || ''
+}
+
+/** Headers to attach to any AI-backed request: the browser-scope BYOK key (an
+ *  account-scope key is resolved server-side from the session) plus the selected
+ *  model id (x-fl-model), which plan routing honors on both BYOK and platform. */
 export function llmHeaders(): Record<string, string> {
   if (typeof window === 'undefined') return {}
+  const h: Record<string, string> = {}
   const key = localStorage.getItem(LS_KEY)?.trim()
-  if (!key) return {}
-  const provider = localStorage.getItem(LS_PROVIDER)?.trim()
-  const h: Record<string, string> = { 'x-llm-key': key }
-  if (provider) h['x-llm-provider'] = provider
+  if (key) {
+    h['x-llm-key'] = key
+    const provider = localStorage.getItem(LS_PROVIDER)?.trim()
+    if (provider) h['x-llm-provider'] = provider
+  }
+  const model = selectedModelId()
+  if (model) h['x-fl-model'] = model
   return h
 }
 

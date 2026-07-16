@@ -43,16 +43,16 @@ const CLAUDE_CLI_TIMEOUT_MS = 300_000
  */
 export class CliTimeoutError extends Error {}
 
-async function openaiCall(system: string, user: string, key?: string): Promise<string> {
+async function openaiCall(system: string, user: string, key?: string, model?: string): Promise<string> {
   const k = key || process.env.OPENAI_API_KEY
-  const model = process.env.OPENAI_MODEL || 'gpt-5.1'
+  const m = model || process.env.OPENAI_MODEL || 'gpt-5.1'
   if (!k) throw new Error('no openai key')
   const r = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
     headers: { Authorization: `Bearer ${k}`, 'content-type': 'application/json' },
     body: JSON.stringify({
-      model,
+      model: m,
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: user },
@@ -97,12 +97,12 @@ async function anthropicCall(system: string, user: string, key?: string, model?:
   return t
 }
 
-async function geminiCall(system: string, user: string, key?: string): Promise<string> {
+async function geminiCall(system: string, user: string, key?: string, model?: string): Promise<string> {
   const k = key || process.env.GEMINI_API_KEY
-  const model = process.env.GEMINI_MODEL || 'gemini-3.1-pro-preview'
+  const m = model || process.env.GEMINI_MODEL || 'gemini-3.1-pro-preview'
   if (!k) throw new Error('no gemini key')
   const r = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${k}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${k}`,
     {
       method: 'POST',
       signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
@@ -259,7 +259,12 @@ export async function callLLMText(
   // "platform" (use the CLI); only a real header BYOK key (different from the
   // env key) takes precedence. Falls through to the normal chain if the CLI
   // itself fails.
-  if (useClaudeCodeCli() && (!override?.apiKey || override.apiKey === process.env.ANTHROPIC_API_KEY)) {
+  // Subscription (CLI) path is ADMIN-ONLY now: a plan-routed request carries a
+  // platform provider pin (override.provider, no apiKey) chosen by
+  // lib/plan-llm.ts, and must NOT borrow the subscription. So only fire the CLI
+  // when there is NO provider pin and NO user key — i.e. the admin path, which
+  // resolves to a model-only override.
+  if (useClaudeCodeCli() && !override?.provider && !override?.apiKey) {
     try {
       return { text: await claudeCodeCall(system, user, undefined, override?.model), provider: 'claude-code (subscription)' }
     } catch (e) {
@@ -276,6 +281,15 @@ export async function callLLMText(
     return {
       text: await PROVIDERS[name](system, user, override.apiKey, override.model),
       provider: `${name} (user key)`,
+    }
+  }
+  // Platform provider PIN (plan-routed, no user key): run exactly the selected
+  // provider on the PLATFORM key — no chain fallthrough, so a free user's Gemini
+  // pick can't silently escalate to a paid provider on our dime.
+  if (override?.provider && PROVIDERS[override.provider]) {
+    return {
+      text: await PROVIDERS[override.provider](system, user, undefined, override.model),
+      provider: `${override.provider} (platform)`,
     }
   }
   // Anthropic first: strongest instruction-following for structured output.

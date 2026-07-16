@@ -14,11 +14,15 @@ import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypt
 import fs from 'node:fs'
 import path from 'node:path'
 
+/** Subscription tier. free = Gemini only; pro/enterprise unlock frontier models
+ *  on platform credit (revenue-funded); see lib/model-catalog.ts. */
+export type Plan = 'free' | 'pro' | 'enterprise'
+
 export interface UserRecord {
   email: string
   salt: string
   hash: string
-  plan: 'free' | 'pro'
+  plan: Plan
   createdAt: string
   runIds: string[]
   usage: { month: string; runs: number }
@@ -42,7 +46,9 @@ const STORE = path.join(STORE_DIR, 'users.json')
 // A board run costs credits scaled by its complexity (nets + components), so
 // the person generating expensive boards pays for them. 1 credit ~= one simple
 // board. See creditsForRun().
-export const PLAN_CREDITS: Record<'free' | 'pro', number> = { free: 5, pro: 100 }
+// Monthly plan grant. Enterprise is a high pooled allowance (contact-sales,
+// granted manually / by an enterprise Stripe subscription).
+export const PLAN_CREDITS: Record<Plan, number> = { free: 5, pro: 100, enterprise: 2000 }
 
 // One-time top-up packs, bigger packs, cheaper per credit (volume discount).
 // Priced inline at checkout (no pre-created Stripe prices needed).
@@ -52,9 +58,12 @@ export const CREDIT_PACKS = [
   { id: 'large', credits: 1000, cents: 30000 }, // $300 · $0.30/credit (40% off)
 ] as const
 
-/** Credits a run costs, from its board complexity. Round up, min 1. */
-export function creditsForRun(nets: number, components: number): number {
-  return Math.max(1, Math.round(((nets || 0) + (components || 0)) / 25))
+/** Credits a run costs, from its board complexity times the model's cost
+ *  multiplier (lib/model-catalog.ts creditMult). A frontier model burns more so
+ *  the credits the customer pre-bought cover its API bill. Round up, min 1. */
+export function creditsForRun(nets: number, components: number, modelMult = 1): number {
+  const base = ((nets || 0) + (components || 0)) / 25
+  return Math.max(1, Math.round(base * (modelMult > 0 ? modelMult : 1)))
 }
 
 export const FREE_RUNS_PER_MONTH = 5 // legacy export; superseded by credits
