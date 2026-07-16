@@ -915,6 +915,20 @@ export async function GET(req: Request) {
         const rfNets = rf.out.match(/^RF_NET .+$/gm) ?? []
         for (const line of rfNets) log('routing', `RF pass: ${line.slice(7)} (50Ω microstrip target)`, 'ok')
         if (!rfNets.length) log('routing', 'RF pass: no RF nets on this board')
+        // high-speed checks: diff-pair skew + matched-length groups measured
+        // from the routed copper. REPORTING stage (honest) — the router does
+        // not yet honor length constraints; see docs/density-program.md.
+        const hs = await exec('routing', KPY, [
+          path.join(appDir, 'scripts/hs_check.py'), variantBoard,
+        ])
+        const hsPairs = hs.out.match(/^HS_PAIR: .+$/gm) ?? []
+        for (const l of hsPairs)
+          log('routing', `high-speed: ${l.slice(9)}`, l.includes('EXCEEDED') ? 'warn' : 'ok')
+        if (!hsPairs.length) log('routing', 'high-speed: no differential pairs on this board')
+        try {
+          fs.copyFileSync(variantBoard.replace(/\.kicad_pcb$/, '.highspeed.json'),
+            path.join(pubData, 'highspeed.json'))
+        } catch { /* no report — nothing measured */ }
         log('routing', 'GATE emission: only DRC-clean nets shipped, PASS', 'ok')
         send({ type: 'stage', id: 'routing', state: 'passed' })
 
