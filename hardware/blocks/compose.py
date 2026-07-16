@@ -715,6 +715,71 @@ def block_som_carrier(x, y, n, nets):
     return b, 84, 50
 
 
+def block_eps(x, y, n, nets):
+    """Single-cell Li-ion EPS: TP4056 USB charger, DW01A+FS8205A pack
+    protection in the battery-negative line, AP2112K-3.3 LDO so the BOARD
+    RUNS FROM THE CELL, JST-PH cell connector, CHRG/STDBY LEDs.
+    Parts (registry, JLCPCB catalog): C16581 TP4056-42-ESOP8,
+    C351410 DW01A SOT-23-6L, C908265 FS8205A SOT-23-6L, C51118
+    AP2112K-3.3TRG1 SOT-25-5. Pin maps are datasheet-anchor-verified
+    (tools/blocks/tests/eps_parts_check.py) — never edit one without
+    re-running it.
+    HONEST LIMITS (also in the devices manifest): LDO 3V3 valid while
+    VBAT >= ~3.55 V; charge current fixed ~580 mA (PROG 2k); no solar
+    input in v1."""
+    b = ""
+    # charger: 5V (USB inlet) -> cell positive. TEMP (pin 1) tied to GND
+    # disables the NTC function per datasheet; CE (pin 8) tied high = always
+    # enabled; pad 9 is the ESOP-8 exposed pad (GND per datasheet).
+    b += place("registry", "C16581", _next_ref("U"), x + 6, y + 8, 0, {
+        "4": "+5V", "3": "GND", "1": "GND", "8": "+5V", "9": "GND",
+        "5": "VBAT", "2": "EPS_PROG",
+        "7": "EPS_CHRG_N", "6": "EPS_STDBY_N"}, nets)
+    b += res(_next_ref("R"), x + 6, y + 14, "EPS_PROG", "GND", nets, value="2k")
+    # status LEDs (existing statusled pattern: LED + series R to +5V)
+    b += res(_next_ref("R"), x + 12, y + 14, "+5V", "EPS_LED_C", nets, value="1k")
+    b += place("LED_SMD", "LED_0603_1608Metric", _next_ref("D"), x + 12, y + 17, 0,
+               {"1": "EPS_CHRG_N", "2": "EPS_LED_C"}, nets)
+    b += res(_next_ref("R"), x + 16, y + 14, "+5V", "EPS_LED_S", nets, value="1k")
+    b += place("LED_SMD", "LED_0603_1608Metric", _next_ref("D"), x + 16, y + 17, 0,
+               {"1": "EPS_STDBY_N", "2": "EPS_LED_S"}, nets)
+    label("CHG FULL", x + 14, y + 19, 0.6)
+    # protection: DW01A senses, FS8205A switches the NEGATIVE line.
+    # Cell-side negative = EPS_BATT_N; board GND = pack negative.
+    # DW01A (C351410, PUOLOP): 1=OD 2=VM(current sense) 3=OC 5=VCC 6=GND.
+    b += place("registry", "C351410", _next_ref("U"), x + 6, y + 22, 0, {
+        "5": "EPS_DW_VCC", "6": "EPS_BATT_N",
+        "1": "EPS_OD", "3": "EPS_OC", "2": "EPS_CS"}, nets)
+    b += res(_next_ref("R"), x + 2, y + 22, "VBAT", "EPS_DW_VCC", nets, value="470")
+    b += cap(_next_ref("C"), x + 2, y + 26, "EPS_DW_VCC", "EPS_BATT_N", nets)
+    b += res(_next_ref("R"), x + 10, y + 26, "EPS_CS", "GND", nets, value="1k")
+    # FS8205A (C908265, SOT-23-6): 1=G1 2=S1 3=D1/D2 4=D1/D2 5=G2 6=S2 —
+    # datasheet-verified. Discharge FET (G1=OD) on the cell side, charge FET
+    # (G2=OC) on the pack side, common drain.
+    b += place("registry", "C908265", _next_ref("U"), x + 14, y + 22, 0, {
+        "1": "EPS_OD", "2": "EPS_BATT_N",
+        "5": "EPS_OC", "6": "GND",
+        "3": "EPS_FET_D", "4": "EPS_FET_D"}, nets)
+    # cell connector: pin1 = VBAT (cell +), pin2 = cell - (protected side)
+    b += place("Connector_JST", "JST_PH_S2B-PH-K_1x02_P2.00mm_Horizontal",
+               _next_ref("J"), x + 26, y + 8, 0,
+               {"1": "VBAT", "2": "EPS_BATT_N"}, nets)
+    label("BAT + -", x + 26, y + 3, 0.6)
+    # regulation: the board runs from the cell.
+    # AP2112K-3.3 (C51118): 1=VIN 2=GND 3=EN 5=VOUT (4=NC).
+    b += place("registry", "C51118", _next_ref("U"), x + 24, y + 22, 0, {
+        "1": "VBAT", "2": "GND", "3": "VBAT", "5": "+3V3"}, nets)
+    b += cap(_next_ref("C"), x + 21, y + 26, "VBAT", "GND", nets, value="1uF")
+    b += cap(_next_ref("C"), x + 27, y + 26, "+3V3", "GND", nets, value="1uF")
+    _DEVICES.append({"ref": "(eps)", "type": "power", "family": "li-ion-1s",
+                     "name": "EPS: TP4056 charge + DW01A/8205 protect + AP2112 3V3",
+                     "honesty": "datasheet-anchor-verified pin maps; LDO 3V3 "
+                                "valid while VBAT>=3.55V; ~580mA charge; no "
+                                "solar input; protection in battery-negative "
+                                "line — cell minus is EPS_BATT_N, NOT board GND"})
+    return b, 34, 30
+
+
 def block_imu(x, y, n, nets):
     """6-axis IMU (MPU-6050) as a GY-521-style breakout module on the I2C bus.
     This is a module-integration board (the MCU and radio are modules too), so
@@ -1717,6 +1782,7 @@ BLOCK_TABLE = {
     "audio": block_audio_amp,
     "esp32c3": block_mcu_esp32c3,
     "somcarrier": block_som_carrier,
+    "eps": block_eps,
 }
 
 
@@ -1754,6 +1820,9 @@ CAPABILITIES = [
         "official CM4IO footprint; 5V power-in, console UART, shared I2C, USB 2.0 "
         "device header for rpiboot flashing, boot/power-control jumpers; firmware "
         "stage skips honestly — OS image is a future target)"},
+    {"key": "eps", "label": "Battery EPS (single-cell Li-ion: USB charging, "
+        "pack protection, 3.3V regulation from the cell, JST-PH connector; "
+        "LDO valid while VBAT>=3.55V — buck-boost is a follow-on)"},
 ]
 
 
@@ -1863,9 +1932,13 @@ def _block_keys(s):
                             "som ", "system on module", "raspberry pi module",
                             "linux carrier", "linux board", "carrier board")):
         add("somcarrier")
-    if "usbc" not in out and any(k in s for k in ("power", "regulator", "battery", "vin",
-                                                  "5v", "3v3", "charg", "ldo", "buck",
-                                                  "usb power", "usb-c power")):
+    if any(k in s for k in ("battery", "batteries", "lipo", "li-ion", "lithium",
+                            "18650", "charging", "charger", "rechargeable")):
+        add("eps")
+    if "usbc" not in out and "eps" not in out and any(
+            k in s for k in ("power", "regulator", "vin",
+                             "5v", "3v3", "ldo", "buck",
+                             "usb power", "usb-c power")):
         add("power")
     return out
 
@@ -1928,13 +2001,18 @@ def classify(blocks):
     if "somcarrier" in seen and "mcu" in seen:
         uniq.remove("mcu")
         seen.discard("mcu")
+    # the EPS IS the board's power source (3V3 from the cell) — drop the
+    # auto power inlet; a USB-C inlet may still co-exist as the charge path
+    if "eps" in seen and "power" in seen:
+        uniq.remove("power")
+        seen.discard("power")
     if "backplane6" in seen and "mcu" in seen and len(seen) <= 3:
         pass  # explicit mcu request stands
     if not (seen & {"mcu", "baremcu", "esp32c3", "somcarrier", "backplane6",
                     "bme280breakout", "standalone"}):
         uniq.append("mcu")
         seen.add("mcu")
-    if not (seen & {"power", "usbc"}):
+    if not (seen & {"power", "usbc", "eps"}):
         uniq.append("power")
         seen.add("power")
     # The standalone U.FL block exists only to carry the LoRa ANT net; cellular
@@ -1994,7 +2072,7 @@ LAYERS8 = '''  (layers
 # on the left, the MCU is central, sensors sit next to it (short I2C), and the
 # radio + antenna land on the right edge (best RF practice). Rows wrap if a band
 # grows past the width budget, so the layout scales as blocks are added.
-ROW = {"power": 0, "usbc": 0, "mcu": 0, "esp32c3": 0, "somcarrier": 0,
+ROW = {"power": 0, "usbc": 0, "eps": 0, "mcu": 0, "esp32c3": 0, "somcarrier": 0,
        "imu": 0, "radio": 0, "antenna": 0,
        "gnss": 0, "cellular": 0, "tempsensor": 0, "comms": 0, "motion": 1,
        "instrument": 0, "dutmonitor": 0, "calref": 0, "calrefext": 0, "backplane6": 0,
@@ -2002,7 +2080,7 @@ ROW = {"power": 0, "usbc": 0, "mcu": 0, "esp32c3": 0, "somcarrier": 0,
        "standalone": 0,
        "baremcu": 0, "relaymatrix": 1, "motors": 1, "gpiobreakout": 1,
        "fl1bus": 0, "boardid": 0, "gpiobank": 0, "spibus": 0, "uartbridge": 0}
-COL = {"power": 0, "usbc": 0, "mcu": 2, "esp32c3": 2, "somcarrier": 2,
+COL = {"power": 0, "usbc": 0, "eps": 1, "mcu": 2, "esp32c3": 2, "somcarrier": 2,
        "imu": 3, "tempsensor": 3, "gnss": 4,
        "radio": 5, "cellular": 6, "comms": 7, "antenna": 9, "motors": 1,
        "motion": 3, "instrument": 4, "dutmonitor": 4, "calref": 5, "calrefext": 6,
