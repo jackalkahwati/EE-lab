@@ -39,15 +39,50 @@ env $(cat deploy/.env | xargs) \
 → route a hostname to `http://app:4500` → copy the connector token) instead of
 `FL_HOST`.
 
-### Subscription LLM on the cloud box (testing only)
-The pipeline's LLM legs fall back to the local `claude` CLI. To use the Max
-subscription on the box instead of a metered key: install the `claude` CLI in
-the container/host and copy your authenticated credentials
-(`~/.claude` / the CLI's credential file) onto it, with `CLAUDE_CLI_PATH` set.
-Caveats, honestly: this is credential transfer, the token can expire (needs an
-interactive re-login), and headless server use of a personal subscription is
-ToS-gray. Fine for testing; switch to a funded metered key
-(`llm_health.py` → LIVE) for anything real.
+### Subscription LLM on the cloud box — the proxy hybrid (shipped)
+The box does **not** carry the subscription credential. Instead the Max
+subscription stays on Jack's Mac and the box borrows it over the existing
+Cloudflare tunnel:
+
+- **Mac side** (`~/firstlight-llm-proxy/proxy.py`, launchd
+  `build.firstlight.llmproxy`): a tiny bearer-gated HTTP service that runs the
+  real local `claude` (subscription auth via the keychain; it strips
+  `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` so a metered key can't override the
+  subscription). Exposed as `mac-llm.firstlight.build` via an ingress rule in
+  the Mac's `~/.cloudflared/config.yml` (same tunnel that fronts
+  `app.firstlight.build`). No open ports; only the box's shared secret gets in.
+- **Box side** (`deploy/claude-shim.py`, bind-mounted to
+  `/usr/local/bin/claude-proxy`, `CLAUDE_CLI_PATH` pointed at it): a transparent
+  stand-in for the `claude` CLI. It forwards the exact `args + stdin` the
+  pipeline used to the Mac proxy and returns its stdout/exit — so **both** LLM
+  legs work unchanged (Python `scripts/llm_json.py` `_claude_cli` with
+  `--output-format text`, and TS `lib/llm.ts` `claudeCodeCall` with
+  `--output-format json`; `USE_CLAUDE_CODE_CLI=1` turns the TS leg on).
+
+Box `.env` for the hybrid:
+```
+CLAUDE_CLI_PATH=/usr/local/bin/claude-proxy
+FL_MAC_PROXY_URL=https://mac-llm.firstlight.build/llm
+FL_MAC_PROXY_SECRET=<matches ~/firstlight-llm-proxy/secret on the Mac>
+USE_CLAUDE_CODE_CLI=1
+```
+
+**Who gets the subscription vs BYOK.** BYOK users hit their own metered key
+first — the TS path treats a header key that differs from the (empty) box env
+key as BYOK and never touches the CLI; the credit gate stops non-admin,
+non-BYOK users before the pipeline even runs. So the subscription only ever
+serves the admin. (Narrow known gap: `scripts/datasheet_to_spec.py` is the one
+Python script that calls `llm_json` directly and isn't handed a per-request
+BYOK key, so a BYOK user who triggers datasheet extraction would fall to the
+subscription. Harden by injecting the request's key into that spawn's env
+before onboarding real BYOK users.)
+
+Honest caveats: the Mac must stay awake (it does — `caffeinate`/launchd) and
+online for the box's admin LLM calls; if the Mac is off, admin builds stall at
+the AI step (BYOK builds are unaffected). ToS-wise this keeps the subscription
+as interactive use on Jack's own machine rather than shipping the credential to
+a server. Still switch to a funded metered key (`llm_health.py` → LIVE) for
+anything that must not depend on the Mac.
 
 ## Prerequisites (the two real gates)
 

@@ -21,9 +21,18 @@ services:
       # operator shell OFF by default in the cloud; admins set to 1 knowingly
       - FL_TERMINAL=${FL_TERMINAL:-0}
       - FL_ADMIN_EMAILS=${FL_ADMIN_EMAILS:-}
+      # Proxy-hybrid LLM: the `claude-cli` leg shells out to this shim, which
+      # forwards to the Mac's subscription `claude` over the tunnel. BYOK users
+      # hit their own metered key first and never reach it; only admin/no-BYOK
+      # runs use the subscription. Unset these and the claude-cli leg no-ops.
+      - CLAUDE_CLI_PATH=${CLAUDE_CLI_PATH:-}
+      - FL_MAC_PROXY_URL=${FL_MAC_PROXY_URL:-}
+      - FL_MAC_PROXY_SECRET=${FL_MAC_PROXY_SECRET:-}
     volumes:
       - runs:/app/software/prompt-to-pcb-ui/public/runs
       - registry:/app/tools/parts
+      # box-side `claude` shim (proxy hybrid) — see deploy/claude-shim.py
+      - ./claude-shim.py:/usr/local/bin/claude-proxy:ro
     expose:
       - "4500"
 
