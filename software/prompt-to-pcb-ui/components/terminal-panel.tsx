@@ -18,8 +18,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { clearLog, useTerminalLog, type TerminalLine } from '@/lib/terminal-log'
 import { ChevronDown, ChevronUp, Trash2, ArrowDownToLine } from 'lucide-react'
+import { ShellTab } from '@/components/shell-tab'
 
-export type TerminalTab = 'terminal' | 'problems'
+export type TerminalTab = 'terminal' | 'problems' | 'shell'
 
 const BAR_PX = 28
 const DEFAULT_OPEN_PX = 220
@@ -159,6 +160,7 @@ export function TerminalPanel({ collapsed, onToggle, heightPx, tab, onTabChange 
       {/* header bar — 28px, tabs left, actions right */}
       <div className="flex h-7 shrink-0 items-center border-b border-border">
         {tabBtn('terminal', 'Terminal')}
+        {tabBtn('shell', 'Shell')}
         {tabBtn('problems', 'Problems', problems.length)}
         <div className="ml-auto flex h-full items-center">
           <button type="button" title="clear log" onClick={clearLog}
@@ -172,8 +174,13 @@ export function TerminalPanel({ collapsed, onToggle, heightPx, tab, onTabChange 
         </div>
       </div>
 
-      {/* log body */}
-      {!collapsed && (
+      {/* body: interactive shell OR log stream */}
+      {!collapsed && activeTab === 'shell' && (
+        <div className="min-h-0 flex-1">
+          <ShellTab active={!collapsed} />
+        </div>
+      )}
+      {!collapsed && activeTab !== 'shell' && (
         <div className="relative min-h-0 flex-1">
           <div ref={bodyRef} onScroll={onScroll}
             className="h-full overflow-y-auto overflow-x-hidden bg-background py-1 font-mono text-[11px]">
