@@ -133,7 +133,16 @@ if os.path.exists(pro_path):
         print(f"design-rule sidecar unreadable: {e}")
 
 filler = pcbnew.ZONE_FILLER(b)
-filler.Fill(zones)
+# KiCad 10's SWIG auto-converts a Python list; KiCad 8's wants a real
+# pcbnew.ZONES vector. Try the list (Mac/10 path, unchanged), fall back to
+# the vector so the same code runs on a Linux KiCad-8 host.
+try:
+    filler.Fill(zones)
+except (TypeError, NotImplementedError):
+    _zv = pcbnew.ZONES()
+    for _z in zones:
+        _zv.append(_z)
+    filler.Fill(_zv)
 pcbnew.SaveBoard(board_path, b)
 print(f"zone fill: {len(zones)} zones")
 print("IMPORT_OK")
