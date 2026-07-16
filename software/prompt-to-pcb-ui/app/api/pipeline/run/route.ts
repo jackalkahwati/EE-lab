@@ -830,8 +830,20 @@ export async function GET(req: Request) {
         }
         const zoneNets =
           dsnRes.out.match(/^ZONE_NETS:(.*)$/m)?.[1]?.split(',').filter(Boolean) ?? []
-        const skipArgs = zoneNets.flatMap((n) => ['--skip-net', n])
+        // pre-routed block nets: their copper is already on the board (frozen
+        // templates; sidecar written by compose next to the board); flroute
+        // must treat it as fixed and not re-route them
+        let preroutedNets: string[] = []
+        try {
+          const pr = JSON.parse(fs.readFileSync(
+            variantBoard.replace(/\.kicad_pcb$/, '.preroute.json'), 'utf8'))
+          preroutedNets = [...new Set(((pr.entries ?? []) as { net?: unknown }[])
+            .map((e) => String(e.net)).filter(Boolean))]
+        } catch { /* no pre-routed blocks on this board */ }
+        const skipArgs = [...zoneNets, ...preroutedNets].flatMap((n) => ['--skip-net', n])
         log('routing', `flroute: skipping zone-served nets [${zoneNets.join(', ')}]`)
+        if (preroutedNets.length)
+          log('routing', `flroute: ${preroutedNets.length} net(s) pre-routed by block templates [${preroutedNets.join(', ')}]`)
         const route = await exec('routing', flroute, [dsn, ses, ...skipArgs])
         if (route.code !== 0 || !fs.existsSync(ses)) {
           send({ type: 'stage', id: 'routing', state: 'failed', failReason: `flroute exit ${route.code}` })

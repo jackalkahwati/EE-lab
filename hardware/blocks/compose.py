@@ -68,6 +68,60 @@ _DEVICES = []
 # independent LLM part-set guess. synth.netlist_from_design() resets + reads it.
 _NETLIST = []
 
+# Pre-routed block templates (density program): frozen internal copper per
+# block key, produced by freeze_routes.py running the block in isolation
+# through the REAL router + DRC. At compose time the template is transposed
+# to the block's placed origin and emitted as real segments/vias — flroute
+# sees them as net-owned obstacles (v5 wiring cells), skips those nets, and
+# import_ses restores them from the .preroute.json sidecar after the SES
+# import wipes tracks. Whole-board DRC re-verifies the frozen copper in
+# context on every board — templates are trusted to route, never to pass.
+_ROUTES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "routes")
+_PREROUTED = []   # sidecar entries (absolute mm) accumulated per board
+_PREROUTED_NETS = []
+
+
+def _route_template(key):
+    p = os.path.join(_ROUTES_DIR, key + ".json")
+    try:
+        return json.load(open(p))
+    except Exception:
+        return None
+
+
+def emit_frozen_routes(key, bx, by, nets):
+    """Emit a block's frozen internal copper transposed to its placed origin.
+    Returns board-file sexprs; also records sidecar entries + net names."""
+    tpl = _route_template(key)
+    if not tpl:
+        return ""
+    out = []
+    for net_name, geo in tpl.get("nets", {}).items():
+        nid = nets.id(net_name)
+        entry = {"net": net_name, "width_mm": geo.get("width_mm", 0.25),
+                 "segments_mm": [], "vias_mm": []}
+        for seg in geo.get("segments_mm", []):
+            x0, y0, x1, y1 = (round(seg[0] + bx, 4), round(seg[1] + by, 4),
+                              round(seg[2] + bx, 4), round(seg[3] + by, 4))
+            layer = seg[4] if len(seg) > 4 else "F.Cu"
+            width = seg[5] if len(seg) > 5 else geo.get("width_mm", 0.25)
+            out.append('  (segment (start {} {}) (end {} {}) (width {}) '
+                       '(layer "{}") (net {}) (uuid "{}"))\n'.format(
+                           x0, y0, x1, y1, width, layer, nid, U()))
+            entry["segments_mm"].append([x0, y0, x1, y1, layer, width])
+        for v in geo.get("vias_mm", []):
+            vx, vy = round(v[0] + bx, 4), round(v[1] + by, 4)
+            out.append('  (via (at {} {}) (size 0.4) (drill 0.2) '
+                       '(layers "F.Cu" "B.Cu") (net {}) (uuid "{}"))\n'.format(
+                           vx, vy, nid, U()))
+            entry["vias_mm"].append([vx, vy])
+        if entry["segments_mm"] or entry["vias_mm"]:
+            _PREROUTED.append(entry)
+            if net_name not in _PREROUTED_NETS:
+                _PREROUTED_NETS.append(net_name)
+    return "".join(out)
+
+
 # Occupancy registry: the real courtyard box (mm, board coords) of every
 # footprint place() has emitted for the current board. The fiducials are added
 # AFTER every component, so they have to be able to see what is already there —
@@ -1907,6 +1961,8 @@ def compose(spec, blocks, out_path):
     _SILK[:] = []     # reset the per-board functional silkscreen labels
     _DYNREF.clear()
     _DYNREF.update({"U": 20, "C": 20, "J": 20, "R": 20})  # per-board ref pool
+    _PREROUTED[:] = []
+    _PREROUTED_NETS[:] = []
     keys, dropped, sensor_reqs = classify(blocks)
     dyn = {}
     for i, desc in enumerate(sensor_reqs):
@@ -2055,6 +2111,9 @@ def compose(spec, blocks, out_path):
                 del _PLACED[_mark:]
                 txt, w, h = build(x, ytop)
             body += txt
+            # frozen internal copper for pre-routed blocks (density program)
+            body += emit_frozen_routes(k, x, ytop, nets)
+            print("BLOCK_AT:" + json.dumps({"key": k, "x": x, "y": ytop}))
             x += w + GAP
             rowh = max(rowh, h)
         maxright = max(maxright, x - GAP)
@@ -2182,10 +2241,12 @@ def compose(spec, blocks, out_path):
     # sourced part can be any package) and emit a matching design-rules file
     # allowing 0.13mm (6-mil) pad-to-pad — a clearance every standard fab
     # supports. kicad-cli auto-loads <board>.kicad_dru.
-    fine_pitch = re.search(
-        r"P0\.[1-7]\d*mm|QFN|DFN|WSON|USON|VSSOP|VQFN|UQFN|UFQFPN|BGA|"
-        r"LGA|SON_|USB_C_Receptacle|SOT-23-8|SOT-23-6", p)
-    if fine_pitch:
+    # ALWAYS write the fab-class sidecars (was fine-pitch-conditional): the
+    # fanout pass uses its own pitch threshold, so a board this regex missed
+    # could still carry 0.4/0.2 stitch vias that are illegal under KiCad's
+    # defaults — the ESP32-C3 module board hit exactly that. The rules ARE
+    # the fab class (JLCPCB-legal), so they are correct for every board.
+    if True:
         base = os.path.splitext(out_path)[0]
         open(base + ".kicad_dru", "w").write(
             "(version 1)\n"
@@ -2233,6 +2294,12 @@ def compose(spec, blocks, out_path):
     mapped_out = [k for k in keys if k not in dyn] + \
         ["sensor:" + dyn[k] for k in keys if k in dyn]
     print("COMPOSE_COVERAGE:" + json.dumps({"mapped": mapped_out, "dropped": dropped}))
+    # pre-routed block copper: sidecar for post-SES restoration + the net list
+    # the router must skip (their copper is already on the board)
+    if _PREROUTED:
+        side = os.path.splitext(out_path)[0] + ".preroute.json"
+        json.dump({"entries": _PREROUTED}, open(side, "w"), indent=1)
+        print("PREROUTED_NETS:" + json.dumps(_PREROUTED_NETS))
 
 
 def main():
