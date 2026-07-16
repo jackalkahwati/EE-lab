@@ -59,11 +59,21 @@ import type { IdBrief } from '@/lib/id-brief'
 import type { ProductSpec } from '@/lib/product-spec'
 import {
   Activity, BookOpen, Box, ClipboardCheck, Code, Cpu, Eye, Factory, FolderTree, Gauge, History, LayoutDashboard, ListTree, Maximize2,
-  MessagesSquare, Package, Palette, Plus, Receipt, ScrollText, ShieldCheck, Sparkles, Truck, Wrench,
+  MessagesSquare, Package, Palette, Plus, Receipt, ScrollText, ShieldCheck, Sparkles, Truck, Wrench, X,
 } from 'lucide-react'
 
 type Run = any
 type Tab = string
+
+// a closable document in the CENTER tab strip: a file from the left tree or
+// one of the VIEWS panels opened on demand (stages stay pinned)
+type DocTab = {
+  id: string
+  kind: 'file' | 'panel'
+  label: string
+  file?: { name: string; path: string; size?: number }
+  panel?: Tab
+}
 
 // flat view list: one icon → one panel (Board lives in the center hero).
 // Two columns only — icons left, content right, no sub-tabs.
@@ -200,8 +210,30 @@ export default function Compose2Page() {
   const [leftW, setLeftW] = useState(288)
   // left-pane mode: chat (conversation), threads (design list), files (run tree)
   const [leftView, setLeftView] = useState<'chat' | 'threads' | 'files'>('chat')
-  // file opened from the left tree — takes over the CENTER pane until closed
-  const [openedFile, setOpenedFile] = useState<{ name: string; path: string; size?: number } | null>(null)
+  // CENTER tab strip: pinned stage tabs + closable doc tabs (files/panels).
+  // activeDoc null = the pinned stage view is showing.
+  const [docTabs, setDocTabs] = useState<DocTab[]>([])
+  const [activeDoc, setActiveDoc] = useState<string | null>(null)
+  const [addOpen, setAddOpen] = useState(false)
+  // badge-don't-steal-focus: a stage finishing while not visible gets a dot
+  const [badged, setBadged] = useState<Record<string, 'passed' | 'failed'>>({})
+  const prevPipeRef = useRef<Record<string, string>>({})
+  const openFileTab = (f: { name: string; path: string; size?: number }) => {
+    const id = `file:${f.path}`
+    setDocTabs((ts) => (ts.some((d) => d.id === id) ? ts : [...ts, { id, kind: 'file' as const, label: f.name, file: f }]))
+    setActiveDoc(id)
+  }
+  const openPanelTab = (tb: Tab, label: string) => {
+    const id = `panel:${tb}`
+    setDocTabs((ts) => (ts.some((d) => d.id === id) ? ts : [...ts, { id, kind: 'panel' as const, label, panel: tb }]))
+    setActiveDoc(id)
+  }
+  const closeDoc = (id: string) => {
+    const i = docTabs.findIndex((d) => d.id === id)
+    const n = docTabs.filter((d) => d.id !== id)
+    setDocTabs(n)
+    if (activeDoc === id) setActiveDoc(n[Math.min(i, n.length - 1)]?.id ?? null)
+  }
   const [rightW, setRightW] = useState(480)
   const dragRef = useRef<null | 'left' | 'right'>(null)
   // mirrors dragRef as state so the active Handle can stay highlighted while the
@@ -301,6 +333,18 @@ export default function Compose2Page() {
   const pipeStatus = selectedId ? (pipeStatusByRun[selectedId] ?? {}) : {}
   const pipeFeedback = selectedId ? (pipeFeedbackByRun[selectedId] ?? null) : null
   const pipeRunning = !!pipelineRunId && pipelineRunId === selectedId
+
+  useEffect(() => {
+    // a stage transitioning to passed/failed while NOT the visible view gets a
+    // badge; focusing its tab clears it (see the stage tab onClick)
+    const next: Record<string, string> = {}
+    for (const [k, v] of Object.entries(pipeStatus ?? {})) next[k] = (v as { status?: string })?.status ?? ''
+    const prev = prevPipeRef.current
+    prevPipeRef.current = next
+    const hits = Object.entries(next).filter(([k, st]) =>
+      st !== prev[k] && (st === 'passed' || st === 'failed') && !(activeDoc === null && stage === k && !pipeRunning))
+    if (hits.length) setBadged((b) => ({ ...b, ...Object.fromEntries(hits) }) as Record<string, 'passed' | 'failed'>)
+  }, [pipeStatus, activeDoc, stage, pipeRunning])
 
   // A tab close would silently kill the multi-minute pipeline — ask first while
   // ANY run's pipeline is in flight (not just the selected one).
@@ -440,6 +484,72 @@ export default function Compose2Page() {
   // layout branches (blank slate + full workspace): resize handle + icon rail
   // (VIEWS) + detail area. Every panel is behind the newDesign/!selectedRun
   // guard, so with no run selected the rail renders a clean empty state.
+  // one panel switch shared by the RIGHT rail and CENTER doc tabs — same
+  // components, same guards, two hosts
+  const panelBody = (tb: Tab) => (
+    <>
+                  {(newDesign || !selectedRun) ? (
+                    <div className="flex h-full items-center justify-center p-6 text-center text-xs text-muted-foreground">
+                      {!selectedRun
+                        ? 'No run yet — panels populate as the build runs.'
+                        : 'No board yet — the overview appears once your new design builds.'}
+                    </div>
+                  ) : (
+                    <>
+                      {tb === 'Overview' && (
+                        <>
+                          <RunOverview runId={selectedRun.runDir ? selectedRun.id : null} run={selectedRun} />
+                          <RevisionRail
+                            runId={selectedRun.runDir ? selectedRun.id : undefined}
+                            onSelectRun={(rid) => { setSelectedId(rid); setNewDesign(false); setIdBrief(null); setProductSpec(null); setStage('electronics'); setBuiltDisc({}) }}
+                          />
+                          <WorkQueue
+                            runId={selectedRun.runDir ? selectedRun.id : undefined}
+                            onResolve={(prompt) => setRevisePrefill(prompt)}
+                          />
+                          <CommentsPanel runId={selectedRun.runDir ? selectedRun.id : undefined} />
+                        </>
+                      )}
+                      {tb === 'Objects' && <BoardObjects real={real} />}
+                      {tb === 'Artifacts' && <ArtifactExplorer runId={selectedRun.runDir ? selectedRun.id : null} />}
+                      {tb === 'Code' && <CodeViewer key={isReal ? 'real' : 'seed'} files={isReal ? real?.ato : null} />}
+                      {tb === 'BOM' && (
+                        <BomWorkspace
+                          lines={isReal ? real?.bom : null}
+                          runId={selectedRun.runDir ? selectedRun.id : undefined}
+                          onResolve={(prompt) => setRevisePrefill(prompt)}
+                        />
+                      )}
+                      {tb === 'Checks' && <BoardChecks real={real} />}
+                      {tb === 'Constraints' && <ConstraintsPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
+                      {tb === 'Pinout' && <PinoutPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
+                      {tb === 'Advanced' && <AdvancedRoutingPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
+                      {tb === 'Ingest' && <IngestPanel />}
+                      {tb === 'Patterns' && <PatternsPanel />}
+                      {tb === 'FL-1 Ready' && <FL1ReadinessPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
+                      {tb === 'Recovery' && <RecoveryPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
+                      {tb === 'Assembly' && <AssemblyPanel runId={selectedRun.runDir ? selectedRun.id : null} fabZip={null} />}
+                      {tb === 'Review' && <ReviewPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
+                      {tb === 'FL-1' && (
+                        <div className="flex h-full flex-col">
+                          <FL1ValidationView runId={selectedRun.runDir ? selectedRun.id : null} />
+                          <div className="border-t border-border">
+                            <FL1Loop
+                              runId={selectedRun.runDir ? selectedRun.id : null}
+                              onRevise={(eco) => setRevisePrefill(eco)}
+                            />
+                          </div>
+                        </div>
+                      )}
+                      {tb === 'Order' && <ProcurementPanel real={real} runDir={selectedRunDir ?? null} />}
+                    </>
+                  )}
+
+    </>
+  )
+
+  const activeDocTab = docTabs.find((d) => d.id === activeDoc) ?? null
+
   const rightPane = (
     <>
       <Handle which="right" />
@@ -467,62 +577,7 @@ export default function Compose2Page() {
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto">
                 <ErrorBoundary>
-                  {(newDesign || !selectedRun) ? (
-                    <div className="flex h-full items-center justify-center p-6 text-center text-xs text-muted-foreground">
-                      {!selectedRun
-                        ? 'No run yet — panels populate as the build runs.'
-                        : 'No board yet — the overview appears once your new design builds.'}
-                    </div>
-                  ) : (
-                    <>
-                      {tab === 'Overview' && (
-                        <>
-                          <RunOverview runId={selectedRun.runDir ? selectedRun.id : null} run={selectedRun} />
-                          <RevisionRail
-                            runId={selectedRun.runDir ? selectedRun.id : undefined}
-                            onSelectRun={(rid) => { setSelectedId(rid); setNewDesign(false); setIdBrief(null); setProductSpec(null); setStage('electronics'); setBuiltDisc({}) }}
-                          />
-                          <WorkQueue
-                            runId={selectedRun.runDir ? selectedRun.id : undefined}
-                            onResolve={(prompt) => setRevisePrefill(prompt)}
-                          />
-                          <CommentsPanel runId={selectedRun.runDir ? selectedRun.id : undefined} />
-                        </>
-                      )}
-                      {tab === 'Objects' && <BoardObjects real={real} />}
-                      {tab === 'Artifacts' && <ArtifactExplorer runId={selectedRun.runDir ? selectedRun.id : null} />}
-                      {tab === 'Code' && <CodeViewer key={isReal ? 'real' : 'seed'} files={isReal ? real?.ato : null} />}
-                      {tab === 'BOM' && (
-                        <BomWorkspace
-                          lines={isReal ? real?.bom : null}
-                          runId={selectedRun.runDir ? selectedRun.id : undefined}
-                          onResolve={(prompt) => setRevisePrefill(prompt)}
-                        />
-                      )}
-                      {tab === 'Checks' && <BoardChecks real={real} />}
-                      {tab === 'Constraints' && <ConstraintsPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
-                      {tab === 'Pinout' && <PinoutPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
-                      {tab === 'Advanced' && <AdvancedRoutingPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
-                      {tab === 'Ingest' && <IngestPanel />}
-                      {tab === 'Patterns' && <PatternsPanel />}
-                      {tab === 'FL-1 Ready' && <FL1ReadinessPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
-                      {tab === 'Recovery' && <RecoveryPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
-                      {tab === 'Assembly' && <AssemblyPanel runId={selectedRun.runDir ? selectedRun.id : null} fabZip={null} />}
-                      {tab === 'Review' && <ReviewPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
-                      {tab === 'FL-1' && (
-                        <div className="flex h-full flex-col">
-                          <FL1ValidationView runId={selectedRun.runDir ? selectedRun.id : null} />
-                          <div className="border-t border-border">
-                            <FL1Loop
-                              runId={selectedRun.runDir ? selectedRun.id : null}
-                              onRevise={(eco) => setRevisePrefill(eco)}
-                            />
-                          </div>
-                        </div>
-                      )}
-                      {tab === 'Order' && <ProcurementPanel real={real} runDir={selectedRunDir ?? null} />}
-                    </>
-                  )}
+                  {panelBody(tab)}
                 </ErrorBoundary>
               </div>
             </div>
@@ -581,7 +636,8 @@ export default function Compose2Page() {
   // ---- left pane: icon bar + the three views (chat / threads / files) ------
   const selectThreadFromList = (id: string) => {
     setSelectedId(id); setNewDesign(false); setIdBrief(null); setProductSpec(null)
-    setStage('electronics'); setBuiltDisc({}); setLeftView('chat'); setOpenedFile(null)
+    setStage('electronics'); setBuiltDisc({}); setLeftView('chat')
+    setDocTabs([]); setActiveDoc(null); setBadged({})
   }
   const leftIcons = (
     <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-1.5">
@@ -630,7 +686,7 @@ export default function Compose2Page() {
   )
   const filesPane = (
     <div className="flex min-h-0 flex-1 flex-col">
-      <ArtifactExplorer runId={selectedRun?.runDir ? selectedRun.id : null} compact onOpen={setOpenedFile} />
+      <ArtifactExplorer runId={selectedRun?.runDir ? selectedRun.id : null} compact onOpen={openFileTab} />
     </div>
   )
 
@@ -736,11 +792,7 @@ export default function Compose2Page() {
           A file opened from the left Files tree takes over this pane (IDE
           editor style) until closed. */}
       <section className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
-        {openedFile && selectedRun?.runDir && (
-          <div className="absolute inset-0 z-20 bg-background">
-            <FilePreview runId={selectedRun.id} file={openedFile} onClose={() => setOpenedFile(null)} />
-          </div>
-        )}
+
         {/* stage bar — editor-style tab strip scoped to the middle pane: each tab
             carries its own bottom border; the ACTIVE tab drops it (bg-background)
             so it reads connected to the content below, with a 1px amber top edge */}
@@ -754,13 +806,14 @@ export default function Compose2Page() {
             const on = stage === s.key
             return (
               <button key={s.key} type="button" disabled={locked}
-                onClick={() => setStage(s.key)}
+                onClick={() => { setStage(s.key); setActiveDoc(null); setBadged((b) => { if (!(s.key in b)) return b; const n = { ...b }; delete n[s.key]; return n }) }}
                 title={s.key === 'id' && !idBrief && !productSpec ? 'describe a product first' : s.key === 'explore' && !productSpec ? 'describe a product first' : s.label}
                 className={cn('relative flex shrink-0 items-center gap-1.5 border-b border-r border-border px-3 text-[11.5px]',
                   on ? 'border-b-transparent bg-background font-medium text-foreground'
                     : 'bg-card/40 text-muted-foreground hover:text-foreground',
                   locked && 'cursor-not-allowed opacity-40 hover:text-muted-foreground')}>
-                {on && <span aria-hidden className="absolute inset-x-0 top-0 h-px bg-primary" />}
+                {on && !activeDoc && <span aria-hidden className="absolute inset-x-0 top-0 h-px bg-primary" />}
+                {badged[s.key] && <span aria-hidden className={cn('absolute right-1 top-1 h-1.5 w-1.5 rounded-full', badged[s.key] === 'failed' ? 'bg-red-500' : 'bg-primary')} />}
                 <s.Icon className={cn('size-3.5 shrink-0', on && 'text-primary')} />
                 {s.label}
                 {!s.built && <span className="bg-muted px-1 text-[8px] uppercase tracking-wide text-muted-foreground">soon</span>}
@@ -768,6 +821,39 @@ export default function Compose2Page() {
             )
           })}
           {/* filler completes the tab strip's bottom border after the last tab */}
+          {docTabs.map((d) => {
+            const on = activeDoc === d.id
+            return (
+              <div key={d.id} className={cn('relative flex shrink-0 items-stretch border-b border-r border-border', on ? 'border-b-transparent bg-background' : 'bg-card/40')}>
+                {on && <span aria-hidden className="absolute inset-x-0 top-0 h-px bg-primary" />}
+                <button type="button" onClick={() => setActiveDoc(d.id)} title={d.kind === 'file' ? d.file?.path : d.label}
+                  className={cn('flex items-center gap-1.5 pl-3 pr-1 text-[11.5px]', on ? 'font-medium text-foreground' : 'text-muted-foreground hover:text-foreground')}>
+                  {d.label}
+                </button>
+                <button type="button" onClick={() => closeDoc(d.id)}
+                  className="flex items-center pl-0.5 pr-2 text-muted-foreground hover:text-foreground" title="Close">
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            )
+          })}
+          <div className="relative flex shrink-0 items-center border-b border-border px-1">
+            <button type="button" onClick={() => setAddOpen((o) => !o)} title="Open a panel as a tab"
+              className="rounded p-1 text-muted-foreground hover:bg-accent/50 hover:text-foreground">
+              <Plus className="h-3.5 w-3.5" />
+            </button>
+            {addOpen && (
+              <div className="absolute left-0 top-full z-30 mt-1 w-40 rounded-md border border-border bg-card py-1 shadow-lg">
+                {VIEWS.map((v) => (
+                  <button key={v.tab} type="button"
+                    onClick={() => { openPanelTab(v.tab, v.label); setAddOpen(false) }}
+                    className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[11.5px] text-muted-foreground hover:bg-accent/50 hover:text-foreground">
+                    <v.Icon className="h-3.5 w-3.5" /> {v.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <div aria-hidden className="min-w-4 flex-1 border-b border-border" />
         </div>
 
@@ -776,6 +862,14 @@ export default function Compose2Page() {
             per-discipline progress) instead of the active stage. */}
         {pipeRunning ? (
           <PipelineLoader status={pipeStatus} />
+        ) : activeDocTab ? (
+          <div className="min-h-0 flex-1 overflow-hidden">
+            {activeDocTab.kind === 'file' && selectedRun?.runDir ? (
+              <FilePreview key={activeDocTab.id} runId={selectedRun.id} file={activeDocTab.file!} />
+            ) : activeDocTab.kind === 'panel' ? (
+              <div className="h-full overflow-y-auto"><ErrorBoundary>{panelBody(activeDocTab.panel!)}</ErrorBoundary></div>
+            ) : null}
+          </div>
         ) : (
         <>
         {stage === 'explore' && (
