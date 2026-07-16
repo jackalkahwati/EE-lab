@@ -102,23 +102,13 @@ def fetch_text(src):
 
 
 def extract(text, part_hint):
-    key = os.environ.get("OPENAI_API_KEY")
-    model = os.environ.get("OPENAI_MODEL", "gpt-5.1")
-    if not key:
-        raise SystemExit("OPENAI_API_KEY not set in .env.local")
+    # provider chain (OpenAI -> Anthropic) lives in llm_json — the sourcing
+    # path must survive one provider's key running out of quota
+    from llm_json import complete_json
     user = (
         "{}\n\nPart (hint): {}\n\nDatasheet text:\n\"\"\"\n{}\n\"\"\"".format(
             SCHEMA_HINT, part_hint or "(unknown)", text))
-    body = json.dumps({
-        "model": model,
-        "response_format": {"type": "json_object"},
-        "messages": [{"role": "system", "content": SYS}, {"role": "user", "content": user}],
-    }).encode()
-    req = urllib.request.Request(
-        "https://api.openai.com/v1/chat/completions", data=body,
-        headers={"Authorization": "Bearer " + key, "content-type": "application/json"})
-    d = json.loads(urllib.request.urlopen(req, timeout=120).read())
-    return json.loads(d["choices"][0]["message"]["content"])
+    return complete_json(SYS, user)
 
 
 def main():

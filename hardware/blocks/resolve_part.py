@@ -18,8 +18,14 @@ import os
 import re
 import sys
 
-SYM_DIR = "/Applications/KiCad/KiCad.app/Contents/SharedSupport/symbols"
-FP_DIR = "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints"
+# Phase 5b: overridable so part resolution isn't welded to a Mac-local KiCad
+# install path (FL_KICAD_SYMBOLS / FL_KICAD_FOOTPRINTS)
+SYM_DIR = os.environ.get(
+    "FL_KICAD_SYMBOLS",
+    "/Applications/KiCad/KiCad.app/Contents/SharedSupport/symbols")
+FP_DIR = os.environ.get(
+    "FL_KICAD_FOOTPRINTS",
+    "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints")
 
 
 # ---- interface contracts ----------------------------------------------------

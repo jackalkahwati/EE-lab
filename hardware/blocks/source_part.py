@@ -192,6 +192,109 @@ def source(query, interface, nets, refresh=False):
     return r
 
 
+def _registry_footprint(entry):
+    """Footprint text for a catalog part: registry-cached kicad_mod, else a
+    live easyeda2kicad fetch persisted back to the registry. None on failure."""
+    if entry.get("kicad_mod"):
+        return entry["kicad_mod"]
+    lcsc = entry.get("lcsc")
+    if not lcsc:
+        return None
+    import subprocess
+    import tempfile
+    base = os.path.join(tempfile.gettempdir(), "fl_fp_%s" % lcsc)
+    try:
+        subprocess.run(["python3", "-m", "easyeda2kicad", "--footprint", "--overwrite",
+                        "--lcsc_id=%s" % lcsc, "--output=%s" % base],
+                       capture_output=True, timeout=45)
+        pretty = base + ".pretty"
+        mods = [f for f in os.listdir(pretty) if f.endswith(".kicad_mod")]
+        if not mods:
+            return None
+        mod = open(os.path.join(pretty, mods[0])).read()
+        if parts_registry:
+            parts_registry.upsert({"lcsc": lcsc, "kicad_mod": mod,
+                                   "provenance": {"source": "easyeda2kicad",
+                                                  "verified": "lcsc-footprint"}})
+        return mod
+    except Exception:
+        return None
+
+
+def source_catalog(query, roles, nets, interface_name=None):
+    """Source a part from the shared registry's JLCPCB catalog for an
+    ARBITRARY role set — the Phase 3/4 path past the hand-written contracts.
+
+      query          plain-language part ask ("class d audio amplifier 3W")
+      roles          {role: {"desc": ..., "required": bool, "mode": "one"|"multi"}}
+      nets           {role: net_name} — roles absent here stay unconnected
+      interface_name cache key for the binding (defaults to the sorted role set)
+
+    Chain: registry catalog search (684k JLCPCB parts, basic-first) ->
+    datasheet pins (cached on the part row) -> LLM-synthesized, mechanically
+    verified pin binding (cached in registry.bindings, review-required) ->
+    registry footprint (easyeda2kicad on miss). Returns a place()-ready dict
+    with lib='registry' + footprint=<LCSC id>, or {'error': ...}."""
+    if not parts_registry:
+        return {"error": "part registry unavailable"}
+    import contract_synth
+    from digikey import load_env
+    load_env()  # OPENAI_* for the datasheet + binding models
+    iface = interface_name or ("custom::" + "+".join(sorted(roles)))
+    cands = [c for c in parts_registry.search(query, 10)
+             if c.get("lcsc") and c.get("datasheet")]
+    if not cands:
+        return {"error": "no catalog match for %r" % query}
+    last_err = None
+    for cand in cands[:3]:
+        try:
+            pins = cand.get("pins")
+            if not pins:
+                import time as _time
+                import datasheet_to_spec
+                text = datasheet_to_spec.fetch_text(cand["datasheet"])
+                spec = None
+                for attempt in (0, 1, 2):  # 429s are routine on the shared key
+                    try:
+                        spec = datasheet_to_spec.extract(text, cand.get("mpn"))
+                        break
+                    except Exception as e:
+                        if "429" not in str(e) or attempt == 2:
+                            raise
+                        _time.sleep(8 * (attempt + 1))
+                pins = spec.get("pins") or []
+                if not pins:
+                    raise RuntimeError("datasheet yielded no pin table")
+                parts_registry.upsert({
+                    "lcsc": cand["lcsc"], "pins": pins,
+                    "package": cand.get("package") or spec.get("package")})
+            syn = contract_synth.synthesize(cand["lcsc"], pins, roles, iface)
+            binding = syn["binding"]
+            mod = _registry_footprint(cand)
+            if not mod:
+                raise RuntimeError("no footprint for %s" % cand["lcsc"])
+            pmap = {}
+            for role, pin_nums in binding.items():
+                net = nets.get(role)
+                if not net:
+                    continue
+                for n in pin_nums:
+                    pmap[str(n)] = net
+            return {
+                "symbol": cand.get("mpn"), "lib": "registry",
+                "footprint": cand["lcsc"], "pmap": pmap,
+                "mpn": cand.get("mpn"), "manufacturer": cand.get("manufacturer"),
+                "lcsc": cand["lcsc"], "price": cand.get("price"),
+                "stock": cand.get("stock"), "datasheet": cand.get("datasheet"),
+                "verified": "llm-datasheet-binding (review-required)",
+                "source": "catalog+datasheet+llm",
+                "binding": binding,
+            }
+        except Exception as e:
+            last_err = "%s: %s" % (cand.get("lcsc"), str(e)[:120])
+    return {"error": "no catalog candidate bound cleanly (last: %s)" % last_err}
+
+
 def _source_live(query, interface):
     """DigiKey search -> rank -> datasheet -> spec. Returns a cacheable dict or
     None if any step fails (caller falls back)."""

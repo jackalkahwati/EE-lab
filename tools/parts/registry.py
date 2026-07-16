@@ -68,6 +68,18 @@ CREATE TABLE IF NOT EXISTS queries (
   part_id TEXT NOT NULL,
   updated_at REAL
 );
+-- synthesized role bindings: how a specific part's pins map to a role set
+-- (Phase 3 contract synthesis). One row per (part, interface-name); binding
+-- is {"role": ["pin numbers"]}. Provenance says HOW it was produced and
+-- whether a human has reviewed it.
+CREATE TABLE IF NOT EXISTS bindings (
+  part_id TEXT NOT NULL,
+  interface TEXT NOT NULL,
+  binding TEXT NOT NULL,
+  provenance TEXT,
+  updated_at REAL,
+  PRIMARY KEY (part_id, interface)
+);
 """
 
 
@@ -221,6 +233,37 @@ def bulk_upsert(entries, batch=5000):
             con.commit()
             n += len(rows)
         return n
+    finally:
+        con.close()
+
+
+def get_binding(part_id, interface):
+    con = _connect()
+    try:
+        row = con.execute(
+            "SELECT binding, provenance FROM bindings WHERE part_id = ? AND interface = ?",
+            (str(part_id).upper(), interface)).fetchone()
+        if not row:
+            return None
+        out = {"binding": json.loads(row["binding"])}
+        try:
+            out["provenance"] = json.loads(row["provenance"] or "null")
+        except Exception:
+            out["provenance"] = None
+        return out
+    finally:
+        con.close()
+
+
+def save_binding(part_id, interface, binding, provenance=None):
+    con = _connect()
+    try:
+        con.execute(
+            "INSERT OR REPLACE INTO bindings (part_id, interface, binding, provenance, updated_at) "
+            "VALUES (?,?,?,?,?)",
+            (str(part_id).upper(), interface, json.dumps(binding),
+             json.dumps(provenance) if provenance else None, time.time()))
+        con.commit()
     finally:
         con.close()
 

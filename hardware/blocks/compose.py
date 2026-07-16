@@ -24,7 +24,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import resolve_part  # general KiCad-library part resolver
 import source_part   # DigiKey -> datasheet -> resolved part (cache-first)
 
-FP = "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints"
+# Phase 5b: overridable so part resolution isn't welded to a Mac-local KiCad
+# install (registry-served footprints already bypass this for catalog parts)
+FP = os.environ.get(
+    "FL_KICAD_FOOTPRINTS",
+    "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints")
 
 
 def U():
@@ -73,10 +77,49 @@ _NETLIST = []
 _PLACED = []
 
 
+def _upgrade_mod(text, name):
+    """easyeda2kicad emits legacy '(module ...)' footprints; pcbnew 10 refuses
+    to load a board embedding them. Convert with the OFFICIAL converter
+    (kicad-cli fp upgrade) — hand-porting the grammar was tried and rejected
+    by the parser. Then strip file-level tokens (version/generator have no
+    place inside a board) and pin the reference to REF** for place()."""
+    if text.lstrip().startswith("(module"):
+        import subprocess as _usp
+        import tempfile as _utf
+        with _utf.TemporaryDirectory(suffix=".pretty") as d:
+            p = os.path.join(d, "%s.kicad_mod" % re.sub(r"[^\w.-]", "_", name))
+            open(p, "w").write(text)
+            kcli = os.environ.get(
+                "FL_KICAD_CLI", "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli")
+            _usp.run([kcli, "fp", "upgrade", d], capture_output=True, timeout=60)
+            text = open(p).read()
+        if text.lstrip().startswith("(module"):
+            raise RuntimeError("kicad-cli fp upgrade did not modernize footprint %s" % name)
+    text = re.sub(r"\s*\(version [^)]*\)", "", text, count=1)
+    text = re.sub(r'\s*\(generator(_version)? "[^"]*"\)', "", text)
+    text = re.sub(r'\(property "Reference" "[^"]*"', '(property "Reference" "REF**"',
+                  text, count=1)
+    text = re.sub(r'\(fp_text\s+reference\s+(?:"[^"]*"|\S+)',
+                  '(fp_text reference "REF**"', text, count=1)
+    return text
+
+
 def _load(lib, name):
     key = (lib, name)
     if key not in _cache:
-        _cache[key] = open(os.path.join(FP, lib + ".pretty", name + ".kicad_mod")).read()
+        if lib == "registry":
+            # shared part registry footprint (LCSC id) — real pad geometry
+            # fetched by easyeda2kicad and cached for every later build
+            sys.path.insert(0, os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                "tools", "parts"))
+            import registry as _reg
+            e = _reg.get(name)
+            if not (e and e.get("kicad_mod")):
+                raise RuntimeError("registry has no footprint for %s" % name)
+            _cache[key] = _upgrade_mod(e["kicad_mod"], name)
+        else:
+            _cache[key] = open(os.path.join(FP, lib + ".pretty", name + ".kicad_mod")).read()
     return _cache[key]
 
 
@@ -433,6 +476,9 @@ def block_mcu_pico(x, y, n, nets):
         opt["29"] = "rst_out"
     if "sr_oe" in n and "cell_rst" not in n:             # relay OE gate vs modem reset
         opt["22"] = "sr_oe"
+    if "audio_pwm" in n and "fault" not in n:            # audio PWM/EN vs FL-1 bus
+        opt["31"] = "audio_pwm"                          # GP26 (PWM-capable)
+        opt["32"] = "amp_en"                             # GP27
     pmap = {"40": "+5V", "39": "+5V", "38": "GND", "36": "+3V3"}
     for pin, key in opt.items():
         if key in n:
@@ -570,11 +616,12 @@ def block_tempsensor(x, y, n, nets):
         "i2c_scl": n["i2c_scl"], "i2c_sda": n["i2c_sda"], "int": "TEMP_OS"})
     if "error" in r:
         raise RuntimeError("tempsensor source failed: " + r["error"])
-    b = place(r["lib"], r["footprint"], "U6", x + 6, y + 6, 0, r["pmap"], nets)
-    b += cap("C9", x + 6, y + 14, "+3V3", "GND", nets)  # decoupling per power pin
-    _DEVICES.append({"ref": "U6", "type": "i2c_tempsensor", "mpn": r.get("mpn"), "name": r.get("mpn") or r.get("symbol") or "I2C temperature sensor"})
+    uref, cref = _next_ref("U"), _next_ref("C")
+    b = place(r["lib"], r["footprint"], uref, x + 6, y + 6, 0, r["pmap"], nets)
+    b += cap(cref, x + 6, y + 14, "+3V3", "GND", nets)  # decoupling per power pin
+    _DEVICES.append({"ref": uref, "type": "i2c_tempsensor", "mpn": r.get("mpn"), "name": r.get("mpn") or r.get("symbol") or "I2C temperature sensor"})
     print("SOURCED:" + json.dumps({
-        "ref": "U6", "mpn": r.get("mpn"), "manufacturer": r.get("manufacturer"),
+        "ref": uref, "mpn": r.get("mpn"), "manufacturer": r.get("manufacturer"),
         "price": r.get("price"), "stock": r.get("stock"),
         "footprint": r["lib"] + ":" + r["footprint"],
         "verified": r.get("verified"), "via": r.get("source")}))
@@ -593,12 +640,15 @@ def block_sourced_sensor(x, y, n, nets, desc, key):
         "int": key.upper() + "_INT"})
     if "error" in r:
         raise RuntimeError("sensor source failed (%s): %s" % (desc, r["error"]))
-    b = place(r["lib"], r["footprint"], "U6", x + 6, y + 6, 0, r["pmap"], nets)
-    b += cap("C9", x + 6, y + 14, "+3V3", "GND", nets)
-    _DEVICES.append({"ref": "U6", "type": "i2c_sensor", "desc": desc,
+    # Phase 5a: dynamic refs — boards can carry N sourced parts (the old
+    # hardcoded U6/C9 collided at the second sourced sensor)
+    uref, cref = _next_ref("U"), _next_ref("C")
+    b = place(r["lib"], r["footprint"], uref, x + 6, y + 6, 0, r["pmap"], nets)
+    b += cap(cref, x + 6, y + 14, "+3V3", "GND", nets)
+    _DEVICES.append({"ref": uref, "type": "i2c_sensor", "desc": desc,
                      "mpn": r.get("mpn"), "name": r.get("mpn") or r.get("symbol") or desc})
     print("SOURCED:" + json.dumps({
-        "ref": "U6", "desc": desc, "mpn": r.get("mpn"),
+        "ref": uref, "desc": desc, "mpn": r.get("mpn"),
         "manufacturer": r.get("manufacturer"),
         "price": r.get("price"), "stock": r.get("stock"),
         "footprint": r["lib"] + ":" + r["footprint"],
@@ -1353,6 +1403,56 @@ def block_uart_bridge(x, y, n, nets):
     return b, 12, 20
 
 
+# Dynamic reference allocator for catalog-sourced parts (Phase 5a): the old
+# single hardcoded U6/C9 slot collided as soon as a board carried two sourced
+# parts. Reset per board in compose(); starts high to clear every static ref.
+_DYNREF = {"U": 20, "C": 20, "J": 20, "R": 20}
+
+
+def _next_ref(prefix):
+    _DYNREF[prefix] = _DYNREF.get(prefix, 20) + 1
+    return "%s%d" % (prefix, _DYNREF[prefix])
+
+
+def block_audio_amp(x, y, n, nets):
+    """Audio amplifier + speaker connector — NOT a hardcoded part. The part is
+    sourced from the shared registry's JLCPCB catalog (684k parts), its pinout
+    read from the real datasheet, and the pin binding synthesized by the LLM
+    and mechanically verified (contract_synth). REVIEW-REQUIRED like every
+    LLM-bound part; the BOM carries MPN/stock/provenance."""
+    roles = {
+        "power":    {"desc": "supply voltage input(s)", "required": True, "mode": "multi"},
+        "gnd":      {"desc": "ground pin(s)", "required": True, "mode": "multi"},
+        "audio_in": {"desc": "audio signal input (single-ended or IN+)", "required": True, "mode": "one"},
+        "out_pos":  {"desc": "speaker output positive (OUT+ / VO1)", "required": True, "mode": "one"},
+        "out_neg":  {"desc": "speaker output negative (OUT- / VO2)", "required": True, "mode": "one"},
+        "shutdown": {"desc": "shutdown / enable control pin", "required": False, "mode": "one"},
+    }
+    r = source_part.source_catalog(
+        "class d audio amplifier", roles,
+        {"power": "+3V3", "gnd": "GND", "audio_in": n.get("audio_pwm", "AUDIO_PWM"),
+         "out_pos": "SPK_P", "out_neg": "SPK_N",
+         "shutdown": n.get("amp_en", "AMP_EN")},
+        interface_name="audio_amp")
+    if "error" in r:
+        raise RuntimeError("audio amp source failed: " + r["error"])
+    uref, cref, jref = _next_ref("U"), _next_ref("C"), _next_ref("J")
+    b = place(r["lib"], r["footprint"], uref, x + 6, y + 6, 0, r["pmap"], nets)
+    b += cap(cref, x + 6, y + 14, "+3V3", "GND", nets)
+    b += place("Connector_PinHeader_2.54mm", "PinHeader_1x02_P2.54mm_Vertical",
+               jref, x + 16, y + 6, 0, {"1": "SPK_P", "2": "SPK_N"}, nets)
+    label("SPK + -", x + 16, y + 2, 0.6)
+    _DEVICES.append({"ref": uref, "type": "audio_amp", "mpn": r.get("mpn"),
+                     "name": r.get("mpn") or "audio amplifier",
+                     "honesty": "catalog-sourced, LLM pin binding, REVIEW-REQUIRED"})
+    print("SOURCED:" + json.dumps({
+        "ref": uref, "mpn": r.get("mpn"), "manufacturer": r.get("manufacturer"),
+        "price": r.get("price"), "stock": r.get("stock"),
+        "footprint": r["lib"] + ":" + r["footprint"],
+        "verified": r.get("verified"), "via": r.get("source")}))
+    return b, 24, 20
+
+
 # free-text sensor detector for blocks no fixed key matched — these SOURCE a
 # real part instead of being dropped
 SENSOR_PAT = re.compile(
@@ -1394,6 +1494,7 @@ BLOCK_TABLE = {
     "gpiobank": block_gpio_bank,
     "spibus": block_spibus,
     "uartbridge": block_uart_bridge,
+    "audio": block_audio_amp,
 }
 
 
@@ -1422,6 +1523,8 @@ CAPABILITIES = [
     {"key": "spibus", "label": "SPI peripheral header / bus break-out"},
     {"key": "boardid", "label": "Board-ID EEPROM (24LCxx)"},
     {"key": "gpiobank", "label": "Protected GPIO bank / header"},
+    {"key": "audio", "label": "Audio amplifier + speaker connector (Class-D/AB, "
+        "sourced live from the JLCPCB catalog, LLM pin binding, review-required)"},
 ]
 
 
@@ -1519,11 +1622,34 @@ def _block_keys(s):
     if any(k in s for k in ("uart bridge", "serial bridge", "instrument uart",
                             "instrument serial")):
         add("uartbridge")
+    if any(k in s for k in ("audio amp", "speaker", "class d", "class-d",
+                            "audio out", "audio driver")):
+        add("audio")
     if "usbc" not in out and any(k in s for k in ("power", "regulator", "battery", "vin",
                                                   "5v", "3v3", "charg", "ldo", "buck",
                                                   "usb power", "usb-c power")):
         add("power")
     return out
+
+
+def _catalog_i2c_rescue(desc):
+    """Would-be-dropped phrase -> True when the shared part registry's JLCPCB
+    catalog has an in-stock I2C-attachable match for it (the existing sourced-
+    sensor path can then build it). Registry absent or no match -> False, and
+    the phrase drops honestly like before."""
+    try:
+        sys.path.insert(0, os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "tools", "parts"))
+        import registry as _reg
+        for hit in _reg.search(desc, 5):
+            text = " ".join(str(hit.get(k) or "") for k in
+                            ("description", "category", "mpn")).upper()
+            if "I2C" in text or "IIC" in text:
+                return True
+        return False
+    except Exception:
+        return False
 
 
 def classify(blocks):
@@ -1536,6 +1662,11 @@ def classify(blocks):
         ks = _block_keys(b)
         if not ks:
             if SENSOR_PAT.search(b):
+                sensor_reqs.append(b)
+            elif _catalog_i2c_rescue(b):
+                # Phase 4: the 684k-part catalog recognizes this as an
+                # I2C-attachable part even though no keyword matched — source
+                # it instead of dropping it. Non-I2C hits still drop honestly.
                 sensor_reqs.append(b)
             else:
                 dropped.append(b)
@@ -1662,6 +1793,8 @@ def compose(spec, blocks, out_path):
     _DEVICES[:] = []  # reset the per-board device manifest
     _PLACED[:] = []   # occupancy for the fiducial free-space search
     _SILK[:] = []     # reset the per-board functional silkscreen labels
+    _DYNREF.clear()
+    _DYNREF.update({"U": 20, "C": 20, "J": 20, "R": 20})  # per-board ref pool
     keys, dropped, sensor_reqs = classify(blocks)
     dyn = {}
     for i, desc in enumerate(sensor_reqs):
@@ -1764,6 +1897,8 @@ def compose(spec, blocks, out_path):
         n.update({"uart_gps_tx": "INSTR_TX", "uart_gps_rx": "INSTR_RX"})
     if "motion" in keys:
         n.update({"step": "STEP", "dir": "DIR", "en": "MOT_EN"})
+    if "audio" in keys:
+        n.update({"audio_pwm": "AUDIO_PWM", "amp_en": "AMP_EN"})
     if "cellular" in keys:
         n.update({"uart_cell_tx": "CELL_TX", "uart_cell_rx": "CELL_RX",
                   "cell_pwrkey": "CELL_PWRKEY", "cell_rst": "CELL_RST"})

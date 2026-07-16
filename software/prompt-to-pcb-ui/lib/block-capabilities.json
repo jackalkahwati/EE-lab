@@ -71,6 +71,10 @@
     {
       "key": "gpiobank",
       "label": "Protected GPIO bank / header"
+    },
+    {
+      "key": "audio",
+      "label": "Audio amplifier + speaker connector (Class-D/AB, sourced live from the JLCPCB catalog, LLM pin binding, review-required)"
     }
   ]
 }
