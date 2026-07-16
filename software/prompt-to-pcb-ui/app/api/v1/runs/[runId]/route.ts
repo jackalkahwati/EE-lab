@@ -26,10 +26,12 @@ export async function GET(req: Request, ctx: { params: Promise<{ runId: string }
   }
 
   const dir = path.join(process.cwd(), 'public', 'runs', runId)
-  const [jobFile, timing, board] = await Promise.all([
+  const [jobFile, timing, board, idRenderFile, idConsistency] = await Promise.all([
     readJson(path.join(dir, 'v1-job.json')),
     readJson(path.join(dir, 'timing.json')),
     readJson(path.join(dir, 'electronics', 'chipscale-board.json')),
+    readJson(path.join(dir, 'id', 'render.json')),
+    readJson(path.join(dir, 'id', 'consistency.json')),
   ])
   const job = getJob(runId) ?? jobFile
   if (!job && !board && !timing) {
@@ -48,6 +50,13 @@ export async function GET(req: Request, ctx: { params: Promise<{ runId: string }
     prompt: job?.prompt,
     stages: job?.stages ?? {},
     error: job?.error,
+    // Industrial-design concept sheet + its self-consistency verdict. null when
+    // no render landed (e.g. image generation billing-gated) — the honest
+    // gated/failed reason then lives in stages['id render'].detail.
+    idRender: idRenderFile ? {
+      url: idRenderFile.url, provider: idRenderFile.provider,
+      consistency: idConsistency ? { state: idConsistency.state, reason: idConsistency.reason ?? null } : null,
+    } : null,
     electronics,
     board: board?.boardMm ? {
       widthMm: board.boardMm.w, heightMm: board.boardMm.h,

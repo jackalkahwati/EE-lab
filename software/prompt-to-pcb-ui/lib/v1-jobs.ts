@@ -17,10 +17,12 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { spawn } from 'node:child_process'
 import { makeSession, recordRun, getUser } from '@/lib/auth'
 import { runFullPipeline, type StageEvent } from '@/lib/run-pipeline'
 import { trackAndSync } from '@/lib/programs-sync'
 import { writeWorkItems } from '@/lib/work-items'
+import { normalizeIdBrief, type IdBrief } from '@/lib/id-brief'
 import type { ProductSpec } from '@/lib/product-spec'
 
 export type V1Job = {
@@ -85,6 +87,126 @@ async function selfAnswered(
   throw new Error('interview did not converge in 5 rounds')
 }
 
+/** Server-side equivalent of the browser's ID scaffold (components/id-scaffold.tsx):
+ *  the same standardized 4-view, to-scale orthographic sheet (front · ¾ iso ·
+ *  top-down · side), drawn deterministically from the brief's envelope, as plain
+ *  SVG. Same geometry math + one shared mm→px scale; hard-coded dark-theme colors
+ *  (headless has no CSS theme). One honest difference from the browser sheet: no
+ *  nested board footprint — at this point in a headless build the electronics
+ *  board does not exist yet. */
+function scaffoldSvg(brief: IdBrief): string | null {
+  const e = brief.envelopeMm ?? {}
+  const x = e.x ?? 0
+  const y = e.y ?? 0
+  if (!(x > 0 && y > 0)) return null
+  const z = (e.z ?? 0) > 0 ? (e.z as number) : Math.max(6, Math.min(x, y) * 0.3)
+  const CELL = 190
+  const PAD = 30
+  const S = CELL / Math.max(x, y, z) // one shared mm->px scale
+  const cw = CELL + PAD * 2
+  const W = cw * 2
+  const cx = (col: number) => col * cw + cw / 2
+  const cy = (row: number) => row * cw + cw / 2
+  const TXT = 'font-family="ui-monospace,monospace" fill="#9ca3af" text-anchor="middle"'
+  const STROKE = '#93b8e8'
+  const ortho = (col: number, row: number, wMm: number, hMm: number, label: string) => {
+    const w = wMm * S
+    const h = hMm * S
+    return (
+      `<rect x="${(cx(col) - w / 2).toFixed(1)}" y="${(cy(row) - h / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="${(Math.min(w, h) * 0.08).toFixed(1)}" fill="rgba(147,184,232,0.06)" stroke="${STROKE}" stroke-width="1.2"/>` +
+      `<text x="${cx(col)}" y="${row * cw + 18}" font-size="11" ${TXT}>${label}</text>` +
+      `<text x="${cx(col)}" y="${(row + 1) * cw - 10}" font-size="10" ${TXT}>${Math.round(wMm)} × ${Math.round(hMm)} mm</text>`
+    )
+  }
+  // ¾ isometric box, top-right cell — same projection as the browser scaffold.
+  const COS30 = Math.cos(Math.PI / 6)
+  const SIN30 = 0.5
+  const iso = (u: number, v: number, w: number) => ({ px: (u - v) * COS30 * S, py: ((u + v) * SIN30 - w) * S })
+  const pts = [
+    iso(0, 0, 0), iso(x, 0, 0), iso(x, y, 0), iso(0, y, 0),
+    iso(0, 0, z), iso(x, 0, z), iso(x, y, z), iso(0, y, z),
+  ]
+  const tx = cx(1) - (Math.min(...pts.map((p) => p.px)) + Math.max(...pts.map((p) => p.px))) / 2
+  const ty = cy(0) - (Math.min(...pts.map((p) => p.py)) + Math.max(...pts.map((p) => p.py))) / 2
+  const P = pts.map((p) => `${(p.px + tx).toFixed(1)},${(p.py + ty).toFixed(1)}`)
+  const face = (idx: number[], fill: string) =>
+    `<polygon points="${idx.map((i) => P[i]).join(' ')}" fill="${fill}" stroke="${STROKE}" stroke-width="1.2"/>`
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${W}" width="${W}" height="${W}">` +
+    `<rect width="${W}" height="${W}" fill="#0f0f0f"/>` + // dark, matching the browser raster + render prompt
+    ortho(0, 0, x, z, 'FRONT') +
+    face([4, 5, 6, 7], 'rgba(147,184,232,0.10)') + // top
+    face([0, 1, 5, 4], 'rgba(147,184,232,0.05)') + // front
+    face([1, 2, 6, 5], 'rgba(147,184,232,0.03)') + // right
+    `<text x="${cx(1)}" y="18" font-size="11" ${TXT}>PERSPECTIVE</text>` +
+    `<text x="${cx(1)}" y="${cw - 10}" font-size="10" ${TXT}>${Math.round(x)} × ${Math.round(y)} × ${Math.round(z)} mm</text>` +
+    ortho(0, 1, x, y, 'TOP') +
+    ortho(1, 1, y, z, 'SIDE') +
+    `</svg>`
+  )
+}
+
+/** Rasterize the scaffold SVG to a base64 PNG using macOS QuickLook (qlmanage —
+ *  already on the deployment host, zero npm dependencies). Best-effort: any
+ *  failure returns null and the headless render proceeds WITHOUT a proportion
+ *  reference (the id-render prompt then falls back to the envelope text). The
+ *  svg + png persist under the run's id/ dir as evidence of what conditioned
+ *  the render. */
+async function rasterizeScaffold(brief: IdBrief, runId: string): Promise<string | null> {
+  const svg = scaffoldSvg(brief)
+  if (!svg) return null
+  try {
+    const dir = path.join(runDir(runId), 'id')
+    await fs.mkdir(dir, { recursive: true })
+    const svgPath = path.join(dir, 'scaffold.svg')
+    await fs.writeFile(svgPath, svg)
+    const ok = await new Promise<boolean>((resolve) => {
+      const p = spawn('qlmanage', ['-t', '-s', '1024', '-o', dir, svgPath], { timeout: 60_000 })
+      p.on('error', () => resolve(false))
+      p.on('close', (code) => resolve(code === 0))
+    })
+    if (!ok) return null
+    const png = path.join(dir, 'scaffold.png')
+    await fs.rename(path.join(dir, 'scaffold.svg.png'), png) // qlmanage names it <src>.png
+    return (await fs.readFile(png)).toString('base64')
+  } catch {
+    return null
+  }
+}
+
+/** Headless ID concept render — POSTs the same /api/id-render the browser calls,
+ *  so the self-consistency gate fires on v1 API runs too. Returns the stage
+ *  record for the job's status surface; never throws. Image generation may be
+ *  billing-gated — the route replies { ok:false, reason } honestly and that is
+ *  recorded verbatim (never faked); the build continues either way. */
+async function renderIdSheet(
+  briefRaw: unknown, runId: string, baseUrl: string, headers: Record<string, string>,
+): Promise<{ status: string; detail?: string }> {
+  try {
+    const brief = normalizeIdBrief(briefRaw as Partial<IdBrief>)
+    const scaffoldPng = await rasterizeScaffold(brief, runId)
+    const noRef = scaffoldPng ? '' : ' · no scaffold reference (rendered from envelope text)'
+    const r = await fetch(`${baseUrl}/api/id-render`, {
+      method: 'POST', headers: { 'content-type': 'application/json', ...headers },
+      body: JSON.stringify({ brief, runId, ...(scaffoldPng ? { scaffoldPng } : {}) }),
+    })
+    const d = await r.json().catch(() => null)
+    if (d?.ok) {
+      const cons = d?.consistency?.state ? ` · consistency ${d.consistency.state}` : ''
+      return { status: 'passed', detail: `${d.provider ?? 'rendered'}${cons}${noRef}` }
+    }
+    // gated (billing/quota) → skipped; a real fault → failed. Both recorded
+    // honestly; neither blocks the build (a product can proceed without a
+    // render — the consistency gate then records nothing, which is correct).
+    return {
+      status: d?.reason === 'unavailable' ? 'skipped' : 'failed',
+      detail: `${d?.reason ?? 'error'}: ${d?.message ?? `id-render HTTP ${r.status}`}`,
+    }
+  } catch (e) {
+    return { status: 'failed', detail: `id-render unreachable: ${String(e).slice(0, 200)}` }
+  }
+}
+
 async function runJob(job: V1Job, baseUrl: string) {
   job.status = 'running'
   job.startedAt = new Date().toISOString()
@@ -129,6 +251,18 @@ async function runJob(job: V1Job, baseUrl: string) {
       }).then((r) => r.json())
       if (id?.type === 'brief') idBrief = id.brief
     } catch { /* advisory */ }
+
+    // 1b. ID concept render + self-consistency gate — the same /api/id-render
+    //     the browser calls, so headless runs get the concept sheet (and its
+    //     judge evidence under id/) too. Best-effort: a gated or failed render
+    //     is recorded in the stage detail and the build continues.
+    if (idBrief) {
+      job.phase = 'id render'
+      job.stages['id render'] = { status: 'running' }
+      await persist(job)
+      job.stages['id render'] = await renderIdSheet(idBrief, job.runId, baseUrl, headers)
+      await persist(job)
+    }
 
     // 2. Product spec via the architect (self-answered clarifications).
     job.phase = 'product architecture'
