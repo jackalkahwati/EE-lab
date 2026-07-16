@@ -1,0 +1,14 @@
+# Automatic HTTPS ingress — replaces the Cloudflare tunnel. Caddy fetches and
+# renews a Let's Encrypt cert for {$FL_HOST} on its own and reverse-proxies to
+# the single app container. Point the domain's A/AAAA record at this host and
+# open 80/443; that's the entire "drop the tunnel for normal ingress" step.
+{$FL_HOST} {
+	encode zstd gzip
+	# pipeline stages stream for many minutes — do not let the proxy time them out
+	reverse_proxy app:4500 {
+		transport http {
+			read_timeout 1800s
+			write_timeout 1800s
+		}
+	}
+}

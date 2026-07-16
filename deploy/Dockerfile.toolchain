@@ -1,0 +1,63 @@
+# FirstLight pipeline TOOLCHAIN image (Linux) — the native EDA stack the
+# backend shells out to, proven portable off macOS. This image contains NO app
+# code and NO node_modules; it's the base layer that answers the hard cloud-
+# move question: does compose → freerouting → flroute → KiCad DRC run clean on
+# Linux? Mount the repo at /repo and run the chain with FL_KICAD_* env pointing
+# at the Linux KiCad below.
+#
+#   docker build -f deploy/Dockerfile.toolchain -t firstlight-toolchain .
+#   docker run --rm -v "$PWD":/repo -w /repo firstlight-toolchain bash deploy/verify-linux.sh
+#
+# Sims (OpenFOAM/Elmer/openEMS/ccx/gmsh) are a SEPARATE, larger layer added
+# later — the electronics spine is proven first.
+# 22.04 (jammy): the kicad-9.0 PPA has a reliable build here (it did NOT apply
+# on 24.04/noble, which silently fell back to KiCad 7.0.11 — too far from the
+# Mac's 10.0.1 for DRC parity). KiCad 9 has the design-rules-in-board-file
+# behavior the pipeline relies on. Prod should still pin the exact Mac version
+# (nightly PPA / source build) — see deploy/README.md.
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# The kicad metapackage ships its footprint/symbol/3d libraries as RECOMMENDS,
+# which --no-install-recommends drops — so install the library packages
+# EXPLICITLY or /usr/share/kicad/footprints is empty. Plus JRE for freerouting,
+# Rust to build flroute for Linux, and the pipeline's Python deps.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      software-properties-common ca-certificates gnupg curl \
+    && add-apt-repository -y ppa:kicad/kicad-9.0-releases \
+    && apt-get update && apt-get install -y --no-install-recommends \
+      kicad kicad-footprints kicad-symbols kicad-packages3d \
+      python3 python3-pip python3-venv \
+      default-jre-headless \
+      build-essential pkg-config libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Python deps the pipeline scripts import (kept minimal — pcbnew comes from the
+# kicad apt package, already on the system python path).
+RUN pip3 install --break-system-packages --no-cache-dir \
+      jsonschema requests easyeda2kicad anthropic openai
+
+# Rust toolchain + build flroute for Linux. Only the flroute crate is copied so
+# the layer caches independently of app changes.
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+COPY hardware/pcba-rev-a/tools/flroute /build/flroute
+RUN cd /build/flroute && cargo build --release && \
+    mkdir -p /opt/flroute && cp target/release/flroute /opt/flroute/flroute && \
+    cargo clean
+
+# Linux toolchain locations, exposed under the SAME env names the refactored
+# code reads (macOS defaults apply only when these are unset).
+ENV FL_KICAD_CLI=/usr/bin/kicad-cli \
+    FL_KICAD_PYTHON=/usr/bin/python3 \
+    FL_KICAD_FOOTPRINTS=/usr/share/kicad/footprints \
+    FL_KICAD_SYMBOLS=/usr/share/kicad/symbols \
+    FL_KICAD_3DMODELS=/usr/share/kicad/3dmodels \
+    FL_FLROUTE=/opt/flroute/flroute
+
+# sanity: pcbnew + kicad-cli must import/run in this image
+RUN python3 -c "import pcbnew; print('pcbnew', pcbnew.Version())" && kicad-cli version
+
+WORKDIR /repo
+CMD ["bash"]

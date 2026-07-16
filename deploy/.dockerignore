@@ -1,0 +1,8 @@
+node_modules
+.next
+.next-*
+public/runs
+.git
+tools/parts/*.sqlite*
+.jlcparts-cache
+**/target
