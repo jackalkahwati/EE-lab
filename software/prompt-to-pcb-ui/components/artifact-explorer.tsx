@@ -146,14 +146,86 @@ function Tree({ nodes, sel, onSel, openDirs, toggle, depth = 0 }: {
   )
 }
 
-export function ArtifactExplorer({ runId, compact }: { runId: string | null; compact?: boolean }) {
+
+/** Full-pane preview of one run file — used by the explorer's two-pane mode
+ *  AND by the compose page's CENTER pane (IDE-style: tree left, content
+ *  center). Fetches text itself; images load via <img>. */
+export function FilePreview({ runId, file, onClose }: {
+  runId: string
+  file: { name: string; path: string; size?: number }
+  onClose?: () => void
+}) {
+  const [body, setBody] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const e = ext(file.name)
+  const url = `/runs/${runId}/${file.path}`
+  useEffect(() => {
+    setBody(null)
+    if (IMG_EXT.has(e)) return
+    if (!TEXT_EXT.has(e) || (file.size ?? 0) > MAX_PREVIEW) return
+    setLoading(true)
+    fetch(url, { cache: 'no-store' })
+      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then(setBody)
+      .catch((er) => setBody(`⚠ could not load: ${String(er)}`))
+      .finally(() => setLoading(false))
+  }, [url, e, file.size])
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex items-center gap-2 border-b border-border/60 px-3 py-1.5">
+        {onClose && (
+          <button onClick={onClose} className="rounded p-0.5 hover:bg-accent/50" title="Close">
+            <ChevronLeft className="h-3.5 w-3.5" />
+          </button>
+        )}
+        <span className="truncate font-mono text-xs text-foreground">{file.path}</span>
+        <span className="text-[10px] text-muted-foreground">{fmtSize(file.size)}</span>
+        <a href={url} download className="ml-auto flex items-center gap-1 rounded border border-border/60 px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-accent/50">
+          <Download className="h-3 w-3" /> Download
+        </a>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto p-3">
+        {loading && <div className="text-xs text-muted-foreground">Loading…</div>}
+        {IMG_EXT.has(e) && <img src={url} alt={file.name} className="max-w-full rounded border border-border/40" />}
+        {e === 'svg' && <img src={url} alt={file.name} className="max-w-full rounded border border-border/40 bg-white/5" />}
+        {e === 'md' && body && (
+          <div
+            className="max-w-3xl text-[13px] leading-relaxed text-foreground/90 [&_.ae-h]:mt-4 [&_.ae-h]:mb-1 [&_.ae-h]:font-semibold [&_.ae-h]:text-foreground [&_.ae-p]:my-1 [&_.ae-ul]:my-1 [&_.ae-ul]:list-disc [&_.ae-ul]:pl-5 [&_.ae-gap]:h-2 [&_.ae-code]:my-2 [&_.ae-code]:overflow-auto [&_.ae-code]:rounded [&_.ae-code]:bg-black/30 [&_.ae-code]:p-2 [&_.ae-code]:font-mono [&_.ae-code]:text-xs [&_.ae-inline]:rounded [&_.ae-inline]:bg-black/30 [&_.ae-inline]:px-1 [&_.ae-inline]:font-mono [&_.ae-inline]:text-xs [&_.ae-row]:whitespace-pre [&_.ae-row]:font-mono [&_.ae-row]:text-xs"
+            dangerouslySetInnerHTML={{ __html: mdToHtml(body) }}
+          />
+        )}
+        {e === 'json' && body && (
+          <pre className="overflow-auto rounded bg-black/30 p-2 font-mono text-xs text-foreground/90">
+            {(() => { try { return JSON.stringify(JSON.parse(body), null, 2) } catch { return body } })()}
+          </pre>
+        )}
+        {e === 'csv' && body && <CsvTable text={body} />}
+        {!IMG_EXT.has(e) && !['md', 'json', 'csv', 'svg'].includes(e) && body && (
+          <pre className="overflow-auto rounded bg-black/30 p-2 font-mono text-xs text-foreground/90">{body}</pre>
+        )}
+        {!loading && body == null && !IMG_EXT.has(e) && e !== 'svg' && (
+          <div className="text-xs text-muted-foreground">
+            {(file.size ?? 0) > MAX_PREVIEW
+              ? `Too large to preview inline (${fmtSize(file.size)}) — use Download.`
+              : 'Binary file — use Download (boards open in KiCad, .step/.glb in a CAD viewer).'}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+export function ArtifactExplorer({ runId, compact, onOpen }: {
+  runId: string | null
+  compact?: boolean
+  /** when set, file clicks open in the HOST's pane (IDE center) — no inline preview */
+  onOpen?: (f: { name: string; path: string; size?: number }) => void
+}) {
   const [tree, setTree] = useState<FileNode[] | null>(null)
   const [count, setCount] = useState(0)
   const [err, setErr] = useState<string | null>(null)
   const [openDirs, setOpenDirs] = useState<Set<string>>(new Set(['data', 'disciplines', 'id']))
   const [sel, setSel] = useState<FileNode | null>(null)
-  const [body, setBody] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
 
   const load = useCallback(() => {
     if (!runId) return
@@ -167,21 +239,12 @@ export function ArtifactExplorer({ runId, compact }: { runId: string | null; com
       .catch((e) => setErr(String(e)))
   }, [runId])
 
-  useEffect(() => { setTree(null); setSel(null); setBody(null); load() }, [load])
+  useEffect(() => { setTree(null); setSel(null); load() }, [load])
 
   const openFile = useCallback((n: FileNode) => {
     setSel(n)
-    setBody(null)
-    const e = ext(n.name)
-    if (IMG_EXT.has(e)) return // <img> loads itself
-    if (!TEXT_EXT.has(e) || (n.size ?? 0) > MAX_PREVIEW) return // download-only
-    setLoading(true)
-    fetch(`/runs/${runId}/${n.path}`, { cache: 'no-store' })
-      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then(setBody)
-      .catch((er) => setBody(`⚠ could not load: ${String(er)}`))
-      .finally(() => setLoading(false))
-  }, [runId])
+    if (onOpen) onOpen({ name: n.name, path: n.path, size: n.size })
+  }, [onOpen])
 
   const toggle = (p: string) =>
     setOpenDirs((s) => {
@@ -202,7 +265,7 @@ export function ArtifactExplorer({ runId, compact }: { runId: string | null; com
     <div className="flex h-full min-h-0 text-sm">
       {/* tree pane */}
       <div className={compact
-        ? `${sel ? 'hidden' : 'flex'} w-full flex-col`
+        ? `${sel && !onOpen ? 'hidden' : 'flex'} w-full flex-col`
         : 'flex w-64 shrink-0 flex-col border-r border-border/60'}>
         <div className="flex items-center justify-between border-b border-border/60 px-2 py-1.5 text-[11px] text-muted-foreground">
           <span>{count} files</span>
@@ -214,55 +277,15 @@ export function ArtifactExplorer({ runId, compact }: { runId: string | null; com
           <Tree nodes={tree} sel={sel?.path ?? null} onSel={openFile} openDirs={openDirs} toggle={toggle} />
         </div>
       </div>
-      {/* preview pane */}
-      <div className={compact && !sel ? 'hidden' : 'min-w-0 flex-1 overflow-auto'}>
+      {/* preview pane (hosts without onOpen only — onOpen mode is tree-only) */}
+      <div className={(compact && !sel) || onOpen ? 'hidden' : 'min-w-0 flex-1 overflow-auto'}>
         {!sel ? (
           <div className="p-6 text-xs text-muted-foreground">
             Every file this run generated, live from disk. Select one to preview — markdown, JSON,
             CSV and images render inline; CAD/board binaries download.
           </div>
         ) : (
-          <div className="flex h-full flex-col">
-            <div className="flex items-center gap-2 border-b border-border/60 px-3 py-1.5">
-              {compact && (
-                <button onClick={() => { setSel(null); setBody(null) }} className="rounded p-0.5 hover:bg-accent/50" title="Back to files">
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                </button>
-              )}
-              <span className="truncate font-mono text-xs text-foreground">{sel.path}</span>
-              <span className="text-[10px] text-muted-foreground">{fmtSize(sel.size)}</span>
-              <a href={url} download className="ml-auto flex items-center gap-1 rounded border border-border/60 px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-accent/50">
-                <Download className="h-3 w-3" /> Download
-              </a>
-            </div>
-            <div className="min-h-0 flex-1 overflow-auto p-3">
-              {loading && <div className="text-xs text-muted-foreground">Loading…</div>}
-              {IMG_EXT.has(e) && <img src={url} alt={sel.name} className="max-w-full rounded border border-border/40" />}
-              {e === 'svg' && <img src={url} alt={sel.name} className="max-w-full rounded border border-border/40 bg-white/5" />}
-              {e === 'md' && body && (
-                <div
-                  className="max-w-3xl text-[13px] leading-relaxed text-foreground/90 [&_.ae-h]:mt-4 [&_.ae-h]:mb-1 [&_.ae-h]:font-semibold [&_.ae-h]:text-foreground [&_.ae-p]:my-1 [&_.ae-ul]:my-1 [&_.ae-ul]:list-disc [&_.ae-ul]:pl-5 [&_.ae-gap]:h-2 [&_.ae-code]:my-2 [&_.ae-code]:overflow-auto [&_.ae-code]:rounded [&_.ae-code]:bg-black/30 [&_.ae-code]:p-2 [&_.ae-code]:font-mono [&_.ae-code]:text-xs [&_.ae-inline]:rounded [&_.ae-inline]:bg-black/30 [&_.ae-inline]:px-1 [&_.ae-inline]:font-mono [&_.ae-inline]:text-xs [&_.ae-row]:whitespace-pre [&_.ae-row]:font-mono [&_.ae-row]:text-xs"
-                  dangerouslySetInnerHTML={{ __html: mdToHtml(body) }}
-                />
-              )}
-              {e === 'json' && body && (
-                <pre className="overflow-auto rounded bg-black/30 p-2 font-mono text-xs text-foreground/90">
-                  {(() => { try { return JSON.stringify(JSON.parse(body), null, 2) } catch { return body } })()}
-                </pre>
-              )}
-              {e === 'csv' && body && <CsvTable text={body} />}
-              {!IMG_EXT.has(e) && !['md', 'json', 'csv', 'svg'].includes(e) && body && (
-                <pre className="overflow-auto rounded bg-black/30 p-2 font-mono text-xs text-foreground/90">{body}</pre>
-              )}
-              {!loading && body == null && !IMG_EXT.has(e) && e !== 'svg' && (
-                <div className="text-xs text-muted-foreground">
-                  {(sel.size ?? 0) > MAX_PREVIEW
-                    ? `Too large to preview inline (${fmtSize(sel.size)}) — use Download.`
-                    : 'Binary file — use Download (boards open in KiCad, .step/.glb in a CAD viewer).'}
-                </div>
-              )}
-            </div>
-          </div>
+          <FilePreview runId={runId} file={sel} onClose={compact ? () => setSel(null) : undefined} />
         )}
       </div>
     </div>

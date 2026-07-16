@@ -37,7 +37,7 @@ import { RunOverview } from '@/components/run-overview'
 import { RevisionRail } from '@/components/revision-rail'
 import { WorkQueue } from '@/components/work-queue'
 import { CommentsPanel } from '@/components/comments-panel'
-import { ArtifactExplorer } from '@/components/artifact-explorer'
+import { ArtifactExplorer, FilePreview } from '@/components/artifact-explorer'
 import { FL1ReadinessPanel } from '@/components/fl1-readiness-panel'
 import { BoardObjects } from '@/components/board-objects'
 import { ReviewsPill } from '@/components/board-reviews'
@@ -200,6 +200,8 @@ export default function Compose2Page() {
   const [leftW, setLeftW] = useState(288)
   // left-pane mode: chat (conversation), threads (design list), files (run tree)
   const [leftView, setLeftView] = useState<'chat' | 'threads' | 'files'>('chat')
+  // file opened from the left tree — takes over the CENTER pane until closed
+  const [openedFile, setOpenedFile] = useState<{ name: string; path: string; size?: number } | null>(null)
   const [rightW, setRightW] = useState(480)
   const dragRef = useRef<null | 'left' | 'right'>(null)
   // mirrors dragRef as state so the active Handle can stay highlighted while the
@@ -579,7 +581,7 @@ export default function Compose2Page() {
   // ---- left pane: icon bar + the three views (chat / threads / files) ------
   const selectThreadFromList = (id: string) => {
     setSelectedId(id); setNewDesign(false); setIdBrief(null); setProductSpec(null)
-    setStage('electronics'); setBuiltDisc({}); setLeftView('chat')
+    setStage('electronics'); setBuiltDisc({}); setLeftView('chat'); setOpenedFile(null)
   }
   const leftIcons = (
     <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-1.5">
@@ -628,7 +630,7 @@ export default function Compose2Page() {
   )
   const filesPane = (
     <div className="flex min-h-0 flex-1 flex-col">
-      <ArtifactExplorer runId={selectedRun?.runDir ? selectedRun.id : null} compact />
+      <ArtifactExplorer runId={selectedRun?.runDir ? selectedRun.id : null} compact onOpen={setOpenedFile} />
     </div>
   )
 
@@ -730,8 +732,15 @@ export default function Compose2Page() {
       <Handle which="left" />
 
       {/* CENTER — stage bar over the middle pane ONLY, then the active stage's
-          visualization. The right pane is a full-height sibling (like the left). */}
-      <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          visualization. The right pane is a full-height sibling (like the left).
+          A file opened from the left Files tree takes over this pane (IDE
+          editor style) until closed. */}
+      <section className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+        {openedFile && selectedRun?.runDir && (
+          <div className="absolute inset-0 z-20 bg-background">
+            <FilePreview runId={selectedRun.id} file={openedFile} onClose={() => setOpenedFile(null)} />
+          </div>
+        )}
         {/* stage bar — editor-style tab strip scoped to the middle pane: each tab
             carries its own bottom border; the ACTIVE tab drops it (bg-background)
             so it reads connected to the content below, with a 1px amber top edge */}
