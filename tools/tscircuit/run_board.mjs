@@ -1027,13 +1027,22 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15 } = {}) {
   // showed). Skip straight to a single placement+DRC pass.
   const noNets = !nets?.length
   const spread = +(gap + 1.3).toFixed(2) // the fallback ladder's roomier variant, relative to the base gap
+  // Density quick wins (opt out with FL_DENSE_4L=0):
+  //  - dense boards (> 10 parts) skip the 2-layer rung: at that density the
+  //    2-layer JVM pass is a ~1-2 min near-certain failure that also poisons
+  //    the trail; inner-layer escape is what actually routes them
+  //  - a final ROOMIER rung (bigger gap + wider board) runs before giving up,
+  //    so a genuinely routable-but-tight board grows honestly instead of
+  //    triggering the part-shedding density re-plan
+  const dense = process.env.FL_DENSE_4L !== '0' && (parts?.length ?? 0) > 10
   const ladder = noNets
     ? [{ name: 'placement only (no signal nets)', router: 'tsci', place: { gap, maxW, clearance: 0.5 }, profile: 'standard' }]
     : FR_JAR && JAVA
     ? [
-        { name: 'freerouting 2-layer, standard fab', router: 'fr', layers: 2, place: { gap, maxW, singleSided: true }, profile: 'standard' },
+        ...(dense ? [] : [{ name: 'freerouting 2-layer, standard fab', router: 'fr', layers: 2, place: { gap, maxW, singleSided: true }, profile: 'standard' }]),
         { name: 'freerouting 4-layer, standard fab', router: 'fr', layers: 4, place: { gap, maxW, singleSided: true }, profile: 'standard' },
         { name: 'freerouting 4-layer, HDI fab',      router: 'fr', layers: 4, place: { gap, maxW, singleSided: true }, profile: 'hdi' },
+        { name: 'freerouting 4-layer HDI, spread placement', router: 'fr', layers: 4, place: { gap: spread, maxW: maxW + 4, singleSided: true }, profile: 'hdi', respace: true },
         { name: 'built-in router, HDI fab',          router: 'tsci', place: { gap, maxW, clearance: 0.45 }, profile: 'hdi' },
       ]
     : [
@@ -1061,8 +1070,13 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15 } = {}) {
     // export — skip computing it (routingDisabled). The tsci strategies keep it:
     // there the built-in router IS the router.
     const rd = OPT && s.router === 'fr'
-    const code = netAwarePlaced
-      ? emitBoardCode(netAwarePlaced, nets, { clearance: s.router === 'tsci' ? s.place.clearance : null, routingDisabled: rd })
+    // the spread rung must actually RE-PLACE with the roomier gap/width —
+    // reusing the tight net-aware placement would make it a no-op
+    const placed = s.respace && FR_JAR && JAVA
+      ? (await netAwarePlace(parts, nets, { gap: s.place.gap, maxW: s.place.maxW })) ?? netAwarePlaced
+      : netAwarePlaced
+    const code = placed
+      ? emitBoardCode(placed, nets, { clearance: s.router === 'tsci' ? s.place.clearance : null, routingDisabled: rd })
       : buildCode(parts, nets, { ...s.place, routingDisabled: rd })
     let cj = await buildCircuit(code, s.name)
     let fixes = [], unrouted = 0
