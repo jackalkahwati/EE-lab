@@ -24,6 +24,7 @@ import {
   canRun,
   chargeCredits,
   creditsAvailable,
+  creditsForRun,
   getUser,
   isAdminRequest,
   isValidRunId,
@@ -1772,9 +1773,16 @@ export async function GET(req: Request) {
             revNote,
             events,
           })
-          // v3: 1 credit = 1 platform run. The LLM itself runs on the user's
-          // BYOK key, so we meter platform runs (tooling), not model cost.
-          chargeCredits(userEmail, 1)
+          // Credits scale with the run's SIZE — a big or multi-board run costs
+          // more than one small board (~1 credit per small board, by nets +
+          // components). The LLM is BYOK, so credits meter PLATFORM compute
+          // (routing, solvers, CAD), read from the finished board.
+          try {
+            const bj = JSON.parse(fs.readFileSync(path.join(pubData, 'board.json'), 'utf8'))
+            chargeCredits(userEmail, creditsForRun(bj.netsTotal ?? bj.netsRouted ?? 0, bj.components ?? 0))
+          } catch {
+            chargeCredits(userEmail, 1)
+          }
         } catch {
           /* never let report writing break the response */
         }

@@ -1,44 +1,15 @@
-'use client'
-
 /**
- * Pricing page — renders the three tiers from lib/plans.ts. Pro kicks off the
- * Stripe subscription checkout; Enterprise opens a sales email. Free just points
- * back into the app. Prices come from the config (single source of truth).
+ * Pricing page (server component). Renders the tiers + credit model from config;
+ * the interactive buttons live in the <PricingCta> client island so this file
+ * can safely import server-only config (lib/plans → lib/auth).
  */
-import { useState } from 'react'
-import { PLANS, SALES_EMAIL, type PlanTier } from '@/lib/plans'
+import { CREDIT_PACKS } from '@/lib/auth'
+import { PLANS, SALES_EMAIL } from '@/lib/plans'
+import { PricingCta } from '@/components/pricing-cta'
+
+export const dynamic = 'force-dynamic'
 
 export default function PricingPage() {
-  const [busy, setBusy] = useState<string | null>(null)
-  const [error, setError] = useState('')
-
-  async function onCta(tier: PlanTier) {
-    setError('')
-    if (tier.id === 'free') {
-      window.location.href = '/'
-      return
-    }
-    if (tier.id === 'enterprise') {
-      window.location.href = `mailto:${SALES_EMAIL}?subject=${encodeURIComponent('FirstLight Enterprise inquiry')}`
-      return
-    }
-    // Pro → Stripe subscription checkout
-    setBusy(tier.id)
-    try {
-      const r = await fetch('/api/billing/checkout', { method: 'POST' })
-      const d = await r.json()
-      if (r.ok && d.url) {
-        window.location.href = d.url
-      } else {
-        setError(d.error || 'Checkout is not available yet.')
-      }
-    } catch {
-      setError('Could not reach checkout. Try again.')
-    } finally {
-      setBusy(null)
-    }
-  }
-
   return (
     <main className="mx-auto max-w-5xl px-4 py-12">
       <header className="mb-2 text-center">
@@ -47,12 +18,6 @@ export default function PricingPage() {
           Bring your own model key — you only pay for platform runs, never for inference.
         </p>
       </header>
-
-      {error && (
-        <p className="mx-auto mb-4 max-w-md rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-center text-sm text-red-500">
-          {error}
-        </p>
-      )}
 
       <div className="mt-8 grid gap-5 md:grid-cols-3">
         {PLANS.map((tier) => (
@@ -83,21 +48,43 @@ export default function PricingPage() {
               ))}
             </ul>
 
-            <button
-              type="button"
-              onClick={() => onCta(tier)}
-              disabled={busy === tier.id}
-              className={`mt-5 rounded-md px-3 py-2 text-sm font-medium disabled:opacity-50 ${
-                tier.featured
-                  ? 'bg-primary text-primary-foreground hover:bg-primary/90'
-                  : 'border border-border hover:bg-muted'
-              }`}
-            >
-              {busy === tier.id ? 'Redirecting…' : tier.cta}
-            </button>
+            <PricingCta tierId={tier.id} cta={tier.cta} featured={tier.featured} salesEmail={SALES_EMAIL} />
           </div>
         ))}
       </div>
+
+      {/* How credits work — the run unit */}
+      <section className="mx-auto mt-12 max-w-3xl rounded-xl border border-border p-5">
+        <h3 className="text-base font-semibold">How credits work</h3>
+        <p className="mt-2 text-sm text-muted-foreground">
+          A <strong>credit</strong> is one small board. A run costs credits in
+          proportion to its <strong>size</strong> — a simple board is ~1 credit,
+          while a dense or multi-board run costs more (metered by nets +
+          components). So a 40-board run naturally costs far more than a single
+          small board. The AI model runs on <strong>your own key</strong>, so
+          credits only cover the platform work: routing, DRC, solvers, and CAD.
+        </p>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Your plan refreshes its credit allowance each month. Run out early? Top
+          off any time with a credit pack — no waiting for the next cycle.
+        </p>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          {CREDIT_PACKS.map((p) => (
+            <div key={p.id} className="rounded-lg border border-border p-3 text-center">
+              <div className="text-lg font-bold">{p.credits} credits</div>
+              <div className="text-sm text-muted-foreground">${(p.cents / 100).toFixed(0)}</div>
+              <div className="mt-1 text-[11px] text-muted-foreground">
+                ${(p.cents / 100 / p.credits).toFixed(2)}/credit
+              </div>
+            </div>
+          ))}
+        </div>
+        <p className="mt-3 text-[11px] text-muted-foreground">
+          Top-off packs are priced per-credit above the Pro plan’s included rate — the
+          subscription is the cheapest way to buy runs.
+        </p>
+      </section>
 
       <p className="mt-6 text-center text-xs text-muted-foreground">
         Prices in USD. Enterprise is a custom annual quote — {SALES_EMAIL}.
