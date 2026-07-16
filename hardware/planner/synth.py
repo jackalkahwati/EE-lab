@@ -665,6 +665,48 @@ def synth(design, out_path):
 
 _QFN_SIZES = [6, 8, 16, 24, 32, 48]
 
+# ---- part identity for the exported netlist (the merger's whole point) -------
+# The chip-scale spec must carry the planner's REAL parts — MPN + LCSC id — so
+# the board builder shows real components and can pull real footprint geometry,
+# instead of an anonymous qfnN-only part set.
+_REG = None
+
+
+def _registry():
+    """Shared MPN/LCSC part registry (tools/parts) — best-effort import; the
+    netlist still exports (mpn-only) when the registry is unavailable."""
+    global _REG
+    if _REG is None:
+        try:
+            regdir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "..", "..", "tools", "parts")
+            if regdir not in sys.path:
+                sys.path.insert(0, regdir)
+            import registry as _r
+            _REG = _r
+        except Exception:
+            _REG = False
+    return _REG or None
+
+
+def _lcsc_for(mpn, spec=None):
+    """Real LCSC id for a part: the UCS spec's own sourcing first, then the
+    shared part registry (mpn -> lcsc). Returns None when honestly unknown —
+    an id is looked up, never guessed."""
+    if spec:
+        for v in (spec.get("lcsc"), (spec.get("sourcing") or {}).get("lcsc")):
+            if v:
+                return str(v)
+    reg = _registry()
+    if reg and mpn:
+        try:
+            hit = reg.get(mpn)
+            if hit and hit.get("lcsc"):
+                return str(hit["lcsc"])
+        except Exception:
+            pass
+    return None
+
 
 def _qfn_for(netmap):
     """qfnN fallback footprint — used ONLY if the real .kicad_mod has no SMD pads
@@ -687,7 +729,12 @@ def _qfn_for(netmap):
 # header + FL-1 instrument-bus header (both THT pin headers), dedicated test-point
 # pads, and the calibration divider resistors. The functional design — MCU,
 # peripherals, decoupling, bus pull-ups, the USB/power connector — stays.
-_CHIP_SCALE_DROP_LIBS = {"TestPoint", "Connector_PinHeader_2.54mm"}
+_CHIP_SCALE_DROP_LIBS = {"TestPoint", "Connector_PinHeader_2.54mm",
+                         # bench-board mechanicals: run_board drills its OWN
+                         # collision-checked NPTH mounting holes, and a fiducial
+                         # is not a part — exporting these as phantom 0402 chips
+                         # just pollutes the product board.
+                         "MountingHole", "Fiducial"}
 
 
 def _is_chip_scale_extra(ref, lib):
@@ -713,11 +760,29 @@ def netlist_from_design(design, chip_scale=True, real_geometry=False):
     compose._NETLIST = []
     compose._DEVICES[:] = []
     tmpd = tempfile.mkdtemp(prefix="fl_netlist_")
+    buf = io.StringIO()
     try:
-        with contextlib.redirect_stdout(io.StringIO()):
+        with contextlib.redirect_stdout(buf):
             synth(design, os.path.join(tmpd, "b.kicad_pcb"))
     finally:
         shutil.rmtree(tmpd, ignore_errors=True)
+
+    # honest report seed: what synth itself already dropped (no footprint /
+    # unwireable), read from its own COMPOSE_COVERAGE sentinel.
+    dropped = []
+    mcov = re.search(r"^COMPOSE_COVERAGE:(\{.*\})$", buf.getvalue(), re.M)
+    if mcov:
+        try:
+            dropped += json.loads(mcov.group(1)).get("dropped", [])
+        except Exception:
+            pass
+
+    # ref -> real part name (MPN), from the device manifest synth recorded
+    mpn_of = {}
+    for d in compose._DEVICES:
+        if d.get("ref") and d.get("name"):
+            mpn_of.setdefault(d["ref"], d["name"])
+    by_mpn = {s.get("mpn"): s for s in design.get("final_design", []) if s.get("mpn")}
 
     # merge placements by ref (a ref placed twice = one part; union its pads)
     comps = {}
@@ -727,13 +792,50 @@ def netlist_from_design(design, chip_scale=True, real_geometry=False):
         c = comps.setdefault(e["ref"], {"lib": e["lib"], "name": e["name"], "netmap": {}})
         c["netmap"].update(e["netmap"])
 
-    parts, by_net, gnd = [], {}, []
+    parts, by_net, gnd, notes = [], {}, [], []
     for ref, c in comps.items():
         nm = c["netmap"]
         name = c["name"]
         kind = ("capacitor" if name.startswith("C_")
                 else "resistor" if name.startswith("R_") else "chip")
-        part = {"name": ref, "kind": kind, "footprint": _qfn_for(nm)}
+        mpn = mpn_of.get(ref)
+        # module blocks (e.g. the Pico) are wired by MODULE pin numbers; the bare
+        # chip's LCSC footprint would land those nets on the WRONG pads, so a
+        # module part carries its mpn only, never an lcsc id.
+        lcsc = None if c["lib"] == "Module" else _lcsc_for(mpn, by_mpn.get(mpn))
+        # honesty gates on the footprint mapping — never fake, drop LOUDLY:
+        #  - non-numeric pads (A5/B12/S1 on connectors) do not exist on a qfnN;
+        #    only a REAL footprint (named pads) can carry them.
+        #  - run_board accepts qfn4..qfn64 only; a part with more wired pads than
+        #    qfn64 has no honest generic mapping.
+        nonnum = sorted(p for p in nm if not str(p).isdigit())
+        if nonnum:
+            # qfnN pins are strictly numeric, so these pads (A4/B9/SHIELD on
+            # connectors, EP names) cannot exist on the fallback footprint.
+            # Strip them LOUDLY — each lost pad+net is reported — and keep the
+            # part only if numeric pads remain; never emit an endpoint the
+            # board builder cannot resolve.
+            notes.append("%s%s: pads %s stripped — they exist only on the real "
+                         "footprint%s, not on the qfn fallback (their nets are lost)"
+                         % (ref, " (%s)" % mpn if mpn else "", ",".join(nonnum[:8]),
+                            " (LCSC %s)" % lcsc if lcsc else ""))
+            nm = {k: v for k, v in nm.items() if str(k).isdigit()}
+            if not nm:
+                dropped.append({"ref": ref, "mpn": mpn, "reason":
+                                "all wired pads are non-numeric (%s) — no honest qfn mapping"
+                                % ",".join(nonnum[:8])})
+                continue
+        fp = _qfn_for(nm)
+        mq = re.match(r"qfn(\d+)$", fp)
+        if mq and int(mq.group(1)) > 64:
+            dropped.append({"ref": ref, "mpn": mpn, "reason":
+                            "%s wired pads exceed run_board's qfn64 limit — no honest footprint mapping" % mq.group(1)})
+            continue
+        part = {"name": ref, "kind": kind, "footprint": fp}
+        if mpn:
+            part["mpn"] = mpn
+        if lcsc:
+            part["lcsc"] = lcsc
         # Real .kicad_mod geometry is OPT-IN: it currently breaks run_board's
         # routers (freerouting DSN export fails, built-in autorouter errors on the
         # real pad geometry), whereas the qfnN string footprint — sized by the
@@ -766,7 +868,13 @@ def netlist_from_design(design, chip_scale=True, real_geometry=False):
 
     return {"parts": parts, "nets": nets, "gnd": gnd,
             "components": len(parts), "signal_nets": len([n for n in by_net if len(by_net[n]) > 1]),
-            "ground_pins": len(gnd)}
+            "ground_pins": len(gnd),
+            # provenance + honesty: this spec came from the PLANNER's design (one
+            # board, no second LLM part-set), and every part that could not map
+            # to a run_board footprint is reported here, never silently faked.
+            "source": "planner",
+            "honest": {"dropped": dropped, "notes": notes,
+                       "mapped": [p.get("mpn") or p["name"] for p in parts]}}
 
 
 if __name__ == "__main__":

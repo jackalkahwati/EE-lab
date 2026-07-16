@@ -186,6 +186,23 @@ async function fetchFootprintUncached(lcsc: string): Promise<string | null> {
 const PLANNER_DIR = path.join(process.cwd(), '..', '..', 'hardware', 'planner')
 const exists = (p: string) => fs.access(p).then(() => true).catch(() => false)
 
+/** Pull REAL LCSC footprints for every part tagged with a valid id and attach
+ *  them as part.kicadMod so the runner uses true pad geometry + size. Fetches
+ *  each distinct id ONCE (duplicate ids would race on the same /tmp file).
+ *  Returns how many parts got a real footprint. Shared by the LLM candidate
+ *  path and the planner-spec path — the planner's parts carry real LCSC ids. */
+async function attachRealFootprints(parts: any[]): Promise<number> {
+  const ids = [...new Set(parts.map((p: any) => (p?.lcsc ? String(p.lcsc) : '')).filter(Boolean))]
+  const mods = new Map<string, string>()
+  await Promise.all(ids.map(async (id) => { const m = await fetchFootprint(id); if (m) mods.set(id, m) }))
+  let real = 0
+  for (const p of parts as any[]) {
+    const m = p?.lcsc ? mods.get(String(p.lcsc)) : undefined
+    if (m) { p.kicadMod = m; real++ }
+  }
+  return real
+}
+
 /** MERGER: export the planner's real design (final_design + intent) as a
  *  run_board {parts, nets, gnd} netlist via synth.py's bridge. Returns null on
  *  any failure so the caller falls back to the LLM part-set. */
@@ -291,17 +308,7 @@ type BoardOpts = {
 /** One full board candidate: part-set engine → real footprints → routed board. */
 async function buildCandidate(userMsg: string, req: Request, dir: string, svgName: string, timeoutMs: number, boardOpts: BoardOpts, model?: string) {
   const { parts, nets, gnd, note, droppedCapabilities } = await emitPartsNets(userMsg, overrideForRequest(req), model)
-  // pull REAL LCSC footprints for any part the engine tagged with a valid id;
-  // attach as part.kicadMod so the runner uses the true pad geometry + size.
-  // Fetch each distinct id ONCE (duplicate ids would race on the same /tmp file).
-  const ids = [...new Set(parts.map((p: any) => (p?.lcsc ? String(p.lcsc) : '')).filter(Boolean))]
-  const mods = new Map<string, string>()
-  await Promise.all(ids.map(async (id) => { const m = await fetchFootprint(id); if (m) mods.set(id, m) }))
-  let realFootprints = 0
-  for (const p of parts as any[]) {
-    const m = p?.lcsc ? mods.get(String(p.lcsc)) : undefined
-    if (m) { p.kicadMod = m; realFootprints++ }
-  }
+  const realFootprints = await attachRealFootprints(parts)
   const result = await runBoard({ parts, nets, gnd, ...boardOpts }, path.join(dir, svgName), timeoutMs, req.signal ?? undefined)
   return { parts, nets, gnd, note, droppedCapabilities, realFootprints, result, svgName }
 }
@@ -422,21 +429,43 @@ async function buildChipScale(
       mountingHoles: { count: roundForm ? 3 : 4, holeDiaMm: 2.2 },
     }
 
-    // MERGER (Stage E): if the planner produced a real UCS design for this run,
-    // build the chip-scale board from THAT — its real parts, MCU pin allocation
-    // and bus connectivity, exported to a netlist by synth's bridge — so the board
-    // the user sees comes from the SAME design as the plan, not a separate LLM
-    // part-set guess. Falls back to emitPartsNets when there's no planner design
-    // (or the bridge yields nothing). Skipped for a keep-capabilities rebuild.
+    // MERGER (Stage E): ONE design, ONE board — never a second, independent LLM
+    // part-set when the planner already designed this run. Preferred source is
+    // the PERSISTED planner spec (data/chipscale-spec.json, emitted by the plan
+    // path in run_board format with the planner's REAL part names + LCSC ids):
+    // read it directly, pull the real LCSC footprints, feed run_board — no LLM
+    // call, no python re-run. Fallback: the ucs_design.json bridge (spawn
+    // synth --netlist). Only with neither does emitPartsNets run. Skipped for a
+    // keep-capabilities rebuild (that is a deliberate LLM re-design).
     let cand: Awaited<ReturnType<typeof buildCandidate>> | undefined
-    let boardSource: 'planner-merged' | 'llm' = 'llm'
-    const plannerDesignPath = path.join(process.cwd(), 'public', 'runs', runId, 'data', 'ucs_design.json')
-    if (!keepCapabilities && await exists(plannerDesignPath)) {
-      const nl = await plannerNetlist(plannerDesignPath)
+    let boardSource: 'planner' | 'planner-merged' | 'llm' = 'llm'
+    let plannerHonest: { dropped?: unknown[]; notes?: unknown[] } | null = null
+    const dataDir = path.join(process.cwd(), 'public', 'runs', runId, 'data')
+    if (!keepCapabilities) {
+      let nl: { parts: any[]; nets: any[]; gnd?: string[]; honest?: any } | null = null
+      let src: 'planner' | 'planner-merged' = 'planner'
+      try {
+        const specJson = JSON.parse(await fs.readFile(path.join(dataDir, 'chipscale-spec.json'), 'utf8'))
+        if (Array.isArray(specJson?.parts) && specJson.parts.length && Array.isArray(specJson?.nets)) nl = specJson
+      } catch { /* no persisted spec — try the ucs_design bridge below */ }
+      if (!nl && await exists(path.join(dataDir, 'ucs_design.json'))) {
+        nl = await plannerNetlist(path.join(dataDir, 'ucs_design.json'))
+        src = 'planner-merged'
+      }
       if (nl?.parts?.length) {
-        const result = await runBoard({ parts: nl.parts, nets: nl.nets, gnd: nl.gnd, ...boardOpts }, path.join(dir, 'chipscale.svg'), 285_000, req.signal ?? undefined)
-        cand = { parts: nl.parts, nets: nl.nets, gnd: nl.gnd, note: undefined, droppedCapabilities: undefined, realFootprints: 0, result, svgName: 'chipscale.svg' }
-        boardSource = 'planner-merged'
+        // The planner's parts carry real LCSC ids so real footprint geometry
+        // CAN be pulled — but attaching it is OPT-IN (FL_CS_REAL_FP=1): measured
+        // A/B on the same planner netlist (run-cs-merge-vrfy-1), real kicadMods
+        // gave 0 routed traces / 39 DRC errors while the pin-count-sized qfn
+        // mapping routed 27/27 traces at 4 errors — the real-geometry router
+        // break synth.py's bridge documents. The NETLIST is the real design;
+        // the footprint stays an approximation until that break is fixed, and
+        // the lcsc ids still flow to the BOM/sourcing artifacts unchanged.
+        const realFootprints = process.env.FL_CS_REAL_FP === '1' ? await attachRealFootprints(nl.parts) : 0
+        plannerHonest = nl.honest ?? null
+        const result = await runBoard({ parts: nl.parts, nets: nl.nets, gnd: nl.gnd ?? [], ...boardOpts }, path.join(dir, 'chipscale.svg'), 285_000, req.signal ?? undefined)
+        cand = { parts: nl.parts, nets: nl.nets, gnd: nl.gnd ?? [], note: undefined, droppedCapabilities: undefined, realFootprints, result, svgName: 'chipscale.svg' }
+        boardSource = src
       }
     }
     // plannerOnly (the pipeline route's early kick): if the bridge yielded no
@@ -603,7 +632,7 @@ async function buildChipScale(
       // Persist the part set too, so downstream disciplines (supply chain BOM,
       // manufacturing, validation) can ground on the REAL chip-scale parts (the
       // BLE SoC + mics + PMIC), not the flroute reference board's placeholder BOM.
-      const partList = parts.map((p: any) => ({ name: p.name, footprint: p.footprint, kind: p.kind, lcsc: p.lcsc ?? null }))
+      const partList = parts.map((p: any) => ({ name: p.name, footprint: p.footprint, kind: p.kind, mpn: p.mpn ?? null, lcsc: p.lcsc ?? null }))
       // CONTRACT with the MECHANICAL stage (read from chipscale-board.json):
       //   boardShape: {type:'rect'} | {type:'circle', diameterMm, boltCircleDiaMm?}
       //     — the REAL as-built outline the runner exported to Edge.Cuts (for a
@@ -613,7 +642,7 @@ async function buildChipScale(
       //     drilled in the .kicad_pcb, in BOARD-CENTERED mm (+x right, +y up).
       //     The enclosure should put its bosses/standoffs exactly there.
       await fs.writeFile(path.join(dir, 'chipscale-board.json'),
-        JSON.stringify({ boardMm: result.boardMm, areaMm2: result.areaMm2, components: result.components, routedTraces: result.routedTraces, realFootprints, parts: partList, boardShape: result.boardShape ?? null, mountingHoles: result.mountingHoles ?? [], drc: result.drc ?? null, drcRepair: result.drcRepair ?? null, designConvergence, boardSource }))
+        JSON.stringify({ boardMm: result.boardMm, areaMm2: result.areaMm2, components: result.components, routedTraces: result.routedTraces, realFootprints, parts: partList, boardShape: result.boardShape ?? null, mountingHoles: result.mountingHoles ?? [], drc: result.drc ?? null, drcRepair: result.drcRepair ?? null, designConvergence, boardSource, plannerHonest }))
       // the routed .kicad_pcb for the 3D render (the real chip-down board)
       if (result.kicadPcb) await fs.writeFile(path.join(dir, 'chipscale.kicad_pcb'), result.kicadPcb)
     }
@@ -651,6 +680,9 @@ async function buildChipScale(
       drcRepair: result.drcRepair ?? null,
       designConvergence,
       boardSource,
+      // honest report from the planner spec: parts that could NOT map to a
+      // run_board footprint were dropped LOUDLY there, never silently faked.
+      plannerHonest,
       realFootprints,
       svgUrl: result.svg ? `/runs/${runId}/electronics/chipscale.svg?t=${Date.now()}` : null,
       // true when a re-planned board won but its SVG could not be promoted to

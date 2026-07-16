@@ -602,6 +602,51 @@ export async function GET(req: Request) {
           // design via the netlist bridge, instead of a separate LLM part-set.
           try { fs.writeFileSync(path.join(pubData, 'ucs_design.json'), JSON.stringify(synthDesign)) } catch { /* non-fatal */ }
 
+          // MERGER artifact (one design → one board): export the SAME planner
+          // design in run_board format — {parts, nets, gnd} with the planner's
+          // REAL part names + LCSC ids — as data/chipscale-spec.json. The
+          // chip-scale engine feeds tools/tscircuit/run_board.mjs DIRECTLY from
+          // this file and skips its own LLM part-set entirely. Plain python3
+          // (the netlist bridge needs no KiCad); quiet spawn, not exec() — the
+          // spec is one large JSON line that would spam the client log.
+          try {
+            const plannerHome = path.resolve(hwDir, '../../hardware/planner')
+            const nlRaw = await new Promise<string>((resolve, reject) => {
+              const py = spawn('python3', [path.join(plannerHome, 'synth.py'), '--netlist', designPath],
+                { cwd: plannerHome, timeout: 90_000 })
+              let out = ''
+              let err = ''
+              py.stdout?.on('data', (d: Buffer) => (out += d))
+              py.stderr?.on('data', (d: Buffer) => (err += d))
+              py.on('error', reject)
+              py.on('close', (code) => (code === 0 && out.trim()
+                ? resolve(out)
+                : reject(new Error(err.slice(0, 200) || `netlist bridge exit ${code}`))))
+            })
+            const nl = JSON.parse(nlRaw.trim().split('\n').filter(Boolean).pop() || 'null') as {
+              parts?: { name: string; mpn?: string; lcsc?: string }[]
+              nets?: unknown[]
+              honest?: { dropped?: unknown[] }
+            } | null
+            if (nl && Array.isArray(nl.parts) && nl.parts.length) {
+              fs.writeFileSync(path.join(pubData, 'chipscale-spec.json'), JSON.stringify(nl))
+              const named = nl.parts.filter((p) => p.mpn)
+              log('design',
+                `chip-scale spec: ${nl.parts.length} parts — ${named.map((p) => `${p.name}=${p.mpn}${p.lcsc ? ' (' + p.lcsc + ')' : ''}`).join(', ')} — ${nl.nets?.length ?? 0} nets → data/chipscale-spec.json`,
+                'ok')
+              const nDropped = nl.honest?.dropped?.length ?? 0
+              if (nDropped) {
+                log('design',
+                  `⚠ chip-scale spec: ${nDropped} part(s) had no honest run_board footprint mapping — dropped LOUDLY (chipscale-spec.json → honest.dropped)`,
+                  'warn')
+              }
+            } else {
+              log('design', 'chip-scale spec: netlist bridge returned no parts — electronics stage falls back honestly', 'warn')
+            }
+          } catch (e) {
+            log('design', `chip-scale spec export failed: ${String(e).slice(0, 160)} — electronics stage falls back`, 'warn')
+          }
+
           // ---- EARLY CHIP-SCALE BUILD (plan mode) ---------------------------
           // The merged design just landed, and in plan mode the board that SHIPS
           // is the chip-scale board built FROM it — so start that build NOW,
