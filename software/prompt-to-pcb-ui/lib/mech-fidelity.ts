@@ -44,7 +44,11 @@ export function judgeSystem(): string {
     'provided). You are strict about FORM (silhouette, proportions, envelope) and ' +
     'FEATURES (ports, vents, controls, windows present in the right faces), and ' +
     'you ignore rendering style, color, and material appearance — the CAD is ' +
-    'unstyled geometry. Reply with ONLY a JSON object.'
+    'unstyled geometry. RENDERING CONVENTION: the lid/cap may be shown floating ' +
+    'a few millimetres above the shell (an exploded view for cavity inspection) — ' +
+    'never penalize that axial gap itself; instead judge whether the lid PROFILE ' +
+    'would seat flush on the shell (matching outer contour, no step) if lowered. ' +
+    'Reply with ONLY a JSON object.'
   )
 }
 
