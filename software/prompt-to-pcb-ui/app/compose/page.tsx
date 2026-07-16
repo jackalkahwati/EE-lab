@@ -77,7 +77,7 @@ const VIEWS: { tab: Tab; label: string; Icon: any }[] = [
   { tab: 'Assembly', label: 'Assembly', Icon: Wrench },
   { tab: 'FL-1', label: 'FL-1', Icon: Activity },
   { tab: 'FL-1 Ready', label: 'Ready', Icon: Gauge },
-  { tab: 'Artifacts', label: 'Artifacts', Icon: ScrollText },
+  { tab: 'Artifacts', label: 'Files', Icon: ScrollText },
 ]
 
 // Pipeline stages the middle+right panes follow. Electronics + Industrial Design
