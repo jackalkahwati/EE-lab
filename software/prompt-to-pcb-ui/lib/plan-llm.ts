@@ -24,7 +24,6 @@ import type { LLMOverride } from '@/lib/llm'
 import {
   defaultModelForPlan,
   findModel,
-  modelAllowed,
   type CatalogModel,
 } from '@/lib/model-catalog'
 
@@ -51,53 +50,41 @@ export function resolvePlanModel(req: Request, requestedId?: string | null): Res
   const plan: Plan = user?.plan ?? 'free'
   const admin = isAdminRequest(req)
   const requested = findModel(requestedId ?? requestedModelId(req))
-  // Admin's default is an Anthropic model so it routes to the Mac subscription
-  // (their proxy-hybrid path); everyone else defaults per plan (free → Gemini).
+  // Admin defaults to an Anthropic model so it routes to the Mac subscription
+  // (their proxy-hybrid path); everyone else defaults to the catalog default.
   const model = requested ?? (admin ? findModel('claude-sonnet')! : defaultModelForPlan(plan))
   const byok = overrideForRequest(req)
 
-  // 1) BYOK — their key, their bill. Match the model to their provider so we
-  // never send e.g. a Gemini model string to an Anthropic key.
+  // 1) BYOK — the free tier's LLM source: user's own key + provider, any model.
+  // Match the model string to their provider so we never send e.g. a Gemini
+  // model string to an Anthropic key.
   if (byok?.apiKey) {
     const provider = byok.provider ?? model.provider
     const modelStr = requested && requested.provider === provider ? requested.providerModel : byok.model
     return {
       override: { provider, apiKey: byok.apiKey, model: modelStr },
       model,
-      creditMult: 0,
+      creditMult: 1,
       source: 'byok',
     }
   }
 
-  // 2) Plan gate (platform credit only; admin bypasses).
-  if (!admin && !modelAllowed(plan, model)) {
-    const need = model.minPlan.charAt(0).toUpperCase() + model.minPlan.slice(1)
-    return {
-      override: {},
-      model,
-      creditMult: model.creditMult,
-      source: 'platform',
-      error: `${model.label} needs a ${need} plan. Upgrade, or add your own model API key in settings to run any model.`,
-      status: 402,
-    }
-  }
-
-  // 3) Admin — subscription for Anthropic (model-only → CLI path), OpenRouter
-  // otherwise. Not billed to a customer.
+  // 2) Admin — the Mac subscription (Anthropic → CLI path). Jack's own testing;
+  // not billed. Non-anthropic admin picks fall back to the subscription model.
   if (admin) {
-    if (model.provider === 'anthropic') {
-      return { override: { model: model.providerModel }, model, creditMult: 0, source: 'subscription' }
-    }
-    return { override: { provider: 'openrouter', model: model.openrouterModel }, model, creditMult: 0, source: 'platform' }
+    const m = model.provider === 'anthropic' ? model.providerModel : 'claude-sonnet-5'
+    return { override: { model: m }, model, creditMult: 0, source: 'subscription' }
   }
 
-  // 4) Allowed platform pick (free taste + Pro/Enterprise) — routed through the
-  // one funded OpenRouter key, credit cost scaled by the model's multiplier so
-  // subscription revenue covers the API bill.
+  // 3) Non-admin without a key — v3 has no platform-hosted model, so they must
+  // BYOK. The run route already refuses this before the pipeline; this is a
+  // safety net so the resolver never silently produces a keyless override.
   return {
-    override: { provider: 'openrouter', model: model.openrouterModel },
+    override: {},
     model,
-    creditMult: model.creditMult,
-    source: 'platform',
+    creditMult: 1,
+    source: 'byok',
+    error: 'Add your own model API key in settings to run — the free tier runs on your key.',
+    status: 402,
   }
 }

@@ -24,8 +24,8 @@ import {
   canRun,
   chargeCredits,
   creditsAvailable,
-  creditsForRun,
   getUser,
+  isAdminRequest,
   isValidRunId,
   recordRun,
   runAccess,
@@ -203,21 +203,27 @@ export async function GET(req: Request) {
   }
   const userRec = getUser(userEmail)
   if (!userRec) return new Response('unknown account', { status: 401 })
-  // BYOK escape hatch: a user running on their OWN model key (per-request
-  // header or account-stored) may keep designing at 0 credits — the LLM spend
-  // is theirs. Credits are still charged while they last (they fund the
-  // platform compute: routing, solvers, CAD), floored at 0 by chargeCredits.
-  if (!canRun(userRec) && !hasByok(req)) {
+  const admin = isAdminRequest(req)
+  // v3 LLM source: admin runs on the Mac subscription; everyone else MUST bring
+  // their own key. On the free tier the model runs on the USER's key, so the
+  // platform never pays for inference.
+  if (!admin && !hasByok(req)) {
     return new Response(
-      `Free preview used up (${creditsAvailable(userRec)} credits left). Add your own model API key in settings to keep designing free, or subscribe to Pro to have us run the frontier models for you.`,
+      'Add your own model API key in settings to run — on the free tier the model runs on your key. Subscribe later to unlock more runs.',
       { status: 402 },
     )
   }
-  // Plan-gate the selected model: a free user picking a frontier model on
-  // platform credit is refused here (BYOK and admin bypass). resolvedModel also
-  // carries the credit multiplier used when the finished board is charged.
-  // The run is an EventSource GET (no custom headers), so the selected model
-  // rides as the `model` query param; pass it explicitly to the resolver.
+  // Run allowance: a few free runs, then subscribe. BYOK does NOT grant
+  // unlimited runs — it satisfies the LLM requirement, not the platform run
+  // limit. Admin is uncapped.
+  if (!canRun(userRec) && !admin) {
+    return new Response(
+      `You've used your free runs (${creditsAvailable(userRec)} left). Subscribe to Pro or Enterprise to unlock more.`,
+      { status: 402 },
+    )
+  }
+  // Selected model rides as the `model` query param (EventSource GET has no
+  // custom headers). resolvePlanModel routes BYOK→their key, admin→subscription.
   const resolvedModel = resolvePlanModel(req, new URL(req.url).searchParams.get('model'))
   if (resolvedModel.error) {
     return new Response(resolvedModel.error, { status: resolvedModel.status ?? 402 })
@@ -1766,17 +1772,9 @@ export async function GET(req: Request) {
             revNote,
             events,
           })
-          // charge credits by the finished board's complexity (nets + parts).
-          // Read the just-written board.json; fall back to 1 credit if absent.
-          try {
-            const bj = JSON.parse(
-              fs.readFileSync(path.join(pubData, 'board.json'), 'utf8'),
-            )
-            const cost = creditsForRun(bj.netsTotal ?? bj.netsRouted ?? 0, bj.components ?? 0, resolvedModel.creditMult)
-            chargeCredits(userEmail, cost)
-          } catch {
-            chargeCredits(userEmail, 1)
-          }
+          // v3: 1 credit = 1 platform run. The LLM itself runs on the user's
+          // BYOK key, so we meter platform runs (tooling), not model cost.
+          chargeCredits(userEmail, 1)
         } catch {
           /* never let report writing break the response */
         }

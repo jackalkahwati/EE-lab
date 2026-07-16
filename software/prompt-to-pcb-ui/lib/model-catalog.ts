@@ -69,7 +69,7 @@ export const MODELS: CatalogModel[] = [
     provider: 'gemini',
     providerModel: geminiPro,
     openrouterModel: orGeminiPro,
-    minPlan: 'pro',
+    minPlan: 'free',
     creditMult: 1,
   },
   {
@@ -79,7 +79,7 @@ export const MODELS: CatalogModel[] = [
     provider: 'openai',
     providerModel: openaiModel,
     openrouterModel: orGpt,
-    minPlan: 'pro',
+    minPlan: 'free',
     creditMult: 2,
   },
   {
@@ -89,7 +89,7 @@ export const MODELS: CatalogModel[] = [
     provider: 'anthropic',
     providerModel: 'claude-opus-4-8',
     openrouterModel: orOpus,
-    minPlan: 'pro',
+    minPlan: 'free',
     creditMult: 4,
   },
 ]
