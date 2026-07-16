@@ -48,7 +48,7 @@ const STORE = path.join(STORE_DIR, 'users.json')
 // board. See creditsForRun().
 // Monthly plan grant. Enterprise is a high pooled allowance (contact-sales,
 // granted manually / by an enterprise Stripe subscription).
-export const PLAN_CREDITS: Record<Plan, number> = { free: 5, pro: 100, enterprise: 2000 }
+export const PLAN_CREDITS: Record<Plan, number> = { free: 5, pro: 200, enterprise: 2000 }
 
 // One-time top-up packs, bigger packs, cheaper per credit (volume discount).
 // Priced inline at checkout (no pre-created Stripe prices needed).
