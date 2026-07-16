@@ -268,6 +268,36 @@ def save_binding(part_id, interface, binding, provenance=None):
         con.close()
 
 
+# Verification ladder for LLM pin bindings — a binding can only move UP:
+#   review-required < double-extracted < build-proven < hardware-verified
+# (double-extracted: two independent model extractions agreed; build-proven:
+# shipped on a board that routed clean + passed real DRC; hardware-verified:
+# FL-1 physically validated a board carrying it.)
+BINDING_LEVELS = ["review-required", "double-extracted", "build-proven",
+                  "hardware-verified"]
+
+
+def promote_binding(part_id, interface, level, evidence=None):
+    """Raise a binding's verification level (never lowers). Appends evidence
+    (e.g. runId, DRC result) to the provenance trail. Returns the new level
+    or None when the binding doesn't exist."""
+    if level not in BINDING_LEVELS:
+        raise ValueError("unknown level %r" % level)
+    cur = get_binding(part_id, interface)
+    if not cur:
+        return None
+    prov = cur.get("provenance") or {}
+    old = prov.get("level", "review-required")
+    if old in BINDING_LEVELS and BINDING_LEVELS.index(level) <= BINDING_LEVELS.index(old):
+        return old  # never downgrade
+    prov["level"] = level
+    trail = prov.get("evidence") or []
+    trail.append({"level": level, "at": time.time(), **(evidence or {})})
+    prov["evidence"] = trail[-20:]
+    save_binding(part_id, interface, cur["binding"], prov)
+    return level
+
+
 def remember_query(interface, query, part_id):
     con = _connect()
     try:
@@ -385,6 +415,15 @@ def _main(argv):
         q = next((a for a in argv[2:] if not a.startswith("-") and a != str(n)), "")
         print(json.dumps(search(q, n)))
         return 0
+    if cmd == "promote-binding":
+        # promote-binding <part_id> <interface> <level> [evidence-json]
+        if len(argv) < 5:
+            print(json.dumps({"error": "usage: promote-binding <part> <interface> <level> [evidence-json]"}))
+            return 2
+        ev = json.loads(argv[5]) if len(argv) > 5 else None
+        new = promote_binding(argv[2], argv[3], argv[4], ev)
+        print(json.dumps({"level": new}))
+        return 0 if new else 1
     if cmd == "stats":
         print(json.dumps(stats(), indent=1))
         return 0

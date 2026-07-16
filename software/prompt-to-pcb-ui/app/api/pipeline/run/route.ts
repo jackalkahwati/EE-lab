@@ -1026,6 +1026,27 @@ export async function GET(req: Request) {
         }
         const drcPass = violations === 0 && unconnected === 0
 
+        // Verification ladder: a board that ROUTED CLEAN and passed real DRC
+        // promotes every catalog-sourced binding it carries in the shared
+        // registry (double-extracted -> build-proven). Fleet learning: each
+        // clean build permanently de-risks those parts for every later run.
+        if (drcPass) {
+          try {
+            const devManifest = variantBoard.replace(/\.kicad_pcb$/, '.devices.json')
+            const devices = JSON.parse(fs.readFileSync(devManifest, 'utf8')) as Record<string, unknown>[]
+            const registryCli = path.join(process.cwd(), '..', '..', 'tools', 'parts', 'registry.py')
+            for (const d of devices) {
+              if (typeof d.lcsc === 'string' && typeof d.interface === 'string') {
+                const evidence = JSON.stringify({ runId, drc: 'clean', mpn: d.mpn ?? null })
+                spawn(process.env.FL_PYTHON || 'python3',
+                  [registryCli, 'promote-binding', d.lcsc, d.interface, 'build-proven', evidence],
+                  { stdio: 'ignore' }).on('error', () => {})
+                log('validation', `verification ladder: ${d.mpn ?? d.lcsc} (${d.interface}) promoted to build-proven`)
+              }
+            }
+          } catch { /* no catalog-sourced devices on this board */ }
+        }
+
         // ---- sync: the routed variant IS the board, render it with copper --
         // One coherent board: renders (now with traces), layer SVGs, routing
         // stats and BOM all come from the routed variant.

@@ -1542,7 +1542,9 @@ def block_audio_amp(x, y, n, nets):
     label("SPK + -", x + 16, y + 2, 0.6)
     _DEVICES.append({"ref": uref, "type": "audio_amp", "mpn": r.get("mpn"),
                      "name": r.get("mpn") or "audio amplifier",
-                     "honesty": "catalog-sourced, LLM pin binding, REVIEW-REQUIRED"})
+                     "lcsc": r.get("lcsc"), "interface": "audio_amp",
+                     "verified": r.get("verified"),
+                     "honesty": "catalog-sourced, LLM pin binding — see verification level"})
     print("SOURCED:" + json.dumps({
         "ref": uref, "mpn": r.get("mpn"), "manufacturer": r.get("manufacturer"),
         "price": r.get("price"), "stock": r.get("stock"),

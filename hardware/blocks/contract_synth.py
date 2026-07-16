@@ -78,21 +78,74 @@ def verify(binding, pins, roles):
     return (not problems), problems
 
 
+_SUPPLY_TOKENS = ("VDD", "VCC", "V+", "VS", "VBAT", "VIN", "3V3", "5V",
+                  "SUPPLY", "POWER", "PVDD", "AVDD", "DVDD", "VDDIO")
+_GROUND_TOKENS = ("GND", "VSS", "GROUND", "EPAD", "AGND", "DGND", "PGND",
+                  "THERMAL PAD")
+
+
+def erc_check(binding, pins, roles):
+    """Electrical sanity beyond structural verify(): a power role must land on
+    supply-named pins and a ground role on ground-named pins — the two binding
+    mistakes that destroy hardware. Uses the datasheet's own pin names +
+    function text. Returns a list of problems (empty = clean)."""
+    problems = []
+    pin_text = {str(p.get("number")):
+                ("%s %s" % (p.get("name", ""), p.get("function", ""))).upper()
+                for p in pins}
+    for role, nums in binding.items():
+        rl = role.lower()
+        desc = (roles.get(role) or {}).get("desc", "").lower()
+        want = None
+        kind = None
+        if rl in ("power", "vcc", "vdd", "vin") or "supply" in desc or "power" in desc:
+            want, kind = _SUPPLY_TOKENS, "supply"
+        elif rl in ("gnd", "ground") or "ground" in desc:
+            want, kind = _GROUND_TOKENS, "ground"
+        if not want:
+            continue
+        for x in nums:
+            txt = pin_text.get(str(x), "")
+            if not any(t in txt for t in want):
+                problems.append("role '%s' bound to pin %s which is not %s-named (%s)"
+                                % (role, x, kind, txt[:40] or "unnamed"))
+    return problems
+
+
+def _normalize(binding):
+    return {r: sorted(str(x) for x in v) for r, v in binding.items()}
+
+
 def synthesize(part_id, pins, roles, interface_name, refresh=False):
-    """Cached LLM pin-role binding for a part. Returns
-    {"binding": {role: [pins]}, "provenance": {...}} or raises with the
-    verification problems (the caller falls back / reports honestly)."""
+    """Cached LLM pin-role binding for a part, produced by the VERIFICATION
+    LADDER: two independent extractions must agree (double-extraction), the
+    agreed binding must pass structural verify() AND electrical erc_check().
+    Returns {"binding": ..., "provenance": {..., "level": ...}} or raises
+    (the caller tries the next candidate / reports honestly)."""
     import registry
     if not refresh:
         cached = registry.get_binding(part_id, interface_name)
         if cached:
             return cached
-    proposal = _llm(pins, roles, str(part_id))
-    ok, problems = verify(proposal, pins, roles)
+    # two independent samples — a hallucinated pin map is unlikely to be
+    # hallucinated the same way twice; disagreement fails the candidate
+    a = _llm(pins, roles, str(part_id))
+    b = _llm(pins, roles, str(part_id))
+    if _normalize(a) != _normalize(b):
+        raise RuntimeError("double-extraction disagreement for %s (%s) — binding rejected"
+                           % (part_id, interface_name))
+    ok, problems = verify(a, pins, roles)
     if not ok:
         raise RuntimeError("contract synthesis failed verification: %s"
                            % "; ".join(problems[:4]))
-    provenance = {"source": "llm-datasheet-binding", "verified": "mechanical-checks",
-                  "review": "required", "model": "openai/anthropic chain (llm_json)"}
-    registry.save_binding(part_id, interface_name, proposal, provenance)
-    return {"binding": proposal, "provenance": provenance}
+    erc = erc_check(a, pins, roles)
+    if erc:
+        raise RuntimeError("binding failed electrical sanity (ERC): %s"
+                           % "; ".join(erc[:3]))
+    provenance = {"source": "llm-datasheet-binding",
+                  "level": "double-extracted",
+                  "verified": "double-extraction agree + mechanical + ERC",
+                  "review": "recommended before fab",
+                  "model": "openai/anthropic chain (llm_json), 2 samples"}
+    registry.save_binding(part_id, interface_name, a, provenance)
+    return {"binding": a, "provenance": provenance}
