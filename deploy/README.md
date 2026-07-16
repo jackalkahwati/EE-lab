@@ -65,12 +65,25 @@ free; the box is the single point of truth.
 
 ## Known caveats (honest)
 
-- **KiCad version parity.** The base installs KiCad from the `kicad-9.0`
-  Ubuntu PPA; the Mac runs 10.0.1. The design-rules-in-board-file behavior the
-  pipeline depends on exists in KiCad 9, so DRC parity is expected — but prod
-  should pin the **exact** Mac version (KiCad nightly PPA or a source build)
-  once `verify-linux.sh` confirms the board matches. Treat any DRC delta
-  between Mac-10 and Linux-9 as a version-parity task, not a code bug.
+- **KiCad version parity — the one open item, proven at fine grain.** The base
+  installs **KiCad 8.0.9** (jammy + the `kicad-8.0` PPA — the reliable apt path;
+  noble ships only 7.0.11 and no PPA publishes a noble app build). Verified in
+  a real Linux container run:
+    - The toolchain installs and runs: pcbnew 8.0.9, kicad-cli, Linux-built
+      flroute, the KiCad footprint libraries.
+    - The Python pipeline EXECUTES on Linux: `compose.py` builds a real board
+      using the Linux footprints, `export_dsn.py` + the Linux `flroute` route
+      it, and KiCad 8 reads the pipeline's board files (KiCad 7 could NOT — it
+      rejects the `generator_version` token, so 8+ is the floor).
+    - Remaining delta: a few **pcbnew API signatures differ between KiCad 8 and
+      the Mac's 10.0.1** (e.g. `ZONE_FILLER.Fill()` argument types in
+      `import_ses.py`). The board FORMAT is compatible; specific SWIG calls are
+      not.
+  The correct fix is **KiCad 10.0.1 on the Linux host** (match the Mac exactly:
+  a source build, or the apt/PPA once it ships 10 — KiCad 10 is brand new), NOT
+  making the pipeline straddle two KiCad APIs. With version parity these deltas
+  vanish. Until then, `verify-linux.sh` runs the chain to the zone-fill step on
+  KiCad 8 and stops there honestly.
 - **npm lockfile.** This tree's lockfile is currently broken (`npm ci` fails);
   the app Dockerfile installs with `--force`. Repair the lockfile before
   relying on this for reproducible builds.

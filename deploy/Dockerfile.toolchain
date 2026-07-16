@@ -10,22 +10,24 @@
 #
 # Sims (OpenFOAM/Elmer/openEMS/ccx/gmsh) are a SEPARATE, larger layer added
 # later — the electronics spine is proven first.
-# 22.04 (jammy): the kicad-9.0 PPA has a reliable build here (it did NOT apply
-# on 24.04/noble, which silently fell back to KiCad 7.0.11 — too far from the
-# Mac's 10.0.1 for DRC parity). KiCad 9 has the design-rules-in-board-file
-# behavior the pipeline relies on. Prod should still pin the exact Mac version
-# (nightly PPA / source build) — see deploy/README.md.
+# 22.04 (jammy) + the kicad-8.0 PPA → KiCad 8.0.9 (verified via apt-cache).
+# The VERSION matters: the pipeline emits KiCad-8/10-format board files (the
+# 'generator_version' token), which KiCad 7 CANNOT read back ("created with a
+# more recent version"). Noble's native kicad is only 7.0.11 and NO kicad PPA
+# publishes a noble app build, so jammy + the 8.0 PPA is the reliable apt path
+# to a format-compatible KiCad. KiCad 8 vs the Mac's 10.0.1 is a 2-minor gap
+# the board format tolerates; pin the exact version for prod (deploy/README.md).
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# The kicad metapackage ships its footprint/symbol/3d libraries as RECOMMENDS,
-# which --no-install-recommends drops — so install the library packages
-# EXPLICITLY or /usr/share/kicad/footprints is empty. Plus JRE for freerouting,
-# Rust to build flroute for Linux, and the pipeline's Python deps.
+# kicad ships its footprint/symbol/3d libraries as RECOMMENDS, which
+# --no-install-recommends drops — install them EXPLICITLY or
+# /usr/share/kicad/footprints is empty. Plus JRE for freerouting, Rust to build
+# flroute for Linux, and the pipeline's Python deps.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       software-properties-common ca-certificates gnupg curl \
-    && add-apt-repository -y ppa:kicad/kicad-9.0-releases \
+    && add-apt-repository -y ppa:kicad/kicad-8.0-releases \
     && apt-get update && apt-get install -y --no-install-recommends \
       kicad kicad-footprints kicad-symbols kicad-packages3d \
       python3 python3-pip python3-venv \
@@ -33,9 +35,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential pkg-config libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Python deps the pipeline scripts import (kept minimal — pcbnew comes from the
-# kicad apt package, already on the system python path).
-RUN pip3 install --break-system-packages --no-cache-dir \
+# Python deps the pipeline scripts import (pcbnew comes from the kicad package,
+# already on the system python path). jammy's pip predates PEP-668, so no
+# --break-system-packages needed.
+RUN pip3 install --no-cache-dir \
       jsonschema requests easyeda2kicad anthropic openai
 
 # Rust toolchain + build flroute for Linux. Only the flroute crate is copied so
