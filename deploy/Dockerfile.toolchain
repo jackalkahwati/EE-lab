@@ -1,57 +1,59 @@
 # FirstLight pipeline TOOLCHAIN image (Linux) — the native EDA stack the
-# backend shells out to, proven portable off macOS. This image contains NO app
-# code and NO node_modules; it's the base layer that answers the hard cloud-
-# move question: does compose → freerouting → flroute → KiCad DRC run clean on
-# Linux? Mount the repo at /repo and run the chain with FL_KICAD_* env pointing
-# at the Linux KiCad below.
+# backend shells out to, proven portable off macOS. Multi-stage + slimmed:
+# the Rust toolchain (only builds flroute) and KiCad's 4.8 GB 3D-model library
+# (only feeds the advisory board.glb viewer export) stay OUT of the final
+# image — ~10 GB down to ~2 GB.
 #
 #   docker build -f deploy/Dockerfile.toolchain -t firstlight-toolchain .
 #   docker run --rm -v "$PWD":/repo -w /repo firstlight-toolchain bash deploy/verify-linux.sh
 #
 # Sims (OpenFOAM/Elmer/openEMS/ccx/gmsh) are a SEPARATE, larger layer added
 # later — the electronics spine is proven first.
-# 22.04 (jammy) + the kicad-8.0 PPA → KiCad 8.0.9 (verified via apt-cache).
-# The VERSION matters: the pipeline emits KiCad-8/10-format board files (the
-# 'generator_version' token), which KiCad 7 CANNOT read back ("created with a
-# more recent version"). Noble's native kicad is only 7.0.11 and NO kicad PPA
-# publishes a noble app build, so jammy + the 8.0 PPA is the reliable apt path
-# to a format-compatible KiCad. KiCad 8 vs the Mac's 10.0.1 is a 2-minor gap
-# the board format tolerates; pin the exact version for prod (deploy/README.md).
-FROM ubuntu:22.04
 
+# ---- builder: compile flroute for Linux; Rust never reaches the final image
+FROM ubuntu:22.04 AS flroute-builder
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl build-essential pkg-config libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+COPY hardware/pcba-rev-a/tools/flroute /build/flroute
+RUN cd /build/flroute && cargo build --release
+
+# ---- final: KiCad 8 + JRE + Python deps + the flroute binary
+# 22.04 (jammy) + the kicad-8.0 PPA → KiCad 8.0.9. The version matters: the
+# pipeline emits KiCad-8/10-format boards (the 'generator_version' token) that
+# KiCad 7 can't read; noble ships only 7.0.11 and no PPA has a noble app build.
+# KiCad 8 vs the Mac's 10.0.1 is a 2-minor gap handled by a cross-version zone
+# Fill in import_ses.py. Pin the exact version for prod (see deploy/README.md).
+FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 
-# kicad ships its footprint/symbol/3d libraries as RECOMMENDS, which
-# --no-install-recommends drops — install them EXPLICITLY or
-# /usr/share/kicad/footprints is empty. Plus JRE for freerouting, Rust to build
-# flroute for Linux, and the pipeline's Python deps.
+# kicad-footprints/-symbols are RECOMMENDS (dropped by --no-install-recommends)
+# so install them EXPLICITLY. kicad-packages3d (4.8 GB) is DELIBERATELY OMITTED
+# — it only supplies component 3D bodies for the advisory board.glb export;
+# the board still renders (copper/silk/outline/pads) and nothing in
+# routing/DRC/BOM/firmware needs it. Add it back only if full 3D fidelity is
+# wanted. JRE = freerouting. No build tools here (flroute came from the builder).
 RUN apt-get update && apt-get install -y --no-install-recommends \
       software-properties-common ca-certificates gnupg curl \
     && add-apt-repository -y ppa:kicad/kicad-8.0-releases \
     && apt-get update && apt-get install -y --no-install-recommends \
-      kicad kicad-footprints kicad-symbols kicad-packages3d \
+      kicad kicad-footprints kicad-symbols \
       python3 python3-pip python3-venv \
       default-jre-headless \
-      build-essential pkg-config libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Python deps the pipeline scripts import (pcbnew comes from the kicad package,
-# already on the system python path). jammy's pip predates PEP-668, so no
-# --break-system-packages needed.
+# Python deps the pipeline imports (pcbnew comes from the kicad package).
 RUN pip3 install --no-cache-dir \
       jsonschema requests easyeda2kicad anthropic openai
 
-# Rust toolchain + build flroute for Linux. Only the flroute crate is copied so
-# the layer caches independently of app changes.
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-ENV PATH="/root/.cargo/bin:${PATH}"
-COPY hardware/pcba-rev-a/tools/flroute /build/flroute
-RUN cd /build/flroute && cargo build --release && \
-    mkdir -p /opt/flroute && cp target/release/flroute /opt/flroute/flroute && \
-    cargo clean
+# the Linux-built flroute binary from the builder stage
+COPY --from=flroute-builder /build/flroute/target/release/flroute /opt/flroute/flroute
 
-# Linux toolchain locations, exposed under the SAME env names the refactored
-# code reads (macOS defaults apply only when these are unset).
+# Linux toolchain locations, under the SAME env names the refactored code reads
+# (macOS defaults apply only when these are unset).
 ENV FL_KICAD_CLI=/usr/bin/kicad-cli \
     FL_KICAD_PYTHON=/usr/bin/python3 \
     FL_KICAD_FOOTPRINTS=/usr/share/kicad/footprints \

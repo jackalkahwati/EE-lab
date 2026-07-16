@@ -10,7 +10,7 @@ jobs are already serialized by an in-process lock, so we don't fight that yet
 
 | File | Role |
 |---|---|
-| `Dockerfile.toolchain` | Linux base: KiCad + JRE + Linux-built flroute + Python deps. No app code. Proves the native stack ports. |
+| `Dockerfile.toolchain` | Linux base: KiCad 8 + JRE + Linux-built flroute + Python deps. Multi-stage + slimmed to **~1.9 GB** (Rust toolchain builds flroute in a throwaway stage; KiCad's 4.8 GB 3D-model library omitted — it only feeds the advisory board.glb export, not routing/DRC). No app code. |
 | `verify-linux.sh` | Runs the real board chain **inside Linux** and asserts 0 DRC / 0 unconnected. The go/no-go for the electronics spine. |
 | `Dockerfile` | Full app image (Next server + pipeline) on top of the toolchain base. |
 | `docker-compose.yml` | One app container + Caddy HTTPS ingress; named volumes for `public/runs` and the parts registry. |
