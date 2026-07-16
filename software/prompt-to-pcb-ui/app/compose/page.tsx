@@ -803,7 +803,10 @@ export default function Compose2Page() {
             // soon as there's a product spec, so its Generate button is accessible.
             const avail = needsSpec ? !!productSpec : s.key === 'electronics' ? (!!selectedRun || !!productSpec) : s.key === 'id' ? (!!productSpec || !!idBrief || !!selectedRun) : true
             const locked = !avail && (needsSpec || s.key === 'electronics' || s.key === 'id')
-            const on = stage === s.key
+            // active ONLY when the stage view is actually showing — with a doc
+            // tab focused the stage must read inactive (else the file looks
+            // nested under it)
+            const on = stage === s.key && !activeDoc
             return (
               <button key={s.key} type="button" disabled={locked}
                 onClick={() => { setStage(s.key); setActiveDoc(null); setBadged((b) => { if (!(s.key in b)) return b; const n = { ...b }; delete n[s.key]; return n }) }}
@@ -812,7 +815,7 @@ export default function Compose2Page() {
                   on ? 'border-b-transparent bg-background font-medium text-foreground'
                     : 'bg-card/40 text-muted-foreground hover:text-foreground',
                   locked && 'cursor-not-allowed opacity-40 hover:text-muted-foreground')}>
-                {on && !activeDoc && <span aria-hidden className="absolute inset-x-0 top-0 h-px bg-primary" />}
+                {on && <span aria-hidden className="absolute inset-x-0 top-0 h-px bg-primary" />}
                 {badged[s.key] && <span aria-hidden className={cn('absolute right-1 top-1 h-1.5 w-1.5 rounded-full', badged[s.key] === 'failed' ? 'bg-red-500' : 'bg-primary')} />}
                 <s.Icon className={cn('size-3.5 shrink-0', on && 'text-primary')} />
                 {s.label}
