@@ -451,23 +451,57 @@ def block_usbc_power(x, y, n, nets):
     return b, 10, 24
 
 
+# ---- MCU profiles -----------------------------------------------------------
+# Role-keyed pin maps per MCU family (Phase: multi-MCU). Each profile maps the
+# module's PHYSICAL pad number -> the interface-net role it carries; a role is
+# wired only when a peripheral allocated that net (no dangling stubs). The
+# ESP32-C3 map was read from KiCad's shipped ESP32-C3-WROOM-02 symbol (real
+# pin names), not from memory.
+MCU_PROFILES = {
+    "pico": {
+        "label": "RP2040 (Raspberry Pi Pico module)",
+        "footprint": ("Module", "RaspberryPi_Pico_SMD_HandSolder"),
+        "family": "rp2040",
+        "roles": {
+            "4": "spi_sck", "5": "spi_mosi", "6": "spi_miso", "7": "spi_cs",
+            "9": "ctrl_rst", "10": "ctrl_irq", "11": "i2c_sda", "12": "i2c_scl",
+            "14": "mot1", "15": "mot2", "16": "mot3", "17": "mot4",
+            "1": "uart_gps_tx", "2": "uart_gps_rx",          # UART0 -> GNSS
+            "19": "uart_cell_tx", "20": "uart_cell_rx",      # UART1 -> cellular modem
+            "21": "cell_pwrkey", "22": "cell_rst",           # modem power control
+            "24": "can_txd", "25": "can_rxd",                # CAN comms head
+            "26": "step", "27": "dir", "29": "en",           # stepper motion controller
+            "31": "fault", "32": "interlock", "34": "trig",  # FL-1 bus safety/sync lines
+        },
+    },
+    "esp32c3": {
+        "label": "ESP32-C3-WROOM-02 (WiFi + BLE module)",
+        "footprint": ("RF_Module", "ESP32-C3-WROOM-02"),
+        "family": "esp32c3",
+        # pads per the KiCad symbol: 1=3V3 2=EN 3=IO4 4=IO5 5=IO6 6=IO7 7=IO8
+        # 8=IO9 9=GND 10=IO10 11=IO20/RXD 12=IO21/TXD 13=IO18 14=IO19 15=IO3
+        # 16=IO2 17=IO1 18=IO0 19=GND. Straps (EN, IO9, IO8) are kept off the
+        # role map and handled by the block. Conflicting roles are resolved by
+        # absence, same convention as the Pico map.
+        "roles": {
+            "5": "i2c_sda", "6": "i2c_scl",                  # IO6 / IO7
+            "3": "spi_sck", "4": "spi_mosi",                 # IO4 / IO5
+            "10": "spi_miso", "15": "spi_cs",                # IO10 / IO3
+            "18": "uart_gps_tx", "17": "uart_gps_rx",        # IO0 / IO1 (UART1)
+            "16": "audio_pwm",                               # IO2 (PWM-capable)
+            "13": "ctrl_irq", "14": "ctrl_rst",              # IO18 / IO19
+        },
+    },
+}
+
+
 def block_mcu_pico(x, y, n, nets):
     """RP2040 (Pico module). 5V -> VSYS/VBUS; provides 3V3OUT to peripherals.
     Buses are wired only where a peripheral actually uses them: the pin map is
     built from whichever interface nets `n` carries (SPI for a radio, I2C for a
     sensor, PWM for motors), so the MCU has no dangling stub nets."""
     # physical Pico pin -> the interface-net key it carries (mapped only if present)
-    opt = {
-        "4": "spi_sck", "5": "spi_mosi", "6": "spi_miso", "7": "spi_cs",
-        "9": "ctrl_rst", "10": "ctrl_irq", "11": "i2c_sda", "12": "i2c_scl",
-        "14": "mot1", "15": "mot2", "16": "mot3", "17": "mot4",
-        "1": "uart_gps_tx", "2": "uart_gps_rx",          # UART0 -> GNSS
-        "19": "uart_cell_tx", "20": "uart_cell_rx",      # UART1 -> cellular modem
-        "21": "cell_pwrkey", "22": "cell_rst",           # modem power control
-        "24": "can_txd", "25": "can_rxd",                # CAN comms head
-        "26": "step", "27": "dir", "29": "en",           # stepper motion controller
-        "31": "fault", "32": "interlock", "34": "trig",  # FL-1 bus safety/sync lines
-    }
+    opt = dict(MCU_PROFILES["pico"]["roles"])
     # pin-sharing role primitives: these reuse pins whose primary block is absent
     # on FL-1 core boards (documented conflict, resolved by absence):
     if "gp_a" in n and "mot1" not in n:                  # GPIO bank vs motors
@@ -493,8 +527,72 @@ def block_mcu_pico(x, y, n, nets):
     if "i2c_sda" in n:
         b += res("R10", x + 26, y + 38, n["i2c_sda"], "+3V3", nets, value="4.7k")
         b += res("R11", x + 26, y + 44, n["i2c_scl"], "+3V3", nets, value="4.7k")
-    _DEVICES.append({"ref": "U1", "type": "mcu"})
+    _DEVICES.append({"ref": "U1", "type": "mcu", "family": "rp2040"})
     return b, 30, 56
+
+
+def keepout_zone(x0, y0, x1, y1, layer="F.Cu"):
+    """Copper/zone keep-out rectangle (antenna clearance). Tracks, vias, pads
+    and pours are all excluded — the region must stay copper-free for the
+    module's antenna to radiate."""
+    pts = "(xy {} {}) (xy {} {}) (xy {} {}) (xy {} {})".format(x0, y0, x1, y0, x1, y1, x0, y1)
+    return ('  (zone (net 0) (net_name "") (layers "F.Cu" "B.Cu") (uuid "{}")\n'
+            '    (hatch edge 0.5)\n'
+            '    (keepout (tracks not_allowed) (vias not_allowed) (pads not_allowed)'
+            ' (copperpour not_allowed) (footprints allowed))\n'
+            '    (fill (thermal_gap 0.5) (thermal_bridge_width 0.5))\n'
+            '    (polygon (pts {}))\n'
+            '  )\n').format(U(), pts)
+
+
+def block_mcu_esp32c3(x, y, n, nets):
+    """ESP32-C3-WROOM-02 — WiFi + BLE MCU module (KiCad-shipped symbol +
+    footprint; pin map read from the real symbol, not memory). The module's
+    integrated PCB antenna needs a copper keep-out beyond its top edge, which
+    this block emits; the antenna-FDTD sim gate grades the board as its
+    counterpoise. Straps per datasheet: EN via 10k/100nF RC, IO9 pulled up
+    (boot-from-flash); flashing over the UART0 header (3V3 GND TX RX EN IO9).
+    Firmware for this family lands with the ESP-IDF target; until then the
+    firmware stage reports the gap honestly instead of emitting Pico code."""
+    prof = MCU_PROFILES["esp32c3"]
+    # antenna keep-out: the WROOM-02 antenna occupies the module's top ~6.5 mm;
+    # keep copper away above and beside it
+    ka_h = 8.0
+    b = keepout_zone(x - 2, y - 2, x + 22, y + ka_h)
+    pmap = {"1": "+3V3", "9": "GND", "19": "GND", "2": "C3_EN", "8": "C3_IO9"}
+    opt = dict(prof["roles"])
+    if "amp_en" in n and "spi_miso" not in n:  # IO10: audio enable vs SPI MISO
+        opt["10"] = "amp_en"
+    for pin, key in opt.items():
+        if key in n:
+            pmap[pin] = n[key]
+    # UART0 pads route to the flash header so esptool can always program it
+    pmap["12"] = "C3_TXD"
+    pmap["11"] = "C3_RXD"
+    lib, fp = prof["footprint"]
+    # module body ~13.2 x 19.2 mm; antenna end points UP into the keep-out
+    b += place(lib, fp, "U1", x + 10, y + ka_h + 10, 0, pmap, nets)
+    b += cap("C2", x + 24, y + ka_h + 4, "+3V3", "GND", nets)      # bulk 10uF slot
+    b += cap("C3", x + 24, y + ka_h + 12, "+3V3", "GND", nets)     # 100nF
+    # EN reset RC (10k to 3V3, 100nF to GND) + IO9 boot-strap pull-up (10k)
+    b += res("R10", x + 24, y + ka_h + 20, "C3_EN", "+3V3", nets, value="10k")
+    b += cap("C4", x + 24, y + ka_h + 28, "C3_EN", "GND", nets)
+    b += res("R11", x + 24, y + ka_h + 36, "C3_IO9", "+3V3", nets, value="10k")
+    # I2C bus pull-ups when the board carries an I2C bus (bus master owns them)
+    if "i2c_sda" in n:
+        b += res("R12", x + 30, y + ka_h + 20, n["i2c_sda"], "+3V3", nets, value="4.7k")
+        b += res("R13", x + 30, y + ka_h + 28, n["i2c_scl"], "+3V3", nets, value="4.7k")
+    # UART0 flash/console header: 3V3 GND TXD RXD EN IO9
+    b += place("Connector_PinHeader_2.54mm", "PinHeader_1x06_P2.54mm_Vertical",
+               "J10", x + 36, y + ka_h + 14, 0,
+               {"1": "+3V3", "2": "GND", "3": "C3_TXD", "4": "C3_RXD",
+                "5": "C3_EN", "6": "C3_IO9"}, nets)
+    label("FLASH 3V3 G TX RX EN IO9", x + 36, y + ka_h + 8, 0.6)
+    label("ANTENNA KEEP-OUT", x + 4, y + 3, 0.7)
+    _DEVICES.append({"ref": "U1", "type": "mcu", "family": "esp32c3",
+                     "name": "ESP32-C3-WROOM-02",
+                     "radio": "wifi+ble (module, integrated antenna)"})
+    return b, 44, ka_h + 48
 
 
 def block_imu(x, y, n, nets):
@@ -1495,6 +1593,7 @@ BLOCK_TABLE = {
     "spibus": block_spibus,
     "uartbridge": block_uart_bridge,
     "audio": block_audio_amp,
+    "esp32c3": block_mcu_esp32c3,
 }
 
 
@@ -1525,6 +1624,9 @@ CAPABILITIES = [
     {"key": "gpiobank", "label": "Protected GPIO bank / header"},
     {"key": "audio", "label": "Audio amplifier + speaker connector (Class-D/AB, "
         "sourced live from the JLCPCB catalog, LLM pin binding, review-required)"},
+    {"key": "esp32c3", "label": "ESP32-C3-WROOM-02 WiFi + BLE MCU module (replaces the "
+        "Pico as the board's MCU; integrated antenna with copper keep-out; UART flash "
+        "header; firmware image lands with the ESP-IDF target)"},
 ]
 
 
@@ -1625,6 +1727,9 @@ def _block_keys(s):
     if any(k in s for k in ("audio amp", "speaker", "class d", "class-d",
                             "audio out", "audio driver")):
         add("audio")
+    if any(k in s for k in ("esp32", "wifi", "wi-fi", "ble", "bluetooth",
+                            "2.4ghz", "2.4 ghz")):
+        add("esp32c3")
     if "usbc" not in out and any(k in s for k in ("power", "regulator", "battery", "vin",
                                                   "5v", "3v3", "charg", "ldo", "buck",
                                                   "usb power", "usb-c power")):
@@ -1680,9 +1785,14 @@ def classify(blocks):
     if "baremcu" in seen and "mcu" in seen:
         uniq.remove("mcu")
         seen.discard("mcu")
+    # a WiFi/BLE request makes the ESP32-C3 the board's (only) MCU: it IS an
+    # MCU, so the Pico must not be auto- or co-added
+    if "esp32c3" in seen and "mcu" in seen:
+        uniq.remove("mcu")
+        seen.discard("mcu")
     if "backplane6" in seen and "mcu" in seen and len(seen) <= 3:
         pass  # explicit mcu request stands
-    if not (seen & {"mcu", "baremcu", "backplane6", "bme280breakout",
+    if not (seen & {"mcu", "baremcu", "esp32c3", "backplane6", "bme280breakout",
                     "standalone"}):
         uniq.append("mcu")
         seen.add("mcu")
@@ -1746,14 +1856,14 @@ LAYERS8 = '''  (layers
 # on the left, the MCU is central, sensors sit next to it (short I2C), and the
 # radio + antenna land on the right edge (best RF practice). Rows wrap if a band
 # grows past the width budget, so the layout scales as blocks are added.
-ROW = {"power": 0, "usbc": 0, "mcu": 0, "imu": 0, "radio": 0, "antenna": 0,
+ROW = {"power": 0, "usbc": 0, "mcu": 0, "esp32c3": 0, "imu": 0, "radio": 0, "antenna": 0,
        "gnss": 0, "cellular": 0, "tempsensor": 0, "comms": 0, "motion": 1,
        "instrument": 0, "dutmonitor": 0, "calref": 0, "calrefext": 0, "backplane6": 0,
        "statusled": 0, "bme280": 0, "bme280breakout": 0, "usbcsink": 0,
        "standalone": 0,
        "baremcu": 0, "relaymatrix": 1, "motors": 1, "gpiobreakout": 1,
        "fl1bus": 0, "boardid": 0, "gpiobank": 0, "spibus": 0, "uartbridge": 0}
-COL = {"power": 0, "usbc": 0, "mcu": 2, "imu": 3, "tempsensor": 3, "gnss": 4,
+COL = {"power": 0, "usbc": 0, "mcu": 2, "esp32c3": 2, "imu": 3, "tempsensor": 3, "gnss": 4,
        "radio": 5, "cellular": 6, "comms": 7, "antenna": 9, "motors": 1,
        "motion": 3, "instrument": 4, "dutmonitor": 4, "calref": 5, "calrefext": 6,
        "backplane6": 1, "statusled": 6, "bme280": 3, "bme280breakout": 1,

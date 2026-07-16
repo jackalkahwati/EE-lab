@@ -75,6 +75,10 @@
     {
       "key": "audio",
       "label": "Audio amplifier + speaker connector (Class-D/AB, sourced live from the JLCPCB catalog, LLM pin binding, review-required)"
+    },
+    {
+      "key": "esp32c3",
+      "label": "ESP32-C3-WROOM-02 WiFi + BLE MCU module (replaces the Pico as the board's MCU; integrated antenna with copper keep-out; UART flash header; firmware image lands with the ESP-IDF target)"
     }
   ]
 }

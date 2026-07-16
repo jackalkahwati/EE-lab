@@ -613,7 +613,29 @@ def emit(pins, peripherals, motors):
     open(os.path.join(OUT, "src", "lib.rs"), "w").write("\n".join(lib))
 
 
+def _mcu_family():
+    """The composed board's MCU family, from the device manifest. This
+    generator emits RP2040/Pico firmware ONLY — for any other family it must
+    say so instead of shipping a Pico image for a non-Pico board."""
+    manifest = os.path.splitext(BOARD)[0] + ".devices.json"
+    try:
+        for d in json.load(open(manifest)):
+            if d.get("type") == "mcu":
+                return d.get("family", "rp2040")
+    except Exception:
+        pass
+    return "rp2040"
+
+
 def main():
+    fam = _mcu_family()
+    if fam != "rp2040":
+        # honest gate: no firmware image is better than the WRONG image
+        print("FIRMWARE: SKIPPED — board MCU family '%s' is not supported by "
+              "the RP2040 generator; the %s firmware target is pending. No "
+              "image was produced (never a Pico image for a non-Pico board)."
+              % (fam, fam))
+        return
     pins, peripherals, motors = load()
     # A bare MCU + power board has no peripheral nets, so `pins` is empty — that
     # is valid hardware, not an error. Emit a minimal BSP crate that still
