@@ -65,6 +65,7 @@ export async function POST(req: Request) {
     let layerCount: number | undefined
     let enclosureStep: string | undefined
     let pdn: Record<string, unknown> | undefined
+    let autoAntenna: string | undefined
     if (runId && RUN_ID.test(runId)) {
       // real Onshape CAD (when the mechanical stage has run) → 3D FEA target
       const stepPath = path.join(process.cwd(), 'public', 'runs', runId, 'mechanical', 'enclosure.step')
@@ -111,6 +112,22 @@ export async function POST(req: Request) {
         }
         if (rails.length) pdn = { rails, railCaps }
       } catch { /* run has no power budget / netlist artifacts */ }
+      // Radio products always engage the antenna-FDTD gate: when the design
+      // didn't declare an antenna placement, derive one from the run's device
+      // manifest (ESP32-C3 / LoRa / any device carrying a radio). The board
+      // is the module antenna's counterpoise either way — that's exactly what
+      // the FDTD pass grades.
+      try {
+        const devs = JSON.parse(await fs.readFile(
+          path.join(process.cwd(), 'public', 'runs', runId, 'data', 'devices.json'), 'utf8',
+        )) as Record<string, unknown>[]
+        const radio = devs.find((d) =>
+          typeof d.radio === 'string' || d.type === 'radio' ||
+          (d.type === 'mcu' && d.family === 'esp32c3'))
+        if (radio) {
+          autoAntenna = `${radio.name ?? radio.type} module antenna at board edge (auto-declared from device manifest)`
+        }
+      } catch { /* no device manifest for this run */ }
     }
 
     const p = spec.budgets?.power ?? {}
@@ -135,7 +152,7 @@ export async function POST(req: Request) {
       massG: num(design.massG) ?? spec.budgets?.massG,
       envelopeMm: spec.budgets?.sizeMm,
       enclosureMaterial: design.enclosureMaterial,
-      antennaPlacement: design.antennaPlacement,
+      antennaPlacement: design.antennaPlacement ?? autoAntenna,
       runtimeTargetHours: p.runtimeHours,
       sleepUw, dutyCycle, dutyCycleAssumed,
       enclosureStep,
