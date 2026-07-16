@@ -156,15 +156,8 @@ async function nemotronCall(system: string, user: string, key?: string): Promise
  */
 async function claudeCodeCall(system: string, user: string, _key?: string, model?: string): Promise<string> {
   const { spawn } = await import('node:child_process')
-  const fs = await import('node:fs')
-  const bin = (() => {
-    if (process.env.CLAUDE_CLI_PATH) return process.env.CLAUDE_CLI_PATH
-    const home = process.env.HOME || ''
-    for (const p of [`${home}/.local/bin/claude`, '/opt/homebrew/bin/claude', '/usr/local/bin/claude']) {
-      try { if (fs.existsSync(p)) return p } catch { /* keep looking */ }
-    }
-    return 'claude'
-  })()
+  const { claudeBin } = await import('@/lib/toolchain')
+  const bin = claudeBin()
   // Map the model string to a CLI alias. NOTE the trap in the final `: 'sonnet'`
   // fallback: any string this chain does not recognise SILENTLY runs sonnet. That is
   // why 'claude-fable-5' used to become sonnet with no error (the CLI does support a

@@ -30,7 +30,10 @@ import sys
 
 import pcbnew
 
-FP_SHARE = "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import toolchain  # noqa: E402
+
+FP_SHARE = toolchain.kicad_footprints()
 # stitchable PLANES only — +5V has no plane on this stackup; a +5V "zone"
 # dogbone creates an orphan via and strips the pin from routing (the TXB0102
 # VCCB signature). +5V escapes like a signal and flroute routes it.

@@ -23,8 +23,9 @@ import external_eda as ee  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUNS = os.path.join(HERE, "..", "public", "runs")
-KIPY = ("/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/"
-        "Versions/Current/bin/python3")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import toolchain  # noqa: E402
+KIPY = toolchain.kicad_python()
 FP = os.path.join(pf.FP_SHARE, "Package_BGA.pretty",
                   "BGA-121_9.0x9.0mm_Layout11x11_P0.8mm_Ball0.4mm_Pad0.35mm"
                   "_NSMD.kicad_mod")

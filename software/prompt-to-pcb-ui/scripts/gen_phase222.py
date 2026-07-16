@@ -11,11 +11,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "..", "..", "hardware", "planner"))
 import jit_primitives as jp  # noqa: E402
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import toolchain  # noqa: E402
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUNS = os.path.join(HERE, "..", "public", "runs")
 TARGETS = ["fl1-backplane-v1", "env-sensor-benchmark-v1"]
-FP = "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints"
-SYM = "/Applications/KiCad/KiCad.app/Contents/SharedSupport/symbols"
+FP = toolchain.kicad_footprints()
+SYM = toolchain.kicad_symbols()
 
 
 def _w(name, obj):

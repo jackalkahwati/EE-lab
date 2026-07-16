@@ -13,13 +13,13 @@ import path from 'node:path'
 import { callLLMText } from '@/lib/llm'
 import { overrideForRequest } from '@/lib/byok'
 import { isValidRunId, runAccess } from '@/lib/auth'
+import { kicadCli, kicadPython } from '@/lib/toolchain'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
-const KCLI = '/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli'
-const KPY =
-  '/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3'
+const KCLI = kicadCli()
+const KPY = kicadPython()
 
 const CATEGORIES = [
   'power', 'signal_integrity', 'emi', 'rf', 'thermal',

@@ -9,10 +9,14 @@ harness only when flroute fails honestly (open net reported, no fake copper).
 Run under kipython. No fixture success implies physical validation.
 """
 import os
+import sys
 
 import pcbnew
 
-FP_SHARE = "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import toolchain  # noqa: E402
+
+FP_SHARE = toolchain.kicad_footprints()
 MM = pcbnew.FromMM
 
 

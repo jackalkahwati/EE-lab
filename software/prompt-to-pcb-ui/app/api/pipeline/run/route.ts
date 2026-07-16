@@ -32,13 +32,13 @@ import {
   sessionEmail,
 } from '@/lib/auth'
 import { hasByok } from '@/lib/byok'
+import { kicadCli, kicadPython } from '@/lib/toolchain'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 1800
 
-const KCLI = '/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli'
-const KPY =
-  '/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3'
+const KCLI = kicadCli()
+const KPY = kicadPython()
 const RUN_TIMEOUT_MS = 20 * 60 * 1000
 
 // ---- planner python resolution ----------------------------------------------

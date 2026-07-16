@@ -17,7 +17,10 @@ import subprocess
 import sys
 import zipfile
 
-KCLI = "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import toolchain  # noqa: E402
+
+KCLI = toolchain.kicad_cli()
 
 BOARD = sys.argv[1]
 OUT = sys.argv[2]

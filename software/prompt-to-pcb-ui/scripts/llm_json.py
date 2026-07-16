@@ -21,6 +21,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from digikey import load_env  # .env.local loader
+import toolchain  # toolchain path resolver (env-overridable, macOS defaults)
 
 ANTHROPIC_MODEL = "claude-opus-4-8"
 
@@ -69,16 +70,7 @@ def _claude_cli(system, user):
     API credits, which is exactly what saved the pipeline when both metered
     keys ran dry."""
     import subprocess
-    home = os.environ.get("HOME", "")
-    bin_path = os.environ.get("CLAUDE_CLI_PATH")
-    if not bin_path:
-        for p in (home + "/.local/bin/claude", "/opt/homebrew/bin/claude",
-                  "/usr/local/bin/claude"):
-            if os.path.exists(p):
-                bin_path = p
-                break
-    if not bin_path:
-        raise RuntimeError("claude CLI not found")
+    bin_path = toolchain.claude_bin()
     prompt = (system + "\nOutput ONLY one JSON object — no prose, no markdown "
               "fences.\n\n" + user)
     # The CLI must auth via the Max subscription. load_env() put the (possibly

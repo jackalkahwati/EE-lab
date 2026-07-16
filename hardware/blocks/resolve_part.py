@@ -18,14 +18,13 @@ import os
 import re
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import toolchain  # noqa: E402
+
 # Phase 5b: overridable so part resolution isn't welded to a Mac-local KiCad
 # install path (FL_KICAD_SYMBOLS / FL_KICAD_FOOTPRINTS)
-SYM_DIR = os.environ.get(
-    "FL_KICAD_SYMBOLS",
-    "/Applications/KiCad/KiCad.app/Contents/SharedSupport/symbols")
-FP_DIR = os.environ.get(
-    "FL_KICAD_FOOTPRINTS",
-    "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints")
+SYM_DIR = toolchain.kicad_symbols()
+FP_DIR = toolchain.kicad_footprints()
 
 
 # ---- interface contracts ----------------------------------------------------

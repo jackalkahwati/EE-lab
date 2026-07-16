@@ -85,7 +85,7 @@ function drc(k, label) {
   const dd = fs.mkdtempSync(path.join(os.tmpdir(), 'd-'))
   fs.writeFileSync(path.join(dd, 'b.kicad_pcb'), k)
   fs.writeFileSync(path.join(dd, 'b.kicad_dru'), `(version 1)\n(rule "t" (constraint track_width (min 0.09mm)))(rule "c" (constraint clearance (min 0.09mm)))`)
-  spawnSync('/opt/homebrew/bin/kicad-cli', ['pcb', 'drc', '--format', 'json', '--output', path.join(dd, 'o.json'), path.join(dd, 'b.kicad_pcb')], { timeout: 60000 })
+  spawnSync(process.env.FL_KICAD_CLI || '/opt/homebrew/bin/kicad-cli', ['pcb', 'drc', '--format', 'json', '--output', path.join(dd, 'o.json'), path.join(dd, 'b.kicad_pcb')], { timeout: 60000 })
   const rep = JSON.parse(fs.readFileSync(path.join(dd, 'o.json'), 'utf8'))
   console.log(`${label}: errors=${(rep.violations || []).filter((x) => x.severity === 'error').length} unconnected=${(rep.unconnected_items || []).length}`)
   fs.rmSync(dd, { recursive: true, force: true })

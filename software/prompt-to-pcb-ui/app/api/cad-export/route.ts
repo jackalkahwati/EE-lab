@@ -18,9 +18,9 @@ import os from 'os'
 import path from 'path'
 import { execFileSync } from 'child_process'
 import { isValidRunId, runAccess } from '@/lib/auth'
+import { kicadCli } from '@/lib/toolchain'
 
-const KICAD_CLI = process.env.KICAD_CLI
-  ?? '/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli'
+const KICAD_CLI = kicadCli()
 const RUNS = path.join(process.cwd(), 'public', 'runs')
 
 function findPcb(runDir: string): string | null {

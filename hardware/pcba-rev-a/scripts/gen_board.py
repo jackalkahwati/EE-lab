@@ -13,7 +13,11 @@ import re
 import sys
 import uuid
 
-FP_DIR = "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints"
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "..", "..", "blocks"))
+import toolchain  # noqa: E402
+
+FP_DIR = toolchain.kicad_footprints()
 
 def U():
     return str(uuid.uuid4())

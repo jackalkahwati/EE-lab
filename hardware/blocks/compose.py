@@ -23,12 +23,11 @@ import uuid
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import resolve_part  # general KiCad-library part resolver
 import source_part   # DigiKey -> datasheet -> resolved part (cache-first)
+import toolchain     # toolchain path resolver (env-overridable, macOS defaults)
 
 # Phase 5b: overridable so part resolution isn't welded to a Mac-local KiCad
 # install (registry-served footprints already bypass this for catalog parts)
-FP = os.environ.get(
-    "FL_KICAD_FOOTPRINTS",
-    "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints")
+FP = toolchain.kicad_footprints()
 
 
 def U():
@@ -143,8 +142,7 @@ def _upgrade_mod(text, name):
         with _utf.TemporaryDirectory(suffix=".pretty") as d:
             p = os.path.join(d, "%s.kicad_mod" % re.sub(r"[^\w.-]", "_", name))
             open(p, "w").write(text)
-            kcli = os.environ.get(
-                "FL_KICAD_CLI", "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli")
+            kcli = toolchain.kicad_cli()
             _usp.run([kcli, "fp", "upgrade", d], capture_output=True, timeout=60)
             text = open(p).read()
         if text.lstrip().startswith("(module"):

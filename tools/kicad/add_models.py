@@ -20,10 +20,14 @@ import re
 import json
 import pcbnew
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "..", "..", "hardware", "blocks"))
+import toolchain  # noqa: E402
+
 inp, outp, partsf = sys.argv[1], sys.argv[2], sys.argv[3]
 parts = {p["name"]: p for p in json.load(open(partsf))}
 
-MDL = "/Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels"
+MDL = toolchain.kicad_3dmodels()
 # QFN/DFN bodies by pin count (the nearest available size is used for any count)
 QFN = {
     6: f"{MDL}/Package_DFN_QFN.3dshapes/DFN-6-1EP_2x2mm_P0.5mm_EP0.61x1.42mm.step",

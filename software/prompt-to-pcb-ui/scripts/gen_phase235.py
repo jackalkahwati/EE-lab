@@ -13,6 +13,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
 import qfn56_escape as q  # noqa: E402
 import role_completeness as rc  # noqa: E402
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import toolchain  # noqa: E402
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUNS = os.path.join(HERE, "..", "public", "runs")
 RUN = "bare-mcu-qfn56-core-sandbox-v1"
@@ -42,8 +45,7 @@ def _facts(run):
 _w("compose-qfn56-capability-definition", q.capability_definition())
 
 # acquisition: parse the OFFICIAL symbol again for the report (evidence)
-sym = open("/Applications/KiCad/KiCad.app/Contents/SharedSupport/symbols/"
-           "MCU_RaspberryPi.kicad_sym").read()
+sym = open(toolchain.kicad_symbols() + "/MCU_RaspberryPi.kicad_sym").read()
 i = sym.find('(symbol "RP2040"')
 depth, j = 0, i
 while True:
@@ -57,9 +59,8 @@ while True:
 pins = sorted(re.findall(
     r'\(pin\s+(\w+)\s+\w+[\s\S]*?\(name\s+"([^"]+)"[\s\S]*?\(number\s+"([^"]+)"',
     sym[i:j + 1]), key=lambda x: int(x[2]))
-fpt = open("/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints/"
-           "Package_DFN_QFN.pretty/QFN-56-1EP_7x7mm_P0.4mm_EP3.2x3.2mm"
-           ".kicad_mod").read()
+fpt = open(toolchain.kicad_footprints() + "/Package_DFN_QFN.pretty/"
+           "QFN-56-1EP_7x7mm_P0.4mm_EP3.2x3.2mm.kicad_mod").read()
 pads = set(re.findall(r'\(pad "(\d+)"', fpt))
 xs = sorted(float(a) for a, _b in re.findall(
     r'\(pad "(?:4[3-9]|5[0-6])" smd \S+\s*\(at ([-0-9.]+) ([-0-9.]+)', fpt))

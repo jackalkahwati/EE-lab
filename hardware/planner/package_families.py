@@ -8,8 +8,13 @@ architecture_only until a sandbox proves it.
 """
 import os
 import re
+import sys
 
-FP_SHARE = "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints"
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "..", "blocks"))
+import toolchain  # noqa: E402
+
+FP_SHARE = toolchain.kicad_footprints()
 
 STATES = ("unknown", "footprint_present", "symbol_present",
           "symbol_and_footprint_present", "footprint_verified",

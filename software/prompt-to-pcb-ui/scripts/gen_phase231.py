@@ -17,11 +17,14 @@ import fleet_learning as fl  # noqa: E402
 import jit_primitives as jp  # noqa: E402
 import role_completeness as rc  # noqa: E402
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import toolchain  # noqa: E402
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUNS = os.path.join(HERE, "..", "public", "runs")
-SYM = "/Applications/KiCad/KiCad.app/Contents/SharedSupport/symbols/Sensor.kicad_sym"
-FPP = ("/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints/"
-       "Package_LGA.pretty/Bosch_LGA-8_2.5x2.5mm_P0.65mm_ClockwisePinNumbering.kicad_mod")
+SYM = toolchain.kicad_symbols() + "/Sensor.kicad_sym"
+FPP = (toolchain.kicad_footprints() + "/Package_LGA.pretty/"
+       "Bosch_LGA-8_2.5x2.5mm_P0.65mm_ClockwisePinNumbering.kicad_mod")
 TARGETS = ["bme280-sandbox-v1", "env-sensor-benchmark-v2", "fl1-backplane-v1"]
 FORBIDDEN = ["calibrated", "sensor_accuracy_validated", "low_power_validated",
              "battery_safety_validated", "environmental_certified",

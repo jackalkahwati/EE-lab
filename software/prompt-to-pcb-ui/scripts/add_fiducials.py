@@ -7,12 +7,16 @@ saves. Idempotent: does nothing if 3 are already present.
 Run with KiCad's bundled python:  python3 add_fiducials.py <board.kicad_pcb>
 Prints  FIDUCIALS <n>  (final count). Exit 0 always — best-effort self-heal.
 """
+import os
 import sys
 
 import pcbnew
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import toolchain  # noqa: E402
+
 BOARD = sys.argv[1]
-FID_LIB = "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints/Fiducial.pretty"
+FID_LIB = toolchain.kicad_footprints() + "/Fiducial.pretty"
 FID_FP = "Fiducial_1mm_Mask2mm"
 NEED = 3
 EDGE = 4.0      # inset from board edge, mm

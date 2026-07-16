@@ -12,11 +12,14 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "..", "blocks"))
 import package_families as pfam  # noqa: E402
 import datasheet_evidence as de  # noqa: E402
 import multirail  # noqa: E402
+import toolchain  # noqa: E402
 
-SYM_SHARE = "/Applications/KiCad/KiCad.app/Contents/SharedSupport/symbols"
+SYM_SHARE = toolchain.kicad_symbols()
 
 
 def _extract_block(text, name):

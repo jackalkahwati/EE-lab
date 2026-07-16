@@ -68,8 +68,10 @@ async function buildCircuit(code, note) {
 // against realistic fab rules (JLCPCB 4-layer, 0.09mm), so "clean" means it
 // passes the same design-rule check a fab runs, not just our own. Gated on
 // kicad-cli being installed; absent -> honestly reported unavailable.
-const KICAD_CLI = ['/opt/homebrew/bin/kicad-cli', '/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli']
-  .find((p) => { try { return fs.existsSync(p) } catch { return false } })
+// FL_KICAD_CLI override first (Linux/cloud), else probe the local installs.
+const KICAD_CLI = process.env.FL_KICAD_CLI
+  || ['/opt/homebrew/bin/kicad-cli', '/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli']
+    .find((p) => { try { return fs.existsSync(p) } catch { return false } })
 
 // freerouting — a real push-and-shove autorouter (Java). It routes far cleaner
 // than tscircuit's built-in router (fewer vias, passes fab DRC), so the loop
@@ -85,8 +87,10 @@ const FR_JAR = (() => {
 // KiCad's own python (ships with the app) + the ground-plane pass. pcbnew carries
 // a real net model, so it can assign nets and lay a DRC-verified ground plane the
 // net-less circuit-json-to-kicad export can't.
-const KICAD_PY = ['/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3', '/usr/bin/python3']
-  .find((p) => { try { return fs.existsSync(p) } catch { return false } })
+// FL_KICAD_PYTHON override first (Linux/cloud), else probe the local installs.
+const KICAD_PY = process.env.FL_KICAD_PYTHON
+  || ['/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3', '/usr/bin/python3']
+    .find((p) => { try { return fs.existsSync(p) } catch { return false } })
 const GROUND_PLANE_PY = (() => {
   const p = path.join(HERE, '..', 'kicad', 'ground_plane.py')
   try { return fs.existsSync(p) ? p : null } catch { return null }

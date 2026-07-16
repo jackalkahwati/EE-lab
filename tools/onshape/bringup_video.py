@@ -233,10 +233,13 @@ def main() -> None:
 
 def encode() -> None:
     out = os.path.abspath(OUT)
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    "..", "..", "hardware", "blocks"))
+    import toolchain
     rc = os.system(
-        "/opt/homebrew/bin/ffmpeg -y -framerate 7 -i '{}/f%04d.png' "
+        "{} -y -framerate 7 -i '{}/f%04d.png' "
         "-c:v libx264 -pix_fmt yuv420p -crf 20 '{}' 2>/dev/null".format(
-            FRAMES, out))
+            toolchain.ffmpeg_bin(), FRAMES, out))
     print("ffmpeg rc:", rc, "->", out)
 
 

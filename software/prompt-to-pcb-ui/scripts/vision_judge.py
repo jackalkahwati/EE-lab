@@ -18,6 +18,9 @@ import os
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import toolchain  # toolchain path resolver (env-overridable, macOS defaults)
+
 
 def _first_json(text):
     i = text.find("{")
@@ -58,17 +61,9 @@ def _anthropic(system, user, images):
 
 
 def _claude_bin():
-    """Resolve the claude CLI binary the same way scripts/llm_json.py does —
+    """Resolve the claude CLI binary via the shared toolchain resolver —
     a spawned server process often lacks ~/.local/bin on PATH."""
-    bin_path = os.environ.get("CLAUDE_CLI_PATH")
-    if bin_path:
-        return bin_path
-    home = os.environ.get("HOME", "")
-    for p in (home + "/.local/bin/claude", "/opt/homebrew/bin/claude",
-              "/usr/local/bin/claude"):
-        if os.path.exists(p):
-            return p
-    return "claude"  # last resort: PATH lookup
+    return toolchain.claude_bin()
 
 
 def _claude_cli(system, user, images):

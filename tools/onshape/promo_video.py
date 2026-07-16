@@ -308,10 +308,13 @@ def interior_scene(rig):
 
 
 def encode():
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    "..", "..", "hardware", "blocks"))
+    import toolchain
     rc = os.system(
-        "/opt/homebrew/bin/ffmpeg -y -framerate 8 -i '{}/f%04d.png' "
+        "{} -y -framerate 8 -i '{}/f%04d.png' "
         "-c:v libx264 -pix_fmt yuv420p -crf 19 '{}' 2>/dev/null".format(
-            FRAMES, os.path.abspath(OUT)))
+            toolchain.ffmpeg_bin(), FRAMES, os.path.abspath(OUT)))
     print("ffmpeg rc:", rc, "->", os.path.abspath(OUT))
 
 

@@ -26,10 +26,13 @@ except Exception:
 
 import flroute_fixtures as fx
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import toolchain  # noqa: E402
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 HW = os.path.join(HERE, "..", "..", "..", "hardware", "pcba-rev-a")
 FLROUTE = os.path.join(HW, "tools", "flroute", "target", "release", "flroute")
-KICAD_CLI = "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli"
+KICAD_CLI = toolchain.kicad_cli()
 GOLDEN_DIR = os.path.join(HERE, "flroute_golden")
 
 

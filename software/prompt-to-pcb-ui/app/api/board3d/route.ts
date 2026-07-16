@@ -3,6 +3,7 @@ import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { isValidRunId, runAccess } from '@/lib/auth'
+import { kicadCli } from '@/lib/toolchain'
 
 /**
  * Serves a binary glTF (GLB) of a run's routed board for the 3D viewer,
@@ -15,10 +16,9 @@ import { isValidRunId, runAccess } from '@/lib/auth'
 const exec = promisify(execFile)
 
 const APP = process.cwd()
-const KCLI_CANDIDATES = [
-  '/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli',
-  '/opt/homebrew/bin/kicad-cli',
-]
+// Resolver value first (honors FL_KICAD_CLI), then the homebrew fallback so an
+// existing-file probe still works when the app-bundle path isn't the install.
+const KCLI_CANDIDATES = [kicadCli(), '/opt/homebrew/bin/kicad-cli']
 
 // base → the .kicad_pcb that produced that artifact dir
 function resolvePcb(base: string): string | null {

@@ -18,8 +18,9 @@ SCRIPTS = os.path.join(HERE, "..", "..", "software", "prompt-to-pcb-ui",
                        "scripts")
 D = os.path.join(HERE, "..", "..", "software", "prompt-to-pcb-ui", "public",
                  "runs", "fl1-backplane-v1", "data")
-KIPY = ("/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/"
-        "Versions/Current/bin/python3")
+sys.path.insert(0, os.path.join(HERE, "..", "blocks"))
+import toolchain  # noqa: E402
+KIPY = toolchain.kicad_python()
 
 
 def art(name):

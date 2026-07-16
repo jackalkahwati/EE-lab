@@ -28,8 +28,9 @@ BLOCKS = os.path.join(REPO, "hardware", "blocks")
 SCRIPTS = os.path.join(REPO, "software", "prompt-to-pcb-ui", "scripts")
 FLROUTE = os.path.join(REPO, "hardware", "pcba-rev-a", "tools", "flroute",
                        "target", "release", "flroute")
-KCLI = os.environ.get("FL_KICAD_CLI",
-                      "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli")
+sys.path.insert(0, BLOCKS)
+import toolchain  # noqa: E402
+KCLI = toolchain.kicad_cli()
 KPY = sys.executable  # we ARE KiCad's python
 ROUTES_DIR = os.path.join(BLOCKS, "routes")
 

@@ -100,9 +100,13 @@ for i, pos in enumerate(samples):
 set_values(park)
 print("encoding...", flush=True)
 dst = "/Users/jackal-kahwati/EE-lab/cad/electronics-bringup-station"
-os.system("/opt/homebrew/bin/ffmpeg -y -framerate {fps} -i {d}/f%04d.png "
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "..", "..", "hardware", "blocks"))
+import toolchain
+os.system("{ff} -y -framerate {fps} -i {d}/f%04d.png "
           "-c:v libx264 -pix_fmt yuv420p -crf 20 {o}/motion-sim.mp4 "
-          "> /tmp/ffmpeg_sim.log 2>&1".format(fps=FPS, d=outdir, o=dst))
+          "> /tmp/ffmpeg_sim.log 2>&1".format(ff=toolchain.ffmpeg_bin(),
+                                              fps=FPS, d=outdir, o=dst))
 imgs = [Image.open("{}/f{:04d}.png".format(outdir, i)).resize((600, 450))
         for i in range(0, total, 2)]  # gif at 4 fps real-time
 imgs[0].save(dst + "/motion-sim.gif", save_all=True, append_images=imgs[1:],
