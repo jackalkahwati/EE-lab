@@ -2,3 +2,6 @@
 .DS_Store
 **/__pycache__/
 tools/parts/registry.sqlite
+tools/parts/.jlcparts-cache/
+tools/parts/registry.sqlite-wal
+tools/parts/registry.sqlite-shm

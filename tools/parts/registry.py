@@ -75,7 +75,23 @@ def _connect():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     con = sqlite3.connect(DB_PATH, timeout=15)
     con.row_factory = sqlite3.Row
-    con.executescript(SCHEMA)
+    # WAL: the registry is written by multiple concurrent processes (both
+    # engines + parallel footprint saves from candidate builds). Journal-mode
+    # rollback made simultaneous saves lose races; WAL + busy_timeout makes
+    # them queue instead.
+    con.execute("PRAGMA busy_timeout = 15000")
+    try:
+        con.execute("PRAGMA journal_mode = WAL")
+    except sqlite3.OperationalError:
+        pass  # already WAL / locked mid-switch — fine either way
+    for attempt in (0, 1):
+        try:
+            con.executescript(SCHEMA)
+            break
+        except sqlite3.OperationalError:
+            if attempt:
+                raise
+            time.sleep(0.2)
     return con
 
 
@@ -158,6 +174,57 @@ def upsert(entry):
         con.close()
 
 
+_COLS = ("id", "mpn", "lcsc", "manufacturer", "description", "category",
+         "package", "interface", "pins", "kicad_mod", "footprint_ref",
+         "symbol_ref", "datasheet", "price", "stock", "jlc_basic",
+         "provenance", "updated_at")
+
+
+def bulk_upsert(entries, batch=5000):
+    """Fast path for catalog ingestion: one connection, batched INSERTs with
+    COALESCE merge — incoming non-null wins, existing non-null survives an
+    incoming null (so metadata ingestion can never clobber a stored footprint
+    or datasheet-verified pins). Returns rows written."""
+    con = _connect()
+    # incoming non-null wins — EXCEPT provenance, where the existing record
+    # wins: bulk catalog metadata must not relabel an entry whose footprint or
+    # pins came from a richer source (easyeda2kicad, digikey+datasheet)
+    sets = ", ".join(
+        ("%s = COALESCE(%s, excluded.%s)" if c == "provenance"
+         else "%s = COALESCE(excluded.%s, %s)") % (c, c, c)
+        for c in _COLS if c not in ("id", "updated_at"))
+    sql = ("INSERT INTO parts (%s) VALUES (%s) ON CONFLICT(id) DO UPDATE SET %s, "
+           "updated_at = excluded.updated_at"
+           % (",".join(_COLS), ",".join("?" * len(_COLS)), sets))
+    n = 0
+    now = time.time()
+    try:
+        rows = []
+        for e in entries:
+            pid = canonical_id(e)
+            if not pid:
+                continue
+            e = dict(e, id=pid, updated_at=now)
+            if e.get("lcsc"):
+                e["lcsc"] = str(e["lcsc"]).upper()
+            for k in ("pins", "provenance"):
+                if isinstance(e.get(k), (dict, list)):
+                    e[k] = json.dumps(e[k])
+            rows.append(tuple(e.get(c) for c in _COLS))
+            if len(rows) >= batch:
+                con.executemany(sql, rows)
+                con.commit()
+                n += len(rows)
+                rows = []
+        if rows:
+            con.executemany(sql, rows)
+            con.commit()
+            n += len(rows)
+        return n
+    finally:
+        con.close()
+
+
 def remember_query(interface, query, part_id):
     con = _connect()
     try:
@@ -181,19 +248,27 @@ def lookup_query(interface, query):
 
 
 def search(query, limit=20):
-    """Substring search over mpn/description/category/package. Ranked:
+    """Token-AND substring search: every whitespace token must match somewhere
+    in mpn/description/category/package, so "audio amplifier class d" finds a
+    Class-D audio amp even though no field contains that exact phrase. Ranked:
     JLC-basic parts first (cheapest to assemble), then in-stock, then recency."""
-    like = "%" + (query or "").strip() + "%"
+    tokens = [t for t in (query or "").split() if t]
+    if not tokens:
+        return []
+    clause = ("(mpn LIKE ? OR description LIKE ? OR category LIKE ? "
+              "OR package LIKE ?)")
+    where = " AND ".join([clause] * len(tokens))
+    args = []
+    for t in tokens:
+        args += ["%" + t + "%"] * 4
     con = _connect()
     try:
         rows = con.execute(
-            """SELECT * FROM parts
-               WHERE mpn LIKE ? OR description LIKE ? OR category LIKE ?
-                     OR package LIKE ?
+            """SELECT * FROM parts WHERE %s
                ORDER BY jlc_basic DESC, (stock IS NOT NULL AND stock > 0) DESC,
                         updated_at DESC
-               LIMIT ?""",
-            (like, like, like, like, int(limit))).fetchall()
+               LIMIT ?""" % where,
+            (*args, int(limit))).fetchall()
         return [_row_to_dict(r) for r in rows]
     finally:
         con.close()
