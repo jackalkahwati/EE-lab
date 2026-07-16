@@ -298,6 +298,29 @@ export function readSession(token: string | undefined): string | null {
   }
 }
 
+/**
+ * Admin allowlist — the ONLY accounts that may reach operator-level surfaces
+ * (the Shell tab / /api/terminal). Sourced from FL_ADMIN_EMAILS (comma list);
+ * if unset, defaults to the platform owner so it's never accidentally open to
+ * every authenticated user. A normal customer session is never admin.
+ */
+export function adminEmails(): string[] {
+  const raw = process.env.FL_ADMIN_EMAILS
+  const list = (raw && raw.trim() ? raw.split(',') : ['jack@lattis.io'])
+    .map((e) => norm(e.trim()))
+    .filter(Boolean)
+  return list
+}
+
+export function isAdminEmail(email: string | null | undefined): boolean {
+  return !!email && adminEmails().includes(norm(email))
+}
+
+/** True when the Request's signed-in user is a platform admin. */
+export function isAdminRequest(req: Request): boolean {
+  return isAdminEmail(sessionEmail(req))
+}
+
 /** Email of the signed-in user for a Request, or null. */
 export function sessionEmail(req: Request): string | null {
   const cookie = req.headers.get('cookie') ?? ''

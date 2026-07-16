@@ -75,12 +75,21 @@ export function TerminalPanel({ collapsed, onToggle, heightPx, tab, onTabChange 
   onTabChange?: (t: TerminalTab) => void
 }) {
   const { lines, version } = useTerminalLog()
+  // Shell tab is ADMIN-ONLY (operator surface) — hidden for everyone else
+  const [isAdmin, setIsAdmin] = useState(false)
+  useEffect(() => {
+    let off = false
+    fetch('/api/admin/me', { cache: 'no-store' })
+      .then((r) => r.json()).then((d) => { if (!off) setIsAdmin(!!d?.admin) })
+      .catch(() => {})
+    return () => { off = true }
+  }, [])
   const problems = lines.filter((l) => l.level === 'warn' || l.level === 'error')
   const hasErrors = problems.some((l) => l.level === 'error')
 
   // tab: controlled when the prop is given, else local
   const [localTab, setLocalTab] = useState<TerminalTab>('terminal')
-  const activeTab = tab ?? localTab
+  const activeTab = (!isAdmin && (tab ?? localTab) === 'shell') ? 'terminal' : (tab ?? localTab)
   const setTab = (t: TerminalTab) => { onTabChange?.(t); if (tab === undefined) setLocalTab(t) }
   const shown = activeTab === 'problems' ? problems : lines
 
@@ -160,7 +169,7 @@ export function TerminalPanel({ collapsed, onToggle, heightPx, tab, onTabChange 
       {/* header bar — 28px, tabs left, actions right */}
       <div className="flex h-7 shrink-0 items-center border-b border-border">
         {tabBtn('terminal', 'Terminal')}
-        {tabBtn('shell', 'Shell')}
+        {isAdmin && tabBtn('shell', 'Shell')}
         {tabBtn('problems', 'Problems', problems.length)}
         <div className="ml-auto flex h-full items-center">
           <button type="button" title="clear log" onClick={clearLog}
@@ -175,7 +184,7 @@ export function TerminalPanel({ collapsed, onToggle, heightPx, tab, onTabChange 
       </div>
 
       {/* body: interactive shell OR log stream */}
-      {!collapsed && activeTab === 'shell' && (
+      {!collapsed && activeTab === 'shell' && isAdmin && (
         <div className="min-h-0 flex-1">
           <ShellTab active={!collapsed} />
         </div>
