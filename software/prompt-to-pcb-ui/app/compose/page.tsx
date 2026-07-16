@@ -58,8 +58,8 @@ import { runFullPipeline, PIPE_ORDER, type PipeStatus } from '@/lib/run-pipeline
 import type { IdBrief } from '@/lib/id-brief'
 import type { ProductSpec } from '@/lib/product-spec'
 import {
-  Activity, BookOpen, Box, ClipboardCheck, Code, Cpu, Eye, Factory, Gauge, LayoutDashboard, ListTree, Maximize2,
-  Package, Palette, Receipt, ScrollText, ShieldCheck, Sparkles, Truck, Wrench,
+  Activity, BookOpen, Box, ClipboardCheck, Code, Cpu, Eye, Factory, FolderTree, Gauge, History, LayoutDashboard, ListTree, Maximize2,
+  MessagesSquare, Package, Palette, Plus, Receipt, ScrollText, ShieldCheck, Sparkles, Truck, Wrench,
 } from 'lucide-react'
 
 type Run = any
@@ -198,6 +198,8 @@ export default function Compose2Page() {
 
   // resizable panes (drag the dividers); persisted per browser
   const [leftW, setLeftW] = useState(288)
+  // left-pane mode: chat (conversation), threads (design list), files (run tree)
+  const [leftView, setLeftView] = useState<'chat' | 'threads' | 'files'>('chat')
   const [rightW, setRightW] = useState(480)
   const dragRef = useRef<null | 'left' | 'right'>(null)
   // mirrors dragRef as state so the active Handle can stay highlighted while the
@@ -574,6 +576,62 @@ export default function Compose2Page() {
   // install. The conversation pane (resizable, like the workspace) + empty
   // center + the same right rail in its empty state — describing a board builds
   // one; the panels populate once it finishes. Past runs stay reachable from
+  // ---- left pane: icon bar + the three views (chat / threads / files) ------
+  const selectThreadFromList = (id: string) => {
+    setSelectedId(id); setNewDesign(false); setIdBrief(null); setProductSpec(null)
+    setStage('electronics'); setBuiltDisc({}); setLeftView('chat')
+  }
+  const leftIcons = (
+    <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-1.5">
+      {([['chat', MessagesSquare, 'Chat'], ['threads', History, 'Threads'], ['files', FolderTree, 'Files']] as const).map(([v, Icon, label]) => (
+        <button
+          key={v}
+          onClick={() => setLeftView(v)}
+          title={label}
+          className={cn(
+            'relative flex h-7 items-center gap-1.5 rounded px-2 text-[11px]',
+            leftView === v ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/50',
+          )}
+        >
+          <Icon className="h-3.5 w-3.5" />
+          {label}
+          {leftView === v && <span aria-hidden className="absolute inset-x-1 bottom-0 h-0.5 rounded bg-primary" />}
+        </button>
+      ))}
+    </div>
+  )
+  const threadsPane = (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <button
+        onClick={() => { setNewDesign(true); setBuiltDisc({}); setLeftView('chat') }}
+        className="mx-2 mt-2 flex items-center gap-1.5 rounded border border-border px-2 py-1.5 text-xs text-muted-foreground hover:bg-accent/50"
+      >
+        <Plus className="h-3.5 w-3.5" /> New design
+      </button>
+      <div className="min-h-0 flex-1 overflow-auto py-1.5">
+        {runs.length === 0 && <div className="px-3 py-2 text-xs text-muted-foreground">No designs yet.</div>}
+        {runs.map((r: Run) => (
+          <button
+            key={r.id}
+            onClick={() => selectThreadFromList(r.id)}
+            className={cn(
+              'relative flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-accent/50',
+              r.id === selectedId && !newDesign ? 'bg-accent text-foreground' : 'text-muted-foreground',
+            )}
+          >
+            {r.id === selectedId && !newDesign && <span aria-hidden className="absolute inset-y-1 left-0 w-0.5 bg-primary" />}
+            <span className="truncate">{r.name || r.id}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+  const filesPane = (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <ArtifactExplorer runId={selectedRun?.runDir ? selectedRun.id : null} compact />
+    </div>
+  )
+
   // the ☰ menu (real threads + select handler), so this is a clean start, not a
   // dead end.
   if (!selectedRun) {
@@ -581,7 +639,10 @@ export default function Compose2Page() {
       <main className="flex h-[calc(100dvh-2.25rem)] flex-col overflow-hidden bg-background text-foreground">
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <aside style={{ width: leftW }} className="flex shrink-0 flex-col border-r border-border">
-            <ComposeChat
+            {leftIcons}
+            {leftView === 'threads' && threadsPane}
+            {leftView === 'files' && filesPane}
+            {leftView === 'chat' && <ComposeChat
               threads={runs.map((r) => ({ id: r.id, label: r.name || r.id }))}
               activeId=""
               newDesign
@@ -592,7 +653,7 @@ export default function Compose2Page() {
               onProductSpec={setProductSpec}
               productSpec={productSpec}
               onProductBuilt={onProductBuilt}
-            />
+            />}
           </aside>
           <Handle which="left" />
           <div className="flex min-w-0 flex-1 items-center justify-center p-6 text-center text-sm text-muted-foreground">
@@ -632,7 +693,10 @@ export default function Compose2Page() {
       <div className="flex min-h-0 flex-1 overflow-hidden">
       {/* LEFT — conversation (real interview + live agent step feed) */}
       <aside style={{ width: leftW }} className="flex shrink-0 flex-col border-r border-border">
-        <ComposeChat
+        {leftIcons}
+        {leftView === 'threads' && threadsPane}
+        {leftView === 'files' && filesPane}
+        {leftView === 'chat' && <ComposeChat
           threads={runs.map((r) => ({ id: r.id, label: r.name || r.id }))}
           activeId={selectedId}
           activeRunId={!newDesign && selectedRun?.real ? selectedRun.id : undefined}
@@ -660,7 +724,7 @@ export default function Compose2Page() {
             }).catch(() => {})
             await refreshRuns()
           }}
-        />
+        />}
       </aside>
 
       <Handle which="left" />

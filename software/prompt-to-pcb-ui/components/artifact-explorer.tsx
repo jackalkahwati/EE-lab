@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  ChevronDown, ChevronRight, Download, File, FileCode, FileJson, FileText,
+  ChevronDown, ChevronLeft, ChevronRight, Download, File, FileCode, FileJson, FileText,
   FileSpreadsheet, Folder, FolderOpen, Image as ImageIcon, RefreshCw,
 } from 'lucide-react'
 
@@ -146,7 +146,7 @@ function Tree({ nodes, sel, onSel, openDirs, toggle, depth = 0 }: {
   )
 }
 
-export function ArtifactExplorer({ runId }: { runId: string | null }) {
+export function ArtifactExplorer({ runId, compact }: { runId: string | null; compact?: boolean }) {
   const [tree, setTree] = useState<FileNode[] | null>(null)
   const [count, setCount] = useState(0)
   const [err, setErr] = useState<string | null>(null)
@@ -201,7 +201,9 @@ export function ArtifactExplorer({ runId }: { runId: string | null }) {
   return (
     <div className="flex h-full min-h-0 text-sm">
       {/* tree pane */}
-      <div className="flex w-64 shrink-0 flex-col border-r border-border/60">
+      <div className={compact
+        ? `${sel ? 'hidden' : 'flex'} w-full flex-col`
+        : 'flex w-64 shrink-0 flex-col border-r border-border/60'}>
         <div className="flex items-center justify-between border-b border-border/60 px-2 py-1.5 text-[11px] text-muted-foreground">
           <span>{count} files</span>
           <button onClick={load} className="rounded p-1 hover:bg-accent/50" title="Refresh">
@@ -213,7 +215,7 @@ export function ArtifactExplorer({ runId }: { runId: string | null }) {
         </div>
       </div>
       {/* preview pane */}
-      <div className="min-w-0 flex-1 overflow-auto">
+      <div className={compact && !sel ? 'hidden' : 'min-w-0 flex-1 overflow-auto'}>
         {!sel ? (
           <div className="p-6 text-xs text-muted-foreground">
             Every file this run generated, live from disk. Select one to preview — markdown, JSON,
@@ -222,6 +224,11 @@ export function ArtifactExplorer({ runId }: { runId: string | null }) {
         ) : (
           <div className="flex h-full flex-col">
             <div className="flex items-center gap-2 border-b border-border/60 px-3 py-1.5">
+              {compact && (
+                <button onClick={() => { setSel(null); setBody(null) }} className="rounded p-0.5 hover:bg-accent/50" title="Back to files">
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </button>
+              )}
               <span className="truncate font-mono text-xs text-foreground">{sel.path}</span>
               <span className="text-[10px] text-muted-foreground">{fmtSize(sel.size)}</span>
               <a href={url} download className="ml-auto flex items-center gap-1 rounded border border-border/60 px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-accent/50">
