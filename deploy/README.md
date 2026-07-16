@@ -16,6 +16,39 @@ jobs are already serialized by an in-process lock, so we don't fight that yet
 | `docker-compose.yml` | One app container + Caddy HTTPS ingress; named volumes for `public/runs` and the parts registry. |
 | `Caddyfile` | Automatic Let's Encrypt HTTPS → the app. Replaces the Cloudflare tunnel. |
 
+## Free-tier target ($0/month)
+
+The whole thing runs free:
+- **Host: Oracle Cloud Always-Free Ampere A1** — up to 4 Arm OCPU / 24 GB RAM,
+  always-free (not a trial), 200 GB block storage. Arm64 matches the image
+  built on Apple Silicon. Enough for KiCad + the freerouting JVM + Next.
+  (Caveat: free Ampere capacity can be scarce in a region — expect retries.)
+- **Ingress: Cloudflare Tunnel** (`deploy/docker-compose.tunnel.yml`) — free,
+  no open ports, no public IP, no cert management. Same mechanism fronting the
+  Mac today, pointed at the container.
+- **LLM: the Claude Code subscription** — no metered spend during testing (see
+  the subscription-on-a-box note below).
+
+Bring-up in free mode (no Caddy, no open ports):
+```bash
+env $(cat deploy/.env | xargs) \
+  docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.tunnel.yml \
+  up -d --build app cloudflared
+```
+`deploy/.env` needs `TUNNEL_TOKEN` (Cloudflare Zero Trust → Networks → Tunnels
+→ route a hostname to `http://app:4500` → copy the connector token) instead of
+`FL_HOST`.
+
+### Subscription LLM on the cloud box (testing only)
+The pipeline's LLM legs fall back to the local `claude` CLI. To use the Max
+subscription on the box instead of a metered key: install the `claude` CLI in
+the container/host and copy your authenticated credentials
+(`~/.claude` / the CLI's credential file) onto it, with `CLAUDE_CLI_PATH` set.
+Caveats, honestly: this is credential transfer, the token can expire (needs an
+interactive re-login), and headless server use of a personal subscription is
+ToS-gray. Fine for testing; switch to a funded metered key
+(`llm_health.py` → LIVE) for anything real.
+
 ## Prerequisites (the two real gates)
 
 1. **A metered LLM key with credit.** The pipeline's LLM legs fall back to the
@@ -65,25 +98,24 @@ free; the box is the single point of truth.
 
 ## Known caveats (honest)
 
-- **KiCad version parity — the one open item, proven at fine grain.** The base
-  installs **KiCad 8.0.9** (jammy + the `kicad-8.0` PPA — the reliable apt path;
-  noble ships only 7.0.11 and no PPA publishes a noble app build). Verified in
-  a real Linux container run:
-    - The toolchain installs and runs: pcbnew 8.0.9, kicad-cli, Linux-built
-      flroute, the KiCad footprint libraries.
-    - The Python pipeline EXECUTES on Linux: `compose.py` builds a real board
-      using the Linux footprints, `export_dsn.py` + the Linux `flroute` route
-      it, and KiCad 8 reads the pipeline's board files (KiCad 7 could NOT — it
-      rejects the `generator_version` token, so 8+ is the floor).
-    - Remaining delta: a few **pcbnew API signatures differ between KiCad 8 and
-      the Mac's 10.0.1** (e.g. `ZONE_FILLER.Fill()` argument types in
-      `import_ses.py`). The board FORMAT is compatible; specific SWIG calls are
-      not.
-  The correct fix is **KiCad 10.0.1 on the Linux host** (match the Mac exactly:
-  a source build, or the apt/PPA once it ships 10 — KiCad 10 is brand new), NOT
-  making the pipeline straddle two KiCad APIs. With version parity these deltas
-  vanish. Until then, `verify-linux.sh` runs the chain to the zone-fill step on
-  KiCad 8 and stops there honestly.
+- **KiCad version — RESOLVED for the electronics spine.** The base installs
+  **KiCad 8.0.9** (jammy + the `kicad-8.0` PPA — the reliable apt path; noble
+  ships only 7.0.11 and no PPA publishes a noble app build; KiCad 7 can't even
+  read the pipeline's board format, so 8+ is the floor). The single pcbnew API
+  delta between KiCad 8 and the Mac's 10.0.1 — `ZONE_FILLER.Fill()` argument
+  types — is handled with a cross-version try/except in `import_ses.py` (Mac
+  behavior byte-identical, A/B verified). **A full board now builds 0 DRC / 0
+  unconnected inside the Linux container** (`verify-linux.sh`).
+- **Footprint-library parity — the remaining bounded item.** KiCad 8's stock
+  footprint libraries lack a few parts newer than KiCad 8 (e.g. the Raspberry
+  Pi Pico module — `Module.pretty/RaspberryPi_Pico_SMD_HandSolder`). Boards
+  whose block library references those fail to compose on Linux until the
+  footprints are vendored. Fix: copy the missing footprints from the Mac's
+  KiCad 10 libraries into a vendored dir and point `FL_KICAD_FOOTPRINTS` there
+  (or bundle the Mac's footprint libs into the image for exact parity). Parts
+  sourced from the shared registry (easyeda2kicad) are unaffected — only the
+  stock-library block footprints. Passives, USB, LED, connectors, TestPoint are
+  all present in KiCad 8; a Pico-free board is already fully green on Linux.
 - **npm lockfile.** This tree's lockfile is currently broken (`npm ci` fails);
   the app Dockerfile installs with `--force`. Repair the lockfile before
   relying on this for reproducible builds.

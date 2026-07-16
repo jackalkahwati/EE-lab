@@ -1,0 +1,22 @@
+# FREE-TIER ingress: a Cloudflare Tunnel instead of the Caddy public-port
+# reverse proxy. cloudflared dials OUT to Cloudflare, so the box needs NO open
+# inbound ports, NO public IP, and NO cert management — the same mechanism that
+# fronts the Mac today, pointed at the container. All free on Cloudflare's plan.
+#
+# Use INSTEAD of the caddy service:
+#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.tunnel.yml up -d --build app cloudflared
+#
+# Get TUNNEL_TOKEN from the Cloudflare dashboard: Zero Trust → Networks →
+# Tunnels → (create/select a tunnel) → route a public hostname (e.g.
+# compose.firstlight.build) to http://app:4500 → copy the connector token.
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    depends_on: [app]
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN:?set TUNNEL_TOKEN from the Cloudflare tunnel connector}
+
+  # the caddy service from the base compose is not started in this mode
+  # (bring up only `app cloudflared`), so no ports are exposed on the host.
