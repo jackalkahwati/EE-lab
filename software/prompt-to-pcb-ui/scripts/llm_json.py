@@ -101,10 +101,16 @@ def complete_json(system, user):
     Anthropic API -> local Claude Code CLI (Max subscription, no credits)."""
     load_env()
     errs = []
-    for name, fn in (("openai", _openai), ("anthropic", _anthropic),
-                     ("claude-cli", _claude_cli)):
+    # Order is env-configurable (FL_LLM_ORDER, comma list). Default is
+    # anthropic-first: the whole pipeline is Claude/Opus-tuned, so the funded
+    # metered leg should be tried before OpenAI and before the CLI subscription
+    # fallback — no wasted dead-key call per LLM step once Anthropic is funded.
+    providers = {"openai": _openai, "anthropic": _anthropic, "claude-cli": _claude_cli}
+    order = [p.strip() for p in os.environ.get(
+        "FL_LLM_ORDER", "anthropic,openai,claude-cli").split(",") if p.strip() in providers]
+    for name in order:
         try:
-            return fn(system, user)
+            return providers[name](system, user)
         except Exception as e:
             errs.append("%s: %s" % (name, str(e)[:100]))
     raise RuntimeError("all model providers failed — " + " | ".join(errs))
