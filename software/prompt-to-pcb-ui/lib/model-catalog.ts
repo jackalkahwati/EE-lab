@@ -37,7 +37,7 @@ export interface CatalogModel {
   creditMult: number
 }
 
-const geminiFree = process.env.GEMINI_FREE_MODEL || 'gemini-2.5-flash'
+const geminiFree = process.env.GEMINI_FREE_MODEL || 'gemini-flash-latest'
 const geminiPro = process.env.GEMINI_MODEL || 'gemini-3.1-pro-preview'
 const openaiModel = process.env.OPENAI_MODEL || 'gpt-5.1'
 
