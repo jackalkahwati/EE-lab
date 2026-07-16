@@ -1346,8 +1346,20 @@ export async function GET(req: Request) {
         const fwDir = path.join(ws, 'firmware')
         // Relay boards get the crosspoint/coil HAL; composed boards get a generic
         // BSP + per-peripheral HAL (LoRa/IMU/motors) traced from the netlist.
-        // Either way the hard gate is the same: `cargo build` for the RP2040.
-        const fwGen = boardMode ? 'scripts/gen_firmware_compose.py' : 'scripts/gen_firmware.py'
+        // Either way the hard gate is the same: `cargo build` for the board's
+        // MCU family — thumbv6m for RP2040, riscv32imc (esp-hal) for ESP32-C3.
+        let fwGen = boardMode ? 'scripts/gen_firmware_compose.py' : 'scripts/gen_firmware.py'
+        let fwTargetLabel = 'thumbv6m-none-eabi (RP2040)'
+        try {
+          const devs = JSON.parse(
+            fs.readFileSync(path.join(pubData, 'devices.json'), 'utf8'),
+          ) as Record<string, unknown>[]
+          const mcu = devs.find((d) => d.type === 'mcu')
+          if (mcu?.family === 'esp32c3') {
+            fwGen = 'scripts/gen_firmware_esp32c3.py'
+            fwTargetLabel = 'riscv32imc-unknown-none-elf (ESP32-C3, esp-hal)'
+          }
+        } catch { /* no manifest -> RP2040 default */ }
 
         // ---- plan mode: firmware targets the SHIPPED board ------------------
         // In plan mode the variant board here is an INTERMEDIATE design view (see
@@ -1449,7 +1461,7 @@ export async function GET(req: Request) {
               if (fs.existsSync(pinMd)) fs.copyFileSync(pinMd, path.join(fwDir, 'PINMAP.md'))
             } catch { /* optional rider */ }
           }
-          log('firmware', 'cargo build --target thumbv6m-none-eabi (RP2040)…')
+          log('firmware', `cargo build --target ${fwTargetLabel}…`)
           const fwBuild = await exec('firmware', CARGO, ['build', '--release'], {
             cwd: fwDir,
           })
