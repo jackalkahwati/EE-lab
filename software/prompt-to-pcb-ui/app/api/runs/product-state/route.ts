@@ -33,6 +33,24 @@ function summarize(
       const drc = files['data/drc.json']
       const ver = files['data/verification.json']
       const design = files['data/design.json']
+      // chip-scale runs persist their DRC inside chipscale-board.json (with
+      // the repair ladder) rather than data/drc.json — read it as fallback
+      const cs = files['electronics/chipscale-board.json']
+      if (!drc && !ver && cs?.drc?.available) {
+        const errs = typeof cs.drc.errors === 'number' ? cs.drc.errors : undefined
+        return {
+          status: errs === 0 ? 'passed' : errs == null ? 'unverified' : 'failed',
+          summary: {
+            drcErrors: errs,
+            unrouted: cs.drcRepair?.unrouted ?? null,
+            repairLadder: cs.drcRepair
+              ? `${cs.drcRepair.errorsFirst}->${cs.drcRepair.errorsBest} over ${cs.drcRepair.iterations?.length ?? '?'} strategies`
+              : null,
+            droppedCapabilities: cs.designConvergence?.droppedCapabilities ?? [],
+            boardSource: cs.boardSource ?? null,
+          },
+        }
+      }
       if (!drc && !ver) return { status: 'unverified', summary: { mcu: design?.mcu ?? null } }
       const errs = Array.isArray(drc?.violations)
         ? drc.violations.filter((v: any) => v?.severity === 'error').length
