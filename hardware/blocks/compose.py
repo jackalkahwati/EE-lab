@@ -649,6 +649,72 @@ def block_mcu_esp32c3(x, y, n, nets):
     return b, 44, ka_h + 48
 
 
+# CM4 pin groups — parsed DETERMINISTICALLY from the official datasheet's pin
+# table (tools: cm4 pin parse, anchors cross-checked: GPIO2=58, GPIO14=55,
+# nRPIBOOT=93, USB_P=105) and the footprint is the official CM4IO reference
+# design's, stored in the shared registry. Never from memory.
+_CM4_GND = [1, 2, 7, 8, 13, 14, 22, 23, 32, 33, 42, 43, 52, 53, 59, 60, 65, 66,
+            71, 74, 98, 107, 108, 113, 114, 119, 120, 125, 126, 131, 132, 137,
+            138, 144, 150, 155, 156, 161, 162, 167, 168, 173, 174, 179, 180,
+            185, 186, 191, 192, 197, 198]
+_CM4_5V = [77, 79, 81, 83, 85, 87]
+
+
+def block_som_carrier(x, y, n, nets):
+    """Raspberry Pi CM4 carrier — the SoM strategy: the SoC/DRAM/PMIC live on
+    the certified module; this block designs the CARRIER around it. Official
+    CM4IO footprint (200 pads = datasheet numbering) from the registry.
+    Curated v1 surface: 5V power-in, console UART header, shared I2C, USB 2.0
+    device header (rpiboot flashing + gadget mode), nRPIBOOT jumper and
+    GLOBAL_EN power-control jumper. Everything else is honestly NC — the pin
+    table is in the registry for the next capability rung. Linux image
+    generation is a future firmware target; the firmware stage skips this
+    family loudly rather than emitting MCU code."""
+    pmap = {str(p): "GND" for p in _CM4_GND}
+    pmap.update({str(p): "+5V" for p in _CM4_5V})
+    pmap.update({
+        "55": "CM4_TX", "51": "CM4_RX",          # GPIO14/15 console UART
+        "105": "USB_DP", "103": "USB_DN",        # USB 2.0 (device for rpiboot)
+        "93": "NRPIBOOT", "99": "GLOBAL_EN_J",
+    })
+    if "i2c_sda" in n:
+        pmap["58"] = n["i2c_sda"]                # GPIO2 / SDA1
+        pmap["56"] = n["i2c_scl"]                # GPIO3 / SCL1
+    # The official footprint's anchor is NOT the module centroid: its local
+    # extents (measured from the registry copy, rot 0) are dx -3.6..+36.6,
+    # dy -51.6..+3.6 mm. Rotated 90 CCW a local (dx,dy) maps to (dy,-dx), so
+    # the 40x55 body becomes 55 wide x 40 tall spanning anchor-51.6..+3.6 in x
+    # and anchor-36.6..+3.6 in y — anchor below-right of the body.
+    uref = _next_ref("U")
+    b = place("registry", "CM4", uref, x + 53.6, y + 40.6, 90, pmap, nets)
+    # bulk input capacitance on the 5V feed (module pulls amps at boot)
+    b += cap(_next_ref("C"), x + 62, y + 6, "+5V", "GND", nets, value="22uF")
+    b += cap(_next_ref("C"), x + 62, y + 12, "+5V", "GND", nets, value="22uF")
+    # console UART header: 3V3-level TTL (GND TX RX)
+    b += place("Connector_PinHeader_2.54mm", "PinHeader_1x03_P2.54mm_Vertical",
+               _next_ref("J"), x + 74, y + 8, 0,
+               {"1": "GND", "2": "CM4_TX", "3": "CM4_RX"}, nets)
+    label("CONSOLE G TX RX", x + 74, y + 3, 0.6)
+    # USB 2.0 header (D+ D- 5V GND) — rpiboot flashing + gadget mode
+    b += place("Connector_PinHeader_2.54mm", "PinHeader_1x04_P2.54mm_Vertical",
+               _next_ref("J"), x + 74, y + 18, 0,
+               {"1": "+5V", "2": "USB_DN", "3": "USB_DP", "4": "GND"}, nets)
+    label("USB 5V D- D+ G", x + 74, y + 13, 0.6)
+    # nRPIBOOT jumper (short to GND -> USB boot for flashing) + GLOBAL_EN
+    b += place("Connector_PinHeader_2.54mm", "PinHeader_1x02_P2.54mm_Vertical",
+               _next_ref("J"), x + 74, y + 30, 0, {"1": "NRPIBOOT", "2": "GND"}, nets)
+    label("nRPIBOOT", x + 74, y + 26, 0.6)
+    b += place("Connector_PinHeader_2.54mm", "PinHeader_1x02_P2.54mm_Vertical",
+               _next_ref("J"), x + 74, y + 38, 0, {"1": "GLOBAL_EN_J", "2": "GND"}, nets)
+    label("GLOBAL_EN", x + 74, y + 34, 0.6)
+    _DEVICES.append({"ref": uref, "type": "mcu", "family": "cm4",
+                     "name": "Raspberry Pi Compute Module 4 (SoM carrier)",
+                     "honesty": "curated carrier surface: power/UART/I2C/USB/"
+                                "boot straps wired; remaining CM4 pins NC by "
+                                "design; footprint = official CM4IO reference"})
+    return b, 84, 50
+
+
 def block_imu(x, y, n, nets):
     """6-axis IMU (MPU-6050) as a GY-521-style breakout module on the I2C bus.
     This is a module-integration board (the MCU and radio are modules too), so
@@ -1650,6 +1716,7 @@ BLOCK_TABLE = {
     "uartbridge": block_uart_bridge,
     "audio": block_audio_amp,
     "esp32c3": block_mcu_esp32c3,
+    "somcarrier": block_som_carrier,
 }
 
 
@@ -1683,6 +1750,10 @@ CAPABILITIES = [
     {"key": "esp32c3", "label": "ESP32-C3-WROOM-02 WiFi + BLE MCU module (replaces the "
         "Pico as the board's MCU; integrated antenna with copper keep-out; UART flash "
         "header; firmware image lands with the ESP-IDF target)"},
+    {"key": "somcarrier", "label": "Raspberry Pi CM4 SoM carrier (Linux-class compute; "
+        "official CM4IO footprint; 5V power-in, console UART, shared I2C, USB 2.0 "
+        "device header for rpiboot flashing, boot/power-control jumpers; firmware "
+        "stage skips honestly — OS image is a future target)"},
 ]
 
 
@@ -1723,8 +1794,10 @@ def _block_keys(s):
     if any(k in s for k in ("temperature", "temp sensor", "thermometer", "thermal sensor",
                             "lm75", "tmp102", "tmp117", "mcp9808")):
         add("tempsensor")
-    if any(k in s for k in ("imu", "gyro", "accel", "mpu", "mpu6050", "inertial",
-                            "6-axis", "6 axis", "9-axis", "9 axis")):
+    # "mpu" must be word-bounded: bare substring match hits "coMPUte (module)"
+    if any(k in s for k in ("imu", "gyro", "accel", "mpu6050", "inertial",
+                            "6-axis", "6 axis", "9-axis", "9 axis")) \
+            or re.search(r"\bmpu\b", s):
         add("imu")
     if any(k in s for k in ("motor", "esc", "actuator", "servo", "propeller", "prop ")):
         add("motors")
@@ -1786,6 +1859,10 @@ def _block_keys(s):
     if any(k in s for k in ("esp32", "wifi", "wi-fi", "ble", "bluetooth",
                             "2.4ghz", "2.4 ghz")):
         add("esp32c3")
+    if any(k in s for k in ("cm4", "cm5", "compute module", "som carrier",
+                            "som ", "system on module", "raspberry pi module",
+                            "linux carrier", "linux board", "carrier board")):
+        add("somcarrier")
     if "usbc" not in out and any(k in s for k in ("power", "regulator", "battery", "vin",
                                                   "5v", "3v3", "charg", "ldo", "buck",
                                                   "usb power", "usb-c power")):
@@ -1846,10 +1923,15 @@ def classify(blocks):
     if "esp32c3" in seen and "mcu" in seen:
         uniq.remove("mcu")
         seen.discard("mcu")
+    # a SoM carrier's compute IS the CM4 — "compute module" keyword-matches the
+    # mcu bucket too, so drop the auto-Pico; the CM4 owns the shared buses
+    if "somcarrier" in seen and "mcu" in seen:
+        uniq.remove("mcu")
+        seen.discard("mcu")
     if "backplane6" in seen and "mcu" in seen and len(seen) <= 3:
         pass  # explicit mcu request stands
-    if not (seen & {"mcu", "baremcu", "esp32c3", "backplane6", "bme280breakout",
-                    "standalone"}):
+    if not (seen & {"mcu", "baremcu", "esp32c3", "somcarrier", "backplane6",
+                    "bme280breakout", "standalone"}):
         uniq.append("mcu")
         seen.add("mcu")
     if not (seen & {"power", "usbc"}):
@@ -1912,14 +1994,16 @@ LAYERS8 = '''  (layers
 # on the left, the MCU is central, sensors sit next to it (short I2C), and the
 # radio + antenna land on the right edge (best RF practice). Rows wrap if a band
 # grows past the width budget, so the layout scales as blocks are added.
-ROW = {"power": 0, "usbc": 0, "mcu": 0, "esp32c3": 0, "imu": 0, "radio": 0, "antenna": 0,
+ROW = {"power": 0, "usbc": 0, "mcu": 0, "esp32c3": 0, "somcarrier": 0,
+       "imu": 0, "radio": 0, "antenna": 0,
        "gnss": 0, "cellular": 0, "tempsensor": 0, "comms": 0, "motion": 1,
        "instrument": 0, "dutmonitor": 0, "calref": 0, "calrefext": 0, "backplane6": 0,
        "statusled": 0, "bme280": 0, "bme280breakout": 0, "usbcsink": 0,
        "standalone": 0,
        "baremcu": 0, "relaymatrix": 1, "motors": 1, "gpiobreakout": 1,
        "fl1bus": 0, "boardid": 0, "gpiobank": 0, "spibus": 0, "uartbridge": 0}
-COL = {"power": 0, "usbc": 0, "mcu": 2, "esp32c3": 2, "imu": 3, "tempsensor": 3, "gnss": 4,
+COL = {"power": 0, "usbc": 0, "mcu": 2, "esp32c3": 2, "somcarrier": 2,
+       "imu": 3, "tempsensor": 3, "gnss": 4,
        "radio": 5, "cellular": 6, "comms": 7, "antenna": 9, "motors": 1,
        "motion": 3, "instrument": 4, "dutmonitor": 4, "calref": 5, "calrefext": 6,
        "backplane6": 1, "statusled": 6, "bme280": 3, "bme280breakout": 1,
@@ -2226,11 +2310,18 @@ def compose(spec, blocks, out_path):
         p += gzone("+3V3", "In3.Cu", X0, Y0, X0 + BW, Y0 + BH, nets)
         print("COMPOSE: 8-LAYER profile (GND In1/In4/In6, PWR In3)")
     else:
-        # GND pours on F/B/In1, PWR on In2 (the proven 4-layer flow)
+        # GND pours on F/B/In1, PWR on In2 (the proven 4-layer flow).
+        # A SoM carrier is a 5V-PLANE board: the CM4 pulls amps across six
+        # DF40 pins — that is a plane, not a 0.25mm routed net. +3V3 (small
+        # sensor loads) becomes the routed rail instead, same trade the
+        # 2-layer profile already makes.
+        pwr_net = "+5V" if "somcarrier" in keys else "+3V3"
         p += gzone("GND", "F.Cu", X0, Y0, X0 + BW, Y0 + BH, nets)
         p += gzone("GND", "B.Cu", X0, Y0, X0 + BW, Y0 + BH, nets)
         p += gzone("GND", "In1.Cu", X0, Y0, X0 + BW, Y0 + BH, nets)
-        p += gzone("+3V3", "In2.Cu", X0, Y0, X0 + BW, Y0 + BH, nets)
+        p += gzone(pwr_net, "In2.Cu", X0, Y0, X0 + BW, Y0 + BH, nets)
+        if pwr_net != "+3V3":
+            print("COMPOSE: In2 PWR plane = %s (SoM carrier), +3V3 routed" % pwr_net)
     p += body
     p += ')\n'
     open(out_path, "w").write(p)

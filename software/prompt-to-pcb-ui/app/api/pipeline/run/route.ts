@@ -1384,6 +1384,11 @@ export async function GET(req: Request) {
           if (mcu?.family === 'esp32c3') {
             fwGen = 'scripts/gen_firmware_esp32c3.py'
             fwTargetLabel = 'riscv32imc-unknown-none-elf (ESP32-C3, esp-hal)'
+          } else if (mcu?.family === 'cm4') {
+            // SoM carrier: the compute runs Linux off the module — an OS
+            // image is a future target; gen_firmware_compose SKIPs loudly
+            // for non-RP2040 families rather than shipping a wrong image.
+            fwTargetLabel = 'CM4 SoM (Linux) — no firmware target yet, skipped honestly'
           }
         } catch { /* no manifest -> RP2040 default */ }
 

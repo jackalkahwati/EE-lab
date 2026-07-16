@@ -70,6 +70,44 @@ def inset_boundary(path, inset_um):
 
 
 done, msg = inset_boundary(dsn_path, inset_mm * 1000.0)
+
+# Pads carrying a LOCAL clearance override — e.g. the official CM4IO NPTH
+# mounting pads (2.7mm screw hole + 1.7mm keepout ring) — are invisible to
+# flroute: KiCad exports no keepout it understands, so run-1 routed I2C
+# straight through the screw-head zone. Inject each as a zero-length wire
+# disc under a net that exists in no netlist: flroute marks unknown-net wire
+# cells as blocked-for-every-net, which IS the keepout semantic. The SES
+# import never reads these (they exist only in the DSN the router sees).
+_keeps = []
+for _f in b.GetFootprints():
+    for _p in _f.Pads():
+        try:
+            _lc = _p.GetLocalClearance()
+        except Exception:
+            _lc = None
+        # <0.3mm overrides are routine pad tuning the board rules cover
+        if not _lc or _lc < 300000:
+            continue
+        _pos = _p.GetPosition()
+        _r = max(pcbnew.ToMM(_p.GetSize().x), pcbnew.ToMM(_p.GetSize().y)) / 2.0 \
+            + pcbnew.ToMM(_lc)
+        _keeps.append((pcbnew.ToMM(_pos.x), pcbnew.ToMM(_pos.y), _r))
+if _keeps:
+    _txt = open(dsn_path).read()
+    _wires = "".join(
+        "    (wire (path {} {:.0f}  {:.0f} {:.0f}  {:.0f} {:.0f})(net FL_KEEPOUT)"
+        "(type protect))\n".format(_lyr, 2 * _r * 1000, _x * 1000, -_y * 1000,
+                                   _x * 1000, -_y * 1000)
+        for (_x, _y, _r) in _keeps for _lyr in ("F.Cu", "B.Cu"))
+    if "(wiring" in _txt:
+        _txt = _txt.replace("(wiring\n", "(wiring\n" + _wires, 1)
+    else:
+        _i = _txt.rfind(")")
+        _txt = _txt[:_i] + "  (wiring\n" + _wires + "  )\n" + _txt[_i:]
+    open(dsn_path, "w").write(_txt)
+    print("KEEPOUTS: %d pad-local-clearance disc(s) injected for the router"
+          % len(_keeps))
+
 print(f"DSN export OK -> {dsn_path}")
 print(f"boundary inset: {msg}" if done else f"boundary inset SKIPPED: {msg}")
 print("ZONE_NETS:" + ",".join(zone_nets))
