@@ -372,6 +372,15 @@ def render(plan, out_dir, name):
     # so the .glb name is safe either way. Best-effort: STEP stays the gate.
     gltf_path = _export(c, did, wid, eid, "GLTF", os.path.join(out_dir, "enclosure.glb"))
     png_path = _shaded_png(c, did, wid, eid, os.path.join(out_dir, "enclosure.png"))
+    # fidelity evidence: the four canonical views the ID concept sheet uses
+    # (front / perspective / top / side), rendered from the REAL geometry
+    views_dir = os.path.join(out_dir, "views")
+    os.makedirs(views_dir, exist_ok=True)
+    view_paths = {}
+    for vname, vm in _VIEW_MATRICES.items():
+        p = _shaded_png(c, did, wid, eid, os.path.join(views_dir, vname + ".png"), vm)
+        if p:
+            view_paths[vname] = p
 
     return {
         "ok": bool(rendered) and step_path is not None,
@@ -379,6 +388,7 @@ def render(plan, out_dir, name):
         "stepPath": step_path,
         "gltfPath": gltf_path,
         "previewPath": png_path,
+        "viewPaths": view_paths,
         "onshapeUrl": "%s/documents/%s/w/%s/e/%s" % (BASE_URL, did, wid, eid),
         "opsRendered": rendered,
         "opsFailed": failed,
@@ -386,10 +396,23 @@ def render(plan, out_dir, name):
     }
 
 
-def _shaded_png(c, did, wid, eid, out_path):
-    """Isometric shaded PNG preview of the part studio; path or None."""
+_VIEW_MATRICES = {
+    # rows of the camera rotation, 12 comma floats (same format as the iso
+    # preview). MEASURED convention (probed against a real asymmetric part):
+    # the third row is the world-axis normal of the face you SEE. front shows
+    # the +Y face (the wall the executor's front-plane cutouts pierce); top
+    # shows +Z; right shows +X; iso is the existing preview matrix.
+    "front": "-1,0,0,0,0,0,1,0,0,1,0,0",
+    "top": "1,0,0,0,0,1,0,0,0,0,1,0",
+    "right": "0,1,0,0,0,0,1,0,1,0,0,0",
+    "iso": "0.707,0.707,0,0,-0.408,0.408,0.816,0,0.577,-0.577,0.577,0",
+}
+
+
+def _shaded_png(c, did, wid, eid, out_path,
+                vm="0.707,0.707,0,0,-0.408,0.408,0.816,0,0.577,-0.577,0.577,0"):
+    """Shaded PNG of the part studio from the given view matrix; path or None."""
     try:
-        vm = "0.707,0.707,0,0,-0.408,0.408,0.816,0,0.577,-0.577,0.577,0"
         r = requests.get(
             "%s/api/v6/partstudios/d/%s/w/%s/e/%s/shadedviews" % (BASE_URL, did, wid, eid),
             params={"outputHeight": 600, "outputWidth": 800, "viewMatrix": vm, "pixelSize": 0},

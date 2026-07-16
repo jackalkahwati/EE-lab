@@ -18,6 +18,7 @@ import { overrideForRequest } from '@/lib/byok'
 import { MODEL } from '@/lib/model-tiers'
 import { MECH_PLAN_SCHEMA, normalizeMechPlan, type MechPlan } from '@/lib/mechanical-plan'
 import { normalizeIdBrief, idBriefSummary, type IdBrief } from '@/lib/id-brief'
+import { FIDELITY_ENABLED, FIDELITY_ROUNDS, FIDELITY_THRESHOLD, critiqueBlock, judgeSystem, judgeUser, normalizeVerdict, type FidelityReport } from '@/lib/mech-fidelity'
 import { pinsPromptFor } from '@/lib/design-state'
 import type { ProductSpec } from '@/lib/product-spec'
 
@@ -210,6 +211,25 @@ function renderPlan(plan: MechPlan, outDir: string, name: string): Promise<any> 
   })
 }
 
+/** Run the vision judge; resolves to a report entry or an unavailable marker
+ *  ({ ok: false }) — never rejects, so the honest-degradation path can record
+ *  "unverified" and let the stage ship. */
+function runJudge(images: string[], system: string, user: string): Promise<{ ok: boolean; provider?: string; verdict?: unknown; errors?: string[] }> {
+  const script = path.join(process.cwd(), 'scripts', 'vision_judge.py')
+  return new Promise((resolve) => {
+    const py = spawn(process.env.FL_PYTHON || 'python3', [script], { timeout: 320_000 })
+    let out = ''
+    py.stdout.on('data', (d) => (out += d))
+    py.on('error', () => resolve({ ok: false, errors: ['spawn failed'] }))
+    py.on('close', () => {
+      try { resolve(JSON.parse(out.trim().split('\n').pop() || '{}')) }
+      catch { resolve({ ok: false, errors: ['judge produced no JSON'] }) }
+    })
+    py.stdin.write(JSON.stringify({ system, user, images }))
+    py.stdin.end()
+  })
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json()
@@ -346,7 +366,73 @@ export async function POST(req: Request) {
       // Phase 3: a targeted edit rides in as an explicit engineer instruction.
       (await changeRequestBlock(runId, 'mechanical'))
 
-    const plan = await callLLM(userMsg, overrideForRequest(req))
+    const override = overrideForRequest(req)
+
+    const outDir = path.join(process.cwd(), 'public', 'runs', runId, 'mechanical')
+    // argv hygiene: spec.product is LLM/user-authored free text passed to the
+    // executor as a CLI argument — reduce it to a safe slug: no path separators
+    // or control chars, no '..' hops, no leading '-' that could parse as a flag.
+    const safeName = (spec.product || '')
+      .replace(/[^A-Za-z0-9 ._-]+/g, '_')
+      .replace(/\.{2,}/g, '.')
+      .replace(/^[-. ]+/, '')
+      .trim()
+      .slice(0, 64) || 'part'
+
+    // ID-fidelity loop: render the plan, judge the REAL rendered views against
+    // the ID brief (+ concept sheet when it exists), and revise the plan from
+    // the judge's specific violations. Honest degradation: no judge / no brief
+    // → the stage still ships, fidelity recorded "unverified" with the reason.
+    const fidelity: FidelityReport = { state: 'unverified', threshold: FIDELITY_THRESHOLD, rounds: [] }
+    let plan = await callLLM(userMsg, override)
+    let result = await renderPlan(plan, outDir, safeName)
+
+    if (FIDELITY_ENABLED && idBrief) {
+      for (let round = 0; round <= FIDELITY_ROUNDS; round++) {
+        const viewNames = ['front', 'top', 'right', 'iso'].filter((v) => result?.viewPaths?.[v])
+        const images = viewNames.map((v) => result.viewPaths[v] as string)
+        // concept sheet last, when the ID render exists (render.json pointer)
+        let hasSheet = false
+        try {
+          const meta = JSON.parse(await fs.readFile(path.join(process.cwd(), 'public', 'runs', runId, 'id', 'render.json'), 'utf8'))
+          const sheet = path.join(process.cwd(), 'public', String(meta.url).split('?')[0])
+          await fs.access(sheet)
+          images.push(sheet); hasSheet = true
+        } catch { /* no concept sheet — brief-text judging */ }
+        if (!images.length) { fidelity.reason = 'no CAD views rendered'; break }
+
+        const res = await runJudge(images, judgeSystem(), judgeUser(idBrief, viewNames, hasSheet))
+        if (!res.ok) { fidelity.reason = (res.errors ?? []).join(' | ') || 'judge unavailable'; break }
+        const verdict = normalizeVerdict(res.verdict)
+        fidelity.rounds.push({ round, provider: res.provider ?? '?', verdict })
+
+        if (verdict.adheres || verdict.score >= FIDELITY_THRESHOLD) { fidelity.state = 'verified'; break }
+        if (round === FIDELITY_ROUNDS) { fidelity.state = 'failed-threshold'; break }
+        // revise: same grounded prompt + the judge's concrete fixes. A failed
+        // revise round (LLM timeout, executor fault) must NOT sink the stage —
+        // we already hold a real render + this round's verdict; keep them,
+        // record the failure, ship (measured live: a claude-CLI 300s timeout
+        // here used to 500 the whole route after 15 minutes of good work).
+        try {
+          plan = await callLLM(userMsg + critiqueBlock(round + 1, verdict), override)
+          result = await renderPlan(plan, outDir, safeName)
+        } catch (e) {
+          fidelity.state = 'failed-threshold'
+          fidelity.reason = `revise round ${round + 1} failed: ${String(e).slice(0, 200)}`
+          break
+        }
+      }
+    } else if (FIDELITY_ENABLED && !idBrief) {
+      fidelity.reason = 'no ID brief for this run'
+    } else {
+      fidelity.reason = 'disabled (FL_MECH_FIDELITY=0)'
+    }
+
+    try {
+      const dDir = path.join(process.cwd(), 'public', 'runs', runId, 'disciplines')
+      await fs.mkdir(dDir, { recursive: true })
+      await fs.writeFile(path.join(dDir, 'mech-fidelity.json'), JSON.stringify(fidelity, null, 1))
+    } catch { /* fidelity file is evidence, not a gate on the response */ }
 
     // Honest fit check: does the real PCB fit the enclosure cavity? (a violation
     // the redesign loop consumes — never silently shrink the board to fake a fit)
@@ -455,20 +541,8 @@ export async function POST(req: Request) {
       }
     }
 
-    const outDir = path.join(process.cwd(), 'public', 'runs', runId, 'mechanical')
-    // argv hygiene: spec.product is LLM/user-authored free text passed to the
-    // executor as a CLI argument — reduce it to a safe slug: no path separators
-    // or control chars, no '..' hops, no leading '-' that could parse as a flag.
-    const safeName = (spec.product || '')
-      .replace(/[^A-Za-z0-9 ._-]+/g, '_')
-      .replace(/\.{2,}/g, '.')
-      .replace(/^[-. ]+/, '')
-      .trim()
-      .slice(0, 64) || 'part'
-    const result = await renderPlan(plan, outDir, safeName)
-
     if (!result?.ok) {
-      return Response.json({ ok: false, error: result?.error || 'executor failed', opsFailed: result?.opsFailed ?? [], plan })
+      return Response.json({ ok: false, error: result?.error || 'executor failed', opsFailed: result?.opsFailed ?? [], plan, fidelity })
     }
     const base = `/runs/${runId}/mechanical`
     // HONEST refinement inventory: a feature is listed only when its op(s)
@@ -524,6 +598,7 @@ export async function POST(req: Request) {
       mountingAligned,
       fastening,
       features: featureList,
+      fidelity,
       plan,
     }
 
