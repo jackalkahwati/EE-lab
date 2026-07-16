@@ -145,6 +145,43 @@ async function nemotronCall(system: string, user: string, key?: string): Promise
 }
 
 /**
+ * OpenRouter — the PLATFORM's funded provider. One key (OPENROUTER_API_KEY)
+ * fronts the whole model menu (Claude, GPT, Gemini, Llama, …) via an
+ * OpenAI-compatible API, so platform-funded runs (the free taste + Pro/
+ * Enterprise) route here instead of four separate metered keys. `model` is a
+ * full OpenRouter slug like 'anthropic/claude-sonnet-4.5' (see the catalog's
+ * openrouterModel). BYOK users hit their own native provider, not this.
+ */
+async function openrouterCall(system: string, user: string, key?: string, model?: string): Promise<string> {
+  const k = key || process.env.OPENROUTER_API_KEY
+  const m = model || process.env.OPENROUTER_MODEL || 'anthropic/claude-sonnet-4.5'
+  if (!k) throw new Error('no openrouter key')
+  const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    signal: AbortSignal.timeout(LLM_TIMEOUT_MS),
+    headers: {
+      Authorization: `Bearer ${k}`,
+      'content-type': 'application/json',
+      // OpenRouter attribution headers (optional but recommended)
+      'HTTP-Referer': process.env.APP_URL || 'https://compose.firstlight.build',
+      'X-Title': 'FirstLight Compose',
+    },
+    body: JSON.stringify({
+      model: m,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+    }),
+  })
+  if (!r.ok) throw new Error(`openrouter HTTP ${r.status}`)
+  const d = await r.json()
+  const t = d.choices?.[0]?.message?.content
+  if (!t) throw new Error('openrouter empty')
+  return t
+}
+
+/**
  * Claude Code CLI provider — routes calls through the LOCAL `claude` binary,
  * which authenticates with the user's claude.ai (Max) subscription login rather
  * than the metered API. Opt-in via USE_CLAUDE_CODE_CLI so it never affects a
@@ -220,6 +257,7 @@ const PROVIDERS: Record<string, (s: string, u: string, k?: string, m?: string) =
   openai: openaiCall,
   gemini: geminiCall,
   nemotron: nemotronCall,
+  openrouter: openrouterCall,
   'claude-code': claudeCodeCall,
 }
 

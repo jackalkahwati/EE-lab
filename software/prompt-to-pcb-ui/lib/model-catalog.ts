@@ -27,47 +27,50 @@ export interface CatalogModel {
   label: string
   /** one-line capability/cost hint for the UI */
   blurb: string
-  /** PROVIDERS key in lib/llm.ts */
+  /** NATIVE PROVIDERS key in lib/llm.ts — used when a BYOK caller runs this
+   *  model on their own key (their key is native, not OpenRouter). */
   provider: 'gemini' | 'anthropic' | 'openai'
-  /** literal model string for the provider API */
+  /** literal model string for the native provider API (BYOK path) */
   providerModel: string
+  /** OpenRouter slug for the PLATFORM-funded path (taste + Pro/Enterprise all
+   *  run through the one funded OpenRouter key). */
+  openrouterModel: string
   /** lowest plan that may select it on platform credit (BYOK bypasses) */
   minPlan: Plan
   /** credit multiplier vs a baseline build — set to cover the model's API cost */
   creditMult: number
 }
 
-const geminiFree = process.env.GEMINI_FREE_MODEL || 'gemini-flash-latest'
 const geminiPro = process.env.GEMINI_MODEL || 'gemini-3.1-pro-preview'
 const openaiModel = process.env.OPENAI_MODEL || 'gpt-5.1'
+// OpenRouter slugs for the platform-funded path — env-overridable because
+// OpenRouter renames slugs over time (verify against openrouter.ai/models once
+// the account is funded).
+const orSonnet = process.env.OR_SONNET_MODEL || 'anthropic/claude-sonnet-4.5'
+const orOpus = process.env.OR_OPUS_MODEL || 'anthropic/claude-opus-4.1'
+const orGpt = process.env.OR_GPT_MODEL || 'openai/gpt-5.1'
+const orGeminiPro = process.env.OR_GEMINI_MODEL || 'google/gemini-2.5-pro'
 
 export const MODELS: CatalogModel[] = [
   {
-    id: 'gemini-flash',
-    label: 'Gemini Flash',
-    blurb: 'Fast and free — good for exploring and first drafts.',
-    provider: 'gemini',
-    providerModel: geminiFree,
+    id: 'claude-sonnet',
+    label: 'Claude Sonnet',
+    blurb: 'Balanced design quality and speed — the free-taste default.',
+    provider: 'anthropic',
+    providerModel: 'claude-sonnet-5',
+    openrouterModel: orSonnet,
     minPlan: 'free',
-    creditMult: 0.4,
+    creditMult: 1.5,
   },
   {
     id: 'gemini-pro',
     label: 'Gemini Pro',
-    blurb: 'Stronger reasoning at low cost.',
+    blurb: 'Strong reasoning at lower cost.',
     provider: 'gemini',
     providerModel: geminiPro,
+    openrouterModel: orGeminiPro,
     minPlan: 'pro',
     creditMult: 1,
-  },
-  {
-    id: 'claude-sonnet',
-    label: 'Claude Sonnet',
-    blurb: 'Balanced design quality and speed.',
-    provider: 'anthropic',
-    providerModel: 'claude-sonnet-5',
-    minPlan: 'pro',
-    creditMult: 1.5,
   },
   {
     id: 'gpt',
@@ -75,6 +78,7 @@ export const MODELS: CatalogModel[] = [
     blurb: 'OpenAI frontier reasoning.',
     provider: 'openai',
     providerModel: openaiModel,
+    openrouterModel: orGpt,
     minPlan: 'pro',
     creditMult: 2,
   },
@@ -84,6 +88,7 @@ export const MODELS: CatalogModel[] = [
     blurb: 'The highest design fidelity. Best boards; costs the most.',
     provider: 'anthropic',
     providerModel: 'claude-opus-4-8',
+    openrouterModel: orOpus,
     minPlan: 'pro',
     creditMult: 4,
   },
@@ -100,11 +105,12 @@ export function findModel(id: string | null | undefined): CatalogModel | undefin
   return MODELS.find((m) => m.id === id)
 }
 
-/** The default model a plan lands on when the caller picks nothing. */
-export function defaultModelForPlan(plan: Plan): CatalogModel {
-  // Free stays on Flash; paid plans default to Sonnet (solid design quality
-  // without jumping straight to the priciest tier).
-  return plan === 'free' ? MODELS[0] : MODELS.find((m) => m.id === 'claude-sonnet')!
+/** The default model a plan lands on when the caller picks nothing. Everyone
+ *  defaults to Sonnet — a genuinely good model (the tool underwhelms on weak
+ *  ones), served on platform credit for the free taste and for Pro/Enterprise.
+ *  Pro/Enterprise can pick a stronger model in the selector. */
+export function defaultModelForPlan(_plan: Plan): CatalogModel {
+  return MODELS.find((m) => m.id === 'claude-sonnet')!
 }
 
 /** Can this plan select this model on PLATFORM credit? (BYOK bypasses this.) */

@@ -209,7 +209,7 @@ export async function GET(req: Request) {
   // platform compute: routing, solvers, CAD), floored at 0 by chargeCredits.
   if (!canRun(userRec) && !hasByok(req)) {
     return new Response(
-      `Out of credits (${creditsAvailable(userRec)} left). Upgrade to Pro, buy a credit pack, or add your own model API key in settings to keep designing.`,
+      `Free preview used up (${creditsAvailable(userRec)} credits left). Add your own model API key in settings to keep designing free, or subscribe to Pro to have us run the frontier models for you.`,
       { status: 402 },
     )
   }

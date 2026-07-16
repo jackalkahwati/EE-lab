@@ -82,18 +82,20 @@ export function resolvePlanModel(req: Request, requestedId?: string | null): Res
     }
   }
 
-  // 3) Admin — subscription for Anthropic (model-only → CLI path), platform key
+  // 3) Admin — subscription for Anthropic (model-only → CLI path), OpenRouter
   // otherwise. Not billed to a customer.
   if (admin) {
     if (model.provider === 'anthropic') {
       return { override: { model: model.providerModel }, model, creditMult: 0, source: 'subscription' }
     }
-    return { override: { provider: model.provider, model: model.providerModel }, model, creditMult: 0, source: 'platform' }
+    return { override: { provider: 'openrouter', model: model.openrouterModel }, model, creditMult: 0, source: 'platform' }
   }
 
-  // 4) Allowed platform pick — provider pin on the platform key.
+  // 4) Allowed platform pick (free taste + Pro/Enterprise) — routed through the
+  // one funded OpenRouter key, credit cost scaled by the model's multiplier so
+  // subscription revenue covers the API bill.
   return {
-    override: { provider: model.provider, model: model.providerModel },
+    override: { provider: 'openrouter', model: model.openrouterModel },
     model,
     creditMult: model.creditMult,
     source: 'platform',
