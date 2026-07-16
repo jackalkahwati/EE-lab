@@ -8,7 +8,8 @@
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { callLLMText, overrideFromHeaders, type LLMOverride } from '@/lib/llm'
+import { callLLMText, type LLMOverride } from '@/lib/llm'
+import { overrideForRequest } from '@/lib/byok'
 import { sourcingPromptBlock } from '@/lib/sourcing'
 import { MODEL } from '@/lib/model-tiers'
 import { DISCIPLINE_MODULES, DISCIPLINE_ARTIFACT_SCHEMA, normalizeDisciplineArtifact } from '@/lib/discipline-artifact'
@@ -193,7 +194,7 @@ true|false} — blocking=true when shipping without resolving it would be wrong.
       // gated — the doc then keeps its honest "not live-sourced" caveat)
       (discipline === 'supplyChain' ? await sourcingPromptBlock(await bomMpns(runId)) : '')
 
-    const out = await callLLM(sys, userMsg, overrideFromHeaders(req.headers))
+    const out = await callLLM(sys, userMsg, overrideForRequest(req))
     const artifact = normalizeDisciplineArtifact(out, discipline)
     // structured gaps → work-queue items (lib/work-items); advisory unless flagged
     ;(artifact as any).gaps = Array.isArray((out as any)?.gaps)

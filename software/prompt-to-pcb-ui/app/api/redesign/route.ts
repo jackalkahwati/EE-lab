@@ -12,7 +12,8 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
-import { callLLMText, overrideFromHeaders } from '@/lib/llm'
+import { callLLMText } from '@/lib/llm'
+import { overrideForRequest } from '@/lib/byok'
 import { pinsPromptFor } from '@/lib/design-state'
 import { MODEL } from '@/lib/model-tiers'
 import type { ProductSpec } from '@/lib/product-spec'
@@ -201,7 +202,7 @@ export async function POST(req: Request) {
     // keeps the platform's tier choice (MODEL.design) while a caller-supplied
     // key/provider still takes precedence — the old `override?.apiKey ? override
     // : llmOpts` form dropped the model tier for BYOK callers.
-    const override = overrideFromHeaders(req.headers)
+    const override = overrideForRequest(req)
 
     let budgets = spec.budgets
     const iterations: any[] = []

@@ -13,7 +13,8 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
-import { callLLMText, overrideFromHeaders, type LLMOverride } from '@/lib/llm'
+import { callLLMText, type LLMOverride } from '@/lib/llm'
+import { overrideForRequest } from '@/lib/byok'
 import { MODEL } from '@/lib/model-tiers'
 import { MECH_PLAN_SCHEMA, normalizeMechPlan, type MechPlan } from '@/lib/mechanical-plan'
 import { normalizeIdBrief, idBriefSummary, type IdBrief } from '@/lib/id-brief'
@@ -345,7 +346,7 @@ export async function POST(req: Request) {
       // Phase 3: a targeted edit rides in as an explicit engineer instruction.
       (await changeRequestBlock(runId, 'mechanical'))
 
-    const plan = await callLLM(userMsg, overrideFromHeaders(req.headers))
+    const plan = await callLLM(userMsg, overrideForRequest(req))
 
     // Honest fit check: does the real PCB fit the enclosure cavity? (a violation
     // the redesign loop consumes — never silently shrink the board to fake a fit)

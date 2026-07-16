@@ -9,7 +9,8 @@
  * This works for ANY product: the LLM output is just data the generic kernel
  * consumes. Same provider chain + JSON extraction as /api/architect.
  */
-import { callLLMText, overrideFromHeaders, type LLMOverride } from '@/lib/llm'
+import { callLLMText, type LLMOverride } from '@/lib/llm'
+import { overrideForRequest } from '@/lib/byok'
 import { DESIGN_PROBLEM_SCHEMA, normalizeDesignProblem, type DesignProblem } from '@/lib/design-problem'
 import { optimize } from '@/lib/optimizer'
 import { scorableObjectiveNames } from '@/lib/evaluators'
@@ -127,7 +128,7 @@ export async function POST(req: Request) {
       `active disciplines: ${disc || '-'}\n` +
       `Define the Design Problem to explore.`
 
-    const problem = await callLLM(userMsg, overrideFromHeaders(req.headers))
+    const problem = await callLLM(userMsg, overrideForRequest(req))
     const result = optimize(problem, { problem, spec }, 500)
 
     // compact payload: the frontier, the pick, and all points for a scatter

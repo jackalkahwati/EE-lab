@@ -5,7 +5,8 @@
  * sends the request + the answers so far each turn; the model returns either the
  * next question or a finalized spec.
  */
-import { callLLMText, overrideFromHeaders, type LLMOverride } from '@/lib/llm'
+import { callLLMText, type LLMOverride } from '@/lib/llm'
+import { overrideForRequest } from '@/lib/byok'
 import { MODEL } from '@/lib/model-tiers'
 import capabilities from '@/lib/block-capabilities.json'
 
@@ -225,7 +226,7 @@ export async function POST(req: Request) {
     // Architect sets it on the electronics hand-off: it already interviewed at
     // the product tier, so the board request is complete and needs no re-asking.
     const force = body.force === true || answers.length >= MAX_QUESTIONS
-    const override = overrideFromHeaders(req.headers)
+    const override = overrideForRequest(req)
     let { out, provider } = await callLLM(userMsg, force, override)
 
     // Early-finalize tier guard: a non-forced turn runs on the cheap question

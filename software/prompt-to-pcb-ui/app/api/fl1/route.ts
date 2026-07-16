@@ -15,7 +15,8 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import { callLLMText, overrideFromHeaders } from '@/lib/llm'
+import { callLLMText } from '@/lib/llm'
+import { overrideForRequest } from '@/lib/byok'
 import { isValidRunId, runAccess } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
@@ -184,7 +185,7 @@ export async function POST(req: Request) {
     `MEASUREMENTS (simulated FL-1 run):\n${JSON.stringify(measurements)}\n\nBOM:\n${bom}`
 
   try {
-    const override = overrideFromHeaders(req.headers)
+    const override = overrideForRequest(req)
     let parsed: string | null = null
     let lastFail = ''
     for (let attempt = 0; attempt < 2 && parsed === null; attempt++) {

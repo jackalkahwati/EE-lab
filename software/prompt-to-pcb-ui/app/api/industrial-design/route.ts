@@ -13,7 +13,8 @@
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { callLLMText, overrideFromHeaders, type LLMOverride } from '@/lib/llm'
+import { callLLMText, type LLMOverride } from '@/lib/llm'
+import { overrideForRequest } from '@/lib/byok'
 import { MODEL } from '@/lib/model-tiers'
 import { ID_BRIEF_SCHEMA, normalizeIdBrief } from '@/lib/id-brief'
 import { loadGroundBoard } from '@/lib/ground-board'
@@ -197,7 +198,7 @@ export async function POST(req: Request) {
     // loop: answer the model's own question with its own suggested default and
     // ask again (each round removes an unknown, so it terminates). Accept a
     // structurally-valid brief even when the model says enough:false.
-    const override = overrideFromHeaders(req.headers)
+    const override = overrideForRequest(req)
     const selfAnswered = [...answers]
     let out: { enough?: unknown; brief?: unknown; product?: unknown; question?: unknown; options?: unknown; default?: unknown }
     let provider: string

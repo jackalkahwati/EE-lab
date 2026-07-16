@@ -10,7 +10,8 @@
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
-import { callLLMText, overrideFromHeaders } from '@/lib/llm'
+import { callLLMText } from '@/lib/llm'
+import { overrideForRequest } from '@/lib/byok'
 import { isValidRunId, runAccess } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
@@ -173,7 +174,7 @@ export async function POST(req: Request) {
   } catch { /* optional */ }
 
   try {
-    const override = overrideFromHeaders(req.headers)
+    const override = overrideForRequest(req)
     const userMsg = `MEASURED BOARD FACTS:\n${facts}\n\nBOM:\n${bom || '(unavailable)'}\n\nPOWER BUDGET (computed):\n${power || '(unavailable)'}`
     let text = ''
     let provider = ''

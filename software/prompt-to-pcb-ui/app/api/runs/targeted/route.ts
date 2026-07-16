@@ -10,7 +10,7 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { runAccess, isValidRunId } from '@/lib/auth'
-import { overrideFromHeaders } from '@/lib/llm'
+import { overrideForRequest } from '@/lib/byok'
 import { classifyEdit } from '@/lib/edit-intent'
 import { forkRun } from '@/lib/run-fork'
 import { recordRun } from '@/lib/auth'
@@ -51,7 +51,7 @@ export async function POST(req: Request) {
     const intent = await classifyEdit(
       message,
       `${spec.product ?? ''} — ${String(spec.description ?? '').slice(0, 160)}`,
-      overrideFromHeaders(req.headers))
+      overrideForRequest(req))
 
     if (body?.dryRun) {
       return Response.json({

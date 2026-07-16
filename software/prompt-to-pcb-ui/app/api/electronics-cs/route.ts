@@ -10,7 +10,8 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
-import { callLLMText, overrideFromHeaders, type LLMOverride } from '@/lib/llm'
+import { callLLMText, type LLMOverride } from '@/lib/llm'
+import { overrideForRequest } from '@/lib/byok'
 import { pinsPromptFor, partPinsFor } from '@/lib/design-state'
 import { MODEL } from '@/lib/model-tiers'
 import type { ProductSpec } from '@/lib/product-spec'
@@ -289,7 +290,7 @@ type BoardOpts = {
 
 /** One full board candidate: part-set engine → real footprints → routed board. */
 async function buildCandidate(userMsg: string, req: Request, dir: string, svgName: string, timeoutMs: number, boardOpts: BoardOpts, model?: string) {
-  const { parts, nets, gnd, note, droppedCapabilities } = await emitPartsNets(userMsg, overrideFromHeaders(req.headers), model)
+  const { parts, nets, gnd, note, droppedCapabilities } = await emitPartsNets(userMsg, overrideForRequest(req), model)
   // pull REAL LCSC footprints for any part the engine tagged with a valid id;
   // attach as part.kicadMod so the runner uses the true pad geometry + size.
   // Fetch each distinct id ONCE (duplicate ids would race on the same /tmp file).

@@ -31,6 +31,7 @@ import {
   runAccess,
   sessionEmail,
 } from '@/lib/auth'
+import { hasByok } from '@/lib/byok'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 1800
@@ -164,9 +165,13 @@ export async function GET(req: Request) {
   }
   const userRec = getUser(userEmail)
   if (!userRec) return new Response('unknown account', { status: 401 })
-  if (!canRun(userRec)) {
+  // BYOK escape hatch: a user running on their OWN model key (per-request
+  // header or account-stored) may keep designing at 0 credits — the LLM spend
+  // is theirs. Credits are still charged while they last (they fund the
+  // platform compute: routing, solvers, CAD), floored at 0 by chargeCredits.
+  if (!canRun(userRec) && !hasByok(req)) {
     return new Response(
-      `Out of credits (${creditsAvailable(userRec)} left). Upgrade to Pro or buy a credit pack to keep designing.`,
+      `Out of credits (${creditsAvailable(userRec)} left). Upgrade to Pro, buy a credit pack, or add your own model API key in settings to keep designing.`,
       { status: 402 },
     )
   }

@@ -10,7 +10,8 @@
  * / Compose pipeline; every other discipline is DECLARED honestly (status),
  * never fabricated. Same provider chain + JSON extraction as /api/interview.
  */
-import { callLLMText, overrideFromHeaders, type LLMOverride } from '@/lib/llm'
+import { callLLMText, type LLMOverride } from '@/lib/llm'
+import { overrideForRequest } from '@/lib/byok'
 import { MODEL } from '@/lib/model-tiers'
 import { PRODUCT_SPEC_SCHEMA, normalizeSpec } from '@/lib/product-spec'
 import { idBriefSummary, normalizeIdBrief, type IdBrief } from '@/lib/id-brief'
@@ -189,7 +190,7 @@ export async function POST(req: Request) {
       `Questions already asked: ${answers.length} of max ${MAX_QUESTIONS}.`
 
     const force = answers.length >= MAX_QUESTIONS
-    const { out, provider } = await callLLM(userMsg, force, overrideFromHeaders(req.headers), idConstraint)
+    const { out, provider } = await callLLM(userMsg, force, overrideForRequest(req), idConstraint)
 
     // Finalize rescue (interview's pattern): under force the model MUST
     // finalize, but it can keep replying enough:false — which used to loop the
