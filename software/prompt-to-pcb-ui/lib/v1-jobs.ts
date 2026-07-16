@@ -251,6 +251,20 @@ async function runJob(job: V1Job, baseUrl: string) {
       }).then((r) => r.json())
       if (id?.type === 'brief') idBrief = id.brief
     } catch { /* advisory */ }
+    // Persist the brief to disciplines/id-brief.json in the SAME normalized
+    // shape the mechanical route reads back (normalizeIdBrief) — the fidelity
+    // loop and the Design tab key off this file. /api/industrial-design also
+    // persists it when given a runId, but the headless path guarantees it here
+    // so a v1 run always lands the brief whenever one was produced.
+    if (idBrief) {
+      try {
+        const dDir = path.join(runDir(job.runId), 'disciplines')
+        await fs.mkdir(dDir, { recursive: true })
+        await fs.writeFile(
+          path.join(dDir, 'id-brief.json'),
+          JSON.stringify(normalizeIdBrief(idBrief as Partial<IdBrief>)))
+      } catch { /* best effort — mechanical falls back to box-from-board */ }
+    }
 
     // 1b. ID concept render + self-consistency gate — the same /api/id-render
     //     the browser calls, so headless runs get the concept sheet (and its
@@ -289,20 +303,40 @@ async function runJob(job: V1Job, baseUrl: string) {
         `${baseUrl}/api/pipeline/run?plan=1&runId=${encodeURIComponent(job.runId)}&prompt=${encodeURIComponent(job.prompt)}`,
         { headers },
       )
+      let planFail = ''
       if (r.ok && r.body) {
         // consume the stream to completion so the spec (and the early
-        // chip-scale kick's lock) fully settle before the pipeline starts
+        // chip-scale kick's lock) fully settle before the pipeline starts —
+        // and capture the design stage's failReason from the SSE events, so a
+        // dead planner is NAMED in the job status instead of a generic skip
+        // (a launchd-PATH python without jsonschema died in 45ms and the only
+        // evidence was buried in the discarded stream).
         const reader = r.body.getReader()
+        const dec = new TextDecoder()
+        let buf = ''
         while (true) {
-          const { done } = await reader.read()
+          const { done, value } = await reader.read()
           if (done) break
+          buf += dec.decode(value, { stream: true })
+          let i: number
+          while ((i = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, i).trim()
+            buf = buf.slice(i + 1)
+            if (!line.startsWith('data:')) continue
+            try {
+              const ev = JSON.parse(line.slice(5)) as { type?: string; id?: string; state?: string; failReason?: string }
+              if (ev?.type === 'stage' && ev.id === 'design' && ev.state === 'failed') {
+                planFail = String(ev.failReason ?? 'design failed')
+              }
+            } catch { /* partial or non-JSON SSE line */ }
+          }
         }
       }
       const specPath = path.join(runDir(job.runId), 'data', 'chipscale-spec.json')
       const hasSpec = await fs.access(specPath).then(() => true, () => false)
       job.stages['design plan' as PipeStage] = hasSpec
         ? { status: 'passed', detail: 'planner design → chipscale-spec.json (real parts)' }
-        : { status: 'skipped', detail: r.ok ? 'planner produced no chip-scale spec — electronics falls back' : `plan leg unavailable (${r.status}) — electronics falls back` }
+        : { status: 'skipped', detail: r.ok ? `planner produced no chip-scale spec${planFail ? ` (${planFail})` : ''} — electronics falls back` : `plan leg unavailable (${r.status}) — electronics falls back` }
     } catch (e) {
       job.stages['design plan' as PipeStage] = { status: 'skipped', detail: `plan leg failed (${String(e).slice(0, 120)}) — electronics falls back` }
     }

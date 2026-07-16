@@ -9,7 +9,7 @@
  * - Ends by running sync-board.sh against the run output so the UI's
  *   Board/BOM/Gates tabs refresh with the new real artifacts.
  */
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -40,6 +40,30 @@ const KCLI = '/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli'
 const KPY =
   '/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3'
 const RUN_TIMEOUT_MS = 20 * 60 * 1000
+
+// ---- planner python resolution ----------------------------------------------
+// plan_cli.py needs jsonschema (UCS schema validation). Which `python3` wins
+// depends on who started this server: an interactive shell resolves the
+// Xcode/CLT python3 (has jsonschema), while the launchd deployment's PATH puts
+// homebrew's bare python3 first — spawning that one made every headless plan
+// leg die in ~45ms with ModuleNotFoundError, so the run silently fell back to
+// LLM-invented parts. Probe once per process and cache the first interpreter
+// that can actually import the planner's dependency.
+let plannerPyCache: string | null = null
+function plannerPython(): string {
+  if (plannerPyCache) return plannerPyCache
+  const candidates = [process.env.FL_PYTHON, 'python3', '/usr/bin/python3'].filter(Boolean) as string[]
+  for (const c of candidates) {
+    try {
+      if (spawnSync(c, ['-c', 'import jsonschema'], { timeout: 15_000 }).status === 0) {
+        plannerPyCache = c
+        return c
+      }
+    } catch { /* candidate missing — try the next */ }
+  }
+  plannerPyCache = 'python3' // let the spawn fail loudly with the real traceback
+  return plannerPyCache
+}
 
 // ---- firmware app-code generation (general, board-agnostic) -----------------
 // Writing no_std embedded-hal 1.0 Rust is the hardest codegen target here, so we
@@ -413,13 +437,35 @@ export async function GET(req: Request) {
         const fl1Bom = path.join(hwDir, 'build/builds/default/default.bom.csv')
         log('design', `workspace: ${ws} (working board untouched)`)
 
-        // ---- start this run's id-scoped output dir CLEAN. Every artifact below
-        // is written straight into it, so a run only ever contains its own board.
-        // A run that gate-fails before the render/validation stage leaves no
-        // board.json, loadRealBoard keys off that, so it honestly shows no board
-        // rather than inheriting another run's files. Wiping first also means a
-        // re-run of the same id can't keep stale files from the prior attempt.
-        if (runRoot) fs.rmSync(runRoot, { recursive: true, force: true })
+        // ---- start this run's id-scoped output dir CLEAN — but only the parts
+        // THIS pipeline owns. Every artifact below is written straight into it,
+        // so a run only ever contains its own board; a run that gate-fails before
+        // render/validation leaves no board.json and loadRealBoard keys off that.
+        // The ID-first flows (v1 headless jobs, Compose) legitimately create the
+        // run dir BEFORE this board pipeline runs: v1-job.json, product-spec.json,
+        // disciplines/id-brief.json and the id/ render + consistency-judge
+        // evidence all pre-date this call, and the old blanket rmSync(runRoot)
+        // silently destroyed them (headless runs lost their ID sheet + brief, so
+        // the mechanical fidelity loop honestly skipped with "no ID brief").
+        // Everything else — board/, data/, electronics/, stale top-level EDA
+        // artifacts, stale discipline outputs — is wiped exactly as before, so a
+        // re-run of the same id can't keep stale board files from a prior attempt.
+        if (runRoot && fs.existsSync(runRoot)) {
+          const keep = new Set(['v1-job.json', 'product-spec.json', 'id'])
+          for (const name of fs.readdirSync(runRoot)) {
+            if (keep.has(name)) continue
+            if (name === 'disciplines') {
+              // keep only the pre-pipeline ID brief; stage outputs are stale
+              for (const f of fs.readdirSync(path.join(runRoot, 'disciplines'))) {
+                if (f !== 'id-brief.json') {
+                  fs.rmSync(path.join(runRoot, 'disciplines', f), { recursive: true, force: true })
+                }
+              }
+              continue
+            }
+            fs.rmSync(path.join(runRoot, name), { recursive: true, force: true })
+          }
+        }
         fs.mkdirSync(pubBoard, { recursive: true })
         fs.mkdirSync(pubData, { recursive: true })
 
@@ -512,7 +558,7 @@ export async function GET(req: Request) {
           if (planMode) {
             log('design', 'planning: resolving the prompt to real parts + an MCU…')
             const plannerDir = path.resolve(hwDir, '../../hardware/planner')
-            const pl = await exec('design', 'python3',
+            const pl = await exec('design', plannerPython(),
               [path.join(plannerDir, 'plan_cli.py'), prompt], { cwd: plannerDir })
             try {
               synthDesign = JSON.parse(pl.out.trim().split('\n').filter(Boolean).pop() || 'null')
