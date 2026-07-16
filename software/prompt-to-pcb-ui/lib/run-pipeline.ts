@@ -528,5 +528,15 @@ async function runPipelineStages(opts: RunOpts, timer: RunTimer): Promise<Pipeli
     await disciplineBranch(spec, true, 're-running with converged budgets')
   }
 
+  // Stage A (orchestrator roadmap): assemble the shared product state from
+  // everything this run persisted. Best-effort — assembly is read-only and
+  // must never affect the run result.
+  try {
+    await fetch(
+      `${opts.baseUrl ?? ''}/api/runs/product-state?run=${encodeURIComponent(opts.runId)}`,
+      { headers: opts.headers, signal: opts.signal },
+    )
+  } catch { /* state assembly is evidence, not a gate */ }
+
   return { stages, feedback, updatedSpec: convergedBudgetsDiffer ? spec : undefined }
 }
