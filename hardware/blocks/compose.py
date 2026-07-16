@@ -1925,8 +1925,11 @@ def _block_keys(s):
     if any(k in s for k in ("audio amp", "speaker", "class d", "class-d",
                             "audio out", "audio driver")):
         add("audio")
-    if any(k in s for k in ("esp32", "wifi", "wi-fi", "ble", "bluetooth",
-                            "2.4ghz", "2.4 ghz")):
+    # "ble" must be word-bounded: bare substring match hits "rechargeaBLE",
+    # "portaBLE", "caBLE" (same disease as the "coMPUte"->mpu IMU bug)
+    if any(k in s for k in ("esp32", "wifi", "wi-fi", "bluetooth",
+                            "2.4ghz", "2.4 ghz")) \
+            or re.search(r"\bble\b", s):
         add("esp32c3")
     if any(k in s for k in ("cm4", "cm5", "compute module", "som carrier",
                             "som ", "system on module", "raspberry pi module",
