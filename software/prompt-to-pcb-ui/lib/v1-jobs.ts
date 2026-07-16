@@ -19,7 +19,7 @@ import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { makeSession, recordRun, getUser } from '@/lib/auth'
-import { runFullPipeline, type StageEvent } from '@/lib/run-pipeline'
+import { runFullPipeline, type PipeStage, type StageEvent } from '@/lib/run-pipeline'
 import { trackAndSync } from '@/lib/programs-sync'
 import { writeWorkItems } from '@/lib/work-items'
 import { normalizeIdBrief, type IdBrief } from '@/lib/id-brief'
@@ -274,6 +274,39 @@ async function runJob(job: V1Job, baseUrl: string) {
     const spec = arch.spec as ProductSpec
     await fs.mkdir(runDir(job.runId), { recursive: true })
     await fs.writeFile(path.join(runDir(job.runId), 'product-spec.json'), JSON.stringify(spec))
+
+    // 2.5. Plan leg (two-engine collapse): run the planner so the REAL design
+    // (real MPN/LCSC parts + netlist) lands as data/chipscale-spec.json BEFORE
+    // the pipeline's electronics stage — electronics-cs then builds the chip-
+    // scale board from it and skips the part-inventing LLM. Best-effort: with
+    // no spec file, electronics-cs falls back exactly as before. The route
+    // streams SSE and 409s if a pipeline is already running (v1 jobs are
+    // serialized, so that only means a browser run is live — skip honestly).
+    job.phase = 'design plan'
+    await persist(job)
+    try {
+      const r = await fetch(
+        `${baseUrl}/api/pipeline/run?plan=1&runId=${encodeURIComponent(job.runId)}&prompt=${encodeURIComponent(job.prompt)}`,
+        { headers },
+      )
+      if (r.ok && r.body) {
+        // consume the stream to completion so the spec (and the early
+        // chip-scale kick's lock) fully settle before the pipeline starts
+        const reader = r.body.getReader()
+        while (true) {
+          const { done } = await reader.read()
+          if (done) break
+        }
+      }
+      const specPath = path.join(runDir(job.runId), 'data', 'chipscale-spec.json')
+      const hasSpec = await fs.access(specPath).then(() => true, () => false)
+      job.stages['design plan' as PipeStage] = hasSpec
+        ? { status: 'passed', detail: 'planner design → chipscale-spec.json (real parts)' }
+        : { status: 'skipped', detail: r.ok ? 'planner produced no chip-scale spec — electronics falls back' : `plan leg unavailable (${r.status}) — electronics falls back` }
+    } catch (e) {
+      job.stages['design plan' as PipeStage] = { status: 'skipped', detail: `plan leg failed (${String(e).slice(0, 120)}) — electronics falls back` }
+    }
+    void persist(job)
 
     // 3. Full pipeline — the browser's exact orchestrator, server-side.
     job.phase = 'pipeline'
