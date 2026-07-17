@@ -328,43 +328,60 @@ export default function Home() {
       <section className="section section-dark" id="pricing">
         <div className="container">
           <p className="kicker">Pricing</p>
-          <h2>Start free. Go to production with us.</h2>
+          <h2>Start free. Pay for runs, not tokens.</h2>
           <p className="pricing-note">
-            Evaluate Compose free, every account gets the full design pipeline.
-            Production teams license the platform annually, with board-program
-            bundles, seats for the whole lab, and support that answers.
+            Bring your own model key, you only pay for platform runs, never for
+            inference. A run costs credits by its size, one small board is about
+            one credit, so a dense or multi-board run costs more. Free to try;
+            production teams license the platform annually.
           </p>
           <div className="pricing-grid">
             <div className="price-card">
-              <h3>Free</h3>
+              <h3>Freemium</h3>
               <p className="price">
-                $0<span>/month</span>
+                $0<span>/forever</span>
               </p>
               <ul>
-                <li>5 credits per month</li>
-                <li>Full design pipeline</li>
-                <li>Fab package + firmware downloads</li>
-                <li>FL-1 test plan on every board</li>
+                <li>5 free runs</li>
+                <li>Bring your own model key</li>
+                <li>Every model &mdash; Sonnet, GPT, Opus, Gemini</li>
+                <li>Full pipeline: schematic &rarr; routed PCB &rarr; BOM</li>
               </ul>
               <a href={COMPOSE_URL} className="btn btn-ghost price-cta">
                 Start free
               </a>
             </div>
             <div className="price-card price-card-pro">
+              <span className="price-badge">Most popular</span>
+              <h3>Pro</h3>
+              <p className="price">
+                $49<span>/month</span>
+              </p>
+              <ul>
+                <li>200 board runs every month</li>
+                <li>Priority build queue</li>
+                <li>Full exports &mdash; Gerbers, BOM, CAD</li>
+                <li>Revision history &amp; email support</li>
+              </ul>
+              <a href={COMPOSE_URL} className="btn price-cta">
+                Upgrade to Pro
+              </a>
+            </div>
+            <div className="price-card">
               <span className="price-badge">Production</span>
-              <h3>Teams &amp; Enterprise</h3>
+              <h3>Enterprise</h3>
               <p className="price">
                 Custom<span>/year</span>
               </p>
               <ul>
-                <li>90-day paid pilot, credited toward Year 1</li>
-                <li>Board-program bundles + seats for your team</li>
-                <li>Principal-EE design reviews, SLA, SSO</li>
-                <li>ITAR-ready deployment for defense &amp; space</li>
+                <li>Private / on-prem deployment</li>
+                <li>SSO, SLA, principal-EE design reviews</li>
+                <li>Custom part libraries &amp; design rules</li>
+                <li>ITAR-ready for defense &amp; space</li>
               </ul>
               <a
-                href={`mailto:${CONTACT}?subject=Compose%20for%20production`}
-                className="btn price-cta"
+                href={`mailto:${CONTACT}?subject=FirstLight%20Enterprise`}
+                className="btn btn-ghost price-cta"
               >
                 Talk to us
               </a>
