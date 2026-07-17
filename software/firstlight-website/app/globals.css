@@ -285,10 +285,18 @@ p {
   max-width: 880px;
 }
 
+.hero-value {
+  font-size: 1.34rem;
+  line-height: 1.42;
+  font-weight: 500;
+  max-width: 720px;
+  margin: 22px 0 0;
+}
+
 .lede {
   font-size: 1.12rem;
   max-width: 680px;
-  margin: 26px 0 34px;
+  margin: 18px 0 34px;
 }
 
 .run-caption {

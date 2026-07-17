@@ -27,6 +27,12 @@ const OUTPUTS = [
   ["Manufacturing, sourcing & test", "An NPI package sized to your volume, a sourcing plan with real parts and lead-time risks called out, and an FL-1 validation test plan with the gaps flagged, never papered over."],
 ];
 
+const AUDIENCES: [string, string][] = [
+  ["Hardware startups", "Reach a manufacturable first product without hiring a full electrical, mechanical, and firmware team on day one. Ship your first board this month, not next quarter, and put your budget into what makes you different."],
+  ["Solo & indie builders", "Turn an idea into routed copper, a real enclosure, and a fab package in an afternoon. The disciplines you don't have in-house are covered, and gated on real checks, so what you send to fab is buildable, not a guess."],
+  ["Product & engineering teams", "Kill the expensive early spins. Explore ten design directions before lunch, each one validated in simulation, so the version your EE picks up is already close. Defense and space teams get an ITAR-ready deployment."],
+];
+
 // Real third-party tools in the pipeline: [slug, name, role, iconW, iconH]
 type Tool = [string, string, string, number, number];
 
@@ -100,16 +106,22 @@ export default function Home() {
             <h1>
               Design a real product <span className="accent">from a sentence.</span>
             </h1>
+            <p className="hero-value">
+              The electronics, mechanical, firmware, sourcing, and validation
+              work of a small hardware team, the part that normally takes months
+              and a five-figure budget, in about seven minutes.{" "}
+              <span className="accent">You review what it flags. It does the rest.</span>
+            </p>
             <p className="lede">
               Describe what you&apos;re building in plain language. Compose designs
               and routes the board, wraps it in an enclosure that actually fits,
               runs real physics simulation, generates firmware for the board that
               shipped, and hands you the manufacturing, sourcing, and test plans
-              to build it. About seven minutes, end to end.
+              to build it.
             </p>
             <TryCompose />
             <p className="run-caption">
-              Free account, 5 credits a month, no card required.{" "}
+              Free to start on your own model key, no card required.{" "}
               <a href={COMPOSE_URL} className="compose-link">
                 Open Compose &rarr;
               </a>
@@ -176,6 +188,22 @@ export default function Home() {
             Every result is labeled with the tool and fidelity that produced
             it, and a gate that fails says so.
           </p>
+        </div>
+      </section>
+
+      {/* Who it's for */}
+      <section className="section" id="who">
+        <div className="container">
+          <p className="kicker">Who it&apos;s for</p>
+          <h2>Built for the people actually shipping hardware.</h2>
+          <div className="outputs-grid audiences-grid">
+            {AUDIENCES.map(([title, body]) => (
+              <div className="output-card" key={title}>
+                <h3>{title}</h3>
+                <p>{body}</p>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 
