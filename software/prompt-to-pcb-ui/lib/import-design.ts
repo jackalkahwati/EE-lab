@@ -51,6 +51,7 @@ export interface ImportResult {
     netsTotal: unknown
     netsRouted: unknown
     drcViolations: unknown
+    analysisError: string | null
   }
   note: string
 }
@@ -88,20 +89,30 @@ export async function importDesign(opts: {
     fs.writeFileSync(path.join(runRoot, 'electronics', 'chipscale.kicad_pcb'), pcbBuf)
 
     let board: Record<string, unknown> = { source: 'manual-import', imported: true }
+    let analysisError: string | null = null
     const boardJsonPath = path.join(dataDir, 'board.json')
     if (fs.existsSync(KCLI) && fs.existsSync(KPY)) {
       const boardPath = path.join(runRoot, 'variant.kicad_pcb')
       const drcPath = path.join(dataDir, 'drc.json')
-      await sh(KCLI, ['pcb', 'drc', '--format', 'json', '--severity-error', '-o', drcPath, boardPath])
-      await sh(KPY, [script('extract_stats.py'), boardPath, drcPath, boardJsonPath])
+      const drcRes = await sh(KCLI, ['pcb', 'drc', '--format', 'json', '--severity-error', '-o', drcPath, boardPath])
+      const exRes = await sh(KPY, [script('extract_stats.py'), boardPath, drcPath, boardJsonPath])
       try {
         board = { ...JSON.parse(fs.readFileSync(boardJsonPath, 'utf8')), source: 'manual-import', imported: true, runId }
-      } catch { /* extract failed — store the unverified stub */ }
+      } catch {
+        const log = `${drcRes.out}\n${exRes.out}`
+        analysisError = /more recent version|upgrade KiCad|file format dated/i.test(log)
+          ? 'This board was saved with a newer KiCad than our current toolchain. Re-export it from an older KiCad and import again.'
+          : 'Could not read this board file — confirm it is a valid KiCad PCB.'
+      }
+    } else {
+      analysisError = 'Board analysis is not available on this deployment.'
     }
+    if (analysisError) board.analysisError = analysisError
     fs.writeFileSync(boardJsonPath, JSON.stringify(board, null, 1))
 
-    const wMm = Number(board.wMm ?? 0)
-    const hMm = Number(board.hMm ?? 0)
+    const bs = Array.isArray(board.boardSize) ? (board.boardSize as number[]) : null
+    const wMm = Number(board.wMm ?? bs?.[0] ?? 0)
+    const hMm = Number(board.hMm ?? bs?.[1] ?? 0)
     const drc = board.drc as { violations?: number } | undefined
     fs.writeFileSync(
       path.join(runRoot, 'electronics', 'chipscale-board.json'),
@@ -126,6 +137,7 @@ export async function importDesign(opts: {
       netsTotal: board.netsTotal ?? null,
       netsRouted: board.netsRouted ?? null,
       drcViolations: drc?.violations ?? board.violations ?? null,
+      analysisError,
     }
   }
 
