@@ -59,7 +59,7 @@ import type { IdBrief } from '@/lib/id-brief'
 import type { ProductSpec } from '@/lib/product-spec'
 import {
   Activity, BookOpen, Box, ClipboardCheck, Code, Cpu, Eye, Factory, FolderTree, Gauge, History, LayoutDashboard, ListTree, Maximize2,
-  MessagesSquare, Package, Palette, Plus, Receipt, ScrollText, ShieldCheck, Sparkles, Truck, Wrench, X,
+  MessagesSquare, Package, Palette, Plus, Receipt, ScrollText, ShieldCheck, Sparkles, Truck, Upload, Wrench, X,
 } from 'lucide-react'
 
 type Run = any
@@ -112,6 +112,85 @@ function StagePlaceholder({ title, Icon }: { title: string; Icon: any }) {
       <Icon className="size-9 opacity-25" />
       <span className="text-sm font-medium text-foreground">{title}</span>
       <span className="max-w-xs text-xs">This module isn&apos;t built yet. When it is, its output will appear here in the pipeline — nothing is faked.</span>
+    </div>
+  )
+}
+
+/** One file-picker row for the import panel (hoisted so it doesn't remount). */
+function FilePickRow({ label, hint, accept, file, onPick }: {
+  label: string; hint: string; accept: string; file: File | null; onPick: (f: File | null) => void
+}) {
+  return (
+    <label className="flex cursor-pointer items-center justify-between gap-3 border border-border bg-background px-3 py-2 text-left hover:border-primary/60">
+      <span className="min-w-0">
+        <span className="block text-xs font-medium text-foreground">{label}</span>
+        <span className="block truncate text-[11px] text-muted-foreground">{file ? file.name : hint}</span>
+      </span>
+      {file
+        ? <X className="size-3.5 shrink-0 text-muted-foreground hover:text-foreground"
+            onClick={(e) => { e.preventDefault(); onPick(null) }} />
+        : <Upload className="size-3.5 shrink-0 text-muted-foreground" />}
+      <input type="file" accept={accept} className="hidden"
+        onChange={(e) => onPick(e.target.files?.[0] ?? null)} />
+    </label>
+  )
+}
+
+/**
+ * Start a product from an EXISTING design instead of a prompt: upload a PCBA
+ * (.kicad_pcb) and/or a CAD assembly (.step). POSTs to the session route
+ * /api/pipeline/import (same honest-verification core as the CLI/API); on
+ * success it hands the created run back so the workspace opens it.
+ */
+function ImportDesignPanel({ onImported }: { onImported: (r: any) => void }) {
+  const [pcb, setPcb] = useState<File | null>(null)
+  const [step, setStep] = useState<File | null>(null)
+  const [name, setName] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  const submit = async () => {
+    if (!pcb && !step) { setErr('Choose a .kicad_pcb and/or a .step file first.'); return }
+    setBusy(true); setErr(null)
+    try {
+      const fd = new FormData()
+      if (pcb) fd.append('pcb', pcb)
+      if (step) fd.append('step', step)
+      if (name.trim()) fd.append('name', name.trim())
+      const r = await fetch('/api/pipeline/import', { method: 'POST', body: fd })
+      const d = await r.json().catch(() => null)
+      if (!r.ok) { setErr(d?.error || `Import failed (HTTP ${r.status})`); return }
+      onImported(d)
+    } catch (e: any) {
+      setErr(e?.message || 'Import failed')
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="w-full max-w-sm border border-border bg-card p-4 text-left">
+      <div className="mb-1 flex items-center gap-2">
+        <Package className="size-4 text-primary" />
+        <span className="text-sm font-medium text-foreground">Start from an existing design</span>
+      </div>
+      <p className="mb-3 text-[11px] leading-relaxed text-muted-foreground">
+        Upload a PCBA and/or a CAD assembly to seed a product. The board runs real DRC on
+        ingest and wears no green until it passes against your file; the assembly lands as
+        geometry with its fit check pending.
+      </p>
+      <div className="flex flex-col gap-2">
+        <FilePickRow label="PCBA" hint="choose a .kicad_pcb" accept=".kicad_pcb" file={pcb}
+          onPick={(f) => { setErr(null); setPcb(f) }} />
+        <FilePickRow label="CAD assembly" hint="choose a .step / .stp" accept=".step,.stp,.STEP,.STP" file={step}
+          onPick={(f) => { setErr(null); setStep(f) }} />
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (optional)"
+          className="border border-border bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none" />
+        <button type="button" onClick={submit} disabled={busy || (!pcb && !step)}
+          className="mt-1 flex items-center justify-center gap-2 bg-primary px-3 py-2 text-xs font-medium text-primary-foreground disabled:opacity-50">
+          <Upload className="size-3.5" />
+          {busy ? 'Importing…' : 'Import design'}
+        </button>
+        {err && <p className="text-[11px] text-red-500">{err}</p>}
+      </div>
     </div>
   )
 }
@@ -198,6 +277,20 @@ export default function Compose2Page() {
     const d = await loadRealBoard(runDir); if (d) setRealBoard(d)
     setNewDesign(false) // the freshly-built board now takes the stage
     setStage('electronics') // show the real board first; ID advances the stage after
+  }
+  // an imported design (PCBA/CAD) seeds a run with no pipeline build; /api/runs
+  // skips boardless runs, so inject it like onRunComplete does and open it.
+  const handleImported = async (result: any) => {
+    const runId = result?.runId
+    if (!runId) return
+    const runDir = `/runs/${runId}`
+    setRuns((prev: Run[]) =>
+      prev.some((r) => r.id === runId) ? prev : [{ id: runId, runDir, real: true, name: result.name || runId }, ...prev])
+    setSelectedId(runId)
+    const d = await loadRealBoard(runDir); if (d) setRealBoard(d)
+    setNewDesign(false)
+    setStage(result?.imported?.pcb ? 'electronics' : 'mechanical')
+    refreshRuns()
   }
   // the chat lifts up the ID brief when Industrial Design finishes; advancing to
   // that stage so the form (wrapping the real board) is what's on screen.
@@ -921,9 +1014,12 @@ export default function Compose2Page() {
                 <div ref={stageRef} className="min-h-0 flex-1 bg-background">
                   <ErrorBoundary>
                     {newDesign ? (
-                      <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-muted-foreground">
-                        <Cpu className="size-9 opacity-25" />
-                        <span className="text-xs">New design — describe a board on the left to begin.</span>
+                      <div className="flex h-full flex-col items-center justify-center gap-5 overflow-auto p-6 text-center text-muted-foreground">
+                        <div className="flex flex-col items-center gap-2">
+                          <Cpu className="size-9 opacity-25" />
+                          <span className="text-xs">New design — describe a board on the left to begin,<br />or start from an existing design below.</span>
+                        </div>
+                        <ImportDesignPanel onImported={handleImported} />
                       </div>
                     ) : (
                       <>
