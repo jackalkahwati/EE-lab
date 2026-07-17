@@ -27,6 +27,7 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { loadGroundBoard } from '@/lib/ground-board'
 import type { ProductSpec } from '@/lib/product-spec'
+import { planSimulations, judge } from '@/lib/sim-router'
 
 export const dynamic = 'force-dynamic'
 // High-fidelity solvers (OpenFOAM CFD, docker-hosted Elmer/openEMS) run
@@ -160,15 +161,34 @@ export async function POST(req: Request) {
     }
 
     const out = await runSim(simReq)
+    const results = out.results ?? []
+
+    // Router: decide WHICH analyses this application requires, then judge each
+    // solver result against that requirement. Availability of a result is not the
+    // same as meeting the requirement, and a REQUIRED analysis that did not run is
+    // a surfaced gap — never a silent pass.
+    const plan = planSimulations(spec, {
+      hasEnclosure: !!enclosureStep,
+      hasRadio: !!autoAntenna,
+      rails: Array.isArray((pdn as any)?.rails) ? (pdn as any).rails.length : 0,
+      hasBattery: !!(spec.budgets?.power?.batteryMah),
+      isAudio: /audio|speaker|headphone|earbud|hearable|microphone/i.test(
+        `${spec.product} ${spec.description ?? ''}`),
+    })
+    const assessment = judge(plan, results)
+
     const payload = {
       scipy: !!out.scipy,
       // FEM health passthrough: if scikit-fem failed to import or a FEM solve
       // raised (and the runner degraded to lumped/analytic), the UI must see it.
       femAvailable: !!out.femAvailable,
       femErrors: Array.isArray(out.femErrors) ? out.femErrors : [],
-      results: out.results ?? [],
+      results,
       solvers: out.solvers ?? {},
       inputs: simReq,
+      // engineering-intelligence layer: what this product needed + how it did
+      plan,
+      assessment,
     }
 
     // Persist so the orchestrated sim result is durable + the tab shows it on
