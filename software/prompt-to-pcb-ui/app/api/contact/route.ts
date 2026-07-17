@@ -40,6 +40,23 @@ function store(lead: Record<string, unknown>) {
   }
 }
 
+/** Free lead notification via Telegram — no transactional-email service needed.
+ *  Needs TELEGRAM_BOT_TOKEN (create with @BotFather) + TELEGRAM_CHAT_ID. */
+async function notifyTelegram(text: string) {
+  const token = process.env.TELEGRAM_BOT_TOKEN
+  const chat = process.env.TELEGRAM_CHAT_ID
+  if (!token || !chat) return
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ chat_id: chat, text }),
+    })
+  } catch (e) {
+    console.error('[contact] telegram failed', e)
+  }
+}
+
 async function sendEmail(to: string, subject: string, text: string, replyTo?: string) {
   const key = process.env.RESEND_API_KEY
   if (!key) return false
@@ -80,7 +97,9 @@ export async function POST(req: NextRequest) {
   const lead = { name, email, company, plan, message, at: new Date().toISOString() }
   store(lead)
 
-  // Notify the team.
+  // Notify the team — Telegram (free) and/or email (Resend), whichever is set.
+  const summary = `New FirstLight ${plan || 'contact'} lead\nName: ${name}\nEmail: ${email}\nCompany: ${company}\n\n${message}`
+  await notifyTelegram(summary)
   const notifyTo = process.env.CONTACT_NOTIFY_EMAIL || adminEmails()[0]
   if (notifyTo) {
     await sendEmail(
@@ -103,5 +122,7 @@ export async function POST(req: NextRequest) {
       + `We got your note and will be in touch shortly.\n${bookingLine}\n— The FirstLight team`,
   )
 
-  return NextResponse.json({ ok: true })
+  // Return the booking link so the success screen can offer it immediately —
+  // works even before transactional email is configured.
+  return NextResponse.json({ ok: true, booking: booking || null })
 }

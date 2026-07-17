@@ -10,6 +10,7 @@ import { Suspense, useEffect, useState } from 'react'
 function ContactForm() {
   const [plan, setPlan] = useState('')
   const [sent, setSent] = useState(false)
+  const [booking, setBooking] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -37,8 +38,10 @@ function ContactForm() {
         }),
       })
       const d = await r.json()
-      if (r.ok && d.ok) setSent(true)
-      else setError(d.error || 'Something went wrong. Try again.')
+      if (r.ok && d.ok) {
+        setBooking(d.booking || '')
+        setSent(true)
+      } else setError(d.error || 'Something went wrong. Try again.')
     } catch {
       setError('Could not reach the server. Try again.')
     } finally {
@@ -51,12 +54,19 @@ function ContactForm() {
       <div className="rounded-xl border border-border p-6 text-center">
         <h2 className="text-lg font-semibold">Thanks — we&rsquo;ll be in touch.</h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          We got your note and will reach out shortly. Check your inbox for a
-          confirmation and a link to book a time.
+          {booking
+            ? 'Want to skip the wait? Grab a time that works for you below.'
+            : 'We got your note and will reach out shortly.'}
         </p>
-        <a href="/" className="mt-4 inline-block text-sm text-primary hover:underline">
-          Back to FirstLight
-        </a>
+        {booking && (
+          <a href={booking} target="_blank" rel="noreferrer"
+            className="mt-4 inline-block rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
+            Book a time now
+          </a>
+        )}
+        <div className="mt-4">
+          <a href="/" className="text-sm text-primary hover:underline">Back to FirstLight</a>
+        </div>
       </div>
     )
   }
