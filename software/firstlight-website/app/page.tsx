@@ -328,21 +328,21 @@ export default function Home() {
       <section className="section section-dark" id="pricing">
         <div className="container">
           <p className="kicker">Pricing</p>
-          <h2>Start free. Pay for runs, not tokens.</h2>
+          <h2>Pay for outcomes, not tokens.</h2>
           <p className="pricing-note">
-            Bring your own model key, you only pay for platform runs, never for
-            inference. A run costs credits by its size, one small board is about
-            one credit, so a dense or multi-board run costs more. Free to try;
-            production teams license the platform annually.
+            FirstLight compresses years of product development into minutes.
+            Bring your own model key, and a plan buys platform runs, priced by
+            board size &mdash; so runs are deliberately valuable. Free to explore;
+            ship on a plan, and license annually for a team.
           </p>
           <div className="pricing-grid">
             <div className="price-card">
-              <h3>Freemium</h3>
+              <h3>Free</h3>
               <p className="price">
-                $0<span>/forever</span>
+                $0<span>/explore</span>
               </p>
               <ul>
-                <li>5 free runs</li>
+                <li>3 runs to try it</li>
                 <li>Bring your own model key</li>
                 <li>Every model &mdash; Sonnet, GPT, Opus, Gemini</li>
                 <li>Full pipeline: schematic &rarr; routed PCB &rarr; BOM</li>
@@ -358,13 +358,31 @@ export default function Home() {
                 $49<span>/month</span>
               </p>
               <ul>
-                <li>200 board runs every month</li>
+                <li>Build &amp; ship a product or two, then top off</li>
+                <li>Full exports &mdash; Gerbers, BOM, CAD, firmware</li>
                 <li>Priority build queue</li>
-                <li>Full exports &mdash; Gerbers, BOM, CAD</li>
                 <li>Revision history &amp; email support</li>
               </ul>
               <a href={COMPOSE_URL} className="btn price-cta">
-                Upgrade to Pro
+                Start with Pro
+              </a>
+            </div>
+            <div className="price-card">
+              <h3>Studio</h3>
+              <p className="price">
+                $499<span>/month</span>
+              </p>
+              <ul>
+                <li>For teams shipping products regularly</li>
+                <li>Team seats &amp; shared workspace</li>
+                <li>Highest build priority</li>
+                <li>Principal-EE design reviews</li>
+              </ul>
+              <a
+                href={`mailto:${CONTACT}?subject=FirstLight%20Studio`}
+                className="btn btn-ghost price-cta"
+              >
+                Talk to us
               </a>
             </div>
             <div className="price-card">
@@ -375,15 +393,15 @@ export default function Home() {
               </p>
               <ul>
                 <li>Private / on-prem deployment</li>
-                <li>SSO, SLA, principal-EE design reviews</li>
-                <li>Custom part libraries &amp; design rules</li>
+                <li>SSO, SLA, custom part libraries</li>
                 <li>ITAR-ready for defense &amp; space</li>
+                <li>Negotiated volume</li>
               </ul>
               <a
                 href={`mailto:${CONTACT}?subject=FirstLight%20Enterprise`}
                 className="btn btn-ghost price-cta"
               >
-                Talk to us
+                Contact sales
               </a>
             </div>
           </div>

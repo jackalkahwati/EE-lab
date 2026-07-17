@@ -14,9 +14,10 @@
 import { PLAN_CREDITS } from '@/lib/auth'
 
 const proUsd = Number(process.env.NEXT_PUBLIC_PRO_PRICE_USD) || 49
+const studioUsd = Number(process.env.NEXT_PUBLIC_STUDIO_PRICE_USD) || 499
 
 export interface PlanTier {
-  id: 'free' | 'pro' | 'enterprise'
+  id: 'free' | 'pro' | 'studio' | 'enterprise'
   name: string
   /** display price, e.g. "$0", "$49", "Custom" */
   price: string
@@ -36,10 +37,10 @@ export const SALES_EMAIL = process.env.NEXT_PUBLIC_SALES_EMAIL || 'hello@firstli
 export const PLANS: PlanTier[] = [
   {
     id: 'free',
-    name: 'Freemium',
+    name: 'Free',
     price: '$0',
-    cadence: 'free forever',
-    runs: `${PLAN_CREDITS.free} free runs`,
+    cadence: 'explore',
+    runs: `${PLAN_CREDITS.free} runs to try it`,
     features: [
       'Bring your own model key (any provider)',
       'Every model — Sonnet, GPT, Opus, Gemini',
@@ -53,31 +54,47 @@ export const PLANS: PlanTier[] = [
     name: 'Pro',
     price: `$${proUsd}`,
     cadence: 'per month',
-    runs: `${PLAN_CREDITS.pro} runs / month`,
+    runs: `${PLAN_CREDITS.pro} runs / month, then top off`,
     features: [
-      'Everything in Freemium',
-      `${PLAN_CREDITS.pro} board runs every month`,
+      'Enough to build & ship a product or two',
+      'Full exports — Gerbers, BOM, CAD, firmware',
       'Priority build queue',
-      'Full exports — Gerbers, BOM, CAD',
       'Revision history & lineage',
+      'Top off with credit packs any time',
       'Email support',
     ],
-    cta: 'Upgrade to Pro',
+    cta: 'Start with Pro',
     featured: true,
+  },
+  {
+    id: 'studio',
+    name: 'Studio',
+    price: `$${studioUsd}`,
+    cadence: 'per month',
+    runs: `${PLAN_CREDITS.studio} runs / month`,
+    features: [
+      'Everything in Pro',
+      'For teams shipping products regularly',
+      'Team seats & shared workspace',
+      'Highest build priority',
+      'Principal-EE design reviews',
+      'Priority support',
+    ],
+    cta: 'Talk to us',
   },
   {
     id: 'enterprise',
     name: 'Enterprise',
     price: 'Custom',
     cadence: 'annual quote',
-    runs: 'Unlimited / negotiated',
+    runs: 'Negotiated volume',
     features: [
-      'Everything in Pro',
+      'Everything in Studio',
       'Private / on-prem deployment (your IP never leaves)',
       'SSO & role-based access',
       'Custom part libraries & design rules',
       'Dedicated support & SLA',
-      'Volume run commitments',
+      'ITAR-ready for defense & space',
     ],
     cta: 'Contact sales',
   },

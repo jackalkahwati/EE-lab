@@ -11,15 +11,17 @@ export const dynamic = 'force-dynamic'
 
 export default function PricingPage() {
   return (
-    <main className="mx-auto max-w-5xl px-4 py-12">
+    <main className="mx-auto max-w-6xl px-4 py-12">
       <header className="mb-2 text-center">
         <h1 className="text-2xl font-semibold">Pricing</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Bring your own model key — you only pay for platform runs, never for inference.
+        <p className="mt-2 mx-auto max-w-2xl text-sm text-muted-foreground">
+          FirstLight compresses years of product development into minutes. You pay
+          for outcomes, not tokens — bring your own model key, and a plan buys
+          platform runs, priced by board size. Free to explore; ship on a plan.
         </p>
       </header>
 
-      <div className="mt-8 grid gap-5 md:grid-cols-3">
+      <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
         {PLANS.map((tier) => (
           <div
             key={tier.id}
@@ -57,16 +59,17 @@ export default function PricingPage() {
       <section className="mx-auto mt-12 max-w-3xl rounded-xl border border-border p-5">
         <h3 className="text-base font-semibold">How credits work</h3>
         <p className="mt-2 text-sm text-muted-foreground">
-          A <strong>credit</strong> is one small board. A run costs credits in
-          proportion to its <strong>size</strong> — a simple board is ~1 credit,
-          while a dense or multi-board run costs more (metered by nets +
-          components). So a 40-board run naturally costs far more than a single
-          small board. The AI model runs on <strong>your own key</strong>, so
+          A run costs <strong>credits</strong> in proportion to what it produces —
+          a simple board is a couple of credits, a dense or multi-board product
+          costs more (metered by nets + components). Runs are deliberately
+          valuable: each one advances a real product that would otherwise take an
+          engineer weeks. The AI model runs on <strong>your own key</strong>, so
           credits only cover the platform work: routing, DRC, solvers, and CAD.
         </p>
         <p className="mt-2 text-sm text-muted-foreground">
-          Your plan refreshes its credit allowance each month. Run out early? Top
-          off any time with a credit pack — no waiting for the next cycle.
+          Your plan grant refreshes monthly. Keep polishing past it and you top
+          off with credit packs — the deeper you iterate, the more it costs, but
+          the subscription is always the cheapest per-credit way to buy runs.
         </p>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-3">

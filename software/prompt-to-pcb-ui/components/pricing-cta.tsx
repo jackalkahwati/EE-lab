@@ -27,8 +27,11 @@ export function PricingCta({
       window.location.href = '/'
       return
     }
-    if (tierId === 'enterprise') {
-      window.location.href = `mailto:${salesEmail}?subject=${encodeURIComponent('FirstLight Enterprise inquiry')}`
+    // Studio + Enterprise are sales-assisted (no self-serve Stripe price yet);
+    // only Pro self-serves. This also prevents Studio from hitting the Pro price.
+    if (tierId === 'studio' || tierId === 'enterprise') {
+      const tier = tierId.charAt(0).toUpperCase() + tierId.slice(1)
+      window.location.href = `mailto:${salesEmail}?subject=${encodeURIComponent(`FirstLight ${tier} inquiry`)}`
       return
     }
     setBusy(true)

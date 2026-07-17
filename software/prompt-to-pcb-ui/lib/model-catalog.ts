@@ -94,7 +94,7 @@ export const MODELS: CatalogModel[] = [
   },
 ]
 
-const PLAN_RANK: Record<Plan, number> = { free: 0, pro: 1, enterprise: 2 }
+const PLAN_RANK: Record<Plan, number> = { free: 0, pro: 1, studio: 2, enterprise: 3 }
 
 export function planRank(plan: Plan): number {
   return PLAN_RANK[plan] ?? 0

@@ -14,9 +14,10 @@ import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypt
 import fs from 'node:fs'
 import path from 'node:path'
 
-/** Subscription tier. free = Gemini only; pro/enterprise unlock frontier models
- *  on platform credit (revenue-funded); see lib/model-catalog.ts. */
-export type Plan = 'free' | 'pro' | 'enterprise'
+/** Subscription tier. LLM is always BYOK (v3) — a plan buys PLATFORM runs, not
+ *  inference. Value-based: a run costs credits by its size, and a full product
+ *  is worth compressing years of dev, so runs are deliberately scarce. */
+export type Plan = 'free' | 'pro' | 'studio' | 'enterprise'
 
 export interface UserRecord {
   email: string
@@ -46,16 +47,20 @@ const STORE = path.join(STORE_DIR, 'users.json')
 // A board run costs credits scaled by its complexity (nets + components), so
 // the person generating expensive boards pays for them. 1 credit ~= one simple
 // board. See creditsForRun().
-// Monthly plan grant. Enterprise is a high pooled allowance (contact-sales,
-// granted manually / by an enterprise Stripe subscription).
-export const PLAN_CREDITS: Record<Plan, number> = { free: 5, pro: 200, enterprise: 2000 }
+// Monthly plan grant — deliberately SCARCE. A run costs credits by board size,
+// and FirstLight compresses years of product dev, so runs are valuable: Pro is
+// a couple of products' worth, then you top off. Studio is for teams shipping
+// regularly; Enterprise is a high pooled allowance (contact-sales / manual grant).
+export const PLAN_CREDITS: Record<Plan, number> = { free: 3, pro: 20, studio: 150, enterprise: 2000 }
 
-// One-time top-up packs, bigger packs, cheaper per credit (volume discount).
-// Priced inline at checkout (no pre-created Stripe prices needed).
+// Top-off packs — priced ABOVE the subscription's included rate (Pro is
+// ~$2.45/credit) so the subscription stays the cheapest way to buy runs. The
+// deeper you polish, the more it costs. One-time, never expire, spent after the
+// monthly grant. Priced inline at checkout (no pre-created Stripe prices needed).
 export const CREDIT_PACKS = [
-  { id: 'small', credits: 50, cents: 2500 }, // $25  · $0.50/credit
-  { id: 'mid', credits: 200, cents: 8000 }, //  $80  · $0.40/credit (20% off)
-  { id: 'large', credits: 1000, cents: 30000 }, // $300 · $0.30/credit (40% off)
+  { id: 'small', credits: 10, cents: 4900 }, //  $49  · $4.90/credit
+  { id: 'mid', credits: 30, cents: 11900 }, //   $119 · $3.97/credit
+  { id: 'large', credits: 100, cents: 34900 }, // $349 · $3.49/credit
 ] as const
 
 /** Credits a run costs, from its board complexity times the model's cost
