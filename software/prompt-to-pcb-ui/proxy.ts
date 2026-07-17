@@ -12,6 +12,7 @@ import path from 'node:path'
 
 const PUBLIC_PATTERNS = [
   /^\/login$/,
+  /^\/pricing$/, // public pricing page — prospects see plans before signing up
   /^\/api\/auth\//,
   /^\/api\/v1\//, // programmatic API — authenticated by API key in the route, not the session cookie
   /^\/api\/billing\/webhook$/, // Stripe calls this unauthenticated (signed payload)
