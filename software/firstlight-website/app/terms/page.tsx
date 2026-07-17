@@ -8,7 +8,7 @@ export default function Terms() {
       <div className="container narrow">
         <p className="kicker">StarDrive Inc.</p>
         <h1>Terms of Use</h1>
-        <p className="legal-updated">Last updated: July 5, 2026</p>
+        <p className="legal-updated">Last updated: July 17, 2026</p>
 
         <p>
           These Terms of Use (&ldquo;Terms&rdquo;) govern your access to and use of the
@@ -37,7 +37,7 @@ export default function Terms() {
           suspend or terminate accounts that violate these Terms.
         </p>
 
-        <h2>3. Plans, Billing, and Cancellation</h2>
+        <h2>3. Plans, Billing, Reservations, and Cancellation</h2>
         <p>
           The free plan includes a limited number of board-generation runs per month.
           Paid plans are billed in advance, monthly or annually per your order form
@@ -48,6 +48,21 @@ export default function Terms() {
           the end of the current billing period; fees already paid are
           non-refundable except where required by law. We may change pricing with at
           least 30 days&rsquo; notice.
+        </p>
+        <p>
+          <strong>FL-1 reservations.</strong> FirstLight FL-1 is hardware under active
+          development. A reservation deposit (currently $2,500) holds a place in the
+          production queue and, where stated at checkout, locks a founding price. A
+          reservation is not a completed sale and does not guarantee delivery by any
+          particular date. FL-1&rsquo;s specifications, price, availability, and
+          timeline may change, and we may modify or discontinue the reservation
+          program. Your deposit is <strong>fully refundable at your request at any
+          time before your unit ships</strong>. To request a refund or cancel a
+          reservation, email{" "}
+          <a href="mailto:jack@thestardrive.com">jack@thestardrive.com</a>; approved
+          refunds are returned through Stripe to your original payment method. If you
+          are a consumer in the EEA or United Kingdom, nothing in these Terms limits
+          any non-waivable statutory cancellation or withdrawal rights you may have.
         </p>
 
         <h2>4. Your Content and Designs</h2>
