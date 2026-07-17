@@ -54,10 +54,12 @@ function isAllowedCheckoutUrl(value: unknown): value is string {
 
 export async function POST(req: NextRequest) {
   const key = process.env.STRIPE_SECRET_KEY;
-  const price = process.env.STRIPE_RESERVATION_PRICE;
-  if (!key || !price) {
+  if (!key) {
     return json({ error: RESERVATION_UNAVAILABLE }, 503);
   }
+  // $2,500 refundable deposit, priced inline so no pre-created Stripe Price is
+  // needed. Override the amount with STRIPE_RESERVATION_AMOUNT_CENTS.
+  const amountCents = process.env.STRIPE_RESERVATION_AMOUNT_CENTS?.trim() || "250000";
 
   const origin = getPublicOrigin(req);
   if (!origin) {
@@ -78,7 +80,10 @@ export async function POST(req: NextRequest) {
 
   const form = new URLSearchParams({
     mode: "payment",
-    "line_items[0][price]": price,
+    "line_items[0][price_data][currency]": "usd",
+    "line_items[0][price_data][unit_amount]": amountCents,
+    "line_items[0][price_data][product_data][name]":
+      "FirstLight FL-1 reservation deposit (refundable)",
     "line_items[0][quantity]": "1",
     billing_address_collection: "required",
     "metadata[type]": "fl1_reservation",
