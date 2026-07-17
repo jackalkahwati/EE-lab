@@ -81,12 +81,24 @@ def discard_branch(did, bwid):
     call("DELETE", f"/api/v6/documents/d/{did}/workspaces/{bwid}")
 
 
-def set_material(did, bwid, ps_eid, part_id, material_id):
-    """Retag a part's Material metadata on the branch. material_id is a material
-    library id string (e.g. 'ABS' or a custom EE-lab Materials id)."""
-    payload = {"jsonType": "metadata-part",
-               "properties": [{"name": "Material",
-                               "value": {"id": material_id, "displayName": material_id}}]}
+# the Material property's id on a part's metadata (read once from any part; stable
+# per document). Passed in so callers can override if a doc differs.
+MATERIAL_PROP_ID = "57f3fb8efa3416c06701d615"
+
+
+def set_material(did, bwid, ps_eid, part_id, material_id, density=None,
+                 library="EE-lab Materials", prop_id=MATERIAL_PROP_ID):
+    """Retag a part's Material on the branch. The update targets the Material
+    property by its propertyId and supplies the FULL value object (id +
+    displayName + libraryName + optional DENS) — a partial value 500s."""
+    value = {"id": material_id, "displayName": material_id, "libraryName": library,
+             "properties": []}
+    if density is not None:
+        value["properties"] = [{"name": "DENS", "value": str(density), "type": "REAL",
+                                "displayName": "Density", "units": "kg/m^3",
+                                "category": "PHYSICAL", "description": "density"}]
+    payload = {"jsonType": "metadata-part", "partId": part_id,
+               "properties": [{"propertyId": prop_id, "value": value}]}
     call("POST", f"/api/v6/metadata/d/{did}/w/{bwid}/e/{ps_eid}/p/{part_id}", payload)
 
 

@@ -31,6 +31,7 @@ THERMAL = [
     ("pla", (55, "PLA softens ~55-60 C")),
     ("abs / pc", (95, "ABS/PC blend softens ~95-105 C")),
     ("abs", (90, "ABS softens ~90-100 C")),
+    ("polycarbonate", (135, "Polycarbonate softens ~135-145 C")),
     ("pc", (135, "Polycarbonate softens ~135-145 C")),
     ("nylon", (75, "Nylon (unfilled) softens ~75-90 C")),
     ("petg", (70, "PETG softens ~70-80 C")),

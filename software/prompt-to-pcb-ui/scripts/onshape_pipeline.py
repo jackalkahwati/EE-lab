@@ -45,12 +45,19 @@ def run(url, did, wid, eid, outdir, board=None, with_bbox=True):
     state["stepBytes"] = oi.export_step(did, wid, eid, os.path.join(outdir, "assembly.step"))
     json.dump(state, open(os.path.join(outdir, "onshape-state.json"), "w"), indent=1)
 
-    # Stage 2: analysis
+    # Stage 2: analysis. Clash needs bboxes; if a rate-limited run dropped them,
+    # say so — a 0-clash result with no bbox coverage is "couldn't check", not "clean".
+    bbox_cov = state["assembly"].get("coverage", {}).get("bbox", 0)
     clashes, total = oa.clash_check(state["parts"], tol_mm=2.0, top=25)
+    clash_complete = bbox_cov >= 0.9
     analysis = {
         "assembly": state["assembly"]["name"],
         "clash": {"candidatePairs": total, "top": clashes,
-                  "note": "broad-phase AABB in assembly space; confirm top pairs narrow-phase"},
+                  "complete": clash_complete, "bboxCoverage": bbox_cov,
+                  "note": ("broad-phase AABB in assembly space; confirm top pairs narrow-phase"
+                           if clash_complete else
+                           f"INCOMPLETE — only {round(bbox_cov*100)}% of parts had bounding boxes "
+                           "(Onshape rate limit); re-run for a full clash pass")},
         "thermal": {"flagged": oa.thermal_check(state["parts"])},
         "mass": {"heaviest": [{"part": p["name"], "massKg": p["massKg"], "material": p.get("material")}
                               for p in state["parts"][:10] if p.get("massKg")]},
@@ -63,6 +70,8 @@ def run(url, did, wid, eid, outdir, board=None, with_bbox=True):
         "massKg": state["assembly"]["massKg"],
         "materials": len(state["assembly"]["materials"]),
         "clashCandidates": total,
+        "clashComplete": clash_complete,
+        "bboxCoverage": bbox_cov,
         "thermalFlagged": len(analysis["thermal"]["flagged"]),
         "stepBytes": state["stepBytes"],
     }

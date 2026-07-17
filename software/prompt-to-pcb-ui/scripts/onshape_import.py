@@ -91,8 +91,10 @@ def export_step(did, wid, eid, out_path) -> int:
 AUTH = None  # set in main
 
 
-def api(path: str, retries: int = 3):
-    """GET a JSON API path, with a small retry on 429/5xx."""
+def api(path: str, retries: int = 6):
+    """GET a JSON API path, with exponential backoff on 429/5xx. Honors the
+    Retry-After header so a rate-limited batch waits out the window instead of
+    hammering (and silently dropping data)."""
     last = None
     for attempt in range(retries):
         req = urllib.request.Request(
@@ -104,12 +106,17 @@ def api(path: str, retries: int = 3):
         except urllib.error.HTTPError as e:
             last = f"HTTP {e.code}: {e.read()[:120].decode(errors='replace')}"
             if e.code in (429, 500, 502, 503):
-                time.sleep(0.5 * (attempt + 1))
+                ra = e.headers.get("Retry-After") if e.headers else None
+                try:
+                    wait = float(ra) if ra else min(2 ** attempt, 30)
+                except ValueError:
+                    wait = min(2 ** attempt, 30)
+                time.sleep(wait + 0.25)
                 continue
             raise RuntimeError(f"{path} -> {last}")
         except Exception as e:  # noqa: BLE001 - transient network
             last = str(e)
-            time.sleep(0.4 * (attempt + 1))
+            time.sleep(min(2 ** attempt, 20))
     raise RuntimeError(f"{path} -> {last}")
 
 
@@ -156,7 +163,7 @@ def part_bbox(did, wid, ps_eid, part_id):
         return part_id, None
 
 
-def build_state(did, wid, eid, with_bbox=True, jobs=12):
+def build_state(did, wid, eid, with_bbox=True, jobs=6):
     # 1) assembly definition: instances (name, partId, partStudio) + transforms + mates
     asm = api(f"/api/v6/assemblies/d/{did}/w/{wid}/e/{eid}"
               f"?includeMateFeatures=true&includeNonSolids=false")
@@ -239,9 +246,15 @@ def build_state(did, wid, eid, with_bbox=True, jobs=12):
             "transform": o.get("transform"),  # 16-float placement in the machine
         })
 
-    # 5) totals
+    # 5) totals + honest data-coverage (a rate-limited run drops mass/bbox; the
+    # caller must not read a low-coverage clash pass as "no interference")
     asm_mp = api(f"/api/v6/assemblies/d/{did}/w/{wid}/e/{eid}/massproperties")
     parts.sort(key=lambda p: (p.get("massKg") or 0), reverse=True)
+    n = len(instances) or 1
+    coverage = {
+        "mass": round(sum(1 for p in parts if p.get("massKg") is not None) / n, 3),
+        "bbox": round(sum(1 for p in parts if p.get("bboxMm") is not None) / n, 3),
+    }
     return {
         "source": "onshape-live",
         "capturedAt": None,  # stamped by the caller (scripts can't call time in some envs)
@@ -255,6 +268,7 @@ def build_state(did, wid, eid, with_bbox=True, jobs=12):
             "centroidMm": _mm(asm_mp.get("centroid", [0, 0, 0])),
             "materials": dict(sorted(mat_hist.items(), key=lambda kv: -kv[1])),
             "summedPartMassKg": round(total_mass, 3),
+            "coverage": coverage,
         },
         "parts": parts,
     }

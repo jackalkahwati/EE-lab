@@ -146,8 +146,26 @@ function ImportDesignPanel({ onImported }: { onImported: (r: any) => void }) {
   const [pcb, setPcb] = useState<File | null>(null)
   const [step, setStep] = useState<File | null>(null)
   const [name, setName] = useState('')
+  const [onshapeUrl, setOnshapeUrl] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+
+  const submitOnshape = async () => {
+    const url = onshapeUrl.trim()
+    if (!/cad\.onshape\.com\/documents\//.test(url)) { setErr('Paste an Onshape assembly URL (…/documents/…/w/…/e/…)'); return }
+    setBusy(true); setErr(null)
+    try {
+      const r = await fetch('/api/pipeline/import-onshape', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url, name: name.trim() || undefined }),
+      })
+      const d = await r.json().catch(() => null)
+      if (!r.ok) { setErr(d?.error || `Onshape import failed (HTTP ${r.status})`); return }
+      onImported(d)
+    } catch (e: any) {
+      setErr(e?.message || 'Onshape import failed')
+    } finally { setBusy(false) }
+  }
 
   const submit = async () => {
     if (!pcb && !step) { setErr('Choose a .kicad_pcb and/or a .step file first.'); return }
@@ -189,8 +207,27 @@ function ImportDesignPanel({ onImported }: { onImported: (r: any) => void }) {
           <Upload className="size-3.5" />
           {busy ? 'Importing…' : 'Import design'}
         </button>
-        {err && <p className="text-[11px] text-red-500">{err}</p>}
       </div>
+
+      <div className="my-3 flex items-center gap-2 text-[10px] uppercase tracking-wide text-muted-foreground">
+        <span className="h-px flex-1 bg-border" />or import live from Onshape<span className="h-px flex-1 bg-border" />
+      </div>
+      <div className="flex flex-col gap-2">
+        <input value={onshapeUrl} onChange={(e) => { setErr(null); setOnshapeUrl(e.target.value) }}
+          placeholder="Onshape assembly URL"
+          className="border border-border bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none" />
+        <button type="button" onClick={submitOnshape} disabled={busy || !onshapeUrl.trim()}
+          className="flex items-center justify-center gap-2 border border-primary px-3 py-2 text-xs font-medium text-primary disabled:opacity-50">
+          <Package className="size-3.5" />
+          {busy ? 'Importing…' : 'Import from Onshape'}
+        </button>
+        <p className="text-[10px] leading-relaxed text-muted-foreground">
+          Pulls the live parametric model: per-part materials, mass, and bounding boxes, plus a
+          clash + thermal analysis — not just the STEP geometry.
+        </p>
+      </div>
+
+      {err && <p className="mt-2 text-[11px] text-red-500">{err}</p>}
     </div>
   )
 }
