@@ -64,7 +64,13 @@ async function sendEmail(to: string, subject: string, text: string, replyTo?: st
   try {
     const r = await fetch('https://api.resend.com/emails', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'content-type': 'application/json',
+        // api.resend.com sits behind Cloudflare, which 1010-blocks default
+        // library user-agents; present a browser UA so the send isn't refused.
+        'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
+      },
       body: JSON.stringify({ from, to, subject, text, ...(replyTo ? { reply_to: replyTo } : {}) }),
     })
     if (!r.ok) console.error('[contact] resend error', r.status, await r.text())
