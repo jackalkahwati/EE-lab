@@ -147,7 +147,8 @@ export default function Terms() {
 
         <h2>Contact</h2>
         <p>
-          StarDrive Inc., <a href="mailto:jack@thestardrive.com">jack@thestardrive.com</a>
+          StarDrive Inc., 1400 Mission St. #214, San Francisco, CA 94103, USA.{" "}
+          <a href="mailto:jack@thestardrive.com">jack@thestardrive.com</a>
         </p>
 
         <p>
