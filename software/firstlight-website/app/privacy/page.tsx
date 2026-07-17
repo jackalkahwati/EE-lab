@@ -79,8 +79,10 @@ export default function Privacy() {
           visible only to your account unless you choose to share them; we do not sell
           them, share them with other users, or use them to market to third parties.
           We may use your descriptions, designs, and generated artifacts to develop,
-          train, and improve our own models and the FirstLight pipeline. If you would
-          prefer that we not use your content for model development, email{" "}
+          train, and improve our own models and the FirstLight pipeline, except for
+          content in Enterprise workspaces, which we never use for training. If you are
+          on another plan and would prefer that we not use your content for model
+          development, email{" "}
           <a href="mailto:jack@thestardrive.com">jack@thestardrive.com</a>.
         </p>
 

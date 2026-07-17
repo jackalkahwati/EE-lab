@@ -73,9 +73,10 @@ export default function Terms() {
           us a worldwide, royalty-free license to host, process, and display your
           content to operate the Services, and to use your descriptions, designs, and
           generated artifacts to develop, train, and improve our models, pipeline, and
-          the Services. We do not share your private designs with other users. We own
-          the Services themselves, including the platform, pipeline, block library,
-          and models.
+          the Services. This training use does not apply to content in Enterprise
+          workspaces, which we do not use to train our models. We do not share your
+          private designs with other users. We own the Services themselves, including
+          the platform, pipeline, block library, and models.
         </p>
 
         <h2>5. Hardware Disclaimer, Read This One</h2>

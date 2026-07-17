@@ -421,9 +421,9 @@ export default function Home() {
               </p>
               <ul>
                 <li>Private / on-prem deployment</li>
+                <li>Your designs are never used for training</li>
                 <li>SSO, SLA, custom part libraries</li>
                 <li>ITAR-ready for defense &amp; space</li>
-                <li>Negotiated volume</li>
               </ul>
               <a
                 href={`${COMPOSE_URL}/contact?plan=enterprise`}
