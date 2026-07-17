@@ -9,6 +9,16 @@
  * Coordinates are millimetres, in a right-handed frame: the XY plane is the base
  * (Top) plane, +Z is up (height/thickness). Sketch profiles are centred at
  * (cx, cy) unless noted. See tools/onshape/features.py for the renderer.
+ *
+ * KERNEL SEAM (kept open, integration deferred): this plan is the kernel-agnostic
+ * contract. The Onshape/Parasolid executor (app/api/mechanical/route.ts) is ONE
+ * consumer. A second executor — build123d/OCCT for owned B-rep, or PicoGK for
+ * field/lattice interiors — is a clean addition: it consumes the SAME MechPlan
+ * and emits STEP/mesh, no plan changes. Deferred on purpose (Experiments A/B:
+ * B-rep with clamped fillets already covers the current prismatic vertical; add
+ * a field backend only when a part needs a lattice or conformal channel). The
+ * fillet clamp below is exactly the discipline that makes an OCCT executor viable
+ * (12%→96% success), so the seam is ready when the need is real.
  */
 
 export type MechProfile =
@@ -42,18 +52,62 @@ export interface MechPlan {
   units: 'mm'
   operations: MechOp[]
   notes?: string // one line: what this mechanical piece is / how it serves the product
+  // honest record of automatic corrections (e.g. fillet radii clamped to a
+  // locally-valid size). Empty/absent when the plan needed no correction.
+  adjustments?: string[]
 }
 
 const num = (v: unknown, d = 0): number => (typeof v === 'number' && isFinite(v) ? v : d)
+
+/**
+ * Clamp fillet radii to a locally-valid size. A round bigger than the wall it
+ * sits on is what makes a kernel fail (all-or-nothing "command not done" in
+ * OCCT; benchmarked at only 12% success under blind radii, 96% when clamped —
+ * Experiment A). Clamping here, in the kernel-agnostic plan, fixes it for the
+ * current Onshape executor AND any future kernel, and it is good manufacturing
+ * practice regardless. Radii are only ever reduced, never grown.
+ */
+function clampFillets(ops: MechOp[], adjustments: string[]): MechOp[] {
+  // wall thickness = the shell wall the outer edge sits on. Best proxy is the
+  // smallest positive pocket offset (the innerCavity wall); fall back to the
+  // thinnest extrude, then a conservative default.
+  const pocketWalls = ops.filter((o) => o.op === 'pocket' && typeof (o as any).offset === 'number' && (o as any).offset > 0)
+    .map((o) => (o as any).offset as number)
+  const extrudeDepths = ops.filter((o) => o.op === 'extrude').map((o) => (o as any).depth as number).filter((d) => d > 0)
+  const minWall = pocketWalls.length ? Math.min(...pocketWalls)
+    : extrudeDepths.length ? Math.min(...extrudeDepths) * 0.5
+    : 2.0
+  const maxSafe = Math.max(0.3, 0.45 * minWall) // never below 0.3mm; ~half the wall
+  return ops.map((o) => {
+    if (o.op !== 'fillet') return o
+    if (o.radiusMm > maxSafe) {
+      adjustments.push(
+        `fillet '${o.name}' radius ${o.radiusMm}mm → ${round2(maxSafe)}mm (clamped to ≤0.45×wall ${round2(minWall)}mm so the round is manufacturable and the kernel does not fail)`,
+      )
+      return { ...o, radiusMm: round2(maxSafe) }
+    }
+    return o
+  })
+}
+
+const round2 = (n: number) => Math.round(n * 100) / 100
 
 /** Validate + coerce an LLM-produced plan; drop malformed ops so the executor
  *  never sees a broken operation. */
 export function normalizeMechPlan(raw: Partial<MechPlan> | undefined): MechPlan {
   const s = (raw ?? {}) as MechPlan
-  const ops: MechOp[] = Array.isArray(s.operations)
+  const coerced: MechOp[] = Array.isArray(s.operations)
     ? (s.operations.map(coerceOp).filter(Boolean) as MechOp[])
     : []
-  return { part: s.part || 'Part', units: 'mm', operations: ops, notes: typeof s.notes === 'string' ? s.notes : undefined }
+  const adjustments: string[] = []
+  const ops = clampFillets(coerced, adjustments)
+  return {
+    part: s.part || 'Part',
+    units: 'mm',
+    operations: ops,
+    notes: typeof s.notes === 'string' ? s.notes : undefined,
+    adjustments: adjustments.length ? adjustments : undefined,
+  }
 }
 
 function coerceProfile(p: any): MechProfile | null {
