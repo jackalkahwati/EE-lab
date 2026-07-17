@@ -11,12 +11,10 @@ export function PricingCta({
   tierId,
   cta,
   featured,
-  salesEmail,
 }: {
   tierId: string
   cta: string
   featured?: boolean
-  salesEmail: string
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -28,10 +26,9 @@ export function PricingCta({
       return
     }
     // Studio + Enterprise are sales-assisted (no self-serve Stripe price yet);
-    // only Pro self-serves. This also prevents Studio from hitting the Pro price.
+    // only Pro self-serves. Send them to the contact form, not a dead mailto.
     if (tierId === 'studio' || tierId === 'enterprise') {
-      const tier = tierId.charAt(0).toUpperCase() + tierId.slice(1)
-      window.location.href = `mailto:${salesEmail}?subject=${encodeURIComponent(`FirstLight ${tier} inquiry`)}`
+      window.location.href = `/contact?plan=${tierId}`
       return
     }
     setBusy(true)

@@ -50,7 +50,7 @@ export default function PricingPage() {
               ))}
             </ul>
 
-            <PricingCta tierId={tier.id} cta={tier.cta} featured={tier.featured} salesEmail={SALES_EMAIL} />
+            <PricingCta tierId={tier.id} cta={tier.cta} featured={tier.featured} />
           </div>
         ))}
       </div>

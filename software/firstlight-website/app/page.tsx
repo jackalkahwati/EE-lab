@@ -379,7 +379,7 @@ export default function Home() {
                 <li>Principal-EE design reviews</li>
               </ul>
               <a
-                href={`mailto:${CONTACT}?subject=FirstLight%20Studio`}
+                href={`${COMPOSE_URL}/contact?plan=studio`}
                 className="btn btn-ghost price-cta"
               >
                 Talk to us
@@ -398,7 +398,7 @@ export default function Home() {
                 <li>Negotiated volume</li>
               </ul>
               <a
-                href={`mailto:${CONTACT}?subject=FirstLight%20Enterprise`}
+                href={`${COMPOSE_URL}/contact?plan=enterprise`}
                 className="btn btn-ghost price-cta"
               >
                 Contact sales
