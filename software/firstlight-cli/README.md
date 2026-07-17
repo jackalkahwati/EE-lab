@@ -20,6 +20,8 @@ export FIRSTLIGHT_URL=https://app.firstlight.build   # default; omit unless self
 
 ```sh
 firstlight build "USB-C desk presence puck with a 60GHz radar and an LED ring" --wait
+firstlight import --step enclosure.step --name "My widget"   # start from an existing design
+firstlight import --pcb board.kicad_pcb --step assembly.step  # PCBA + CAD assembly together
 firstlight rebuild <runId> --wait      # re-verify: unchanged stages skip as current
 firstlight status <runId> --watch
 firstlight artifacts <runId>
@@ -38,7 +40,8 @@ enclosure) — wire it straight into CI.
 claude mcp add firstlight -e FIRSTLIGHT_API_KEY=flk_live_… -- node /path/to/firstlight-cli/bin/mcp.mjs
 ```
 
-Tools: `create_board`, `board_status`, `list_artifacts`, `get_artifact`, `list_boards`.
+Tools: `create_board`, `import_design`, `board_status`, `list_artifacts`, `get_artifact`, `list_boards`.
+`import_design` seeds a product from an existing `.kicad_pcb` and/or `.step` on disk instead of a prompt.
 
 A build takes ~7 minutes; `create_board` returns a `runId` immediately and the
 agent polls `board_status`. Artifact kinds include `fab-package` (gerbers +

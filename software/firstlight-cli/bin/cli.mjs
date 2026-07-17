@@ -3,6 +3,7 @@
  * firstlight — FirstLight Compose from the terminal.
  *
  *   firstlight build "<prompt>" [--wait] [--json]
+ *   firstlight import [--pcb <file.kicad_pcb>] [--step <file.step>] [--name <n>] [--json]
  *   firstlight status <runId> [--watch] [--json]
  *   firstlight artifacts <runId> [--json]
  *   firstlight get <runId> <kind> [-o <file>]
@@ -17,6 +18,9 @@ const flags = new Set(args.filter((a) => a.startsWith('--')))
 const pos = args.filter((a) => !a.startsWith('--') && !a.startsWith('-o'))
 const cmd = pos[0]
 const json = flags.has('--json')
+
+/** value of a `--key value` option (undefined if absent) */
+function optVal(name) { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined }
 
 function out(v) { console.log(typeof v === 'string' ? v : JSON.stringify(v, null, 2)) }
 function die(msg) { console.error(`error: ${msg}`); process.exit(1) }
@@ -57,6 +61,22 @@ async function main() {
     })
     printStatus(final)
     process.exit(final.status === 'complete' ? 0 : 2)
+  } else if (cmd === 'import') {
+    const pcbPath = optVal('--pcb')
+    const stepPath = optVal('--step')
+    const name = optVal('--name')
+    if (!pcbPath && !stepPath) die('usage: firstlight import [--pcb <file.kicad_pcb>] [--step <file.step>] [--name "<name>"]')
+    const r = await c.importDesign({ pcbPath, stepPath, name })
+    if (json) return out(r)
+    out(`imported: ${r.name}`)
+    out(`  run ${r.runId}${r.productId ? `  ·  product ${r.productId}` : ''}`)
+    if (r.imported?.pcb) {
+      const b = r.board || {}
+      if (b.analysisError) out(`  board: ${b.analysisError}`)
+      else out(`  board: ${b.sizeMm ? b.sizeMm.join(' × ') + ' mm' : 'size n/a'}, ${b.components ?? '?'} parts, ${b.netsRouted ?? '?'}/${b.netsTotal ?? '?'} nets routed, ${b.drcViolations ?? '?'} DRC violations`)
+    }
+    if (r.imported?.step) out('  assembly: STEP geometry imported (fit check pending)')
+    out(`  next: firstlight status ${r.runId}`)
   } else if (cmd === 'rebuild') {
     const runId = pos[1]
     if (!runId) die('usage: firstlight rebuild <runId> [--wait]')
@@ -108,6 +128,7 @@ async function main() {
     out(`firstlight — prompt-to-product from the terminal
 
   firstlight build "<prompt>" [--wait]     build a product (PCBA + enclosure + docs)
+  firstlight import [--pcb f] [--step f]   start a product from an existing .kicad_pcb and/or .step
   firstlight rebuild <runId> [--wait]      re-verify a run; unchanged stages skip
   firstlight status <runId> [--watch]      run status / stage progress
   firstlight artifacts <runId>             list produced artifacts

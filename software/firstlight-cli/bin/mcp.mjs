@@ -31,6 +31,19 @@ server.tool(
 )
 
 server.tool(
+  'import_design',
+  'Start a FirstLight product from an EXISTING design instead of a prompt: upload a PCBA (.kicad_pcb) and/or a CAD assembly (.step) already on disk. The board is verified with real KiCad DRC on ingest (it wears no green until it passes against YOUR file); the assembly lands as geometry with its fit check pending. Returns the new run/product ids. Provide at least one of pcbPath / stepPath.',
+  {
+    pcbPath: z.string().optional().describe('local path to a .kicad_pcb PCBA file'),
+    stepPath: z.string().optional().describe('local path to a .step CAD assembly file'),
+    name: z.string().optional().describe('name for the imported product'),
+  },
+  async ({ pcbPath, stepPath, name }) => {
+    try { return jsonResult(await client.importDesign({ pcbPath, stepPath, name })) } catch (e) { return errResult(e) }
+  },
+)
+
+server.tool(
   'board_status',
   'Status of a build run: queued/running/complete/failed, per-stage progress (electronics, mechanical, simulation, firmware, manufacturing, supply chain, validation), the honest electronics verdict (DRC state), and timing.',
   { runId: z.string().describe('run id returned by create_board') },

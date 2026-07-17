@@ -3,7 +3,8 @@
  * the MCP server. Auth: FIRSTLIGHT_API_KEY (flk_live_…, minted in the
  * Integrations console); host: FIRSTLIGHT_URL (default app.firstlight.build).
  */
-import { writeFile } from 'node:fs/promises'
+import { writeFile, readFile } from 'node:fs/promises'
+import { basename } from 'node:path'
 
 export class FirstlightClient {
   constructor({ baseUrl, apiKey } = {}) {
@@ -24,6 +25,29 @@ export class FirstlightClient {
     let d
     try { d = await r.json() } catch { throw new Error(`${method} ${path} → HTTP ${r.status} (non-JSON body)`) }
     if (!r.ok) throw new Error(d?.error ? String(d.error) : `${method} ${path} → HTTP ${r.status}`)
+    return d
+  }
+
+  /**
+   * Start a product from an EXISTING design instead of a prompt: a PCBA
+   * (.kicad_pcb) and/or a CAD assembly (.step). The board is verified with real
+   * KiCad DRC on ingest; the assembly lands as geometry with its fit check
+   * nulled. Returns the new run/product ids + the board's honest stats.
+   */
+  async importDesign({ pcbPath, stepPath, name } = {}) {
+    if (!pcbPath && !stepPath) throw new Error('provide a .kicad_pcb (--pcb) and/or a .step (--step)')
+    const fd = new FormData()
+    if (pcbPath) fd.append('pcb', new Blob([await readFile(pcbPath)]), basename(pcbPath))
+    if (stepPath) fd.append('step', new Blob([await readFile(stepPath)]), basename(stepPath))
+    if (name) fd.append('name', name)
+    const r = await fetch(`${this.baseUrl}/api/v1/imports`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${this.apiKey}` },
+      body: fd,
+    })
+    let d
+    try { d = await r.json() } catch { throw new Error(`POST /api/v1/imports → HTTP ${r.status} (non-JSON body)`) }
+    if (!r.ok) throw new Error(d?.error ? String(d.error) : `POST /api/v1/imports → HTTP ${r.status}`)
     return d
   }
 
