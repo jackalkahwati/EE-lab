@@ -76,8 +76,12 @@ export default function Privacy() {
         <p>
           We may also disclose information if required by law, to protect our rights,
           or in connection with a merger or acquisition. Your private designs are
-          visible only to your account unless you choose to share them, and we do not
-          use them to train foundation models or to market to third parties.
+          visible only to your account unless you choose to share them; we do not sell
+          them, share them with other users, or use them to market to third parties.
+          We may use your descriptions, designs, and generated artifacts to develop,
+          train, and improve our own models and the FirstLight pipeline. If you would
+          prefer that we not use your content for model development, email{" "}
+          <a href="mailto:jack@thestardrive.com">jack@thestardrive.com</a>.
         </p>
 
         <h2>5. International Data Transfers</h2>
@@ -117,9 +121,10 @@ export default function Privacy() {
           portability, and to withdraw consent where processing is based on consent.
           We process your data on the following legal bases: performance of a contract
           (providing the Services and processing your subscription or reservation);
-          our legitimate interests (securing the platform, improving the Services, and
-          responding to and following up on inquiries); consent (where we ask for it);
-          and compliance with legal obligations (such as tax records). To exercise any
+          our legitimate interests (securing the platform, improving and training our
+          models and the Services, and responding to and following up on inquiries),
+          balanced against your right to object; consent (where we ask for it); and
+          compliance with legal obligations (such as tax records). To exercise any
           right, email{" "}
           <a href="mailto:jack@thestardrive.com">jack@thestardrive.com</a>. You also
           have the right to lodge a complaint with your local data protection

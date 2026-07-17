@@ -70,9 +70,12 @@ export default function Terms() {
           You retain ownership of the descriptions you submit and, as between you and
           StarDrive, the design outputs generated for you (board files, gerbers,
           BOMs, firmware, test plans). We claim no ownership of your designs. You grant
-          us a limited license to process, store, and display your content solely to
-          operate and improve the Services. We own the Services themselves, including
-          the platform, pipeline, block library, and models.
+          us a worldwide, royalty-free license to host, process, and display your
+          content to operate the Services, and to use your descriptions, designs, and
+          generated artifacts to develop, train, and improve our models, pipeline, and
+          the Services. We do not share your private designs with other users. We own
+          the Services themselves, including the platform, pipeline, block library,
+          and models.
         </p>
 
         <h2>5. Hardware Disclaimer, Read This One</h2>
