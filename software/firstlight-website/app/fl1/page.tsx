@@ -95,6 +95,10 @@ export default function FL1Page() {
           <h1>
             One platform that brings your <span className="accent">board to life.</span>
           </h1>
+          <p className="hero-value fl1-hero-value">
+            A $40,000 bench of instruments and the weeks of engineer time each
+            board bring-up costs, in one machine that runs it in hours.
+          </p>
           <p className="lede fl1-lede">
             Insert the assembled PCB. Press start. FL-1 powers it up, probes it,
             and gives you an evidence-based diagnosis of exactly what works and

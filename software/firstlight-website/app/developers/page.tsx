@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 const COMPOSE_URL =
-  process.env.NEXT_PUBLIC_COMPOSE_URL ?? "https://app.firstlight.build";
+  process.env.NEXT_PUBLIC_COMPOSE_URL ?? "https://compose.firstlight.build";
 
 export const metadata: Metadata = {
   title: "FirstLight Developers | API, CLI and MCP",
@@ -44,6 +44,12 @@ export default function Developers() {
             <h1>
               The whole pipeline, <span className="accent">programmable.</span>
             </h1>
+            <p className="hero-value">
+              Gate hardware in CI the way you gate code. Build board design into
+              your own tool. Or give an AI agent the ability to design real,
+              manufacturable hardware,{" "}
+              <span className="accent">not just describe it.</span>
+            </p>
             <p className="sub">
               Everything Compose does in the browser is available over a REST
               API. A prompt goes in. A routed, DRC gated PCBA, a real CAD
@@ -65,7 +71,7 @@ export default function Developers() {
           </p>
           <CodeBlock title="terminal">{`export FIRSTLIGHT_API_KEY=flk_live_...
 
-curl -X POST https://app.firstlight.build/api/v1/boards \\
+curl -X POST https://compose.firstlight.build/api/v1/boards \\
   -H "Authorization: Bearer $FIRSTLIGHT_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{"prompt": "USB-C powered desk presence puck with a 60GHz radar module and an LED status ring"}'
@@ -119,7 +125,7 @@ curl -X POST https://app.firstlight.build/api/v1/boards \\
               The enterprise board portfolio visible to this key.
             </Endpoint>
           </div>
-          <CodeBlock title="poll until complete">{`curl -s https://app.firstlight.build/api/v1/runs/$RUN_ID \\
+          <CodeBlock title="poll until complete">{`curl -s https://compose.firstlight.build/api/v1/runs/$RUN_ID \\
   -H "Authorization: Bearer $FIRSTLIGHT_API_KEY"
 
 # { "status": "running",

@@ -293,6 +293,12 @@ p {
   margin: 22px 0 0;
 }
 
+.fl1-hero-value {
+  max-width: 640px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
 .lede {
   font-size: 1.12rem;
   max-width: 680px;
