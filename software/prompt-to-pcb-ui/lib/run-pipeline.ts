@@ -380,6 +380,7 @@ async function runPipelineStages(opts: RunOpts, timer: RunTimer): Promise<Pipeli
   // reporting stay correct with both writing at once.
   let mechFitFails = false
   let simFails: string[] = []
+  let simGaps: string[] = []
   let feedback: PipelineResult['feedback']
 
   // ---- Branch A: mechanical → simulation → feedback checkpoint ----
@@ -417,9 +418,21 @@ async function runPipelineStages(opts: RunOpts, timer: RunTimer): Promise<Pipeli
         const d = await postJson('/api/simulate', { spec, runId: opts.runId }, opts)
         if (d?.error) set('simulation', 'failed', String(d.error))
         else {
-          simFails = (d.results ?? []).filter((r: any) => r?.pass === false).map((r: any) => `${r.sim} ${r.value}${r.unit} vs ${r.limit}`)
+          // Combine raw solver fails with the ROUTER's application-aware verdicts.
+          // The router catches fails the raw pass-flag misses (e.g. a 92°C "pass"
+          // at the solver's 22°C ambient is a FAIL at the product's 55°C ambient),
+          // keyed by analysis so the richer judged description wins.
+          const byKind = new Map<string, string>()
+          for (const r of (d.results ?? []) as any[])
+            if (r?.pass === false) byKind.set(r.sim, `${r.sim} ${r.value}${r.unit} vs ${r.limit}`)
+          for (const a of (d.assessment?.assessments ?? []) as any[])
+            if (a.verdict === 'fail') byKind.set(a.kind, `${a.kind}: ${a.detail}`)
+          simFails = [...byKind.values()]
+          // required analyses that could not run — surfaced, never a silent pass
+          simGaps = (d.assessment?.gaps ?? []) as string[]
           set('simulation', simFails.length ? 'failed' : 'passed',
-            simFails.length ? `${simFails.length} sim(s) over limit: ${simFails.join('; ')}` : 'all sims within limits')
+            simFails.length ? `${simFails.length} sim(s) fail the application requirement: ${simFails.join('; ')}`
+              : (simGaps.length ? `within limits (but ${simGaps.length} required check(s) could not run)` : 'all sims meet application requirements'))
         }
       } catch (e) { setCaught('simulation', e) }
       }
@@ -431,7 +444,7 @@ async function runPipelineStages(opts: RunOpts, timer: RunTimer): Promise<Pipeli
       try {
         const d = await postJson('/api/redesign', { spec, runId: opts.runId }, opts)
         if (!d?.error) {
-          feedback = { status: d.status, capabilityGaps: d.capabilityGaps ?? [], remaining: d.remaining ?? [] }
+          feedback = { status: d.status, capabilityGaps: d.capabilityGaps ?? [], remaining: [...(d.remaining ?? []), ...simGaps] }
           // achievable budget changes -> adopt them + re-run mechanical once so the
           // fit actually closes. Capability gaps are surfaced, not faked around.
           const budgetsChanged = d.finalBudgets && JSON.stringify(d.finalBudgets) !== JSON.stringify(spec.budgets)

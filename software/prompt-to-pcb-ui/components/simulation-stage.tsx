@@ -16,7 +16,15 @@ type SimResult = {
   limit?: number | null; pass?: boolean | null; fidelity?: string; tool?: string
   detail?: Record<string, unknown>; note?: string; error?: string
 }
-type Result = { scipy: boolean; results: SimResult[]; solvers?: Record<string, string | null> }
+type SimAssessment = { kind: string; applicability: string; verdict: string; requirement?: string; detail: string }
+type Result = {
+  scipy: boolean; results: SimResult[]; solvers?: Record<string, string | null>
+  plan?: { environment?: { class?: string; ambientC?: number; vibration?: boolean; sealed?: boolean } }
+  assessment?: {
+    assessments?: SimAssessment[]; gaps?: string[]
+    summary?: { required: number; passed: number; tight: number; failed: number; gaps: number }
+  }
+}
 
 export function SimulationStage({ spec, runId, onBuilt }: { spec: any; runId?: string; onBuilt?: () => void }) {
   const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
@@ -72,6 +80,52 @@ export function SimulationStage({ spec, runId, onBuilt }: { spec: any; runId?: s
         </p>
       )}
       {state === 'error' && <div className="mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px] text-destructive">{err}</div>}
+
+      {res && state === 'done' && res.assessment?.assessments?.length ? (
+        <div className="mb-3 rounded-md border border-border bg-secondary/30 p-2.5">
+          <div className="mb-1.5 flex flex-wrap items-center gap-2">
+            <span className="text-[11px] font-medium text-foreground">Application requirements</span>
+            {res.plan?.environment && (
+              <span className="font-mono text-[10px] text-muted-foreground">
+                {res.plan.environment.class} · {res.plan.environment.ambientC}°C ambient
+                {res.plan.environment.vibration ? ' · vibration' : ''}{res.plan.environment.sealed ? ' · sealed' : ''}
+              </span>
+            )}
+            {res.assessment.summary && (
+              <span className="ml-auto font-mono text-[10px] text-muted-foreground">
+                {res.assessment.summary.required} required · {res.assessment.summary.passed} pass · {res.assessment.summary.failed} fail
+                {res.assessment.summary.gaps ? ` · ${res.assessment.summary.gaps} gap` : ''}
+              </span>
+            )}
+          </div>
+          <div className="space-y-1">
+            {res.assessment.assessments
+              .filter((a) => a.applicability !== 'not_applicable')
+              .map((a) => (
+                <div key={a.kind} className="flex items-start gap-2 text-[11px]">
+                  <span className={cn('mt-0.5 rounded-sm px-1 py-0.5 font-mono text-[8px] uppercase',
+                    a.verdict === 'pass' ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                      : a.verdict === 'tight' ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                        : a.verdict === 'fail' ? 'bg-destructive/15 text-destructive'
+                          : a.verdict === 'no_data' ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                            : 'bg-secondary text-muted-foreground')}>
+                    {a.verdict === 'no_data' ? 'gap' : a.verdict.replace('_', ' ')}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="font-medium capitalize text-foreground">{a.kind.replace('_', ' ')}</span>
+                    <span className="text-muted-foreground/70"> ({a.applicability})</span>
+                    <span className="text-muted-foreground"> — {a.detail}</span>
+                  </span>
+                </div>
+              ))}
+          </div>
+          {res.assessment.gaps?.length ? (
+            <p className="mt-1.5 text-[10px] text-amber-600 dark:text-amber-400">
+              {res.assessment.gaps.length} required check(s) could not run — verify inputs, don&apos;t assume pass.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       {res && state === 'done' && (
         <div className="space-y-2">
