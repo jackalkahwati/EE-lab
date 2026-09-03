@@ -873,6 +873,16 @@ async function netAwarePlace(parts, nets, { maxW = 15, gap = 2.1 } = {}) {
   // an integer when |dx| sits within a few ulps of `cell`, so pad the cell by a
   // relative epsilon. Padding can only widen the candidate set, never shrink it.
   const gridCell = (reach) => (maxExtent + reach) * (1 + 1e-9) || 1
+  // The grid only PAYS when it actually partitions. Because the cell has to
+  // bound the largest courtyard, one outsized part (a 30mm connector among
+  // 0402s) forces a cell as wide as the whole board and drops every part into
+  // a handful of cells — the 3x3 scan then returns nearly everything and the
+  // bookkeeping is pure overhead. Below this many occupied cells the sweeps
+  // keep the plain pairwise loop. Both paths visit the same interacting pairs
+  // in the same order; this only picks the cheaper one.
+  // 36 = 4x the 9 cells a query touches, i.e. the grid must prune at least ~4x
+  // before it's worth the bookkeeping (measured: below that it's a wash).
+  const GRID_MIN_CELLS = 36
   // Grid over a LIVE states array: buckets hold indices and are updated in place
   // by move(i), so every query reads current positions (the legalize/compact
   // sweeps mutate parts mid-pass and must still see an exact neighbourhood).
@@ -888,6 +898,7 @@ async function netAwarePlace(parts, nets, { maxW = 15, gap = 2.1 } = {}) {
     const del = (i) => { const b = buckets.get(keys[i]); if (b) { const at = b.indexOf(i); if (at >= 0) b.splice(at, 1) } }
     for (let i = 0; i < states.length; i++) add(i)
     return {
+      cells: buckets.size,
       move: (i) => { del(i); add(i) }, // call AFTER the state's x/y is updated
       near: (x, y, out) => {
         out.length = 0
@@ -930,29 +941,48 @@ async function netAwarePlace(parts, nets, { maxW = 15, gap = 2.1 } = {}) {
     const states = statesIn.map((p) => ({ ...p }))
     // A pair only pushes when |dx| < (wi+wj)/2 + MIN_CLEAR, so reach = MIN_CLEAR
     // is the exact grid bound for this sweep (see the spatial-index note above).
-    const grid = makeGrid(states, MIN_CLEAR)
-    const nb = []
+    const probe = makeGrid(states, MIN_CLEAR)
+    const grid = probe.cells >= GRID_MIN_CELLS ? probe : null
+    const nb = [], cands = []
     // Candidates > after, in ASCENDING index order, so the pair order and the
-    // in-sweep mutations are identical to the original i<j double loop.
-    const above = (i, after) => grid.near(states[i].x, states[i].y, nb).filter((j) => j > after).sort((x, y) => x - y)
+    // in-sweep mutations are identical to the original i<j double loop. Both
+    // arrays are reused (this runs per part per sweep — no allocation here).
+    const above = (i, after) => {
+      const near = grid.near(states[i].x, states[i].y, nb)
+      cands.length = 0
+      for (let t = 0; t < near.length; t++) if (near[t] > after) cands.push(near[t])
+      for (let a = 1; a < cands.length; a++) { const v = cands[a]; let b = a - 1; while (b >= 0 && cands[b] > v) { cands[b + 1] = cands[b]; b-- } cands[b + 1] = v }
+      return cands
+    }
+    // One (i, j) pair: push them apart along the least-penetration axis if their
+    // courtyards overlap or sit inside the clearance. Returns whether it pushed.
+    const pushPair = (i, j) => {
+      const [wi, hi] = size(states[i]), [wj, hj] = size(states[j])
+      const dx = states[j].x - states[i].x, dy = states[j].y - states[i].y
+      const ox = (wi + wj) / 2 + MIN_CLEAR - Math.abs(dx)
+      const oy = (hi + hj) / 2 + MIN_CLEAR - Math.abs(dy)
+      if (!(ox > 0 && oy > 0)) return false
+      if (ox <= oy) { const push = ox / 2 + 1e-3, s = dx >= 0 ? 1 : -1; states[i].x -= s * push; states[j].x += s * push }
+      else { const push = oy / 2 + 1e-3, s = dy >= 0 ? 1 : -1; states[i].y -= s * push; states[j].y += s * push }
+      return true
+    }
     for (let iter = 0; iter < 400; iter++) {
       let moved = false
       for (let i = 0; i < states.length; i++) {
-        let cands = above(i, i), at = 0
+        if (!grid) { // grid can't partition this layout — plain pairwise sweep
+          for (let j = i + 1; j < states.length; j++) if (pushPair(i, j)) moved = true
+          continue
+        }
+        above(i, i)
+        let at = 0
         while (at < cands.length) {
           const j = cands[at]
-          const [wi, hi] = size(states[i]), [wj, hj] = size(states[j])
-          const dx = states[j].x - states[i].x, dy = states[j].y - states[i].y
-          const ox = (wi + wj) / 2 + MIN_CLEAR - Math.abs(dx)
-          const oy = (hi + hj) / 2 + MIN_CLEAR - Math.abs(dy)
-          if (ox > 0 && oy > 0) { // courtyards overlap or sit inside the clearance
+          if (pushPair(i, j)) {
             moved = true
-            if (ox <= oy) { const push = ox / 2 + 1e-3, s = dx >= 0 ? 1 : -1; states[i].x -= s * push; states[j].x += s * push }
-            else { const push = oy / 2 + 1e-3, s = dy >= 0 ? 1 : -1; states[i].y -= s * push; states[j].y += s * push }
             grid.move(i); grid.move(j)
             // i just moved, so its neighbourhood changed — re-query it (still
             // only ahead of j, matching the brute-force loop's forward scan).
-            cands = above(i, j); at = 0
+            above(i, j); at = 0
           } else at++
         }
       }
@@ -977,10 +1007,13 @@ async function netAwarePlace(parts, nets, { maxW = 15, gap = 2.1 } = {}) {
     const cy = states.reduce((a, p) => a + p.y, 0) / states.length
     // routeClear (not TARGET) is this sweep's reach — it can exceed TARGET on
     // net-dense boards, and the cell must bound the LARGEST interaction radius.
-    const grid = makeGrid(states, routeClear)
+    const probe = makeGrid(states, routeClear)
+    const grid = probe.cells >= GRID_MIN_CELLS ? probe : null
     const nb = []
     const clashes = (si) => {
-      const box = aabb(states[si]), near = grid.near(states[si].x, states[si].y, nb)
+      const box = aabb(states[si])
+      if (!grid) return states.some((o, j) => j !== si && gapBetween(box, aabb(o)) < routeClear)
+      const near = grid.near(states[si].x, states[si].y, nb)
       for (let t = 0; t < near.length; t++) { const j = near[t]; if (j !== si && gapBetween(box, aabb(states[j])) < routeClear) return true }
       return false
     }
@@ -990,8 +1023,8 @@ async function netAwarePlace(parts, nets, { maxW = 15, gap = 2.1 } = {}) {
         const s = states[si]
         const ox = s.x, oy = s.y
         s.x += (cx - s.x) * 0.12; s.y += (cy - s.y) * 0.12
-        grid.move(si)
-        if (clashes(si)) { s.x = ox; s.y = oy; grid.move(si) } else if (Math.abs(s.x - ox) + Math.abs(s.y - oy) > 0.02) moved = true
+        grid?.move(si)
+        if (clashes(si)) { s.x = ox; s.y = oy; grid?.move(si) } else if (Math.abs(s.x - ox) + Math.abs(s.y - oy) > 0.02) moved = true
       }
       if (!moved) break
     }
@@ -1009,9 +1042,11 @@ async function netAwarePlace(parts, nets, { maxW = 15, gap = 2.1 } = {}) {
     // sorted, so pairs accumulate in the SAME order as the old double loop and
     // the sum is bit-for-bit identical (skipped pairs have g >= TARGET, which
     // the old loop added nothing for either).
-    const grid = makeGrid(states, TARGET), nb = []
+    const probe = makeGrid(states, TARGET), grid = probe.cells >= GRID_MIN_CELLS ? probe : null
+    const nb = []
     for (let i = 0; i < states.length; i++) {
       const box = aabb(states[i])
+      if (!grid) { for (let j = i + 1; j < states.length; j++) { const g = gapBetween(box, aabb(states[j])); if (g < TARGET) sp += (TARGET - g) ** 2 } ; continue }
       const near = grid.near(states[i].x, states[i].y, nb).filter((j) => j > i).sort((x, y) => x - y)
       for (const j of near) { const g = gapBetween(box, aabb(states[j])); if (g < TARGET) sp += (TARGET - g) ** 2 }
     }
@@ -1028,7 +1063,8 @@ async function netAwarePlace(parts, nets, { maxW = 15, gap = 2.1 } = {}) {
     // so only that part's nets and its pairwise spacing terms change. Rescore
     // just those (grid-bounded, hence O(1) neighbours) instead of the whole
     // O(nets + parts^2) cost — the difference is what makes 200 parts tractable.
-    const grid = makeGrid(cur, TARGET), nb = []
+    const probe = makeGrid(cur, TARGET), grid = probe.cells >= GRID_MIN_CELLS ? probe : null
+    const nb = []
     const wlOf = (i, sti) => { // sti stands in for cur[i]; self-nets use it for both ends
       let wl = 0
       for (const [j, mp, op] of netAdj[i]) {
@@ -1038,8 +1074,13 @@ async function netAwarePlace(parts, nets, { maxW = 15, gap = 2.1 } = {}) {
       return wl
     }
     const spOf = (i, sti) => { // every OTHER part is at its current position
-      const box = aabb(sti), near = grid.near(sti.x, sti.y, nb)
+      const box = aabb(sti)
       let sp = 0
+      if (!grid) { // grid can't partition — still only ONE part's pairs, not all of them
+        for (let j = 0; j < cur.length; j++) { if (j === i) continue; const g = gapBetween(box, aabb(cur[j])); if (g < TARGET) sp += (TARGET - g) ** 2 }
+        return sp
+      }
+      const near = grid.near(sti.x, sti.y, nb)
       for (let t = 0; t < near.length; t++) {
         const j = near[t]; if (j === i) continue
         const g = gapBetween(box, aabb(cur[j])); if (g < TARGET) sp += (TARGET - g) ** 2
@@ -1056,7 +1097,7 @@ async function netAwarePlace(parts, nets, { maxW = 15, gap = 2.1 } = {}) {
       else { st.x += (rnd() - 0.5) * T; st.y += (rnd() - 0.5) * T }
       const cc = curCost + (wlOf(i, st) - wlOf(i, cur[i])) + (spOf(i, st) - spOf(i, cur[i])) * 20
       if (cc < curCost || rnd() < Math.exp((curCost - cc) / (T * 0.3))) {
-        cur[i] = st; grid.move(i); curCost = cc
+        cur[i] = st; grid?.move(i); curCost = cc
         if (cc < bestCost) { best = cur.map((p) => ({ ...p })); bestCost = cc }
         // Summing deltas accumulates float drift; resync off a full recompute
         // periodically so curCost can't wander away from the true cost.
