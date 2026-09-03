@@ -78,8 +78,12 @@ for rel in "${SOURCES[@]}"; do
   need_kb=""; free_kb=""
   if ! need_kb="$(du -sk "$src" | awk '{print $1}')"; then warn "could not measure $src (du failed); skipping the space check"; need_kb=""; fi
   if ! free_kb="$(df -k "$BACKUP_DIR" | awk 'NR==2{print $4}')"; then warn "could not measure free space at $BACKUP_DIR"; free_kb=""; fi
-  if [ -n "$need_kb" ] && [ -n "$free_kb" ] && [ "$need_kb" -gt "$free_kb" ] && [ -z "$PREV_SNAP" ]; then
-    warn "SKIPPING $rel: needs ${need_kb} KB, only ${free_kb} KB free at $BACKUP_DIR (set FL_BACKUP_REMOTE or a bigger FL_BACKUP_DIR)"
+  # Conservative on purpose: --link-dest usually needs far less than the full
+  # size, but a run store that changed a lot could still fill the disk, and a
+  # full boot volume is worse than a skipped snapshot. Keep a 1 GiB reserve.
+  RESERVE_KB=1048576
+  if [ -n "$need_kb" ] && [ -n "$free_kb" ] && [ "$((need_kb + RESERVE_KB))" -gt "$free_kb" ]; then
+    warn "SKIPPING $rel: needs ${need_kb} KB + 1 GiB reserve, only ${free_kb} KB free at $BACKUP_DIR (set FL_BACKUP_REMOTE or a bigger FL_BACKUP_DIR)"
     continue
   fi
   mkdir -p "$(dirname "$dest")"

@@ -46,6 +46,11 @@
     <!-- Internal disk: off the USB drive the live data sits on. -->
     <key>FL_BACKUP_DIR</key><string>/Users/jackal-kahwati/firstlight-backups</string>
     <key>FL_BACKUP_KEEP</key><string>14</string>
+    <!-- This Mac's internal disk has only a few GB free, so only the 52 MB
+         account/enterprise store is snapshotted locally. Remove this line (or
+         set it to "data public/runs") once FL_BACKUP_REMOTE or a larger
+         FL_BACKUP_DIR exists; the 4.6 GB run store is NOT backed up until then. -->
+    <key>FL_BACKUP_SOURCES</key><string>data</string>
     <!-- Optional: uncomment and set an off-MACHINE target for real durability.
     <key>FL_BACKUP_REMOTE</key><string>user@host:/path/firstlight-backups</string>
     -->
