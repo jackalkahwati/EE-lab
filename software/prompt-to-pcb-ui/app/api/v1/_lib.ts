@@ -17,7 +17,13 @@ export function v1Auth(req: Request, opts?: { write?: boolean }): V1Auth | Respo
   if (!m) {
     return Response.json({ error: 'missing API key (Authorization: Bearer flk_live_...)' }, { status: 401 })
   }
-  const db = ent.loadDb()
+  let db: unknown
+  try {
+    db = ent.loadDb()
+  } catch (e) {
+    if (ent.isStoreUnreadable(e)) return ent.storeUnreadableResponse()
+    throw e
+  }
   const key = integrations.verifyApiKey(db, m[1].trim(), { requireWrite: opts?.write === true })
   if (!key) {
     return Response.json(

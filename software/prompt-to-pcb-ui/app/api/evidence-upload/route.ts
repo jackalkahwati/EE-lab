@@ -46,33 +46,63 @@ export async function POST(req: Request) {
   if (file.size === 0) return Response.json({ error: 'empty file' }, { status: 400 })
   if (file.size > MAX_BYTES) return Response.json({ error: `file exceeds ${MAX_BYTES / 1024 / 1024}MB` }, { status: 413 })
 
-  const db = ent.loadDb()
-  const gate = rbac.checkAction(db, actor, 'add_evidence', { board_id })
-  if (!gate.ok) {
-    ent.appendAudit(db, { actor, action: 'DENIED:add_evidence', scope: { board_id }, note: gate.reason })
-    ent.saveDb(db)
-    return Response.json({ error: 'permission denied', detail: gate.reason }, { status: 403 })
-  }
-
-  fs.mkdirSync(ART_DIR, { recursive: true })
-  const stamp = 'art_' + crypto.randomBytes(6).toString('hex')
-  const abs = path.join(ART_DIR, `${stamp}-${safeName(file.name)}`)
-  fs.writeFileSync(abs, Buffer.from(await file.arrayBuffer()))
-
   type EvidenceResult = { error: string } | { evidence_id: string; status: string }
   const addEvidence = ent.addEvidence as unknown as (
     database: unknown,
     input: Record<string, unknown>,
   ) => EvidenceResult
-  const result = addEvidence(db, {
-    scope_type: 'board', scope_id: board_id, evidence_type,
-    source: source || file.name, artifact_path: abs, actor,
-  })
+  // Every read-modify-write of the store happens INSIDE the store mutex with a
+  // freshly loaded db (withStore): the upload's arrayBuffer() await used to sit
+  // between load and save, so a concurrent enterprise action could be clobbered.
+  const withStore = ent.withStore as unknown as <T>(fn: (db: unknown) => Promise<T> | T) => Promise<T>
+
+  // 1. RBAC pre-check (fresh db; a denial is audited and persisted).
+  let denied: { reason?: string } | null = null
+  try {
+    await withStore((db) => {
+      const gate = rbac.checkAction(db, actor, 'add_evidence', { board_id })
+      if (gate.ok) return false // nothing to persist
+      denied = { reason: gate.reason }
+      ent.appendAudit(db, { actor, action: 'DENIED:add_evidence', scope: { board_id }, note: gate.reason })
+      return true
+    })
+  } catch (e) {
+    if (ent.isStoreUnreadable(e)) return ent.storeUnreadableResponse()
+    throw e
+  }
+  if (denied) return Response.json({ error: 'permission denied', detail: (denied as { reason?: string }).reason }, { status: 403 })
+
+  // 2. Land the artifact on disk (outside the mutex — no store state involved).
+  fs.mkdirSync(ART_DIR, { recursive: true })
+  const stamp = 'art_' + crypto.randomBytes(6).toString('hex')
+  const abs = path.join(ART_DIR, `${stamp}-${safeName(file.name)}`)
+  fs.writeFileSync(abs, Buffer.from(await file.arrayBuffer()))
+
+  // 3. Record it: re-load inside the mutex, re-check RBAC against the CURRENT
+  //    membership, add the evidence, save. Webhooks fire after the save (they
+  //    only read the org's webhook list; a failure must not roll back evidence).
+  let result: EvidenceResult
+  let dbForHooks: unknown = null
+  try {
+    result = await withStore((db) => {
+      const gate = rbac.checkAction(db, actor, 'add_evidence', { board_id })
+      if (!gate.ok) return { error: `permission denied: ${gate.reason}` } as EvidenceResult
+      const r = addEvidence(db, {
+        scope_type: 'board', scope_id: board_id, evidence_type,
+        source: source || file.name, artifact_path: abs, actor,
+      })
+      dbForHooks = db
+      return r
+    })
+  } catch (e) {
+    try { fs.unlinkSync(abs) } catch { /* ignore */ }
+    if (ent.isStoreUnreadable(e)) return ent.storeUnreadableResponse()
+    throw e
+  }
   if ('error' in result) {
     try { fs.unlinkSync(abs) } catch { /* ignore */ }
-    return Response.json(result, { status: 422 })
+    return Response.json(result, { status: /^permission denied/.test(result.error) ? 403 : 422 })
   }
-  try { await integrations.fireWebhooks(db, 'evidence.added', { board_id, evidence_type, evidence_id: result.evidence_id }) } catch { /* best effort */ }
-  ent.saveDb(db)
+  try { await integrations.fireWebhooks(dbForHooks, 'evidence.added', { board_id, evidence_type, evidence_id: result.evidence_id }) } catch { /* best effort */ }
   return Response.json({ ok: true, result: { evidence_id: result.evidence_id, status: result.status, file: path.basename(abs), bytes: file.size } })
 }

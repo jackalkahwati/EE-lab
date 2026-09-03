@@ -33,6 +33,7 @@ import {
   sessionEmail,
 } from '@/lib/auth'
 import { hasByok } from '@/lib/byok'
+import { v1Auth } from '@/app/api/v1/_lib'
 import { runDesignGate, runFunctionalWire } from '@/lib/design-gate'
 import { resolvePlanModel } from '@/lib/plan-llm'
 import { kicadCli, kicadPython } from '@/lib/toolchain'
@@ -210,7 +211,45 @@ function releaseRun(email: string): void {
   else RUNS.delete(email)
 }
 
+/**
+ * CSRF guard for a cookie-authenticated GET that spends credits. Browsers stamp
+ * Sec-Fetch-Site on every request: 'same-origin' (the compose EventSource) and
+ * 'none' (typed URL) are the app itself; 'cross-site' / 'same-site' is another
+ * origin riding the user's cookie and is refused. Non-browser callers omit the
+ * header entirely (lib/v1-jobs.ts server-side fetch, curl): those must present
+ * an explicit non-browser marker — X-Requested-With, which no cross-site
+ * navigation/EventSource can set — or a valid flk_ API key. The session cookie
+ * is still required below; this only proves the request was not forged.
+ */
+function csrfRejection(req: Request): Response | null {
+  const site = req.headers.get('sec-fetch-site')
+  if (site === 'same-origin' || site === 'none') return null
+  if (site) {
+    return Response.json({ error: 'cross-site request refused' }, { status: 403 })
+  }
+  if (req.headers.get('x-requested-with')) return null
+  // Older browsers (Safari < 16.4) send no Sec-Fetch-Site and EventSource
+  // cannot add headers, but they do send Referer/Origin: accept when that
+  // host matches the request host. A cross-site page cannot forge either.
+  const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host')
+  for (const h of ['origin', 'referer']) {
+    const v = req.headers.get(h)
+    if (!v || !host) continue
+    try { if (new URL(v).host === host) return null } catch { /* not a URL */ }
+  }
+  if (/^Bearer\s+flk_/i.test(req.headers.get('authorization') ?? '')) {
+    const v1 = v1Auth(req)
+    if (!(v1 instanceof Response)) return null
+  }
+  return Response.json(
+    { error: 'non-browser callers must send X-Requested-With or a flk_ API key' },
+    { status: 403 },
+  )
+}
+
 export async function GET(req: Request) {
+  const csrf = csrfRejection(req)
+  if (csrf) return csrf
   // Live pipeline execution needs the lab workstation (KiCad CLI, flroute
   // binary, Python toolchain). On a cloud deploy those don't exist, fail
   // clean instead of spawning into nothing.

@@ -23,7 +23,13 @@ export const dynamic = 'force-dynamic'
 export async function GET(req: Request) {
   const auth = v1Auth(req)
   if (auth instanceof Response) return auth
-  const db = ent.loadDb()
+  let db: any
+  try {
+    db = ent.loadDb()
+  } catch (e) {
+    if (ent.isStoreUnreadable(e)) return ent.storeUnreadableResponse()
+    throw e
+  }
   const boards = (db.boards ?? []).map((b: any) => ({
     board_id: b.board_id, name: b.name, program_id: b.program_id,
     readiness: b.readiness, routed_state: b.routed_state,

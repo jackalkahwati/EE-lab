@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server.js'
 import fs from 'node:fs'
 import path from 'node:path'
-import { checkRateLimit, envInt, rateLimitDisabled } from './lib/rate-limit.ts'
+import { checkRateLimit, clientIpFromHeaders, envInt, rateLimitDisabled } from './lib/rate-limit.ts'
 
 /**
  * Account gate: every page and API (and all run artifacts — they're user
@@ -43,15 +43,36 @@ function fromB64url(value: string): Uint8Array | null {
   }
 }
 
+/** The account's current sessionVersion (lib/auth.ts revokeSessions). A missing
+ * store or unknown user is 0; a corrupt store is null so the caller fails closed. */
+function sessionVersionFor(email: string): number | null {
+  try {
+    const users = JSON.parse(
+      fs.readFileSync(path.join(process.cwd(), 'data', 'users.json'), 'utf8'),
+    ) as Record<string, { sessionVersion?: unknown }>
+    const v = users?.[email]?.sessionVersion
+    return typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? v : 0
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 0 : null
+  }
+}
+
 async function validSession(token: string | undefined): Promise<string | null> {
   if (!token) return null
   const parts = token.split('|')
-  if (parts.length !== 3) return null
+  // 3 segments = legacy unversioned token (version 0); 4 = versioned
+  // (base64url(email)|expiresMs|v<n>|sig) — same rules as lib/auth.ts readSession.
+  if (parts.length !== 3 && parts.length !== 4) return null
   if (!/^\d+$/.test(parts[1])) return null
   const expiresAt = Number(parts[1])
   if (!Number.isSafeInteger(expiresAt) || expiresAt <= Date.now()) return null
+  let version = 0
+  if (parts.length === 4) {
+    if (!/^v\d{1,9}$/.test(parts[2])) return null
+    version = Number(parts[2].slice(1))
+  }
   const authSecret = secret()
-  const signature = fromB64url(parts[2])
+  const signature = fromB64url(parts[parts.length - 1])
   if (!authSecret || !signature || signature.byteLength !== 32) return null
   const key = await crypto.subtle.importKey(
     'raw',
@@ -64,13 +85,16 @@ async function validSession(token: string | undefined): Promise<string | null> {
     'HMAC',
     key,
     signature,
-    new TextEncoder().encode(`${parts[0]}|${parts[1]}`),
+    new TextEncoder().encode(parts.slice(0, -1).join('|')),
   )
   if (!valid) return null
   const encodedEmail = fromB64url(parts[0])
   if (!encodedEmail) return null
   const email = new TextDecoder().decode(encodedEmail).trim().toLowerCase()
-  return email || null
+  if (!email) return null
+  // Revoked sessions (version bumped) must not pass the page/artifact gate either.
+  if (sessionVersionFor(email) !== version) return null
+  return email
 }
 
 /** True when a run id is owned by a different account. Unowned ids are shared
@@ -124,16 +148,11 @@ function hasEnterpriseMembership(email: string): boolean {
   }
 }
 
-/** Caller IP for anonymous rate-limit keying: first hop of x-forwarded-for
- * (the real client when behind nginx/Caddy), then x-real-ip, then a shared
- * fallback bucket. A spoofed XFF only lets an abuser throttle themselves. */
+/** Caller IP for anonymous rate-limit keying — see clientIpFromHeaders in
+ * lib/rate-limit.ts (cf-connecting-ip, then the LAST x-forwarded-for hop, then
+ * x-real-ip, then a shared fallback bucket). */
 function clientIp(req: NextRequest): string {
-  const xff = req.headers.get('x-forwarded-for')
-  if (xff) {
-    const first = xff.split(',')[0]?.trim()
-    if (first) return first
-  }
-  return req.headers.get('x-real-ip')?.trim() || 'unknown'
+  return clientIpFromHeaders(req.headers)
 }
 
 /** 429 with Retry-After and a small human-readable JSON body (never a stack). */

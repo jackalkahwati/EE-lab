@@ -7,8 +7,11 @@
  * at production deploy only touches this file, every route goes through
  * these helpers.
  *
- * Session cookie: base64url(email)|expiresMs|hmacSHA256(payload, AUTH_SECRET).
- * The middleware (edge) verifies the same format with crypto.subtle.
+ * Session cookie: base64url(email)|expiresMs|v<sessionVersion>|hmacSHA256(payload, AUTH_SECRET).
+ * The middleware (edge) verifies the same format with crypto.subtle. Legacy
+ * 3-segment tokens (no version segment) are still accepted as version 0, so
+ * sessions issued before per-user revocation existed keep working until a
+ * user's sessionVersion is bumped (revokeSessions / OAuth takeover).
  */
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import fs from 'node:fs'
@@ -38,6 +41,14 @@ export interface UserRecord {
   processedCheckoutSessions?: string[]
   /** 'google' accounts have no usable password hash */
   provider?: 'google'
+  /** true once the address was proven (today: a verified Google identity) */
+  emailVerified?: boolean
+  /** Bumped to invalidate every outstanding session cookie (missing = 0). */
+  sessionVersion?: number
+  /** Stripe subscription health; 'past_due' keeps the plan while Stripe retries. */
+  billingStatus?: 'active' | 'past_due'
+  /** Stripe event ids already applied (webhook retries are idempotent). */
+  processedStripeEvents?: string[]
 }
 
 const STORE_DIR = path.join(process.cwd(), 'data')
@@ -141,11 +152,41 @@ export function createUser(email: string, password: string): UserRecord | { erro
   return rec
 }
 
-/** Find-or-create an account from a verified OAuth identity (no password). */
+/**
+ * Find-or-create an account from a verified OAuth identity (no password).
+ *
+ * Takeover rule: a PASSWORD account whose address was never verified (no
+ * emailVerified flag, no prior OAuth login) could have been registered by
+ * anyone who knew the address. When the provider proves ownership of that
+ * address, the verified owner takes the account over: the account and its
+ * runs are kept, password login is disabled (the hash is replaced with an
+ * unguessable one), the address is marked verified, and sessionVersion is
+ * bumped so every outstanding session — possibly the squatter's — dies.
+ */
 export function upsertOAuthUser(email: string, provider: 'google'): UserRecord {
   const e = norm(email)
   const users = load()
-  if (users[e]) return users[e]
+  const existing = users[e]
+  if (existing) {
+    if (existing.provider === provider || existing.emailVerified === true) {
+      // Same verified identity (or an already-proven address): plain login.
+      if (existing.emailVerified !== true || !existing.provider) {
+        existing.emailVerified = true
+        existing.provider ??= provider
+        save(users)
+      }
+      return existing
+    }
+    existing.salt = randomBytes(16).toString('hex')
+    existing.hash = randomBytes(32).toString('hex') // password login impossible
+    // the squatter's stored BYOK secret must not ride along to the real owner
+    delete (existing as UserRecord & { llmKey?: unknown }).llmKey
+    existing.emailVerified = true
+    existing.provider = provider
+    existing.sessionVersion = (existing.sessionVersion ?? 0) + 1
+    save(users)
+    return existing
+  }
   const month = new Date().toISOString().slice(0, 7)
   const rec: UserRecord = {
     email: e,
@@ -159,20 +200,41 @@ export function upsertOAuthUser(email: string, provider: 'google'): UserRecord {
     planCreditsMonth: month,
     extraCredits: 0,
     provider,
+    emailVerified: true,
   }
   users[e] = rec
   save(users)
   return rec
 }
 
+// A fixed salt/hash pair so a login attempt against an UNKNOWN address still
+// pays for one scrypt derivation: response time then no longer reveals whether
+// an account exists.
+const DUMMY_SALT = '5f1d3b9a7c2e4d6f8a0b1c2d3e4f5a6b'
+const DUMMY_HASH = scryptSync('firstlight-dummy-password', DUMMY_SALT, 32)
+
 export function verifyUser(email: string, password: string): UserRecord | null {
   const users = load()
   const rec = users[norm(email)]
-  if (!rec) return null
+  const salt = rec?.salt || DUMMY_SALT
+  const hash = scryptSync(password, salt, 32)
+  const stored = rec ? Buffer.from(rec.hash, 'hex') : DUMMY_HASH
+  const match = hash.length === stored.length && timingSafeEqual(hash, stored)
+  if (!rec || !match) return null
+  return rec
+}
+
+/** Verify a password against a specific record (no lookup timing surface). */
+export function passwordMatches(rec: UserRecord, password: string): boolean {
   const hash = scryptSync(password, rec.salt, 32)
   const stored = Buffer.from(rec.hash, 'hex')
-  if (hash.length !== stored.length || !timingSafeEqual(hash, stored)) return null
-  return rec
+  return hash.length === stored.length && timingSafeEqual(hash, stored)
+}
+
+/** Account whose Stripe customer id matches, or null (linear scan at preview scale). */
+export function findUserByStripeCustomer(customerId: string): UserRecord | null {
+  if (!customerId) return null
+  return Object.values(load()).find((u) => u.stripeCustomerId === customerId) ?? null
 }
 
 export function getUser(email: string): UserRecord | null {
@@ -271,8 +333,27 @@ function b64url(buf: Buffer): string {
   return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
+/** Current session version for an address; a missing store or unknown user is
+ *  0. A CORRUPT store throws (callers fail closed). */
+export function sessionVersionFor(email: string): number {
+  const v = load()[norm(email)]?.sessionVersion
+  return typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? v : 0
+}
+
+/** Invalidate every outstanding session for an account (password reset,
+ *  account takeover, "sign out everywhere"). Returns the new version. */
+export function revokeSessions(email: string): number {
+  let next = 0
+  updateUser(email, (u) => {
+    next = (typeof u.sessionVersion === 'number' ? u.sessionVersion : 0) + 1
+    u.sessionVersion = next
+  })
+  return next
+}
+
 export function makeSession(email: string): string {
-  const payload = `${b64url(Buffer.from(norm(email)))}|${Date.now() + SESSION_TTL_MS}`
+  const e = norm(email)
+  const payload = `${b64url(Buffer.from(e))}|${Date.now() + SESSION_TTL_MS}|v${sessionVersionFor(e)}`
   const sig = b64url(createHmac('sha256', authSecret()).update(payload).digest())
   return `${payload}|${sig}`
 }
@@ -280,12 +361,19 @@ export function makeSession(email: string): string {
 export function readSession(token: string | undefined): string | null {
   if (!token) return null
   const parts = token.split('|')
-  if (parts.length !== 3) return null
+  // 3 segments = legacy unversioned token (version 0); 4 = versioned.
+  if (parts.length !== 3 && parts.length !== 4) return null
   if (!/^\d+$/.test(parts[1])) return null
   const expiresAt = Number(parts[1])
   if (!Number.isSafeInteger(expiresAt) || expiresAt <= Date.now()) return null
-  if (!/^[A-Za-z0-9_-]{43}$/.test(parts[2])) return null
-  const payload = `${parts[0]}|${parts[1]}`
+  let version = 0
+  if (parts.length === 4) {
+    if (!/^v\d{1,9}$/.test(parts[2])) return null
+    version = Number(parts[2].slice(1))
+  }
+  const sigPart = parts[parts.length - 1]
+  if (!/^[A-Za-z0-9_-]{43}$/.test(sigPart)) return null
+  const payload = parts.slice(0, -1).join('|')
   let expect: Buffer
   try {
     expect = createHmac('sha256', authSecret()).update(payload).digest()
@@ -296,20 +384,29 @@ export function readSession(token: string | undefined): string | null {
   }
   let supplied: Buffer
   try {
-    supplied = Buffer.from(parts[2].replace(/-/g, '+').replace(/_/g, '/'), 'base64')
+    supplied = Buffer.from(sigPart.replace(/-/g, '+').replace(/_/g, '/'), 'base64')
   } catch {
     return null
   }
   if (expect.length !== supplied.length || !timingSafeEqual(expect, supplied)) return null
+  let email: string
   try {
-    const email = Buffer.from(
+    email = Buffer.from(
       parts[0].replace(/-/g, '+').replace(/_/g, '/'),
       'base64',
     ).toString('utf8')
-    return email && norm(email) === email ? email : null
   } catch {
     return null
   }
+  if (!email || norm(email) !== email) return null
+  // Revocation: the token's version must match the account's current one.
+  // An unreadable store fails closed (never accept a session we can't check).
+  try {
+    if (sessionVersionFor(email) !== version) return null
+  } catch {
+    return null
+  }
+  return email
 }
 
 /**

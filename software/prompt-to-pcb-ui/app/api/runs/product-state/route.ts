@@ -22,7 +22,9 @@ import {
 
 export const dynamic = 'force-dynamic'
 
-const RUN_ID = /^[A-Za-z0-9._-]{1,128}$/
+// Same shape as lib/auth.ts isValidRunId: a leading alphanumeric rules out
+// '.', '..' and dotfiles, so the id can never walk out of public/runs/.
+const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
 
 function summarize(
   section: string,

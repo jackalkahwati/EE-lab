@@ -12,6 +12,7 @@
  */
 import { callLLMText, type LLMOverride } from '@/lib/llm'
 import { overrideForRequest } from '@/lib/byok'
+import { assertCanSpend } from '@/lib/spend-gate'
 import { MODEL } from '@/lib/model-tiers'
 import { PRODUCT_SPEC_SCHEMA, normalizeSpec } from '@/lib/product-spec'
 import { idBriefSummary, normalizeIdBrief, type IdBrief } from '@/lib/id-brief'
@@ -175,6 +176,11 @@ export async function POST(req: Request) {
     const answers: Answer[] = Array.isArray(body.answers) ? body.answers : []
     if (!request.trim()) {
       return Response.json({ error: 'empty product intent' }, { status: 400 })
+    }
+    // Spend gate: no platform-funded inference for an account at 0 credits.
+    {
+      const gate = assertCanSpend(req)
+      if (gate) return gate
     }
     // Optional upstream Industrial Design brief — constrains budgets + form.
     const idConstraint = body.idBrief

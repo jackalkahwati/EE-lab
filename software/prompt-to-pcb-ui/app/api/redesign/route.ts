@@ -14,6 +14,8 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { callLLMText } from '@/lib/llm'
 import { overrideForRequest } from '@/lib/byok'
+import { isAdminRequest, runAccess } from '@/lib/auth'
+import { assertCanSpend } from '@/lib/spend-gate'
 import { pinsPromptFor } from '@/lib/design-state'
 import { MODEL } from '@/lib/model-tiers'
 import type { ProductSpec } from '@/lib/product-spec'
@@ -250,6 +252,20 @@ export async function POST(req: Request) {
     const spec = body.spec as ProductSpec | undefined
     const runId = typeof body.runId === 'string' ? body.runId : undefined
     if (!spec?.product) return Response.json({ error: 'missing product spec' }, { status: 400 })
+    // Ownership (when a runId is given the route writes disciplines/ under it)
+    // + spend gate (the convergence loop runs on the platform key without BYOK).
+    {
+      if (runId !== undefined) {
+        if (!RUN_ID.test(runId)) return Response.json({ error: 'invalid runId' }, { status: 400 })
+        const access = runAccess(req, runId)
+        if (access.access === 'unauthenticated') return Response.json({ error: 'sign in required' }, { status: 401 })
+        if (access.access !== 'owner' && !isAdminRequest(req)) {
+          return Response.json({ error: 'run belongs to another account' }, { status: 403 })
+        }
+      }
+      const gate = assertCanSpend(req)
+      if (gate) return gate
+    }
 
     let board: { wMm?: number; hMm?: number } = {}
     let boardAreaMm2: number | undefined

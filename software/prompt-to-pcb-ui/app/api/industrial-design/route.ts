@@ -15,6 +15,8 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { callLLMText, type LLMOverride } from '@/lib/llm'
 import { overrideForRequest } from '@/lib/byok'
+import { isAdminRequest, runAccess } from '@/lib/auth'
+import { assertCanSpend } from '@/lib/spend-gate'
 import { MODEL } from '@/lib/model-tiers'
 import { ID_BRIEF_SCHEMA, normalizeIdBrief } from '@/lib/id-brief'
 import { loadGroundBoard } from '@/lib/ground-board'
@@ -168,6 +170,22 @@ export async function POST(req: Request) {
     const answers: Answer[] = Array.isArray(body.answers) ? body.answers : []
     if (!request.trim()) {
       return Response.json({ error: 'empty product intent' }, { status: 400 })
+    }
+    // Ownership (with a runId the brief is persisted under public/runs/<runId>/
+    // disciplines) + spend gate (platform-key inference without BYOK).
+    {
+      if (body.runId !== undefined) {
+        if (typeof body.runId !== 'string' || !/^run-[A-Za-z0-9._-]{1,128}$/.test(body.runId)) {
+          return Response.json({ error: 'invalid runId' }, { status: 400 })
+        }
+        const access = runAccess(req, body.runId)
+        if (access.access === 'unauthenticated') return Response.json({ error: 'sign in required' }, { status: 401 })
+        if (access.access !== 'owner' && !isAdminRequest(req)) {
+          return Response.json({ error: 'run belongs to another account' }, { status: 403 })
+        }
+      }
+      const gate = assertCanSpend(req)
+      if (gate) return gate
     }
 
     const buildUserMsg = (all: Answer[]) => {

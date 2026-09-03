@@ -12,6 +12,8 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { callLLMText, type LLMOverride } from '@/lib/llm'
 import { resolvePlanModel } from '@/lib/plan-llm'
+import { isAdminRequest, runAccess } from '@/lib/auth'
+import { assertCanSpend } from '@/lib/spend-gate'
 import { pinsPromptFor, partPinsFor } from '@/lib/design-state'
 import { MODEL } from '@/lib/model-tiers'
 import type { ProductSpec } from '@/lib/product-spec'
@@ -373,6 +375,18 @@ export async function POST(req: Request) {
   const runId = typeof body.runId === 'string' ? body.runId : undefined
   if (!spec?.product) return Response.json({ error: 'missing product spec' }, { status: 400 })
   if (!runId || !RUN_ID.test(runId)) return Response.json({ error: 'missing/invalid runId' }, { status: 400 })
+  // Ownership: this route writes public/runs/<runId>/. Only the run's owner
+  // (or the platform admin) may build into it; the pipeline's in-process call
+  // and lib/v1-jobs both forward the owner's session cookie, so they qualify.
+  {
+    const access = runAccess(req, runId)
+    if (access.access === 'unauthenticated') return Response.json({ error: 'sign in required' }, { status: 401 })
+    if (access.access !== 'owner' && !isAdminRequest(req)) {
+      return Response.json({ error: 'run belongs to another account' }, { status: 403 })
+    }
+    const gate = assertCanSpend(req)
+    if (gate) return gate
+  }
   const keepCapabilities = body.keepCapabilities === true
   // plannerOnly: the pipeline route's EARLY server-side kick. It only carries a
   // minimal spec (product name + prompt), so if the planner netlist bridge fails

@@ -17,14 +17,24 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { NextRequest, NextResponse } from 'next/server'
 import { adminEmails } from '@/lib/auth'
+import { checkRateLimit, clientIpFromHeaders, envInt, rateLimitDisabled } from '@/lib/rate-limit'
 
 export const dynamic = 'force-dynamic'
 
 const STORE = path.join(process.cwd(), 'data', 'contacts.json')
+// Rotate the lead file once it reaches this size so an unauthenticated form
+// can never grow one JSON document (re-parsed on every write) without bound.
+const ROTATE_BYTES = 5 * 1024 * 1024
 
 function store(lead: Record<string, unknown>) {
   try {
     fs.mkdirSync(path.dirname(STORE), { recursive: true })
+    try {
+      if (fs.statSync(STORE).size >= ROTATE_BYTES) {
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+        fs.renameSync(STORE, STORE.replace(/\.json$/, `-${stamp}.json`))
+      }
+    } catch { /* no file yet */ }
     let all: unknown[] = []
     try {
       all = JSON.parse(fs.readFileSync(STORE, 'utf8'))
@@ -82,6 +92,21 @@ async function sendEmail(to: string, subject: string, text: string, replyTo?: st
 }
 
 export async function POST(req: NextRequest) {
+  // Unauthenticated + writes to disk + sends email: throttle per source IP
+  // (same limiter/keying as the proxy's auth + pipeline tiers).
+  if (!rateLimitDisabled()) {
+    const ip = clientIpFromHeaders(req.headers)
+    const r = checkRateLimit(`rl:contact:min:${ip}`, {
+      limit: envInt('FL_RL_CONTACT_PER_MIN', 5),
+      windowMs: 60_000,
+    })
+    if (!r.ok) {
+      return NextResponse.json(
+        { error: `Too many messages. Please wait ${r.retryAfterSec}s and try again.`, retryAfterSec: r.retryAfterSec },
+        { status: 429, headers: { 'Retry-After': String(r.retryAfterSec) } },
+      )
+    }
+  }
   let body: Record<string, string>
   try {
     body = await req.json()

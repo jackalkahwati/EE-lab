@@ -79,7 +79,7 @@ export const MODELS: CatalogModel[] = [
     provider: 'openai',
     providerModel: openaiModel,
     openrouterModel: orGpt,
-    minPlan: 'free',
+    minPlan: 'pro',
     creditMult: 2,
   },
   {
@@ -89,7 +89,7 @@ export const MODELS: CatalogModel[] = [
     provider: 'anthropic',
     providerModel: 'claude-opus-4-8',
     openrouterModel: orOpus,
-    minPlan: 'free',
+    minPlan: 'pro',
     creditMult: 4,
   },
 ]
@@ -108,9 +108,13 @@ export function findModel(id: string | null | undefined): CatalogModel | undefin
 /** The default model a plan lands on when the caller picks nothing. Everyone
  *  defaults to Sonnet — a genuinely good model (the tool underwhelms on weak
  *  ones), served on platform credit for the free taste and for Pro/Enterprise.
- *  Pro/Enterprise can pick a stronger model in the selector. */
-export function defaultModelForPlan(_plan: Plan): CatalogModel {
-  return MODELS.find((m) => m.id === 'claude-sonnet')!
+ *  Pro/Enterprise can pick a stronger model in the selector. Should Sonnet ever
+ *  be gated above a plan, the first catalog model that plan may use is the
+ *  default instead, so every plan always resolves to SOME model. */
+export function defaultModelForPlan(plan: Plan): CatalogModel {
+  const sonnet = MODELS.find((m) => m.id === 'claude-sonnet')!
+  if (modelAllowed(plan, sonnet)) return sonnet
+  return MODELS.find((m) => modelAllowed(plan, m)) ?? sonnet
 }
 
 /** Can this plan select this model on PLATFORM credit? (BYOK bypasses this.) */

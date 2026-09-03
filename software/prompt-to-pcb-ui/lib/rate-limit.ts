@@ -43,6 +43,59 @@ function state(): LimiterState {
 const SWEEP_EVERY_OPS = 500
 const SWEEP_EVERY_MS = 60_000
 const MAX_TRACKED_WINDOW_MS = 24 * 60 * 60 * 1000 // drop keys idle > 24h
+/** Hard cap on tracked keys (FL_RL_MAX_KEYS, default 10k). The Map is kept in
+ * least-recently-used order (a hit re-inserts its key at the end), so when the
+ * cap is exceeded the oldest-touched keys are evicted first. This bounds memory
+ * against an attacker who rotates source addresses faster than the 24h sweep. */
+const DEFAULT_MAX_KEYS = 10_000
+
+function maxKeys(): number {
+  const n = envInt('FL_RL_MAX_KEYS', DEFAULT_MAX_KEYS)
+  return n > 0 ? n : DEFAULT_MAX_KEYS
+}
+
+function evictOverCap(s: LimiterState): void {
+  const cap = maxKeys()
+  while (s.buckets.size > cap) {
+    const oldest = s.buckets.keys().next()
+    if (oldest.done) break
+    s.buckets.delete(oldest.value)
+  }
+}
+
+/** Number of keys currently tracked (tests + diagnostics). */
+export function trackedKeyCount(): number {
+  return state().buckets.size
+}
+
+/** Drop all limiter state (tests only — production state is process-global). */
+export function resetRateLimitState(): void {
+  const s = state()
+  s.buckets.clear()
+  s.opsSinceSweep = 0
+  s.lastSweep = Date.now()
+}
+
+/**
+ * Caller IP for anonymous rate-limit keying, most-trusted source first:
+ *  1. cf-connecting-ip — set by Cloudflare when the app is behind its tunnel/CDN
+ *     (the client cannot inject it past Cloudflare).
+ *  2. the LAST hop of x-forwarded-for — the address the nearest proxy saw, which
+ *     a client can't spoof; the FIRST hop is client-supplied and trivially forged
+ *     to rotate rate-limit buckets.
+ *  3. x-real-ip (nginx/Caddy), then a shared 'unknown' bucket.
+ */
+export function clientIpFromHeaders(headers: Headers): string {
+  const cf = headers.get('cf-connecting-ip')?.trim()
+  if (cf) return cf
+  const xff = headers.get('x-forwarded-for')
+  if (xff) {
+    const hops = xff.split(',').map((h) => h.trim()).filter(Boolean)
+    const last = hops[hops.length - 1]
+    if (last) return last
+  }
+  return headers.get('x-real-ip')?.trim() || 'unknown'
+}
 
 function maybeSweep(s: LimiterState, now: number): void {
   s.opsSinceSweep += 1
@@ -90,9 +143,14 @@ export function checkRateLimit(key: string, opts: RateLimitOptions): RateLimitRe
   maybeSweep(s, now)
 
   let bucket = s.buckets.get(key)
-  if (!bucket) {
+  if (bucket) {
+    // LRU touch: re-insert so this key moves to the end of iteration order.
+    s.buckets.delete(key)
+    s.buckets.set(key, bucket)
+  } else {
     bucket = { hits: [] }
     s.buckets.set(key, bucket)
+    evictOverCap(s)
   }
 
   const cutoff = now - windowMs

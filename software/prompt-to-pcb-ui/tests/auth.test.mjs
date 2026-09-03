@@ -128,6 +128,68 @@ test('paid credit sessions are idempotent', () => {
   assert.equal(auth.getUser('alice@example.test').extraCredits, 25)
 })
 
+test('legacy unversioned sessions stay valid until the account revokes them', async () => {
+  // alice has no sessionVersion (pre-revocation account): a 3-segment token is version 0
+  const payload = `${b64url('alice@example.test')}|${Date.now() + 60_000}`
+  const signature = createHmac('sha256', process.env.AUTH_SECRET).update(payload).digest('base64url')
+  const legacy = `${payload}|${signature}`
+  assert.equal(auth.readSession(legacy), 'alice@example.test')
+  const viaProxy = await proxy(new NextRequest('https://compose.test/compose', {
+    headers: { cookie: `${auth.SESSION_COOKIE}=${legacy}` },
+  }))
+  assert.equal(viaProxy.status, 200)
+
+  assert.equal(auth.revokeSessions('alice@example.test'), 1)
+  assert.equal(auth.readSession(legacy), null, 'revoked legacy token must be rejected')
+  const revokedProxy = await proxy(new NextRequest('https://compose.test/api/anything', {
+    headers: { cookie: `${auth.SESSION_COOKIE}=${legacy}` },
+  }))
+  assert.equal(revokedProxy.status, 401)
+
+  const fresh = auth.makeSession('alice@example.test')
+  assert.equal(fresh.split('|').length, 4)
+  assert.equal(fresh.split('|')[2], 'v1')
+  assert.equal(auth.readSession(fresh), 'alice@example.test')
+  const freshProxy = await proxy(new NextRequest('https://compose.test/compose', {
+    headers: { cookie: `${auth.SESSION_COOKIE}=${fresh}` },
+  }))
+  assert.equal(freshProxy.status, 200)
+  // a token claiming a different version with a valid signature is still refused
+  const forgedPayload = `${b64url('alice@example.test')}|${Date.now() + 60_000}|v0`
+  const forgedSig = createHmac('sha256', process.env.AUTH_SECRET).update(forgedPayload).digest('base64url')
+  assert.equal(auth.readSession(`${forgedPayload}|${forgedSig}`), null)
+})
+
+test('a verified Google identity takes over an unverified password account', async () => {
+  const created = auth.createUser('carol@example.test', 'squatter-pass-123')
+  assert.equal(created.email, 'carol@example.test')
+  auth.recordRun('carol@example.test', 'run-carol')
+  const squatterSession = auth.makeSession('carol@example.test')
+  assert.equal(auth.readSession(squatterSession), 'carol@example.test')
+  assert.ok(auth.verifyUser('carol@example.test', 'squatter-pass-123'))
+
+  const taken = auth.upsertOAuthUser('Carol@Example.test', 'google')
+  assert.equal(taken.provider, 'google')
+  assert.equal(taken.emailVerified, true)
+  assert.equal(taken.sessionVersion, 1)
+  assert.deepEqual(taken.runIds, ['run-carol'], 'runs are kept for the verified owner')
+  // password login is disabled and every prior session is dead
+  assert.equal(auth.verifyUser('carol@example.test', 'squatter-pass-123'), null)
+  assert.equal(auth.readSession(squatterSession), null)
+  const proxied = await proxy(new NextRequest('https://compose.test/api/anything', {
+    headers: { cookie: `${auth.SESSION_COOKIE}=${squatterSession}` },
+  }))
+  assert.equal(proxied.status, 401)
+  // the owner's new session works, and a repeat Google login does not re-bump
+  const ownerSession = auth.makeSession('carol@example.test')
+  assert.equal(auth.readSession(ownerSession), 'carol@example.test')
+  const again = auth.upsertOAuthUser('carol@example.test', 'google')
+  assert.equal(again.sessionVersion, 1)
+  assert.equal(auth.readSession(ownerSession), 'carol@example.test')
+  // unknown addresses still pay for a hash (no early return) and are refused
+  assert.equal(auth.verifyUser('nobody@example.test', 'whatever-123'), null)
+})
+
 test('a corrupt user store fails closed instead of being treated as empty', () => {
   fs.writeFileSync(path.join(tmp, 'data', 'users.json'), '{not-json')
   assert.throws(() => auth.getUser('alice@example.test'), /user store is unreadable/)

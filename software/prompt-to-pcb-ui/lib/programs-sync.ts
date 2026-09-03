@@ -30,7 +30,15 @@ export async function trackAndSync(runId: string, ownerEmail: string | null): Pr
   const product = trackRun(runId, ownerEmail)
   if (!product) return { synced: false, reason: 'run is not a built product' }
 
-  const db = ent.loadDb()
+  let db: any
+  try {
+    db = ent.loadDb()
+  } catch (e) {
+    // fail closed: never sync into an empty store that would then be saved
+    // back over the real one
+    if (ent.isStoreUnreadable(e)) return { synced: false, reason: 'store unreadable' }
+    throw e
+  }
 
   // Board exists for this product → just attach the new revision (idempotent
   // on run_dir).

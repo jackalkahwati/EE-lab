@@ -6,7 +6,7 @@
 // @ts-ignore - plain ESM shared with node tests
 import { buildEvidencePack, packToMarkdown } from '@/lib/enterprise/evidencepack.mjs'
 // @ts-ignore
-import { loadDb } from '@/lib/enterprise/store.mjs'
+import { isStoreUnreadable, loadDb, storeUnreadableResponse } from '@/lib/enterprise/store.mjs'
 // @ts-ignore
 import { rolesOf } from '@/lib/enterprise/rbac.mjs'
 import { isValidRunId, sessionEmail } from '@/lib/auth'
@@ -28,7 +28,13 @@ export async function GET(req: Request) {
   if (run_dir && !isValidRunId(run_dir)) {
     return Response.json({ error: 'invalid run_dir' }, { status: 400 })
   }
-  const db = loadDb()
+  let db: any
+  try {
+    db = loadDb()
+  } catch (e) {
+    if (isStoreUnreadable(e)) return storeUnreadableResponse()
+    throw e
+  }
   if (rolesOf(db, actor).length === 0) {
     return Response.json({ error: 'enterprise membership required' }, { status: 403 })
   }

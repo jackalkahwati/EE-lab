@@ -15,6 +15,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { callLLMText } from '@/lib/llm'
 import { overrideForRequest } from '@/lib/byok'
+import { assertCanSpend } from '@/lib/spend-gate'
 import { isValidRunId, runAccess } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
@@ -82,6 +83,11 @@ export async function POST(req: Request) {
     return Response.json({ error: 'runId and request required' }, { status: 400 })
   }
   const auth = runAccess(req, id)
+  // Spend gate: no platform-funded inference for an account at 0 credits.
+  {
+    const gate = auth.access === 'unauthenticated' ? null : assertCanSpend(req)
+    if (gate) return gate
+  }
   if (auth.access === 'unauthenticated') {
     return Response.json({ error: 'sign in required' }, { status: 401 })
   }

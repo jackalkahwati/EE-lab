@@ -39,7 +39,13 @@ const WEBHOOK_FOR: Record<string, string> = {
 export async function GET(req: Request) {
   const actor = sessionEmail(req)
   if (!actor) return Response.json({ error: 'sign in required' }, { status: 401 })
-  const db = ent.loadDb()
+  let db: any
+  try {
+    db = ent.loadDb()
+  } catch (e) {
+    if (ent.isStoreUnreadable(e)) return ent.storeUnreadableResponse()
+    throw e
+  }
   if (rbac.rolesOf(db, actor).length === 0) {
     return Response.json({ error: 'enterprise membership required' }, { status: 403 })
   }
@@ -85,7 +91,13 @@ export async function POST(req: Request) {
   const action = body.action ?? ''
   const params = body.params ?? {}
   if (!action) return Response.json({ error: 'action required' }, { status: 400 })
-  const db = ent.loadDb()
+  let db: any
+  try {
+    db = ent.loadDb()
+  } catch (e) {
+    if (ent.isStoreUnreadable(e)) return ent.storeUnreadableResponse()
+    throw e
+  }
 
   const gate = rbac.checkAction(db, actor, action, params)
   if (!gate.ok) {
@@ -132,10 +144,28 @@ export async function POST(req: Request) {
                                 { status: 400 })
   const result = fn(params)
   if (result?.error) return Response.json(result, { status: 422 })
-  // fire subscribed webhooks (best-effort, HMAC-signed) before persisting the
-  // last_delivery status they record
-  const event = WEBHOOK_FOR[action]
-  if (event) { try { await integrations.fireWebhooks(db, event, { action, params, result }) } catch { /* best effort */ } }
+  // Persist the action FIRST (the handler ran synchronously on the db we
+  // loaded, so no other writer could interleave). Webhooks then fire with a
+  // network await — their last_delivery status is merged into a FRESHLY loaded
+  // store under the write mutex, so the await never sits between a load and a
+  // save of the whole document.
   ent.saveDb(db)
+  const event = WEBHOOK_FOR[action]
+  if (event) {
+    try {
+      await integrations.fireWebhooks(db, event, { action, params, result })
+      const delivered = (db.organizations?.[0]?.integrations?.webhooks ?? []) as Array<{ id?: string; url?: string; last_delivery?: unknown }>
+      if (delivered.some((w) => w.last_delivery)) {
+        await ent.withStore((fresh: any) => {
+          const hooks = (fresh.organizations?.[0]?.integrations?.webhooks ?? []) as Array<{ id?: string; url?: string; last_delivery?: unknown }>
+          for (const w of delivered) {
+            if (!w.last_delivery) continue
+            const target = hooks.find((h) => (w.id && h.id === w.id) || (!w.id && h.url === w.url))
+            if (target) target.last_delivery = w.last_delivery
+          }
+        })
+      }
+    } catch { /* best effort */ }
+  }
   return Response.json({ ok: true, result })
 }

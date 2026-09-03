@@ -11,6 +11,7 @@
  */
 import { callLLMText, type LLMOverride } from '@/lib/llm'
 import { overrideForRequest } from '@/lib/byok'
+import { assertCanSpend } from '@/lib/spend-gate'
 import { DESIGN_PROBLEM_SCHEMA, normalizeDesignProblem, type DesignProblem } from '@/lib/design-problem'
 import { optimize } from '@/lib/optimizer'
 import { scorableObjectiveNames } from '@/lib/evaluators'
@@ -115,6 +116,11 @@ export async function POST(req: Request) {
     const body = await req.json()
     const spec = body.spec as ProductSpec | undefined
     if (!spec?.product) return Response.json({ error: 'missing product spec' }, { status: 400 })
+    // Spend gate: no platform-funded inference for an account at 0 credits.
+    {
+      const gate = assertCanSpend(req)
+      if (gate) return gate
+    }
 
     const b = spec.budgets ?? {}
     const disc = Object.entries(spec.disciplines ?? {})

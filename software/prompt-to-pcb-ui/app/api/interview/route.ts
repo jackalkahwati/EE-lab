@@ -7,6 +7,7 @@
  */
 import { callLLMText, type LLMOverride } from '@/lib/llm'
 import { overrideForRequest } from '@/lib/byok'
+import { assertCanSpend } from '@/lib/spend-gate'
 import { MODEL } from '@/lib/model-tiers'
 import capabilities from '@/lib/block-capabilities.json'
 
@@ -212,6 +213,11 @@ export async function POST(req: Request) {
     const answers: Answer[] = Array.isArray(body.answers) ? body.answers : []
     if (!request.trim()) {
       return Response.json({ error: 'empty request' }, { status: 400 })
+    }
+    // Spend gate: no platform-funded inference for an account at 0 credits.
+    {
+      const gate = assertCanSpend(req)
+      if (gate) return gate
     }
 
     const qa = answers

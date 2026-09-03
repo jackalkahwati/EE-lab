@@ -258,7 +258,9 @@ async function runJob(job: V1Job, baseUrl: string) {
   job.startedAt = new Date().toISOString()
   await persist(job)
   const cookie = `fl_session=${makeSession(job.owner)}`
-  const headers = { cookie }
+  // Server-side fetches carry no Sec-Fetch-Site header, so the pipeline route's
+  // CSRF check needs an explicit non-browser marker alongside the session.
+  const headers = { cookie, 'x-requested-with': 'firstlight-v1-jobs' }
   try {
     // REBUILD mode: the run already has its spec + artifacts (e.g. a fork) —
     // skip ID/architect and go straight to the pipeline. With incremental

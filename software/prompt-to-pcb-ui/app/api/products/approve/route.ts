@@ -31,7 +31,13 @@ export async function POST(req: Request) {
   if (!product.boardId) {
     return Response.json({ error: 'product has no portfolio board yet (complete a build first)' }, { status: 409 })
   }
-  const db = ent.loadDb()
+  let db: any
+  try {
+    db = ent.loadDb()
+  } catch (e) {
+    if (ent.isStoreUnreadable(e)) return ent.storeUnreadableResponse()
+    throw e
+  }
   const a = approvals.requestApproval(db, {
     approval_type: 'board_review_approval',
     scope: { board_id: product.boardId },

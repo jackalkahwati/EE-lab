@@ -10,6 +10,8 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { callLLMText, type LLMOverride } from '@/lib/llm'
 import { overrideForRequest } from '@/lib/byok'
+import { isAdminRequest, runAccess } from '@/lib/auth'
+import { assertCanSpend } from '@/lib/spend-gate'
 import { sourcingPromptBlock } from '@/lib/sourcing'
 import { MODEL } from '@/lib/model-tiers'
 import { DISCIPLINE_MODULES, DISCIPLINE_ARTIFACT_SCHEMA, normalizeDisciplineArtifact } from '@/lib/discipline-artifact'
@@ -102,6 +104,20 @@ export async function POST(req: Request) {
     const mod = DISCIPLINE_MODULES[discipline]
     if (!spec?.product) return Response.json({ error: 'missing product spec' }, { status: 400 })
     if (!mod) return Response.json({ error: `unknown discipline: ${discipline}` }, { status: 400 })
+    // Ownership (with a runId the artifact is written under public/runs/<runId>/
+    // disciplines) + spend gate (platform-key inference without BYOK).
+    {
+      if (runId !== undefined) {
+        if (!RUN_ID.test(runId)) return Response.json({ error: 'invalid runId' }, { status: 400 })
+        const access = runAccess(req, runId)
+        if (access.access === 'unauthenticated') return Response.json({ error: 'sign in required' }, { status: 401 })
+        if (access.access !== 'owner' && !isAdminRequest(req)) {
+          return Response.json({ error: 'run belongs to another account' }, { status: 403 })
+        }
+      }
+      const gate = assertCanSpend(req)
+      if (gate) return gate
+    }
 
     // Ground in the REAL board — prefer the bespoke chip-scale board so every
     // discipline references the actual product board, not the flroute placeholder.

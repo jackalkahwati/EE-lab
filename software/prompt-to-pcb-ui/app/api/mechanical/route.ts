@@ -15,6 +15,8 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { callLLMText, type LLMOverride } from '@/lib/llm'
 import { overrideForRequest } from '@/lib/byok'
+import { isAdminRequest, runAccess } from '@/lib/auth'
+import { assertCanSpend } from '@/lib/spend-gate'
 import { MODEL } from '@/lib/model-tiers'
 import {
   MECH_PLAN_SCHEMA, normalizeMechPlan, selectCavity, evaluateFit, profileToShape, shapeDims, pcbShapeFromComponent,
@@ -240,6 +242,17 @@ export async function POST(req: Request) {
     const runId = typeof body.runId === 'string' ? body.runId : undefined
     if (!spec?.product) return Response.json({ error: 'missing product spec' }, { status: 400 })
     if (!runId || !RUN_ID.test(runId)) return Response.json({ error: 'missing/invalid runId' }, { status: 400 })
+    // Ownership + spend gate: this route writes public/runs/<runId>/mechanical
+    // and puts inference on the platform key unless the caller brings a key.
+    {
+      const access = runAccess(req, runId)
+      if (access.access === 'unauthenticated') return Response.json({ error: 'sign in required' }, { status: 401 })
+      if (access.access !== 'owner' && !isAdminRequest(req)) {
+        return Response.json({ error: 'run belongs to another account' }, { status: 403 })
+      }
+      const gate = assertCanSpend(req)
+      if (gate) return gate
+    }
 
     // ground the plan in the REAL built board footprint — prefer the chip-scale
     // board (electronics-cs) if it exists, else the flroute board.json

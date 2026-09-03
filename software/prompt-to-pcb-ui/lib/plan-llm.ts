@@ -21,6 +21,7 @@
 import { getUser, isAdminRequest, sessionEmail, type Plan } from '@/lib/auth'
 import { overrideForRequest } from '@/lib/byok'
 import type { LLMOverride } from '@/lib/llm'
+import { spendBlockReason } from '@/lib/spend-gate'
 import {
   defaultModelForPlan,
   findModel,
@@ -86,6 +87,19 @@ export function resolvePlanModel(req: Request, requestedId?: string | null): Res
   // (defense in depth; the selector already hides locked models).
   if (process.env.OPENROUTER_API_KEY) {
     const picked = modelAllowed(plan, model) ? model : defaultModelForPlan(plan)
+    // Credit pre-check: platform money is never spent for an account at 0
+    // credits (charging still happens once, at run end — lib/spend-gate.ts).
+    const block = spendBlockReason(req)
+    if (block) {
+      return {
+        override: {},
+        model: picked,
+        creditMult: picked.creditMult,
+        source: 'platform',
+        error: block.error,
+        status: 402,
+      }
+    }
     return {
       override: { provider: 'openrouter', apiKey: process.env.OPENROUTER_API_KEY, model: picked.openrouterModel },
       model: picked,

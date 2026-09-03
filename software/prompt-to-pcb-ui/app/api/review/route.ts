@@ -12,6 +12,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { callLLMText } from '@/lib/llm'
 import { overrideForRequest } from '@/lib/byok'
+import { assertCanSpend } from '@/lib/spend-gate'
 import { isValidRunId, runAccess } from '@/lib/auth'
 import { kicadCli, kicadPython } from '@/lib/toolchain'
 
@@ -112,6 +113,11 @@ export async function POST(req: Request) {
   const auth = runAccess(req, id)
   if (auth.access === 'unauthenticated') {
     return Response.json({ error: 'sign in required' }, { status: 401 })
+  }
+  // Spend gate: no platform-funded inference for an account at 0 credits.
+  {
+    const gate = assertCanSpend(req)
+    if (gate) return gate
   }
   if (auth.access === 'forbidden') {
     return Response.json({ error: 'not your board' }, { status: 403 })

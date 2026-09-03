@@ -26,6 +26,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { loadGroundBoard } from '@/lib/ground-board'
+import { isAdminRequest, runAccess } from '@/lib/auth'
 import type { ProductSpec } from '@/lib/product-spec'
 import { planSimulations, judge } from '@/lib/sim-router'
 
@@ -60,6 +61,16 @@ export async function POST(req: Request) {
     const runId = typeof body.runId === 'string' ? body.runId : undefined
     const design = (body.design ?? {}) as Record<string, number | string>
     if (!spec?.product) return Response.json({ error: 'missing product spec' }, { status: 400 })
+    // Ownership: with a runId the route writes disciplines/simulation.json (and
+    // sim artifacts) under public/runs/<runId>/ — owner or admin only.
+    if (runId !== undefined) {
+      if (!RUN_ID.test(runId)) return Response.json({ error: 'invalid runId' }, { status: 400 })
+      const access = runAccess(req, runId)
+      if (access.access === 'unauthenticated') return Response.json({ error: 'sign in required' }, { status: 401 })
+      if (access.access !== 'owner' && !isAdminRequest(req)) {
+        return Response.json({ error: 'run belongs to another account' }, { status: 403 })
+      }
+    }
 
     let boardAreaMm2: number | undefined
     let boardMm: { w: number; h: number } | undefined

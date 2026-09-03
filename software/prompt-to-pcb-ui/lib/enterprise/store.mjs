@@ -66,20 +66,87 @@ function emptyDb() {
   }
 }
 
+/** Thrown when store.json exists but cannot be read or parsed. Callers must
+ *  surface this (503 'store unreadable'), NEVER treat the store as empty — an
+ *  empty in-memory db saved back would erase every program, approval and
+ *  audit entry. */
+export class StoreUnreadableError extends Error {
+  constructor(cause) {
+    super('enterprise store unreadable')
+    this.name = 'StoreUnreadableError'
+    this.code = 'STORE_UNREADABLE'
+    this.cause = cause
+  }
+}
+
+export function isStoreUnreadable(e) {
+  return e instanceof StoreUnreadableError || e?.code === 'STORE_UNREADABLE'
+}
+
+/** 503 JSON body for a caller that hit StoreUnreadableError. */
+export function storeUnreadableResponse() {
+  return Response.json(
+    { error: 'store unreadable', detail: 'enterprise store.json exists but could not be read/parsed; refusing to proceed on an empty store' },
+    { status: 503 },
+  )
+}
+
 export function loadDb() {
+  let raw
   try {
-    return JSON.parse(fs.readFileSync(STORE, 'utf8'))
-  } catch {
-    return emptyDb()
+    raw = fs.readFileSync(STORE, 'utf8')
+  } catch (e) {
+    // Only a MISSING store is legitimately empty (fresh deploy, test tmpdir).
+    if (e?.code === 'ENOENT') return emptyDb()
+    throw new StoreUnreadableError(e)
+  }
+  try {
+    const db = JSON.parse(raw)
+    if (!db || typeof db !== 'object' || Array.isArray(db)) {
+      throw new Error('store root must be an object')
+    }
+    return db
+  } catch (e) {
+    throw new StoreUnreadableError(e)
   }
 }
 
 export function saveDb(db) {
   fs.mkdirSync(STORE_DIR, { recursive: true })
-  const tmp = STORE + '.tmp'
-  fs.writeFileSync(tmp, JSON.stringify(db, null, 1))
-  fs.renameSync(tmp, STORE)
+  // Unique temp name per write: two concurrent writers sharing one '.tmp' path
+  // could interleave and rename a half-written file into place.
+  const tmp = `${STORE}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(db, null, 1))
+    fs.renameSync(tmp, STORE)
+  } catch (e) {
+    try { fs.unlinkSync(tmp) } catch { /* already gone */ }
+    throw e
+  }
   return db
+}
+
+// In-process write mutex: a simple promise chain so read-modify-write
+// sections never interleave across awaits (one Node process serves the app).
+let writeChain = Promise.resolve()
+
+/**
+ * Run `fn(db)` with the store loaded FRESH inside the mutex and saved after
+ * (only when fn returns without throwing and does not return `false`).
+ * Returns fn's result. Use this for every handler that awaits between load
+ * and save (network, file upload) so a concurrent writer cannot be clobbered.
+ */
+export function withStore(fn) {
+  const run = async () => {
+    const db = loadDb()
+    const result = await fn(db)
+    if (result !== false) saveDb(db)
+    return result
+  }
+  const next = writeChain.then(run, run)
+  // keep the chain alive even when this section throws
+  writeChain = next.then(() => undefined, () => undefined)
+  return next
 }
 
 export function resetDb() {

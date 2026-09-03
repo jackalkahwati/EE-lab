@@ -17,7 +17,7 @@
  * The stored key is never returned by any API — only provider + last4.
  */
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto'
-import { getUser, sessionEmail, updateUser, type UserRecord } from '@/lib/auth'
+import { authSecret, getUser, sessionEmail, updateUser, type UserRecord } from '@/lib/auth'
 import { overrideFromHeaders, type LLMOverride } from '@/lib/llm'
 
 export interface StoredLlmKey {
@@ -29,8 +29,10 @@ export interface StoredLlmKey {
 }
 
 function encryptionKey(): Buffer {
-  const secret = process.env.AUTH_SECRET || process.env.FL_PASSWORD || 'firstlight-dev-secret'
-  return scryptSync(secret, 'fl-byok-v1', 32)
+  // authSecret() falls back to the dev secret only outside production and
+  // THROWS in production when neither AUTH_SECRET nor FL_PASSWORD is set — a
+  // known checked-in key must never encrypt customer API keys at rest.
+  return scryptSync(authSecret(), 'fl-byok-v1', 32)
 }
 
 export function encryptKey(apiKey: string): string {
