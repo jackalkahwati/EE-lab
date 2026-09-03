@@ -17,6 +17,8 @@ import { overrideForRequest } from '@/lib/byok'
 import { pinsPromptFor } from '@/lib/design-state'
 import { MODEL } from '@/lib/model-tiers'
 import type { ProductSpec } from '@/lib/product-spec'
+import { planSimulations, judge, isRequiredFail, thermalEnvFromPlan, type SimPlan } from '@/lib/sim-router'
+import { judgeThermal, MIN_MARGIN_C } from '@/lib/sim-judge'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 200
@@ -52,7 +54,17 @@ function runSim(reqObj: Record<string, unknown>): Promise<any> {
 
 const DEFAULT_DUTY = 0.02
 
-function simInputs(b: Budgets, boardAreaMm2?: number) {
+/** Extra solver inputs read once per request and held constant across iterations. */
+type SimCtx = {
+  /** the run's power-budget.json (rail currents → on-board dissipation), if any */
+  powerBudget?: Record<string, unknown>
+  /** real board w×h — sent only while the enclosure budget is unchanged (once the
+   *  loop enlarges sizeMm the board may grow to fill it; see effectiveArea) */
+  boardMm?: { w: number; h: number }
+  layerCount?: number
+}
+
+function simInputs(b: Budgets, boardAreaMm2: number | undefined, plan: SimPlan, ctx: SimCtx, sizeChanged: boolean) {
   const p = b?.power ?? {}
   // Mirror the /api/simulate duty model so the loop scores runtime the same way:
   // a specified sleep power implies a duty-cycled device → average, not peak, draw.
@@ -61,6 +73,12 @@ function simInputs(b: Budgets, boardAreaMm2?: number) {
     activeMw: p.activeMw, batteryMah: p.batteryMah, boardAreaMm2, massG: b?.massG,
     envelopeMm: b?.sizeMm, runtimeTargetHours: p.runtimeHours,
     sleepUw: p.sleepUw, dutyCycle,
+    // same thermal contract as /api/simulate: the reliability class's junction
+    // rating is the solver limit; rail data gives on-board power (else a stated fraction)
+    limitC: plan.environment.ratingC ?? 85,
+    powerBudget: ctx.powerBudget,
+    boardMm: sizeChanged ? undefined : ctx.boardMm,
+    layerCount: ctx.layerCount,
   }
 }
 
@@ -76,7 +94,15 @@ function effectiveArea(b: Budgets, fallback?: number): number | undefined {
 /** Read the mechanical stage's REAL fit result (does the real PCB fit the real
  *  enclosure cavity) — the honest fit signal, more accurate than the board-vs-
  *  envelope estimate. Null if the mechanical stage hasn't run for this run. */
-async function realMechFit(runId?: string): Promise<{ fits: boolean; enclosureMm: { w: number; h: number }; pcbMm: { w: number; h: number } } | null> {
+type FitCheck = {
+  fits: boolean
+  enclosureMm: { w: number; h: number }
+  /** the real pocket the board must fit (enclosure − walls); absent on legacy files */
+  cavityMm?: { w: number; h: number } | null
+  pcbMm: { w: number; h: number }
+  problems?: string[]
+}
+async function realMechFit(runId?: string): Promise<FitCheck | null> {
   if (!runId || !RUN_ID.test(runId)) return null
   try {
     const m = JSON.parse(await fs.readFile(path.join(process.cwd(), 'public', 'runs', runId, 'mechanical', 'mechanical.json'), 'utf8'))
@@ -99,11 +125,49 @@ const WALL_MM = 1.5
  *  has changed sizeMm, skip the stale file and re-evaluate fit LOCALLY against
  *  the UPDATED budgets: real board dims vs (envelope − 2×wall) cavity, the same
  *  comparison the mechanical stage makes. */
-async function violations(b: Budgets, board: { wMm?: number; hMm?: number }, boardAreaMm2?: number, runId?: string, sizeChanged = false) {
-  const v: { id: string; kind: string; detail: string }[] = []
+type Violation = { id: string; kind: string; detail: string }
+
+/** Simulation violations from the JUDGE (lib/sim-router.ts judge → lib/sim-judge.ts
+ *  for thermal), never from the solver's raw pass flag: the raw flag knows nothing
+ *  about the application ambient or the reliability class, so a router-only fail
+ *  used to yield zero violations and a bogus 'converged'. Required + recommended
+ *  fails become violations; 'model_invalid' / 'unknown' are not design fails and
+ *  never block convergence. Solver results the plan does not cover (rf, acoustic…)
+ *  keep the raw flag as the only signal there is. */
+function simViolations(plan: SimPlan, results: Record<string, any>[]): { v: Violation[]; requiredFail: boolean; assessments: ReturnType<typeof judge>['assessments'] } {
+  const v: Violation[] = []
+  const { assessments } = judge(plan, results)
+  const byKind = new Map(results.filter((r) => r && typeof r.sim === 'string').map((r) => [r.sim as string, r]))
+  for (const a of assessments) {
+    if (a.verdict !== 'fail' || a.applicability === 'optional' || a.applicability === 'not_applicable') continue
+    let detail = `${a.kind} (${a.applicability}): ${a.detail}`
+    if (a.kind === 'thermal') {
+      // concrete lever for the controller: how much less board heat closes the gap
+      const j = judgeThermal(byKind.get('thermal'), { ...thermalEnvFromPlan(plan), ambientC: plan.requirements.find((r) => r.kind === 'thermal')?.target?.ambientC ?? plan.environment.ambientC })
+      if (j.junctionC != null && j.riseC != null && j.riseC > 0) {
+        const over = j.junctionC + MIN_MARGIN_C - j.limitC
+        const cut = Math.min(0.95, Math.max(0, over / (j.junctionC - j.ambientC)))
+        detail += ` — needs ${Math.round(over)}°C less rise: cut on-board dissipation ~${Math.round(cut * 100)}% (activeMw) and/or enlarge board/enclosure area (sizeMm) for more convective surface`
+      }
+    }
+    v.push({ id: `sim:${a.kind}`, kind: 'sim', detail })
+  }
+  const planned = new Set(plan.requirements.map((r) => r.kind as string))
+  for (const r of results) {
+    if (r && typeof r.sim === 'string' && !planned.has(r.sim) && r.pass === false)
+      v.push({ id: `sim:${r.sim}`, kind: 'sim', detail: `${r.sim} ${r.metric} = ${r.value}${r.unit} vs limit ${r.limit}` })
+  }
+  return { v, requiredFail: assessments.some(isRequiredFail), assessments }
+}
+
+async function violations(spec: ProductSpec, b: Budgets, board: { wMm?: number; hMm?: number }, boardAreaMm2: number | undefined, runId: string | undefined, sizeChanged: boolean, ctx: SimCtx) {
+  const v: Violation[] = []
+  let requiredSimFail = false
   const mechFit = sizeChanged ? null : await realMechFit(runId)
   if (mechFit && mechFit.fits === false) {
-    v.push({ id: 'fit', kind: 'fit', detail: `real PCB ${mechFit.pcbMm.w}×${mechFit.pcbMm.h}mm does not fit the enclosure cavity ${mechFit.enclosureMm.w}×${mechFit.enclosureMm.h}mm` })
+    const cav = mechFit.cavityMm ?? mechFit.enclosureMm
+    const probs = Array.isArray(mechFit.problems) && mechFit.problems.length ? ` — ${mechFit.problems.join('; ')}` : ''
+    v.push({ id: 'fit', kind: 'fit', detail: `real PCB ${mechFit.pcbMm.w}×${mechFit.pcbMm.h}mm does not fit the enclosure cavity ${cav.w}×${cav.h}mm${probs}` })
   } else if (!mechFit) {
     const env = b?.sizeMm
     if (board.wMm && board.hMm && env?.x && env?.y) {
@@ -113,7 +177,12 @@ async function violations(b: Budgets, board: { wMm?: number; hMm?: number }, boa
       if (!fits) v.push({ id: 'fit', kind: 'fit', detail: `real board ${Math.round(board.wMm)}×${Math.round(board.hMm)}mm exceeds ${sizeChanged ? `the ${env.x}×${env.y}mm enclosure's cavity (−${2 * WALL_MM}mm walls)` : `envelope ${env.x}×${env.y}mm`}` })
     }
   }
-  const sim = await runSim(simInputs(b, boardAreaMm2))
+  // re-plan against THIS iteration's budgets (activeMw / sizeMm move the requirements)
+  const plan = planSimulations({ ...spec, budgets: b }, {
+    hasBattery: !!b?.power?.batteryMah,
+    rails: Object.keys((ctx.powerBudget as any)?.rails ?? {}).length,
+  })
+  const sim = await runSim(simInputs(b, boardAreaMm2, plan, ctx, sizeChanged))
   if (sim?.error) {
     // First-class violation that NO budget change can ever clear: the checker
     // itself is down, so sim compliance is unknowable and convergence would be
@@ -121,11 +190,11 @@ async function violations(b: Budgets, board: { wMm?: number; hMm?: number }, boa
     // 'blocked-capability-gap', never 'converged'.
     v.push({ id: 'sim-unavailable', kind: 'sim-unavailable', detail: `simulation checker unavailable: ${sim.error}` })
   } else {
-    for (const r of sim.results ?? []) {
-      if (r && r.pass === false) v.push({ id: `sim:${r.sim}`, kind: 'sim', detail: `${r.sim} ${r.metric} = ${r.value}${r.unit} vs limit ${r.limit}` })
-    }
+    const sv = simViolations(plan, Array.isArray(sim.results) ? sim.results : [])
+    v.push(...sv.v)
+    requiredSimFail = sv.requiredFail
   }
-  return v
+  return { v, requiredSimFail }
 }
 
 const CONTROLLER_SYS = `detailed thinking off.
@@ -204,6 +273,21 @@ export async function POST(req: Request) {
     // : llmOpts` form dropped the model tier for BYOK callers.
     const override = overrideForRequest(req)
 
+    // held constant across iterations: the run's power budget (rail currents →
+    // on-board dissipation) and the real board dims/layers (see SimCtx)
+    const simCtx: SimCtx = {}
+    if (runId && RUN_ID.test(runId)) {
+      try {
+        const pb = JSON.parse(await fs.readFile(path.join(process.cwd(), 'public', 'runs', runId, 'data', 'power-budget.json'), 'utf8'))
+        if (pb && typeof pb === 'object') simCtx.powerBudget = pb
+      } catch { /* no power budget for this run */ }
+      try {
+        const cs = JSON.parse(await fs.readFile(path.join(process.cwd(), 'public', 'runs', runId, 'electronics', 'chipscale-board.json'), 'utf8'))
+        if (typeof cs?.layers === 'number' && cs.layers > 0) simCtx.layerCount = cs.layers
+      } catch { /* none */ }
+    }
+    if (board.wMm && board.hMm) simCtx.boardMm = { w: board.wMm, h: board.hMm }
+
     let budgets = spec.budgets
     const iterations: any[] = []
     const capabilityGaps: { violation: string; module: string; gap: string }[] = []
@@ -218,7 +302,7 @@ export async function POST(req: Request) {
           capabilityGaps.push({ violation: viol.id, module: 'simulation', gap: viol.detail })
       }
     }
-    let remaining = await violations(budgets, board, effectiveArea(budgets, boardAreaMm2), runId, sizeChanged())
+    let { v: remaining, requiredSimFail } = await violations(spec, budgets, board, effectiveArea(budgets, boardAreaMm2), runId, sizeChanged(), simCtx)
     registerSimGap(remaining)
 
     for (let it = 0; it < MAX_ITERS && remaining.length > 0; it++) {
@@ -250,7 +334,7 @@ export async function POST(req: Request) {
       const before = remaining.map((v) => v.id)
       // re-evaluate against the UPDATED budgets — sizeChanged() makes the fit
       // check track the new enclosure instead of the frozen mechanical.json
-      remaining = await violations(budgets, board, effectiveArea(budgets, boardAreaMm2), runId, sizeChanged())
+      ;({ v: remaining, requiredSimFail } = await violations(spec, budgets, board, effectiveArea(budgets, boardAreaMm2), runId, sizeChanged(), simCtx))
       registerSimGap(remaining)
       const resolved = before.filter((id) => !remaining.some((v) => v.id === id))
       iterations.push({ iter: it + 1, applied, resolved, remaining: remaining.map((v) => v.detail), budgets })
@@ -260,9 +344,13 @@ export async function POST(req: Request) {
       if (!applied.length) break
     }
 
-    const converged = remaining.length === 0
+    // converged only when nothing remains AND no REQUIRED analysis still fails its
+    // application requirement (a required judge fail is always in `remaining`, so
+    // this is belt-and-braces against the two ever drifting apart)
+    const converged = remaining.length === 0 && !requiredSimFail
     const out = {
       converged,
+      requiredSimFail,
       status: converged ? 'converged' : (capabilityGaps.length ? 'blocked-capability-gap' : 'not-converged'),
       iterations,
       finalBudgets: budgets,

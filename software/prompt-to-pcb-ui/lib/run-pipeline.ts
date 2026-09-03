@@ -21,6 +21,7 @@
  * so nothing is duplicated — the orchestrator only sequences + wires feedback.
  */
 import type { ProductSpec } from '@/lib/product-spec'
+import { isRequiredFail } from '@/lib/sim-router'
 
 export type PipeStage =
   | 'electronics' | 'mechanical' | 'simulation'
@@ -147,6 +148,51 @@ async function runDiscipline(stage: PipeStage, spec: ProductSpec, opts: RunOpts)
   const d = await postJson('/api/discipline', { spec, runId: opts.runId, discipline: stage }, opts)
   if (d?.error) return { stage, status: 'failed', detail: String(d.error) }
   return { stage, status: 'passed', detail: d?.artifact?.summary || 'artifact generated' }
+}
+
+/**
+ * Simulation stage verdict from a /api/simulate payload. ONE rule, used for the
+ * first pass and the post-redesign re-check alike:
+ *   - the stage FAILS only when a REQUIRED analysis's judged verdict is 'fail'
+ *     (lib/sim-router.ts judge → lib/sim-judge.ts for thermal);
+ *   - recommended/optional fails, 'model_invalid' (physically absurd solver
+ *     output — a modelling problem, not a design fail), 'unknown', required gaps
+ *     and raw solver pass=false flags on analyses the plan does not cover are all
+ *     surfaced as WARNINGS in the detail and never fail the stage.
+ */
+export function simStageVerdict(d: any): { status: 'passed' | 'failed'; detail: string; fails: string[]; warnings: string[] } {
+  const assessments = (d?.assessment?.assessments ?? []) as any[]
+  const results = (d?.results ?? []) as any[]
+  const planned = new Set(assessments.map((a) => a.kind))
+  const fails = assessments.filter(isRequiredFail).map((a) => `${a.kind}: ${a.detail}`)
+  const warnings: string[] = []
+  for (const a of assessments) {
+    if (a.verdict === 'fail' && a.applicability !== 'required') warnings.push(`${a.kind} (${a.applicability}) fails: ${a.detail}`)
+    else if (a.verdict === 'model_invalid') warnings.push(`${a.kind}: MODEL INVALID — ${a.detail}`)
+    else if (a.verdict === 'unknown') warnings.push(`${a.kind}: no scoreable result — ${a.detail}`)
+  }
+  for (const r of results)
+    if (r && typeof r.sim === 'string' && !planned.has(r.sim) && r.pass === false)
+      warnings.push(`${r.sim} ${r.value}${r.unit ?? ''} vs ${r.limit} (solver limit; no application requirement planned)`)
+  const gaps = (d?.assessment?.gaps ?? []) as string[]
+  if (gaps.length) warnings.push(`${gaps.length} required check(s) could not run: ${gaps.join('; ')}`)
+  const warn = warnings.length ? ` — warnings: ${warnings.join('; ')}` : ''
+  return fails.length
+    ? { status: 'failed', detail: `${fails.length} required sim(s) fail the application requirement: ${fails.join('; ')}${warn}`, fails, warnings }
+    : { status: 'passed', detail: `all required sims meet application requirements${warn}`, fails, warnings }
+}
+
+/** Mechanical stage detail from a /api/mechanical payload's fitCheck. Prints the
+ *  real CAVITY the board must fit (falls back to the outer enclosure only when the
+ *  route did not report a cavity) and appends the route's concrete problems. */
+export function mechFitDetail(d: any): string {
+  const fc = d?.fitCheck
+  if (!fc) return d?.part ? `${d.part} — fit check not run` : 'enclosure built — fit check not run'
+  const cav = fc.cavityMm ?? fc.enclosureMm
+  const probs: string[] = Array.isArray(fc.problems) ? fc.problems.filter((p: unknown) => typeof p === 'string') : []
+  const tail = probs.length ? ` — ${probs.join('; ')}` : ''
+  if (fc.fits) return `PCB ${fc.pcbMm?.w}×${fc.pcbMm?.h}mm fits the cavity ${cav?.w}×${cav?.h}mm${tail}`
+  return `PCB ${fc.pcbMm?.w}×${fc.pcbMm?.h}mm does NOT fit cavity ${cav?.w}×${cav?.h}mm${tail}`
 }
 
 /** Order-insensitive deep compare, used to tell a real budget change from a re-serialized identical one. */
@@ -424,8 +470,9 @@ async function runPipelineStages(opts: RunOpts, timer: RunTimer): Promise<Pipeli
         if (d?.ok) {
           const fits = d.fitCheck ? d.fitCheck.fits : null
           mechFitFails = fits === false
-          set('mechanical', fits === false ? 'failed' : 'passed',
-            d.fitCheck ? (fits ? 'PCB fits the cavity' : `PCB ${d.fitCheck.pcbMm.w}×${d.fitCheck.pcbMm.h}mm does NOT fit cavity ${d.fitCheck.enclosureMm.w}×${d.fitCheck.enclosureMm.h}mm`) : (d.part || 'enclosure built'))
+          // null fitCheck → the route built the part but could not check fit: passed,
+          // but the detail says so plainly (not a silent "fits")
+          set('mechanical', fits === false ? 'failed' : 'passed', mechFitDetail(d))
         } else {
           set('mechanical', 'failed', String(d?.error || 'enclosure build failed'))
         }
@@ -445,21 +492,15 @@ async function runPipelineStages(opts: RunOpts, timer: RunTimer): Promise<Pipeli
         const d = await postJson('/api/simulate', { spec, runId: opts.runId }, opts)
         if (d?.error) set('simulation', 'failed', String(d.error))
         else {
-          // Combine raw solver fails with the ROUTER's application-aware verdicts.
-          // The router catches fails the raw pass-flag misses (e.g. a 92°C "pass"
-          // at the solver's 22°C ambient is a FAIL at the product's 55°C ambient),
-          // keyed by analysis so the richer judged description wins.
-          const byKind = new Map<string, string>()
-          for (const r of (d.results ?? []) as any[])
-            if (r?.pass === false) byKind.set(r.sim, `${r.sim} ${r.value}${r.unit} vs ${r.limit}`)
-          for (const a of (d.assessment?.assessments ?? []) as any[])
-            if (a.verdict === 'fail') byKind.set(a.kind, `${a.kind}: ${a.detail}`)
-          simFails = [...byKind.values()]
+          // The ROUTER's application-aware verdicts decide (a 5°C rise at 55°C
+          // industrial ambient passes; a 92°C junction at 40°C does not) — only a
+          // REQUIRED analysis judged 'fail' fails the stage; everything else
+          // (recommended fails, model_invalid, unknown, gaps) is a warning.
+          const sv = simStageVerdict(d)
+          simFails = sv.fails
           // required analyses that could not run — surfaced, never a silent pass
           simGaps = (d.assessment?.gaps ?? []) as string[]
-          set('simulation', simFails.length ? 'failed' : 'passed',
-            simFails.length ? `${simFails.length} sim(s) fail the application requirement: ${simFails.join('; ')}`
-              : (simGaps.length ? `within limits (but ${simGaps.length} required check(s) could not run)` : 'all sims meet application requirements'))
+          set('simulation', sv.status, sv.detail)
         }
       } catch (e) { setCaught('simulation', e) }
       }
@@ -474,7 +515,9 @@ async function runPipelineStages(opts: RunOpts, timer: RunTimer): Promise<Pipeli
           feedback = { status: d.status, capabilityGaps: d.capabilityGaps ?? [], remaining: [...(d.remaining ?? []), ...simGaps] }
           // achievable budget changes -> adopt them + re-run mechanical once so the
           // fit actually closes. Capability gaps are surfaced, not faked around.
-          const budgetsChanged = d.finalBudgets && JSON.stringify(d.finalBudgets) !== JSON.stringify(spec.budgets)
+          // deep compare (same rule as the fork reconciliation below) — key order
+          // from a JSON round-trip must not read as a budget change
+          const budgetsChanged = !!d.finalBudgets && !deepEqual(d.finalBudgets, spec.budgets)
           if (d.status === 'converged' && budgetsChanged) {
             spec = { ...spec, budgets: d.finalBudgets }
             if (applicable('mechanical') && !aborted()) {
@@ -483,7 +526,7 @@ async function runPipelineStages(opts: RunOpts, timer: RunTimer): Promise<Pipeli
                 const m = await postJson('/api/mechanical', { spec, runId: opts.runId }, opts)
                 const fits = m?.ok && m.fitCheck ? m.fitCheck.fits : null
                 set('mechanical', fits === false ? 'failed' : 'passed',
-                  fits === false ? 'still does not fit after redesign' : 'fits after redesign')
+                  fits === false ? `still does not fit after redesign — ${mechFitDetail(m)}` : m?.fitCheck ? 'fits after redesign' : 'rebuilt after redesign — fit check not run')
               } catch (e) { setCaught('mechanical', e) }
             }
             // The redesign closed the sim FAILs by changing budgets — re-run the sim
@@ -495,9 +538,9 @@ async function runPipelineStages(opts: RunOpts, timer: RunTimer): Promise<Pipeli
                 const s = await postJson('/api/simulate', { spec, runId: opts.runId }, opts)
                 if (s?.error) set('simulation', 'failed', String(s.error))
                 else {
-                  const fails = (s.results ?? []).filter((r: any) => r?.pass === false).map((r: any) => `${r.sim} ${r.value}${r.unit} vs ${r.limit}`)
-                  set('simulation', fails.length ? 'failed' : 'passed',
-                    fails.length ? `${fails.length} sim(s) still over limit: ${fails.join('; ')}` : 'all sims within limits after redesign')
+                  // same judged rule as the first pass — never the raw solver flag
+                  const sv = simStageVerdict(s)
+                  set('simulation', sv.status, `after redesign: ${sv.detail}`)
                 }
               } catch (e) { setCaught('simulation', e) }
             }

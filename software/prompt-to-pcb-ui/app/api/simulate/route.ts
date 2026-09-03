@@ -66,6 +66,9 @@ export async function POST(req: Request) {
     let layerCount: number | undefined
     let enclosureStep: string | undefined
     let pdn: Record<string, unknown> | undefined
+    // the run's power-budget.json, passed whole so the thermal solver can derive
+    // ON-BOARD dissipation from rail currents (not the product's activeMw budget)
+    let powerBudget: Record<string, unknown> | undefined
     let autoAntenna: string | undefined
     if (runId && RUN_ID.test(runId)) {
       // real Onshape CAD (when the mechanical stage has run) → 3D FEA target
@@ -87,6 +90,7 @@ export async function POST(req: Request) {
       try {
         const dataDir = path.join(process.cwd(), 'public', 'runs', runId, 'data')
         const pb = JSON.parse(await fs.readFile(path.join(dataDir, 'power-budget.json'), 'utf8'))
+        if (pb && typeof pb === 'object') powerBudget = pb
         const rails = Object.entries(pb?.rails ?? {}).map(([name, r]) => ({
           name,
           worstMa: typeof (r as any)?.worst_ma === 'number' ? (r as any).worst_ma : 0,
@@ -160,13 +164,11 @@ export async function POST(req: Request) {
       pdn,
     }
 
-    const out = await runSim(simReq)
-    const results = out.results ?? []
-
-    // Router: decide WHICH analyses this application requires, then judge each
-    // solver result against that requirement. Availability of a result is not the
-    // same as meeting the requirement, and a REQUIRED analysis that did not run is
-    // a surfaced gap — never a silent pass.
+    // Router: decide WHICH analyses this application requires (planned BEFORE the
+    // solve so the thermal solver gets the application's junction rating as its
+    // limitC), then judge each solver result against that requirement.
+    // Availability of a result is not the same as meeting the requirement, and a
+    // REQUIRED analysis that did not run is a surfaced gap — never a silent pass.
     const plan = planSimulations(spec, {
       hasEnclosure: !!enclosureStep,
       hasRadio: !!autoAntenna,
@@ -175,6 +177,13 @@ export async function POST(req: Request) {
       isAudio: /audio|speaker|headphone|earbud|hearable|microphone/i.test(
         `${spec.product} ${spec.description ?? ''}`),
     })
+    // thermal pass/fail limit = the reliability class's junction rating (lib/sim-judge.ts);
+    // the solver's own default is 85. The 43°C skin figure is never the solver limit.
+    simReq.limitC = plan.environment.ratingC ?? 85
+    simReq.powerBudget = powerBudget
+
+    const out = await runSim(simReq)
+    const results = out.results ?? []
     const assessment = judge(plan, results)
 
     const payload = {

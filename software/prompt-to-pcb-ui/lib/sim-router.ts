@@ -19,13 +19,20 @@
  * with stated assumptions — never invented silently.
  */
 import type { ProductSpec } from '@/lib/product-spec'
+// relative import with the .ts extension (not '@/') so a plain Node replay script
+// (scripts/replay-sim-judge.mjs) can load this module; tsconfig allows it.
+import { judgeThermal, reliabilityClassFromEnv, reliabilityClassOf, isSkinContact, JUNCTION_RATING_C, type ReliabilityClass } from './sim-judge.ts'
 
 export type SimKind =
   | 'thermal' | 'drop' | 'structural3d' | 'enclosure_fea' | 'cfd_thermal'
   | 'pdn' | 'antenna_fdtd' | 'rf' | 'cavity_acoustic' | 'acoustic' | 'battery'
 
 export type Applicability = 'required' | 'recommended' | 'optional' | 'not_applicable'
-export type Verdict = 'pass' | 'tight' | 'fail' | 'no_data' | 'not_run'
+/** 'no_data'      — the analysis did not run (a GAP when required)
+ *  'unknown'      — it ran but returned nothing scoreable
+ *  'model_invalid'— it ran but the number is physically absurd (thermal peak >200°C):
+ *                   a modelling problem to surface, never a design fail */
+export type Verdict = 'pass' | 'tight' | 'fail' | 'no_data' | 'not_run' | 'unknown' | 'model_invalid'
 
 export interface SimRequirement {
   kind: SimKind
@@ -39,6 +46,11 @@ export interface SimPlan {
   environment: {
     class: 'benign' | 'consumer' | 'industrial' | 'rugged' | 'automotive'
     ambientC: number
+    /** reliability class → component junction rating (lib/sim-judge.ts) */
+    reliabilityClass?: ReliabilityClass
+    ratingC?: number
+    /** handheld / wearable / skin-contact → 43°C touch limit also applies */
+    skinContact?: boolean
     vibration: boolean
     vibHint: string
     ip?: string
@@ -69,7 +81,20 @@ function classifyEnv(spec: ProductSpec) {
   const vibHint = cls === 'automotive' ? 'ISO 16750 / broadband to ~2 kHz'
     : cls === 'rugged' ? 'MIL-STD-810 random vibe / drop'
     : vibration ? 'motor/handling excitation to a few hundred Hz' : 'benign (desktop)'
-  return { class: cls, ambientC, vibration, vibHint, ip, sealed }
+  // consumer is the catch-all class: let the finer reliability-string read decide the rating there
+  const reliabilityClass = cls === 'consumer' ? reliabilityClassOf(spec) : reliabilityClassFromEnv(cls)
+  return {
+    class: cls, ambientC, vibration, vibHint, ip, sealed,
+    reliabilityClass, ratingC: JUNCTION_RATING_C[reliabilityClass], skinContact: isSkinContact(spec),
+  }
+}
+
+/** Thermal environment for the judge from a plan (legacy stored plans lack the
+ *  reliability fields — fall back from the service class). */
+export function thermalEnvFromPlan(plan: SimPlan) {
+  const e = plan.environment
+  const reliabilityClass = e.reliabilityClass ?? reliabilityClassFromEnv(e.class)
+  return { reliabilityClass, ambientC: e.ambientC, skinContact: e.skinContact ?? false }
 }
 
 export function planSimulations(spec: ProductSpec, ctx?: { hasRadio?: boolean; isAudio?: boolean; hasBattery?: boolean; hasEnclosure?: boolean; rails?: number }): SimPlan {
@@ -87,7 +112,7 @@ export function planSimulations(spec: ProductSpec, ctx?: { hasRadio?: boolean; i
     reqs.push({
       kind: 'thermal', applicability: activeMw >= 2000 || env.sealed ? 'required' : 'recommended',
       reason: `${activeMw} mW dissipated${env.sealed ? ' in a sealed enclosure' : ''} at up to ${env.ambientC}°C ambient`,
-      requirement: `all junctions below rating with ≥10°C margin at ${env.ambientC}°C ambient`,
+      requirement: `all junctions below the ${env.ratingC}°C ${env.reliabilityClass} rating with ≥10°C margin at ${env.ambientC}°C ambient${env.skinContact ? '; surface ≤43°C (skin contact)' : ''}`,
       target: { ambientC: env.ambientC, minMarginC: 10 },
     })
     if (env.sealed && activeMw >= 2000) reqs.push({
@@ -154,7 +179,7 @@ export function planSimulations(spec: ProductSpec, ctx?: { hasRadio?: boolean; i
 export function judge(plan: SimPlan, results: Array<Record<string, any>>): {
   assessments: Array<{ kind: SimKind; applicability: Applicability; verdict: Verdict; requirement?: string; detail: string }>
   gaps: string[]
-  summary: { required: number; passed: number; tight: number; failed: number; gaps: number }
+  summary: { required: number; passed: number; tight: number; failed: number; gaps: number; modelInvalid: number; unknown: number }
 } {
   const byKind = new Map<string, Record<string, any>>()
   for (const r of results) if (r && typeof r.sim === 'string') byKind.set(r.sim, r)
@@ -169,7 +194,7 @@ export function judge(plan: SimPlan, results: Array<Record<string, any>>): {
         ? 'REQUIRED for this application but did not run (missing inputs) — gap'
         : 'not run (not required for this application, or inputs absent)'
     } else {
-      const j = scoreOne(req, r)
+      const j = scoreOne(req, r, plan)
       verdict = j.verdict; detail = j.detail
     }
     return { kind: req.kind, applicability: req.applicability, verdict, requirement: req.requirement, detail }
@@ -187,31 +212,31 @@ export function judge(plan: SimPlan, results: Array<Record<string, any>>): {
       tight: assessments.filter((a) => a.verdict === 'tight').length,
       failed: assessments.filter((a) => a.verdict === 'fail').length,
       gaps: gaps.length,
+      modelInvalid: assessments.filter((a) => a.verdict === 'model_invalid').length,
+      unknown: assessments.filter((a) => a.verdict === 'unknown').length,
     },
   }
+}
+
+/** Is this the verdict of a REQUIRED analysis that actually failed its requirement?
+ *  'model_invalid' and 'unknown' are surfaced as warnings, never as fails;
+ *  recommended/optional analyses never fail a stage. */
+export function isRequiredFail(a: { applicability: Applicability; verdict: Verdict }): boolean {
+  return a.applicability === 'required' && a.verdict === 'fail'
 }
 
 /** Judge one result against one requirement. run_sim.py results follow a common
  *  shape { sim, metric, value, unit, limit, pass, note, ... } with a few
  *  analysis-specific fields; we match those real names. */
-function scoreOne(req: SimRequirement, r: Record<string, any>): { verdict: Verdict; detail: string } {
+function scoreOne(req: SimRequirement, r: Record<string, any>, plan: SimPlan): { verdict: Verdict; detail: string } {
   const t = req.target ?? {}
   if (req.kind === 'thermal') {
-    // real fields: junctionTempC (peak), limit (rating). The solver runs at a
-    // benign ~22°C ambient; shift to the APPLICATION ambient — this is the catch
-    // (a "92°C pass" at 22°C is a fail at 55°C). run_sim thermal uses Tamb≈22.
-    const tmax = num(r.junctionTempC ?? r.meanTempC ?? r.value)
-    if (tmax == null) return { verdict: 'no_data', detail: 'thermal solver returned no peak temperature' }
-    const reqAmb = num(t.ambientC) ?? 25
-    const solverAmb = 22
-    const atReqAmb = tmax + (reqAmb - solverAmb)
-    const limit = num(r.limit) ?? 85
-    const margin = limit - atReqAmb
-    const min = num(t.minMarginC) ?? 10
-    return {
-      verdict: margin >= min ? 'pass' : margin >= 0 ? 'tight' : 'fail',
-      detail: `peak ${round(tmax)}°C at solver 22°C → ${round(atReqAmb)}°C at the ${reqAmb}°C app ambient vs ${limit}°C limit → ${round(margin)}°C margin (need ≥${min})`,
-    }
+    // One judge for the stage AND the redesign loop (lib/sim-judge.ts): works in
+    // RISE over the solver's ambient, re-based to the application ambient, plus
+    // the junction-over-case term, against the reliability class's rating.
+    const env = thermalEnvFromPlan(plan)
+    const j = judgeThermal(r, { ...env, ambientC: num(t.ambientC) ?? env.ambientC }, { minMarginC: num(t.minMarginC) })
+    return { verdict: j.verdict, detail: j.detail }
   }
   if (req.kind === 'drop') {
     // modal FEM fundamental frequency: `value` in Hz (unit==='Hz').
