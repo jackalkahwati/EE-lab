@@ -159,6 +159,304 @@ function coerceOp(o: any): MechOp | null {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Cavity selection + honest fit evaluation (pure; unit-testable; no imports so
+// scripts/replay-cavity.mjs can load this file under Node's type stripping).
+//
+// Why this exists: the old picker took "the largest pocket ≥ ½ max depth below
+// the base top". On real runs that chose a ⌀6 mount-hole pocket for a 30×24
+// board (bare PCB assembly, no cavity at all) and a 34×22 display WINDOW over
+// the round board cavity of a puck. The fit test then failed against the wrong
+// pocket, and nothing was persisted to diagnose it. The selection below is
+// tiered, records every candidate + why it was rejected, and returns
+// null/'unknown' rather than failing when no board cavity can be identified.
+// ---------------------------------------------------------------------------
+
+export type FitShape = { kind: 'circle'; d: number } | { kind: 'rect'; w: number; h: number }
+export type CavitySource = 'named' | 'encloses_pcb' | 'largest_qualifying' | 'none'
+export type FitVerdict = 'fits' | 'does_not_fit' | 'unknown'
+
+export interface CavityCandidate {
+  op: string
+  sketch: string
+  profileKind: string
+  shape: FitShape | null // null for ring / degenerate profiles
+  cx: number
+  cy: number
+  depth: number
+  offset: number
+  /** why this pocket was NOT chosen (absent on the chosen one) */
+  rejected?: string
+}
+
+export interface CavitySelection {
+  shape: FitShape | null
+  depth: number | null
+  op: string | null
+  sketch: string | null
+  source: CavitySource
+  /** every pocket examined, with the rejection reason for the losers */
+  candidates: CavityCandidate[]
+  /** the base shell top (z) used to drop lid pockets; Infinity when no extrude */
+  baseTop: number
+}
+
+/** minimum pocket depth that can hold a PCB (1.6 mm board) — shallower pockets
+ *  (pad recesses, score lines, bezel steps) are styling, never the cavity */
+const MIN_CAVITY_DEPTH = 1.5
+/** a round pocket narrower than this is a hole/boss pilot, not a board cavity */
+const MIN_ROUND_CAVITY_D = 15
+/** names that mark a pocket as explicitly NOT the board cavity (tiers b/c) */
+const NON_CAVITY_NAME = /hole|screw|window|vent|louv|slot|groove|lip|channel|radome|\bled|led\b|diffus|pad|foot|grip|slip|btn|button|bezel|\bstep|seat|logo|score|text|label/i
+/** names a tier-(a) match must NOT carry — a batteryCavity / lidCavity is not the board cavity */
+const NAMED_CAVITY_EXCLUDE = /battery|batt|antenna|speaker|lid|cap\b|led|light|diffus|lens|window/i
+const NAMED_CAVITY_EXACT = /^(inner|pcb|board|main)?[-_ ]?cavity$/i
+
+const isFinitePos = (v: unknown): v is number => typeof v === 'number' && isFinite(v) && v > 0
+
+export function profileToShape(p: MechProfile | undefined | null): FitShape | null {
+  if (!p) return null
+  if (p.kind === 'circle') return isFinitePos(p.d) ? { kind: 'circle', d: p.d } : null
+  if (p.kind === 'ring') return null
+  return isFinitePos(p.w) && isFinitePos(p.h) ? { kind: 'rect', w: p.w, h: p.h } : null
+}
+
+export const shapeArea = (s: FitShape | null): number =>
+  !s ? 0 : s.kind === 'circle' ? (Math.PI * s.d * s.d) / 4 : s.w * s.h
+
+export const shapeStr = (s: FitShape): string =>
+  s.kind === 'circle' ? `⌀${round1(s.d)}` : `${round1(s.w)}×${round1(s.h)}`
+
+export const shapeDims = (s: FitShape): { w: number; h: number } =>
+  s.kind === 'circle' ? { w: Math.round(s.d), h: Math.round(s.d) } : { w: Math.round(s.w), h: Math.round(s.h) }
+
+const round1 = (n: number) => Math.round(n * 10) / 10
+
+/** inner fits inside outer (+slack), both centred, shape-aware: circle-in-circle
+ *  by diameter, rect-in-circle by the DIAGONAL, circle-in-rect by the min side
+ *  (a round board must clear the cavity's NARROW dimension). */
+export function shapeContains(outer: FitShape, inner: FitShape, slack: number): boolean {
+  if (outer.kind === 'circle') {
+    const D = outer.d + slack
+    return inner.kind === 'circle' ? inner.d <= D : Math.hypot(inner.w, inner.h) <= D
+  }
+  const W = outer.w + slack, H = outer.h + slack
+  return inner.kind === 'circle' ? inner.d <= Math.min(W, H) : inner.w <= W && inner.h <= H
+}
+
+/** position-aware: does the pocket (centre pcx,pcy) enclose the PCB component
+ *  footprint (centre bcx,bcy)? Used for tier (b), where the plan's own PCB op
+ *  tells us where the board sits. */
+function pocketEnclosesFootprint(
+  pocket: FitShape, pcx: number, pcy: number,
+  pcb: FitShape, bcx: number, bcy: number,
+): boolean {
+  const dx = bcx - pcx, dy = bcy - pcy
+  if (pocket.kind === 'circle') {
+    const R = pocket.d / 2
+    if (pcb.kind === 'circle') return Math.hypot(dx, dy) + pcb.d / 2 <= R + 1e-6
+    const hw = pcb.w / 2, hh = pcb.h / 2
+    return [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].every(([x, y]) => Math.hypot(dx + x, dy + y) <= R + 1e-6)
+  }
+  const hw = pocket.w / 2, hh = pocket.h / 2
+  if (pcb.kind === 'circle') {
+    const r = pcb.d / 2
+    return Math.abs(dx) + r <= hw + 1e-6 && Math.abs(dy) + r <= hh + 1e-6
+  }
+  return Math.abs(dx) + pcb.w / 2 <= hw + 1e-6 && Math.abs(dy) + pcb.h / 2 <= hh + 1e-6
+}
+
+export function pcbShapeFromComponent(plan: MechPlan): { shape: FitShape; cx: number; cy: number } | null {
+  const op = plan.operations.find((o) => o.op === 'component' && o.kind === 'pcb')
+  if (!op || op.op !== 'component') return null
+  if (!isFinitePos(op.w) || !isFinitePos(op.h)) return null
+  return {
+    shape: op.shape === 'cyl' ? { kind: 'circle', d: op.w } : { kind: 'rect', w: op.w, h: op.h },
+    cx: op.cx, cy: op.cy,
+  }
+}
+
+/**
+ * Pick the pocket that is the BOARD CAVITY. Tiers, in order:
+ *  (a) 'named'              — pocket/sketch named cavity | innerCavity | pcbCavity …
+ *                              (exact names rank above partial; batteryCavity etc. excluded)
+ *  (b) 'encloses_pcb'       — a base-shell pocket that geometrically encloses the
+ *                              plan's own `component kind=pcb` footprint (position-aware)
+ *  (c) 'largest_qualifying' — the largest base-shell pocket whose dims exceed the
+ *                              real PCB by `margin`, excluding holes/windows/vents
+ *                              by name, shallow pockets, and round pockets < 15 mm
+ *  else 'none'              — shape null; the caller reports verdict 'unknown'.
+ * `pcb` is the REAL board (ground truth) used for tier (c); tier (b) uses the
+ * plan's PCB component because that carries a position.
+ */
+export function selectCavity(plan: MechPlan, pcb: FitShape | null, margin = 1.0): CavitySelection {
+  const ops = plan.operations
+  const sketches = new Map<string, MechProfile>()
+  for (const o of ops) if (o.op === 'sketch') sketches.set(o.name, o.profile)
+
+  // base shell top: the tallest extrude that starts at the base plane. The lid
+  // is modelled floating at base+4 and so self-excludes; a short skirt extruded
+  // first (real run e5631ea3: skirtBody before body) no longer masks the shell.
+  let baseTop = -Infinity
+  for (const o of ops) {
+    if (o.op !== 'extrude') continue
+    const off = o.offset ?? 0
+    if (off <= 0.01 && isFinitePos(o.depth)) baseTop = Math.max(baseTop, off + o.depth)
+  }
+  if (!isFinite(baseTop)) baseTop = Infinity
+
+  const candidates: CavityCandidate[] = []
+  for (const o of ops) {
+    if (o.op !== 'pocket') continue
+    const prof = sketches.get(o.sketch)
+    const shape = profileToShape(prof)
+    candidates.push({
+      op: o.name, sketch: o.sketch, profileKind: prof?.kind ?? 'missing', shape,
+      cx: prof ? prof.cx : 0, cy: prof ? prof.cy : 0,
+      depth: o.depth ?? 0, offset: o.offset ?? 0,
+    })
+  }
+  const done = (chosen: CavityCandidate | null, source: CavitySource): CavitySelection => ({
+    shape: chosen?.shape ?? null,
+    depth: chosen ? chosen.depth : null,
+    op: chosen?.op ?? null,
+    sketch: chosen?.sketch ?? null,
+    source,
+    candidates,
+    baseTop,
+  })
+
+  const name = (c: CavityCandidate) => `${c.op} ${c.sketch}`
+  const usable = candidates.filter((c) => {
+    if (!c.shape) { c.rejected = `${c.profileKind} profile — not a containable shape`; return false }
+    return true
+  })
+
+  // (a) named — an EXACT cavity name always counts; a partial match ('cavityFloor')
+  // counts only when the name carries no feature word, so 'cavityVent' /
+  // 'cavityDrainSlot' can never become "the cavity" and fail the board against it
+  const exact = (c: CavityCandidate) => NAMED_CAVITY_EXACT.test(c.op) || NAMED_CAVITY_EXACT.test(c.sketch) ? 1 : 0
+  const named = usable.filter((c) =>
+    !NAMED_CAVITY_EXCLUDE.test(name(c)) && (exact(c) || (/cavity/i.test(name(c)) && !NON_CAVITY_NAME.test(name(c)))))
+  if (named.length) {
+    named.sort((x, y) => exact(y) - exact(x) || y.depth - x.depth || shapeArea(y.shape) - shapeArea(x.shape))
+    const win = named[0]
+    for (const c of usable) if (c !== win) c.rejected = named.includes(c) ? 'named cavity, but a better-ranked named cavity exists' : `a named cavity ('${win.op}') takes precedence`
+    return done(win, 'named')
+  }
+
+  // shared filters for (b)/(c): base shell only, deep enough, not typed as a feature
+  const inBase = usable.filter((c) => {
+    if (c.offset >= baseTop - 0.01) { c.rejected = `starts at z=${c.offset} ≥ base top ${round1(baseTop)} (lid pocket)`; return false }
+    if (c.depth < MIN_CAVITY_DEPTH) { c.rejected = `depth ${c.depth} mm < ${MIN_CAVITY_DEPTH} mm (too shallow for a board)`; return false }
+    const m = name(c).match(NON_CAVITY_NAME)
+    if (m) { c.rejected = `name marks it as a '${m[0].toLowerCase()}' feature, not a cavity`; return false }
+    if (c.shape!.kind === 'circle' && c.shape!.d < MIN_ROUND_CAVITY_D) { c.rejected = `round pocket ⌀${round1(c.shape!.d)} < ${MIN_ROUND_CAVITY_D} mm (a hole, not a cavity)`; return false }
+    return true
+  })
+
+  // (b) encloses the plan's PCB component footprint
+  const comp = pcbShapeFromComponent(plan)
+  if (comp) {
+    const enclosing = inBase.filter((c) => pocketEnclosesFootprint(c.shape!, c.cx, c.cy, comp.shape, comp.cx, comp.cy))
+    if (enclosing.length) {
+      enclosing.sort((x, y) => y.depth - x.depth || shapeArea(y.shape) - shapeArea(x.shape))
+      const win = enclosing[0]
+      for (const c of inBase) if (c !== win) c.rejected = enclosing.includes(c) ? `encloses the PCB op but '${win.op}' is deeper/larger` : `does not enclose the PCB op footprint ${shapeStr(comp.shape)} at (${comp.cx}, ${comp.cy})`
+      return done(win, 'encloses_pcb')
+    }
+    for (const c of inBase) c.rejected = `does not enclose the PCB op footprint ${shapeStr(comp.shape)} at (${comp.cx}, ${comp.cy})`
+  }
+
+  // (c) largest pocket that exceeds the real PCB by the margin in both dims
+  if (pcb) {
+    const grown: FitShape = pcb.kind === 'circle' ? { kind: 'circle', d: pcb.d + margin } : { kind: 'rect', w: pcb.w + margin, h: pcb.h + margin }
+    const qualifying = inBase.filter((c) => shapeContains(c.shape!, grown, 0))
+    if (qualifying.length) {
+      qualifying.sort((x, y) => shapeArea(y.shape) - shapeArea(x.shape))
+      const win = qualifying[0]
+      for (const c of inBase) if (c !== win) c.rejected = qualifying.includes(c) ? `qualifies but '${win.op}' is larger` : `${shapeStr(c.shape!)} does not exceed PCB ${shapeStr(pcb)} + ${margin} mm margin`
+      return done(win, 'largest_qualifying')
+    }
+    for (const c of inBase) c.rejected = `${shapeStr(c.shape!)} does not exceed PCB ${shapeStr(pcb)} + ${margin} mm margin`
+  } else {
+    for (const c of inBase) c.rejected = 'no PCB dimensions to qualify against'
+  }
+  return done(null, 'none')
+}
+
+export interface FitEvaluation {
+  verdict: FitVerdict
+  /** false ONLY on 'does_not_fit'; true for 'fits' and (with a warning) 'unknown' */
+  fits: boolean
+  problems: string[]
+}
+
+/** shortfall text: "short by 2 mm in X, 4 mm in Y" / diagonal / narrow-side */
+function shortfall(cavity: FitShape, pcb: FitShape, slack: number): string {
+  if (cavity.kind === 'circle') {
+    const D = cavity.d + slack
+    const need = pcb.kind === 'circle' ? pcb.d : Math.hypot(pcb.w, pcb.h)
+    return pcb.kind === 'circle'
+      ? `⌀${round1(pcb.d)} exceeds ⌀${round1(cavity.d)} by ${round1(need - D)} mm`
+      : `diagonal ${round1(need)} mm exceeds ⌀${round1(cavity.d)} by ${round1(need - D)} mm`
+  }
+  const W = cavity.w + slack, H = cavity.h + slack
+  if (pcb.kind === 'circle') {
+    const narrow = Math.min(W, H)
+    return `⌀${round1(pcb.d)} exceeds the cavity's narrow side ${round1(Math.min(cavity.w, cavity.h))} mm by ${round1(pcb.d - narrow)} mm`
+  }
+  const parts: string[] = []
+  if (pcb.w > W) parts.push(`${round1(pcb.w - W)} mm in X`)
+  if (pcb.h > H) parts.push(`${round1(pcb.h - H)} mm in Y`)
+  return `short by ${parts.join(', ')}`
+}
+
+/**
+ * Honest fit verdict. `cavity` null ⇒ 'unknown' (fit NOT verified — never a
+ * failure on its own); the outer-body checks still run and can fail
+ * independently (board + 2 walls > outer ⇒ 'does_not_fit').
+ */
+export function evaluateFit(args: {
+  pcb: FitShape
+  cavity: FitShape | null
+  outer: FitShape | null
+  wall: number
+  slack: number
+  cavitySelection?: CavitySelection
+}): FitEvaluation {
+  const { pcb, cavity, outer, wall, slack } = args
+  const problems: string[] = []
+  let bad = false
+  if (cavity && !shapeContains(cavity, pcb, slack)) {
+    bad = true
+    problems.push(`PCB ${shapeStr(pcb)} mm does not fit cavity ${shapeStr(cavity)} mm (${shortfall(cavity, pcb, slack)})`)
+  }
+  const shrink = (s: FitShape, by: number): FitShape =>
+    s.kind === 'circle' ? { kind: 'circle', d: s.d - 2 * by } : { kind: 'rect', w: s.w - 2 * by, h: s.h - 2 * by }
+  if (outer && !shapeContains(shrink(outer, wall), pcb, slack)) {
+    bad = true
+    problems.push(`PCB ${shapeStr(pcb)} mm + 2×${wall} mm walls exceed the outer body ${shapeStr(outer)} mm — the board would poke through the shell`)
+  }
+  if (outer && cavity && !shapeContains(shrink(outer, wall), cavity, slack)) {
+    bad = true
+    problems.push(`cavity ${shapeStr(cavity)} mm breaches the outer body ${shapeStr(outer)} mm wall (pocket punches through the shell)`)
+  }
+  if (bad) return { verdict: 'does_not_fit', fits: false, problems }
+  if (!cavity) {
+    const sel = args.cavitySelection
+    const n = sel?.candidates.length ?? 0
+    const why = sel
+      ? sel.candidates.slice(0, 6).map((c) => `${c.op}: ${c.rejected ?? 'n/a'}`).join('; ')
+      : ''
+    problems.push(
+      `no board cavity identified in the plan (${n} pocket${n === 1 ? '' : 's'} examined${why ? ' — ' + why : ''}) — PCB fit NOT verified`,
+    )
+    return { verdict: 'unknown', fits: true, problems }
+  }
+  return { verdict: 'fits', fits: true, problems }
+}
+
 /** The JSON contract the product engine must emit (embedded in its prompt). */
 export const MECH_PLAN_SCHEMA = `{
   "part": "<name, e.g. 'In-ear shell' | 'Mounting bracket'>",
