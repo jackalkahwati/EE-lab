@@ -5,3 +5,6 @@ tools/parts/registry.sqlite
 tools/parts/.jlcparts-cache/
 tools/parts/registry.sqlite-wal
 tools/parts/registry.sqlite-shm
+
+# tscircuit scratch outputs (dsn passes, drc runs)
+tools/tscircuit/[0-9]*/

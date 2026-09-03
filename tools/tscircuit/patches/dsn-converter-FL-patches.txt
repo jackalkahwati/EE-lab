@@ -1,0 +1,17 @@
+=== FL dsn-converter patches (dense multi-layer routing) — reapply after npm install ===
+File: node_modules/dsn-converter/dist/index.js
+
+--- PATCH 1: getFootprintName + flGeomSig helper (per-pad-geometry image names) ---
+474:function getFootprintName(sourceComponent, pcbComponent) {
+482:// FL PATCH: image names must be unique per PAD GEOMETRY, not just per bounding
+490:function flGeomSig(pads, cx, cy) {
+
+--- PATCH 2: smtpad footprintName suffix (line ~510) ---
+508:    const footprintName = getFootprintName(sourceComponent, pcbComponent) + "_g" + flGeomSig(pcb_smtpads, pcbComponent?.center?.x ?? 0, pcbComponent?.center?.y ?? 0);
+
+--- PATCH 3: plated-hole footprintName suffix (line ~1085) ---
+1084:    const footprintName = getFootprintName(sourceComponent, pcbComponent) + "_g" + flGeomSig([...pcb_plated_holes, ...pcb_smtpads], pcbComponent?.center?.x ?? 0, pcbComponent?.center?.y ?? 0);
+
+--- PATCH 4+5: inner-layer wire mapping (two sites) ---
+1962:      layer: /^In(\d+)/.test(String(wire.polyline_path?.layer)) ? "inner" + String(wire.polyline_path?.layer).match(/^In(\d+)/)[1] : wire.polyline_path?.layer.includes("B.") ? "bottom" : "top"
+1996:      layer: /^In(\d+)/.test(String(wire.path.layer)) ? "inner" + String(wire.path.layer).match(/^In(\d+)/)[1] : wire.path.layer.includes("F.") ? "top" : "bottom"
