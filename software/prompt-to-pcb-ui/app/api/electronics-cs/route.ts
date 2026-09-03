@@ -266,6 +266,28 @@ function runBoard(payload: object, svgPath: string, timeoutMs = 285_000, signal?
 // re-plan (only a genuine density limit is worth re-opening the design).
 const DENSITY_REPLAN = process.env.FL_DENSITY_REPLAN !== '0'
 const REPLAN_MIN_ERRORS = 6
+// Residual relief below the re-plan threshold: a board ending the ladder with
+// 1..RESIDUAL_NUDGE_MAX hole_clearance/clearance errors and no unrouted net gets
+// a targeted legalizer nudge INSIDE the runner (run_board.mjs residual nudge),
+// not a full re-plan. Complementary to REPLAN_MIN_ERRORS by construction so
+// every non-clean board lands in exactly one relief path. The runner reports the
+// outcome in drcRepair.residualNudge; densityFailed() sees the POST-nudge count.
+const RESIDUAL_NUDGE_MAX = REPLAN_MIN_ERRORS - 1
+// Strict DRC: count non-electrical classes (footprint-library drift, text size,
+// silkscreen) toward errors/converged. Off by default — they are reported on
+// their own in drc.nonElectrical and never fail a board.
+const STRICT_DRC = process.env.FL_DRC_STRICT === '1'
+
+/** A board that ended the ladder just short of clean: 1..RESIDUAL_NUDGE_MAX
+ *  errors, nothing unrouted. Distinct from densityFailed (≥ REPLAN_MIN_ERRORS or
+ *  any unrouted net), which re-opens the design instead. */
+function residualOnly(result: any): boolean {
+  if (!result?.boardMm || result.ok) return false
+  const errs = result?.drc?.errors ?? 0
+  const unconnected = result?.drc?.errorTypes?.unconnected_items ?? 0
+  const unrouted = result?.drcRepair?.unrouted ?? 0
+  return errs >= 1 && errs <= RESIDUAL_NUDGE_MAX && unconnected === 0 && unrouted === 0
+}
 
 /** A board that ROUTED but is well over the DRC budget — the design is too dense,
  *  not a routing nit. This is the signal to grow (planner boards) / re-open the
@@ -315,6 +337,10 @@ function describeDesignChange(before: any[], after: any[]): string {
 type BoardOpts = {
   boardShape: { type: 'rect' } | { type: 'circle'; marginMm?: number }
   mountingHoles: { count: number; holeDiaMm: number }
+  // post-ladder residual nudge threshold (run_board.mjs) — see RESIDUAL_NUDGE_MAX
+  residualNudge?: { maxErrors: number } | false
+  // count non-electrical DRC classes toward errors (see STRICT_DRC)
+  strictDrc?: boolean
 }
 
 /** One full board candidate: part-set engine → real footprints → routed board. */
@@ -439,6 +465,10 @@ async function buildChipScale(
     const boardOpts: BoardOpts = {
       boardShape: roundForm ? { type: 'circle' } : { type: 'rect' },
       mountingHoles: { count: roundForm ? 3 : 4, holeDiaMm: 2.2 },
+      // inherited by every runBoard call (planner, LLM first pass, grow rungs,
+      // re-plan candidates) so 1..5 residual errors get the nudge in-process.
+      residualNudge: { maxErrors: RESIDUAL_NUDGE_MAX },
+      strictDrc: STRICT_DRC,
     }
 
     // MERGER (Stage E): ONE design, ONE board — never a second, independent LLM
@@ -690,6 +720,46 @@ async function buildChipScale(
         ...(result.drcRepair.fixes ?? []),
         `design↔routing outer loop: ${dc.reason} → ${tail}`,
       ]
+    }
+
+    // Final residual handling. The runner's own residual nudge (drcRepair.
+    // residualNudge) already ran for a 1..RESIDUAL_NUDGE_MAX-error board; here
+    // we make the reported verdict match the POST-nudge board:
+    //  * `converged` is the runner's post-nudge flag (drcRepair.converged);
+    //  * `residual` summarises what is left, split into the electrical count
+    //    that gates the verdict and the non-electrical classes that do not
+    //    (unless STRICT_DRC), so the UI can show both honestly;
+    //  * a residual-only board that was NOT nudged (kicad-cli missing, budget,
+    //    or an error class the nudge does not touch) says so instead of silently
+    //    ending `converged:false` with no relief attempted.
+    if (result.drcRepair && result.drc) {
+      const errs: number = result.drc.errors ?? 0
+      const unrouted: number = result.drcRepair.unrouted ?? 0
+      const nudge = result.drcRepair.residualNudge ?? null
+      result.drcRepair.converged = result.drc.available === true && errs === 0 && unrouted === 0
+      result.drcRepair.residual = {
+        errors: errs,
+        errorTypes: result.drc.errorTypes ?? {},
+        unrouted,
+        nonElectrical: result.drc.nonElectrical ?? { count: 0, types: {}, strict: STRICT_DRC },
+        nudge: nudge ? { attempted: true, accepted: !!nudge.accepted, before: nudge.before, after: nudge.after, targeted: !!nudge.targeted, reason: nudge.reason ?? null } : { attempted: false },
+        replanThreshold: REPLAN_MIN_ERRORS,
+        nudgeThreshold: RESIDUAL_NUDGE_MAX,
+      }
+      if (residualOnly(result) && !nudge) {
+        const types = Object.keys(result.drc.errorTypes ?? {}).join(', ') || 'DRC'
+        result.drcRepair.fixes = [
+          ...(result.drcRepair.fixes ?? []),
+          `residual: ${errs} ${types} error(s) — below the re-plan threshold (${REPLAN_MIN_ERRORS}) but the residual nudge did not run (${result.drc.available === false ? 'no real DRC' : 'error class outside hole_clearance/clearance or out of time budget'})`,
+        ]
+      }
+      if (result.drc.nonElectrical?.count) {
+        const t = Object.entries(result.drc.nonElectrical.types ?? {}).map(([k, v]) => `${v}×${k}`).join(', ')
+        result.drcRepair.fixes = [
+          ...(result.drcRepair.fixes ?? []),
+          `non-electrical DRC (${t}) reported separately — ${STRICT_DRC ? 'counted (FL_DRC_STRICT=1)' : 'not counted toward converged'}`,
+        ]
+      }
     }
 
     if (result.boardMm && !req.signal?.aborted) {

@@ -142,7 +142,8 @@ async function applyGroundPlane(cj, gndPins, profileKey = 'standard') {
     fs.writeFileSync(path.join(dir, 'g.kicad_dru'), (FAB_PROFILES[profileKey] || FAB_PROFILES.standard).rules)
     spawnSync(KICAD_CLI, ['pcb', 'drc', '--format', 'json', '--output', drcJson, outPcb], { encoding: 'utf8', timeout: 120000 })
     let errors = null
-    if (fs.existsSync(drcJson)) { const rep = JSON.parse(fs.readFileSync(drcJson, 'utf8')); errors = (rep.violations || []).filter((v) => v.severity === 'error').length }
+    // same electrical/non-electrical split as realDrc so gp.errors and drc.errors agree
+    if (fs.existsSync(drcJson)) { const rep = JSON.parse(fs.readFileSync(drcJson, 'utf8')); errors = classifyDrcErrors(rep.violations || []).errs.length }
     // return the grounded .kicad_pcb too (read before the temp dir is cleaned) so
     // the caller can persist it for the 3D render — the real chip-down board.
     const pcb = fs.readFileSync(outPcb, 'utf8')
@@ -388,6 +389,129 @@ const FAB_PROFILES = {
   },
 }
 
+// ---- legalizer / residual-nudge tuning ---------------------------------------
+// The via/trace legalizers used to push copper apart to EXACTLY the fab's
+// hole_clearance rule (a hardcoded 0.4 — which was also UNDER the standard
+// profile's 0.5mm rule). Zero margin means float rounding + the converter's
+// coordinate rounding leaves items at 0.354-0.388mm against a 0.4mm rule — the
+// exact residual seen on production drc.json files. Legalize to rule + margin.
+const LEGALIZE_MARGIN_MM = 0.05
+// Residual nudge (post-ladder): a board that ends the whole strategy ladder with
+// only a handful of hole_clearance/clearance nits gets ONE more targeted
+// legalization pass at a slightly larger displacement. Above this count (or with
+// an unrouted net) the density is real and the caller re-plans/grows instead.
+const RESIDUAL_NUDGE_MAX = 5
+const RESIDUAL_NUDGE_DISP_BOOST = 0.1 // mm over the last accepted legalizer displacement
+const RESIDUAL_NUDGE_TARGET_R = 1.0 // mm — only copper this close to a violation moves
+const RESIDUAL_NUDGE_TYPES = new Set(['hole_clearance', 'clearance'])
+// DRC classes that are NOT copper/electrical: library-vs-board footprint drift,
+// text sizes, silkscreen. They are reported separately (drc.nonElectrical) and
+// do not count toward `errors` / `converged` unless strict mode is on
+// (input.strictDrc === true or FL_DRC_STRICT=1). Copper, hole, mask, courtyard
+// and connectivity classes all stay electrical.
+const NON_ELECTRICAL_DRC = /^(lib_footprint_issues|lib_footprint_mismatch|text_height|text_thickness|footprint_type_mismatch|silk_.*)$/
+let STRICT_NON_ELECTRICAL = process.env.FL_DRC_STRICT === '1'
+
+/** Split a KiCad DRC item list into the errors that count and the
+ *  non-electrical ones reported separately. Returns { errs, nonElectrical }. */
+function classifyDrcErrors(all) {
+  const errs = [], nonElectrical = []
+  for (const v of all) {
+    if (v?.severity !== 'error') continue
+    if (!STRICT_NON_ELECTRICAL && NON_ELECTRICAL_DRC.test(String(v.type || ''))) nonElectrical.push(v)
+    else errs.push(v)
+  }
+  return { errs, nonElectrical }
+}
+
+/** Extract the Edge.Cuts bounding box from a .kicad_pcb string (gr_line /
+ *  gr_poly / gr_circle / gr_arc / gr_rect blocks on Edge.Cuts). Returns
+ *  [minX, minY, maxX, maxY] or null. Coordinates are KiCad mm (y down). */
+function edgeCutsBbox(pcbText) {
+  const xs = [], ys = []
+  let i = 0
+  while ((i = pcbText.indexOf('(gr_', i)) !== -1) {
+    // paren-match the block so a gr_ block on another layer never bleeds in
+    let depth = 0, j = i
+    for (; j < pcbText.length; j++) {
+      const ch = pcbText[j]
+      if (ch === '(') depth++
+      else if (ch === ')') { depth--; if (depth === 0) { j++; break } }
+    }
+    const block = pcbText.slice(i, j)
+    i = j
+    if (!/\(layer\s+"Edge\.Cuts"\)/.test(block)) continue
+    if (block.startsWith('(gr_circle')) {
+      const c = block.match(/\(center\s+(-?[\d.]+)\s+(-?[\d.]+)\)/), e = block.match(/\(end\s+(-?[\d.]+)\s+(-?[\d.]+)\)/)
+      if (c && e) { const r = Math.hypot(+e[1] - +c[1], +e[2] - +c[2]); xs.push(+c[1] - r, +c[1] + r); ys.push(+c[2] - r, +c[2] + r) }
+      continue
+    }
+    for (const m of block.matchAll(/\((?:start|end|xy|mid)\s+(-?[\d.]+)\s+(-?[\d.]+)\)/g)) { xs.push(+m[1]); ys.push(+m[2]) }
+  }
+  if (!xs.length) return null
+  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]
+}
+
+/** Map KiCad-space DRC item positions back into circuit-json coordinates so the
+ *  residual nudge can target JUST the offending copper. The converter's
+ *  transform is a translation (board centred somewhere on the sheet) plus a
+ *  possible y flip (KiCad is y-down, circuit-json y-up); the package is not
+ *  introspected — instead both flips are tried against the Edge.Cuts bbox
+ *  centre and VALIDATED: a mapped item position must land on real cj copper
+ *  (via / track / pad / hole). The flip that validates wins; a tie (symmetric
+ *  board) keeps the union — targeting only restricts which items move, so a
+ *  superset is a safe fallback. Returns { mapped: boolean, points: [{type,x,y}] }. */
+function mapDrcPositions(pcbText, cj, errs) {
+  const board = cj.find((e) => e.type === 'pcb_board')
+  const bbox = board ? edgeCutsBbox(pcbText) : null
+  if (!bbox) return { mapped: false, points: [] }
+  const ex = (bbox[0] + bbox[2]) / 2, ey = (bbox[1] + bbox[3]) / 2
+  const bx = board.center?.x ?? 0, by = board.center?.y ?? 0
+  // cj copper to validate against
+  const pts = [] // vias + holes (x, y, r)
+  const segs = []
+  const boxes = []
+  for (const e of cj) {
+    if (e.type === 'pcb_via' && e.x != null) pts.push({ x: e.x, y: e.y, r: (e.outer_diameter ?? 0.4) / 2 })
+    else if (e.type === 'pcb_hole' && e.x != null) pts.push({ x: e.x, y: e.y, r: (e.hole_diameter ?? 2.2) / 2 })
+    else if (e.type === 'pcb_plated_hole' && e.x != null) pts.push({ x: e.x, y: e.y, r: (e.outer_diameter ?? e.hole_diameter ?? 0.6) / 2 })
+    else if (e.type === 'pcb_smtpad' && e.x != null) boxes.push([e.x - (e.width || 0) / 2, e.y - (e.height || 0) / 2, e.x + (e.width || 0) / 2, e.y + (e.height || 0) / 2])
+    else if (e.type === 'pcb_trace' && Array.isArray(e.route)) {
+      for (let i = 0; i + 1 < e.route.length; i++) {
+        const a = e.route[i], b = e.route[i + 1]
+        if (a?.x == null || b?.x == null) continue
+        segs.push({ x1: a.x, y1: a.y, x2: b.x, y2: b.y, hw: Math.max(a.width || 0.15, b.width || 0.15) / 2 })
+        if (a.route_type === 'via') pts.push({ x: a.x, y: a.y, r: (a.outer_diameter ?? 0.4) / 2 })
+      }
+    }
+  }
+  const TOL = 0.35
+  const onCopper = (x, y) => {
+    for (const p of pts) if (Math.hypot(x - p.x, y - p.y) <= p.r + TOL) return true
+    for (const b of boxes) if (Math.hypot(Math.max(b[0] - x, 0, x - b[2]), Math.max(b[1] - y, 0, y - b[3])) <= TOL) return true
+    for (const s of segs) {
+      const dx = s.x2 - s.x1, dy = s.y2 - s.y1, L2 = dx * dx + dy * dy
+      const t = L2 ? Math.max(0, Math.min(1, ((x - s.x1) * dx + (y - s.y1) * dy) / L2)) : 0
+      if (Math.hypot(x - (s.x1 + t * dx), y - (s.y1 + t * dy)) <= s.hw + TOL) return true
+    }
+    return false
+  }
+  const items = []
+  for (const v of errs) for (const it of (v.items || [])) if (it?.pos && Number.isFinite(+it.pos.x) && Number.isFinite(+it.pos.y)) items.push({ type: v.type, kx: +it.pos.x, ky: +it.pos.y })
+  if (!items.length) return { mapped: false, points: [] }
+  const tryFlip = (s) => {
+    const out = items.map((it) => ({ type: it.type, x: +(it.kx - ex + bx).toFixed(4), y: +(s * (it.ky - ey) + by).toFixed(4) }))
+    return { out, hits: out.filter((p) => onCopper(p.x, p.y)).length }
+  }
+  const down = tryFlip(-1), up = tryFlip(1)
+  const need = Math.max(1, Math.ceil(items.length * 0.6))
+  const okDown = down.hits >= need, okUp = up.hits >= need
+  if (!okDown && !okUp) return { mapped: false, points: [] }
+  if (okDown && okUp && down.hits === up.hits) return { mapped: true, flip: 'both', points: [...down.out, ...up.out] }
+  const win = (okDown && (!okUp || down.hits >= up.hits)) ? down : up
+  return { mapped: true, flip: win === down ? 'y-down' : 'y-up', points: win.out }
+}
+
 /** Decorate every exported .kicad_pcb that carries our standalone mounting
  *  holes (NPTH, from pcb_hole elements) with the two things the raw converter
  *  output lacks:
@@ -475,19 +599,32 @@ async function realDrcInner(cj, profileKey = 'standard') {
       try { fs.mkdirSync(dbg, { recursive: true }); fs.copyFileSync(pcbPath, path.join(dbg, 'board.kicad_pcb')); fs.copyFileSync(drcPath, path.join(dbg, 'drc.json')) } catch { /* debug only */ }
     }
     const all = [...(rep.violations || []), ...(rep.unconnected_items || []), ...(rep.schematic_parity || [])]
-    const errs = all.filter((v) => v.severity === 'error')
+    const { errs, nonElectrical } = classifyDrcErrors(all)
     const warns = all.filter((v) => v.severity === 'warning')
     const byType = {}
     for (const v of errs) byType[v.type] = (byType[v.type] || 0) + 1
+    const neTypes = {}
+    for (const v of nonElectrical) neTypes[v.type] = (neTypes[v.type] || 0) + 1
+    // violation positions in cj coordinates (for the residual nudge); bounded
+    // because this object is serialized to stdout and persisted with the board.
+    const pos = mapDrcPositions(fs.readFileSync(pcbPath, 'utf8'), cj, errs)
     return {
       available: true,
       kicadVersion: ver,
       ruleProfile: profile.label,
       profileKey,
+      // `errors` = the count that gates ok/converged: electrical + physical fab
+      // classes only (see NON_ELECTRICAL_DRC). `errorsAll` is the raw KiCad
+      // error count; `nonElectrical` is reported on its own. Additive fields —
+      // consumers keyed on `errors` keep working.
       errors: errs.length,
+      errorsAll: errs.length + nonElectrical.length,
+      nonElectrical: { count: nonElectrical.length, types: neTypes, strict: STRICT_NON_ELECTRICAL },
       warnings: warns.length,
       errorTypes: byType,
       sample: errs.slice(0, 6).map((v) => `${v.type}: ${(v.description || '').slice(0, 90)}`),
+      positionsMapped: pos.mapped,
+      violations: pos.points.slice(0, 40),
     }
   } catch (e) {
     return { available: false, reason: String(e).slice(0, 160) }
@@ -1075,8 +1212,11 @@ function completeUnroutedNets(cj) {
  *  via can't wander off its own connection; the caller re-runs REAL DRC and keeps
  *  the result only if errors drop without adding unconnected nets. Same-net copper
  *  is never pushed apart — that IS the connection. Mutates cj in place. */
-function legalizeVias(cj, { minClear = 0.4, maxDisp = 0.4, iters = 80 } = {}) {
+function legalizeVias(cj, { minClear = FAB_PROFILES.standard.holeClearance + LEGALIZE_MARGIN_MM, maxDisp = 0.4, iters = 80, targets = null, targetR = RESIDUAL_NUDGE_TARGET_R } = {}) {
   const standalone = cj.filter((e) => e.type === 'pcb_via')
+  // optional targeting (residual nudge): only vias within targetR of a DRC
+  // violation position are allowed to move; everything else stays put.
+  const nearTarget = (x, y) => !targets || targets.some((t) => Math.hypot(x - t.x, y - t.y) <= targetR)
   const traces = cj.filter((e) => e.type === 'pcb_trace')
   // Unified MOVABLE via set. A via can live two ways: as a standalone pcb_via, OR
   // as a route_type:'via' POINT inside a trace's route (how tscircuit's multi-layer
@@ -1095,14 +1235,14 @@ function legalizeVias(cj, { minClear = 0.4, maxDisp = 0.4, iters = 80 } = {}) {
       if (p.route_type !== 'via') continue
       const sv = standalone.find((v) => Math.abs(v.x - p.x) < 1e-3 && Math.abs(v.y - p.y) < 1e-3)
       if (sv) claimed.add(sv)
-      movers.push({ p, sv, net: netOfTrace(t), r: (p.outer_diameter ?? sv?.outer_diameter ?? 0.4) / 2 })
+      movers.push({ p, sv, net: netOfTrace(t), r: (p.outer_diameter ?? sv?.outer_diameter ?? 0.4) / 2, fixed: !nearTarget(p.x, p.y) })
     }
   }
   for (const v of standalone) {
     if (claimed.has(v)) continue
-    movers.push({ p: v, sv: null, net: v.subcircuit_connectivity_map_key, r: (v.outer_diameter ?? 0.4) / 2 })
+    movers.push({ p: v, sv: null, net: v.subcircuit_connectivity_map_key, r: (v.outer_diameter ?? 0.4) / 2, fixed: !nearTarget(v.x, v.y) })
   }
-  if (!movers.length) return { moved: 0 }
+  if (!movers.length || movers.every((m) => m.fixed)) return { moved: 0 }
   const net = (m) => m.net
   // mounting holes (NPTH) count as pad copper keep-outs too, padded by the fab's
   // hole-to-copper rule — otherwise this pass could nudge a via INTO a hole it
@@ -1138,6 +1278,7 @@ function legalizeVias(cj, { minClear = 0.4, maxDisp = 0.4, iters = 80 } = {}) {
   for (let it = 0; it < iters; it++) {
     let any = false
     for (const m of movers) {
+      if (m.fixed) continue // outside the nudge target radius — still an obstacle, never a mover
       const r = m.r, vx = m.p.x, vy = m.p.y
       let px = 0, py = 0
       for (const o of movers) { // other-net via copper
@@ -1175,8 +1316,18 @@ function legalizeVias(cj, { minClear = 0.4, maxDisp = 0.4, iters = 80 } = {}) {
  *  disturbing the via's own connections. Endpoints (pad-anchored) never move; only
  *  interior wire points bend. Same-net track vs via is left alone (that's a real
  *  connection). Caller re-runs DRC and keeps only a strict improvement. */
-function legalizeTraces(cj, { minClear = 0.4, maxDisp = 0.3, iters = 120 } = {}) {
+function legalizeTraces(cj, { minClear = FAB_PROFILES.standard.holeClearance + LEGALIZE_MARGIN_MM, maxDisp = 0.3, iters = 120, targets = null, targetR = RESIDUAL_NUDGE_TARGET_R } = {}) {
   const traces = cj.filter((e) => e.type === 'pcb_trace')
+  // optional targeting (residual nudge): an interior point may move only if it,
+  // or one of its two adjacent segments, passes within targetR of a violation.
+  // (A DRC track position is a point ON the track, not the closest point to the
+  // offender, so the segment test is what actually catches the bend.)
+  const segNear = (a, b, t) => {
+    const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy
+    const u = L2 ? Math.max(0, Math.min(1, ((t.x - a.x) * dx + (t.y - a.y) * dy) / L2)) : 0
+    return Math.hypot(t.x - (a.x + u * dx), t.y - (a.y + u * dy)) <= targetR
+  }
+  const pointAllowed = (route, i) => !targets || targets.some((t) => segNear(route[i - 1], route[i], t) || segNear(route[i], route[i + 1], t))
   const vias = []
   for (const t of traces) for (const p of (t.route || [])) if (p.route_type === 'via') vias.push({ x: p.x, y: p.y, r: (p.outer_diameter ?? 0.4) / 2, net: t.subcircuit_connectivity_map_key })
   for (const v of cj.filter((e) => e.type === 'pcb_via')) vias.push({ x: v.x, y: v.y, r: (v.outer_diameter ?? 0.4) / 2, net: v.subcircuit_connectivity_map_key })
@@ -1191,6 +1342,7 @@ function legalizeTraces(cj, { minClear = 0.4, maxDisp = 0.3, iters = 120 } = {})
       for (let i = 1; i < route.length - 1; i++) { // interior wire points only
         const p = route[i]
         if (p.route_type === 'via') continue // vias are legalizeVias' job
+        if (!pointAllowed(route, i)) continue // outside the nudge target radius
         const hw = (p.width ?? 0.15) / 2
         let px = 0, py = 0
         for (const v of vias) {
@@ -1368,6 +1520,9 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15 } = {}) {
 
 async function main() {
   const input = JSON.parse(fs.readFileSync(0, 'utf8'))
+  // strict DRC: count non-electrical classes (footprint-lib drift, text, silk)
+  // toward errors/converged too. Off by default; see NON_ELECTRICAL_DRC.
+  if (input.strictDrc === true) STRICT_NON_ELECTRICAL = true
 
   // Validate footprints up front. tscircuit expands "qfn999" into a literal
   // 999-pad part that hangs placement/routing for minutes — reject an absurd or
@@ -1482,6 +1637,12 @@ async function main() {
           ...boardFeatures.notes,
         ]
       }
+      // Legalizer clearance = the winning profile's hole_clearance RULE + margin
+      // (the old hardcoded 0.4 had zero margin against the HDI rule and sat
+      // UNDER the standard profile's 0.5mm rule).
+      const holeClearanceMm = (FAB_PROFILES[res.best.drc.profileKey] || FAB_PROFILES.standard).holeClearance ?? 0.5
+      const legalClear = +(holeClearanceMm + LEGALIZE_MARGIN_MM).toFixed(3)
+      let lastMd = null // last accepted legalizer displacement (feeds the residual nudge)
       // Via-legalization post-pass: if the best board has DRC errors, try nudging
       // over-packed vias off nearby other-net copper, then re-DRC. Keep it ONLY if
       // total errors drop and no new unconnected nets appear (a via that wandered
@@ -1502,8 +1663,8 @@ async function main() {
             // Both directions: nudge over-packed vias off copper, then bend the
             // remaining crossing tracks off any via still too close. A boxed-in
             // via that can't move is cleared by moving the track instead.
-            const vm = legalizeVias(cjTry, { minClear: 0.4, maxDisp: md, iters: 260 }).moved
-            const tm = legalizeTraces(cjTry, { minClear: 0.4, maxDisp: md, iters: 200 }).moved
+            const vm = legalizeVias(cjTry, { minClear: legalClear, maxDisp: md, iters: 260 }).moved
+            const tm = legalizeTraces(cjTry, { minClear: legalClear, maxDisp: md, iters: 200 }).moved
             const moved = vm + tm
             if (!moved) continue
             const drc2 = await realDrc(cjTry, res.best.drc.profileKey || 'standard')
@@ -1515,21 +1676,85 @@ async function main() {
           }
           if (process.env.FL_FR_DEBUG) process.stderr.write(`[legalizeVias r${round}] before ${drc.errors} -> ${best2 ? best2.drc.errors + ' (md ' + best2.md + ')' : 'no improvement'}\n`)
           if (!best2) break
-          cj = best2.cj; drc = best2.drc; curMoved += best2.moved
+          cj = best2.cj; drc = best2.drc; curMoved += best2.moved; lastMd = best2.md
         }
         if (curMoved > 0) {
-          drcRepair.viaLegalization = { moved: curMoved, errorsAfter: drc.errors }
+          drcRepair.viaLegalization = { moved: curMoved, errorsAfter: drc.errors, minClear: legalClear }
           drcRepair.errorsBest = drc.errors
-          drcRepair.fixes = [...drcRepair.fixes, `via-legalization: nudged vias off other-net copper → ${drc.errors} DRC error(s)`]
+          drcRepair.fixes = [...drcRepair.fixes, `via-legalization (${legalClear.toFixed(2)}mm = ${holeClearanceMm}mm rule + ${LEGALIZE_MARGIN_MM}mm margin): nudged vias off other-net copper → ${drc.errors} DRC error(s)`]
         }
+      }
+      // Residual nudge: the whole ladder is done and the board is a handful of
+      // hole_clearance / clearance nits short of clean (≤ RESIDUAL_NUDGE_MAX, no
+      // unrouted net, no other error class). Run both legalizers ONCE more at a
+      // slightly larger displacement, but only on copper next to the reported
+      // violation positions (drc.violations, mapped back into cj coordinates),
+      // then re-run real DRC once. Accept only if the count did not increase and
+      // no unconnected item appeared. This is the relief a 1-5-error board never
+      // got: the caller's density re-plan only fires at ≥6 errors / an unrouted
+      // net, so these boards used to end `converged:false` untouched.
+      const nudgeCfg = input.residualNudge
+      const nudgeMax = nudgeCfg === false ? 0
+        : (Number.isFinite(+nudgeCfg?.maxErrors) && +nudgeCfg.maxErrors >= 1 && +nudgeCfg.maxErrors <= 10 ? +nudgeCfg.maxErrors : RESIDUAL_NUDGE_MAX)
+      const errTypes = Object.keys(drc?.errorTypes || {})
+      if (drc?.available && drc.errors > 0 && drc.errors <= nudgeMax && (res.best.unrouted ?? 0) === 0
+          && errTypes.length && errTypes.every((t) => RESIDUAL_NUDGE_TYPES.has(t))
+          && (Date.now() - T_START) + 20_000 < BUDGET_MS) {
+        const targets = (drc.violations || []).filter((v) => RESIDUAL_NUDGE_TYPES.has(v.type)).map((v) => ({ x: v.x, y: v.y }))
+        const targeted = !!drc.positionsMapped && targets.length > 0
+        const md = +((lastMd ?? 0.3) + RESIDUAL_NUDGE_DISP_BOOST).toFixed(2)
+        const cjTry = JSON.parse(JSON.stringify(cj))
+        const vm = legalizeVias(cjTry, { minClear: legalClear, maxDisp: md, iters: 260, targets: targeted ? targets : null }).moved
+        const tm = legalizeTraces(cjTry, { minClear: legalClear, maxDisp: md, iters: 200, targets: targeted ? targets : null }).moved
+        const before = drc.errors
+        let after = before, accepted = false, reason = 'nothing to move'
+        if (vm + tm > 0) {
+          const drc2 = await realDrc(cjTry, res.best.drc.profileKey || 'standard')
+          const unbefore = drc.errorTypes?.unconnected_items || 0
+          const unafter = drc2.errorTypes?.unconnected_items || 0
+          if (drc2.available && drc2.errors <= drc.errors && unafter <= unbefore) {
+            cj = cjTry; drc = drc2; accepted = true; after = drc2.errors
+            reason = drc2.errors < before ? 'fewer errors' : 'no change in count'
+          } else {
+            after = drc2.available ? drc2.errors : null
+            reason = !drc2.available ? 'DRC unavailable' : unafter > unbefore ? 'connectivity regressed' : 'error count rose'
+          }
+        }
+        drcRepair.residualNudge = { attempted: true, targeted, targets: targets.length, moved: vm + tm, maxDisp: md, minClear: legalClear, before, after, accepted, reason }
+        if (process.env.FL_FR_DEBUG) process.stderr.write(`[residualNudge] ${before} -> ${after} (${reason}; targeted=${targeted}, moved=${vm + tm}, md=${md})\n`)
+        drcRepair.fixes = [...drcRepair.fixes,
+          `residual nudge (${targeted ? `${targets.length} violation site(s)` : 'untargeted — positions not mappable'}, ${md}mm): ${accepted ? `${before} → ${after} DRC error(s)` : `rejected (${reason}), kept ${before}`}`]
+        if (accepted) drcRepair.errorsBest = drc.errors
+      }
+      // Post-pass verdict refresh: `converged` / `verdict` were computed by the
+      // ladder BEFORE via-legalization and the residual nudge; they must reflect
+      // the board actually being reported (the spec-level "post-nudge count").
+      {
+        const unroutedNow = res.best.unrouted ?? 0
+        const convergedNow = !!(drc?.available && drc.errors === 0 && unroutedNow === 0)
+        if (convergedNow !== drcRepair.converged || drc?.errors !== res.best.drc.errors) {
+          drcRepair.converged = convergedNow
+          const n = res.trail.length, sl = `iterated ${n} strateg${n === 1 ? 'y' : 'ies'} + legalization`
+          if (convergedNow) drcRepair.verdict = null
+          else if (unroutedNow > 0) {
+            drcRepair.verdict = `${sl}; best board has ${drc.errors} DRC error(s) and ${unroutedNow} net(s) the autorouter couldn't complete — needs manual routing or a simpler netlist.`
+          } else {
+            const top = Object.entries(drc?.errorTypes || {}).sort((a, b) => b[1] - a[1])[0]?.[0]
+            drcRepair.verdict = `${sl}; best ${drc.errors} error(s) (${top || 'DRC'}) under ${drc.ruleProfile} — beyond the loop's current levers.`
+          }
+        }
+        if (drc?.nonElectrical?.count) drcRepair.nonElectrical = drc.nonElectrical
       }
       // Real ground plane (pcbnew): assign GND to the ground pins and lay a
       // DRC-verified GND zone that bonds them. Signals stay freerouting-routed;
       // ground becomes a plane, the way a real board does it.
+      // NOTE: uses `cj` (the legalized / nudged board), not res.best.cj — the
+      // legalizers work on deep copies, so the old res.best.cj reference here
+      // grounded and rendered the PRE-legalization geometry.
       if (input.gnd?.length) {
         const tGp = Date.now()
         TIMINGS.counters.groundPlanePasses++
-        const gp = await applyGroundPlane(res.best.cj, input.gnd, res.best.drc.profileKey || 'standard')
+        const gp = await applyGroundPlane(cj, input.gnd, res.best.drc.profileKey || 'standard')
         tAdd('groundPlane', Date.now() - tGp, gp?.available ? `${gp.assigned} pins, ${gp.errors} errors` : 'unavailable')
         if (gp?.available) {
           if (gp.pcb) kicadPcb = gp.pcb // grounded board (with the GND plane) for the 3D render
@@ -1549,7 +1774,9 @@ async function main() {
             const bits = []
             if (gp.unconnected) bits.push(`${gp.unconnected} ground pin(s) unreached${gp.skipped ? ` (${gp.skipped} via-in-pad skipped to hold hole_clearance)` : ''}`)
             if (gp.errors) bits.push(`${gp.errors} zone DRC error(s) amid the dense routing`)
-            drcRepair.verdict = `${res.verdict ? res.verdict + ' ' : ''}Ground plane: ${bits.join(' + ')} — a real chip-scale density limit, reported not hidden.`
+            // build on the REFRESHED (post-legalization / post-nudge) verdict, not
+            // the ladder's original res.verdict, so the detail never quotes a stale count
+            drcRepair.verdict = `${drcRepair.verdict ? drcRepair.verdict + ' ' : ''}Ground plane: ${bits.join(' + ')} — a real chip-scale density limit, reported not hidden.`
           }
         }
       }
