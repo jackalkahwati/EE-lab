@@ -1,0 +1,34 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+
+component TCAN1042VDRQ1_package:
+    """CAN-FD transceiver 5Mbps SOIC-8"""
+    # VERIFY: run `ato create part -s TCAN1042VDRQ1 -a` to confirm LCSC C2897156
+    trait is_atomic_part<manufacturer="Texas Instruments", partnumber="TCAN1042VDRQ1",
+        footprint="SOIC-8_L4.9-W3.9-P1.27-LS6.0-BL.kicad_mod",
+        symbol="TCAN1042VDRQ1.kicad_sym",
+        model="SOIC-8_L4.9-W3.9-H1.7-LS6.0-P1.27.STEP">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C2897156",
+        manufacturer="Texas Instruments", partno="TCAN1042VDRQ1">
+    trait has_designator_prefix<prefix="U">
+    trait has_datasheet<datasheet="https://www.ti.com/lit/ds/symlink/tcan1042-q1.pdf">
+
+    pin 1
+    pin 2
+    pin 3
+    pin 4
+    pin 5
+    pin 6
+    pin 7
+    pin 8
+
+    signal TXD  ~ pin 1
+    signal GND  ~ pin 2
+    signal VCC  ~ pin 3
+    signal RXD  ~ pin 4
+    signal VIO  ~ pin 5
+    signal CANL ~ pin 6
+    signal CANH ~ pin 7
+    signal STB  ~ pin 8

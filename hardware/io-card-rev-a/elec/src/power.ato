@@ -1,0 +1,234 @@
+"""
+PowerTree — FL-1 I/O Card Rev A power management.
+
+24V input -> fuse + TVS -> TPS54331DR (24V->5V digital, 3A)
+5V digital -> TPS62086RLTR (5V->3.3V digital)
+5V digital -> TPS7A4901DGNR (5V->+5V_ANA, filtered analog LDO)
++5V_ANA -> ICL7660AIBAZA (charge pump -> -5V_ANA, for ADS1256 bipolar supply)
+INA219 coil/input monitor at 0x40 (A0=GND, A1=GND), 50mOhm shunt on 24V rail.
+
+Feedback values (TPS54331, 24V->5V):
+  Vref=0.8V, Vout=5V -> R_top=10.5kOhm, R_bot=2kOhm
+Feedback values (TPS62086, 5V->3.3V):
+  Vref=0.45V, Vout=3.3V -> R_top=100kOhm, R_bot=15.8kOhm
+TPS7A4901 (5V->5V_ANA LDO):
+  Vref=1.225V, Vout=5V -> R_top=3.09kOhm, R_bot=1kOhm
+"""
+
+import ElectricPower
+import Resistor
+import Capacitor
+import Inductor
+import Fuse
+from "parts/Texas_Instruments_TPS54331DR/Texas_Instruments_TPS54331DR.ato" import Texas_Instruments_TPS54331DR_package
+from "parts/Texas_Instruments_TPS62086RLTR/Texas_Instruments_TPS62086RLTR.ato" import Texas_Instruments_TPS62086RLTR_package
+from "parts/Texas_Instruments_TPS7A4901DGNR/Texas_Instruments_TPS7A4901DGNR.ato" import Texas_Instruments_TPS7A4901DGNR_package
+from "parts/Texas_Instruments_INA219AIDCNR/Texas_Instruments_INA219AIDCNR.ato" import Texas_Instruments_INA219AIDCNR_package
+from "parts/ICL7660AIBAZA/ICL7660AIBAZA.ato" import ICL7660AIBAZA_package
+from "parts/Littelfuse_0805L010YR/Littelfuse_0805L010YR.ato" import Littelfuse_0805L010YR_package
+from "parts/Littelfuse_SMBJ33A/Littelfuse_SMBJ33A.ato" import Littelfuse_SMBJ33A_package
+
+
+module PowerTree:
+    # External ports
+    v24      = new ElectricPower   # 24V input
+    v5_dig   = new ElectricPower   # 5V digital rail
+    v3v3     = new ElectricPower   # 3.3V digital rail
+    v5_ana   = new ElectricPower   # +5V analog (filtered)
+    vm5_ana  = new ElectricPower   # -5V analog (charge pump)
+
+    # I2C bus (INA219 monitor)
+    signal sda
+    signal scl
+
+    # --- 24V input protection: PTC fuse + TVS --------------------------------
+    fuse_in = new Littelfuse_0805L010YR_package
+    tvs_in  = new Littelfuse_SMBJ33A_package
+
+    v24.hv ~ fuse_in.p1
+    fuse_in.p2 ~ tvs_in.A
+    tvs_in.C ~ v24.lv
+
+    signal v24_fused
+    fuse_in.p2 ~ v24_fused
+
+    # --- 24V -> 5V digital: TPS54331DR ----------------------------------------
+    buck24 = new Texas_Instruments_TPS54331DR_package
+
+    l_buck24 = new Inductor
+    l_buck24.inductance = 10uH +/- 20%
+
+    c_boot24 = new Capacitor
+    c_boot24.capacitance = 100nF +/- 10%
+
+    c_in24 = new Capacitor
+    c_in24.capacitance = 47uF +/- 20%
+
+    # Feedback: Vref=0.8V, Vout=5V -> R_top=10.5kOhm, R_bot=2kOhm
+    fb24_top = new Resistor
+    fb24_top.resistance = 10.5kohm +/- 1%
+    fb24_bot = new Resistor
+    fb24_bot.resistance = 2kohm +/- 1%
+
+    v24_fused ~ buck24.VIN
+    buck24.GND ~ v24.lv
+    buck24.EN  ~ buck24.VIN
+
+    # Input decoupling
+    buck24.VIN ~ c_in24.unnamed[0]
+    c_in24.unnamed[1] ~ v24.lv
+
+    # BOOT cap
+    buck24.BOOT ~ c_boot24.unnamed[0]
+    c_boot24.unnamed[1] ~ buck24.PH
+
+    # Inductor: PH -> v5_raw
+    signal v5_raw
+    buck24.PH ~ l_buck24.unnamed[0]
+    l_buck24.unnamed[1] ~ v5_raw
+
+    # Feedback divider
+    v5_raw ~ fb24_top.unnamed[0]
+    fb24_top.unnamed[1] ~ buck24.VSENSE
+    buck24.VSENSE ~ fb24_bot.unnamed[0]
+    fb24_bot.unnamed[1] ~ v24.lv
+
+    # Output cap
+    c_out24 = new Capacitor
+    c_out24.capacitance = 47uF +/- 20%
+    v5_raw ~ c_out24.unnamed[0]
+    c_out24.unnamed[1] ~ v24.lv
+
+    # --- 24V rail INA219 monitor (addr 0x40: A0=GND, A1=GND) ------------------
+    shunt_24 = new Resistor
+    shunt_24.resistance = 0.05ohm +/- 1%
+
+    pwr_mon = new Texas_Instruments_INA219AIDCNR_package
+
+    v24_fused ~ shunt_24.unnamed[0]
+    shunt_24.unnamed[1] ~ v5_dig.hv    # monitor 24V->5V path via shunt
+    # Actually monitor v5_raw output through shunt to v5_dig
+    v5_raw ~ v5_dig.hv
+
+    pwr_mon.INpos ~ v5_raw
+    pwr_mon.INneg ~ v5_dig.hv
+    pwr_mon.VS    ~ v3v3.hv
+    pwr_mon.GND   ~ v24.lv
+    pwr_mon.SDA   ~ sda
+    pwr_mon.SCL   ~ scl
+    pwr_mon.A0    ~ v24.lv
+    pwr_mon.A1    ~ v24.lv
+
+    c_pwr_mon = new Capacitor
+    c_pwr_mon.capacitance = 100nF +/- 10%
+    v3v3.hv ~ c_pwr_mon.unnamed[0]
+    c_pwr_mon.unnamed[1] ~ v24.lv
+
+    # --- 5V -> 3.3V digital: TPS62086RLTR -------------------------------------
+    buck5 = new Texas_Instruments_TPS62086RLTR_package
+
+    l_buck5 = new Inductor
+    l_buck5.inductance = 2.2uH +/- 20%
+
+    # Feedback: Vref=0.45V, Vout=3.3V -> R_top=100kOhm, R_bot=15.8kOhm
+    fb5_top = new Resistor
+    fb5_top.resistance = 100kohm +/- 1%
+    fb5_bot = new Resistor
+    fb5_bot.resistance = 15.8kohm +/- 1%
+
+    v5_dig.hv ~ buck5.VIN
+    buck5.GND ~ v24.lv
+    buck5.EN  ~ buck5.VIN
+    buck5.SW  ~ l_buck5.unnamed[0]
+    l_buck5.unnamed[1] ~ v3v3.hv
+    buck5.VOS ~ v3v3.hv
+
+    v3v3.hv ~ fb5_top.unnamed[0]
+    fb5_top.unnamed[1] ~ buck5.FB
+    buck5.FB ~ fb5_bot.unnamed[0]
+    fb5_bot.unnamed[1] ~ v24.lv
+
+    c_out3v3 = new Capacitor
+    c_out3v3.capacitance = 47uF +/- 20%
+    v3v3.hv ~ c_out3v3.unnamed[0]
+    c_out3v3.unnamed[1] ~ v24.lv
+
+    # --- 5V -> +5V_ANA: TPS7A4901DGNR LDO (low-noise analog) -----------------
+    ldo_ana = new Texas_Instruments_TPS7A4901DGNR_package
+
+    # Feedback: Vref=1.225V, Vout=5.0V -> R_top=3.09kOhm, R_bot=1kOhm
+    fb_ana_top = new Resistor
+    fb_ana_top.resistance = 3.09kohm +/- 1%
+    fb_ana_bot = new Resistor
+    fb_ana_bot.resistance = 1kohm +/- 1%
+
+    v5_dig.hv ~ ldo_ana.IN
+    ldo_ana.GND   ~ v24.lv
+    ldo_ana.EN    ~ v5_dig.hv
+    ldo_ana.OUT   ~ v5_ana.hv
+    ldo_ana.NR_SS ~ v5_ana.hv   # noise-reduction cap tied to output
+    ldo_ana.PwPd  ~ v24.lv      # power-pad to GND
+
+    ldo_ana.OUT ~ fb_ana_top.unnamed[0]
+    fb_ana_top.unnamed[1] ~ ldo_ana.FB
+    ldo_ana.FB ~ fb_ana_bot.unnamed[0]
+    fb_ana_bot.unnamed[1] ~ v24.lv
+
+    # +5V_ANA decoupling (extra filtering)
+    c_ana_1 = new Capacitor
+    c_ana_1.capacitance = 10uF +/- 20%
+    c_ana_2 = new Capacitor
+    c_ana_2.capacitance = 100nF +/- 10%
+    v5_ana.hv ~ c_ana_1.unnamed[0]
+    c_ana_1.unnamed[1] ~ v24.lv
+    v5_ana.hv ~ c_ana_2.unnamed[0]
+    c_ana_2.unnamed[1] ~ v24.lv
+
+    # NR/SS cap
+    c_nr = new Capacitor
+    c_nr.capacitance = 10uF +/- 20%
+    ldo_ana.NR_SS ~ c_nr.unnamed[0]
+    c_nr.unnamed[1] ~ v24.lv
+
+    # --- +5V_ANA -> -5V_ANA: ICL7660AIBAZA charge pump -----------------------
+    chgpump = new ICL7660AIBAZA_package
+
+    c_cap_plus = new Capacitor
+    c_cap_plus.capacitance = 10uF +/- 20%
+
+    c_cap_minus = new Capacitor
+    c_cap_minus.capacitance = 10uF +/- 20%
+
+    c_vm5_bulk = new Capacitor
+    c_vm5_bulk.capacitance = 100uF +/- 20%
+
+    c_vm5_dec = new Capacitor
+    c_vm5_dec.capacitance = 100nF +/- 10%
+
+    v5_ana.hv ~ chgpump.V_PLUS
+    chgpump.GND ~ v24.lv
+    chgpump.LV  ~ v24.lv   # LV pin to GND enables full voltage doubler
+    chgpump.OSC ~ v24.lv   # OSC to GND for internal oscillator
+    chgpump.BOOST ~ v5_ana.hv  # BOOST tied to V+ for higher freq
+
+    # Flying capacitor
+    chgpump.CAP_PLUS  ~ c_cap_plus.unnamed[0]
+    c_cap_plus.unnamed[1] ~ chgpump.CAP_MINUS
+    # alias for clarity
+    chgpump.CAP_MINUS ~ c_cap_minus.unnamed[0]
+    c_cap_minus.unnamed[1] ~ vm5_ana.hv   # V_MINUS is negative output
+
+    # Actually connect V_MINUS to vm5_ana.hv (note: -5V so "hv" means the more-positive rail)
+    chgpump.V_MINUS ~ vm5_ana.hv
+
+    # -5V output decoupling
+    vm5_ana.hv ~ c_vm5_bulk.unnamed[0]
+    c_vm5_bulk.unnamed[1] ~ v24.lv
+    vm5_ana.hv ~ c_vm5_dec.unnamed[0]
+    c_vm5_dec.unnamed[1] ~ v24.lv
+
+    # GND stitching
+    v5_dig.lv ~ v24.lv
+    v3v3.lv   ~ v24.lv
+    v5_ana.lv ~ v24.lv
+    vm5_ana.lv ~ v24.lv

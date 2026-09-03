@@ -1,0 +1,118 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://firstlight.io/schemas/fl1-iocard/telemetry/v1",
+  "title": "FL-1 I/O Card Telemetry",
+  "description": "JSON schema for READ TELEMETRY response from FL-1 I/O Card Rev A",
+  "type": "object",
+  "required": ["ts_ms", "ai", "diff", "ao", "di", "do_ls", "gpio", "temperatures", "power", "faults", "uptime_ms"],
+  "properties": {
+    "ts_ms": {
+      "type": "integer",
+      "description": "Timestamp in milliseconds since firmware boot",
+      "minimum": 0
+    },
+    "ai": {
+      "type": "array",
+      "description": "GP ADC channels AI1-AI16 (0-24V range, ADS1115 x4)",
+      "minItems": 16,
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "required": ["ch", "v", "raw"],
+        "properties": {
+          "ch":  {"type": "integer", "minimum": 1, "maximum": 16},
+          "v":   {"type": "number", "description": "Voltage in volts (0-24V after divider correction)"},
+          "raw": {"type": "integer", "description": "Raw 16-bit ADC code"}
+        }
+      }
+    },
+    "diff": {
+      "type": "array",
+      "description": "Precision differential ADC channels DIFF1-4 (ADS1256 24-bit)",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "required": ["ch", "v", "range_mv", "pga"],
+        "properties": {
+          "ch":       {"type": "integer", "minimum": 1, "maximum": 4},
+          "v":        {"type": "number", "description": "Differential voltage in volts"},
+          "range_mv": {"type": "number", "description": "Input range in mV (100/1000/5000/10000)"},
+          "pga":      {"type": "integer", "description": "PGA gain setting (1/2/4/8/16/32/64)"}
+        }
+      }
+    },
+    "ao": {
+      "type": "array",
+      "description": "Analog outputs AO1-4 (0-5V, DAC8552 16-bit)",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "required": ["ch", "v", "code"],
+        "properties": {
+          "ch":   {"type": "integer", "minimum": 1, "maximum": 4},
+          "v":    {"type": "number", "description": "Set voltage in volts (0-5V)", "minimum": 0, "maximum": 5},
+          "code": {"type": "integer", "description": "Raw 16-bit DAC code", "minimum": 0, "maximum": 65535}
+        }
+      }
+    },
+    "di": {
+      "type": "object",
+      "description": "Digital inputs DI1-24 (24V-tolerant via voltage divider + MCP23017)",
+      "additionalProperties": {"type": "boolean"},
+      "propertyNames": {"pattern": "^([1-9]|1[0-9]|2[0-4])$"}
+    },
+    "do_ls": {
+      "type": "object",
+      "description": "Low-side MOSFET outputs DO_LS1-16 (ULN2803, 24V/500mA)",
+      "additionalProperties": {"type": "boolean"},
+      "propertyNames": {"pattern": "^([1-9]|1[0-6])$"}
+    },
+    "gpio": {
+      "type": "object",
+      "description": "3.3V logic GPIO outputs GPIO1-8 (MCP23017 direct)",
+      "additionalProperties": {"type": "boolean"},
+      "propertyNames": {"pattern": "^[1-8]$"}
+    },
+    "temperatures": {
+      "type": "object",
+      "description": "Temperature and humidity readings",
+      "properties": {
+        "sht31_c":  {"type": ["number", "null"], "description": "Board temperature in Celsius (SHT31)"},
+        "sht31_rh": {"type": ["number", "null"], "description": "Relative humidity in percent (SHT31)"},
+        "ntc_1":    {"type": ["number", "null"], "description": "NTC1 temperature in Celsius"},
+        "ntc_2":    {"type": ["number", "null"], "description": "NTC2 temperature in Celsius"},
+        "ntc_3":    {"type": ["number", "null"], "description": "NTC3 temperature in Celsius"},
+        "ntc_4":    {"type": ["number", "null"], "description": "NTC4 temperature in Celsius"},
+        "ntc_5":    {"type": ["number", "null"], "description": "NTC5 temperature in Celsius"}
+      }
+    },
+    "power": {
+      "type": "object",
+      "description": "Power monitor readings (INA219 at 0x40)",
+      "required": ["v5_dig", "i_coil_ma"],
+      "properties": {
+        "v5_dig":    {"type": "number", "description": "5V digital rail voltage in volts"},
+        "i_coil_ma": {"type": "number", "description": "Supply current in milliamps"}
+      }
+    },
+    "faults": {
+      "type": "array",
+      "description": "Recent fault log entries (up to 8 in telemetry response)",
+      "items": {
+        "type": "object",
+        "required": ["ts_ms", "msg"],
+        "properties": {
+          "ts_ms": {"type": "integer", "description": "Fault timestamp ms since boot"},
+          "msg":   {"type": "string", "description": "Fault description"}
+        }
+      }
+    },
+    "uptime_ms": {
+      "type": "integer",
+      "description": "Firmware uptime in milliseconds",
+      "minimum": 0
+    }
+  }
+}

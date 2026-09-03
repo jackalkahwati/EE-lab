@@ -1,0 +1,38 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+
+component ADS1115IDGST_package:
+    """16-bit delta-sigma ADC 4-ch I2C VSSOP-10"""
+    # VERIFY: run `ato create part -s ADS1115IDGST -a` to confirm LCSC C37593
+    trait is_atomic_part<manufacturer="Texas Instruments", partnumber="ADS1115IDGST",
+        footprint="VSSOP-10_L3.0-W3.0-P0.50-LS3.4-BL.kicad_mod",
+        symbol="ADS1115IDGST.kicad_sym",
+        model="VSSOP-10_L3.0-W3.0-H1.1-LS3.4-P0.50.STEP">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C37593",
+        manufacturer="Texas Instruments", partno="ADS1115IDGST">
+    trait has_designator_prefix<prefix="U">
+    trait has_datasheet<datasheet="https://www.ti.com/lit/ds/symlink/ads1115.pdf">
+
+    pin 1
+    pin 2
+    pin 3
+    pin 4
+    pin 5
+    pin 6
+    pin 7
+    pin 8
+    pin 9
+    pin 10
+
+    signal VDD   ~ pin 1
+    signal GND   ~ pin 2
+    signal SCL   ~ pin 3
+    signal SDA   ~ pin 4
+    signal ADDR  ~ pin 5
+    signal ALERT ~ pin 6
+    signal AIN3  ~ pin 7
+    signal AIN2  ~ pin 8
+    signal AIN1  ~ pin 9
+    signal AIN0  ~ pin 10

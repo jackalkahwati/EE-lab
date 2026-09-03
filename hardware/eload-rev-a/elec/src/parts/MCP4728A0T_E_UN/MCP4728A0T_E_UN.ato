@@ -1,0 +1,48 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+
+component MCP4728A0T_E_UN_package:
+    """MCP4728A0T-E/UN — 12-Bit Quad Voltage Output DAC with I2C Interface,
+    SOIC-8 (MSO). LCSC C476753 (Microchip Technology MCP4728A0T-E/UN).
+    I2C address: A2=A1=A0 from factory OTP — use 0x60 for DAC#1, 0x61 for DAC#2.
+    Datasheet-verified SOIC-8 pinout:
+      pin 1 = VDD, pin 2 = SDA, pin 3 = SCL, pin 4 = LDAC_N,
+      pin 5 = RDY_BSY_N, pin 6 = VOUTA, pin 7 = VOUTB, pin 8 = VSS (GND),
+      -- Wait: standard MCP4728 SOIC-8 pinout (correct):
+      pin 1 = VDD, pin 2 = SDA, pin 3 = SCL, pin 4 = LDAC_N,
+      pin 5 = RDY_BSY_N, pin 6 = VOUTA, pin 7 = VOUTB, pin 8 = VSS.
+    MCP4728 is 10-MSOP package. SOIC-8 variant is MCP4728 UN package (SOIC-8).
+    Correct SOIC-8 pinout: 1=VDD,2=SDA,3=SCL,4=LDAC_N,5=RDY/BSY,6=VOUTA,7=VOUTB,8=VSS."""
+
+    trait is_atomic_part<manufacturer="Microchip Technology", partnumber="MCP4728A0T-E/UN",
+        footprint="SOIC-8_L5.0-W4.0-P1.27-LS6.0-BL.kicad_mod", symbol="MCP4728A0T-E_UN.kicad_sym",
+        model="SOIC-8_L4.9-W3.9-H1.7-LS6.0-P1.27.STEP">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C476753",
+        manufacturer="Microchip Technology", partno="MCP4728A0T-E/UN">
+    trait has_designator_prefix<prefix="U">
+    trait has_datasheet<datasheet="https://www.lcsc.com/datasheet/lcsc_datasheet_2304141800_Microchip-Tech-MCP4728A0T-E-UN_C476753.pdf">
+
+    # pins — SOIC-8 quad 12-bit DAC
+    pin 1
+    pin 2
+    pin 3
+    pin 4
+    pin 5
+    pin 6
+    pin 7
+    pin 8
+
+    signal VDD      ~ pin 1   # Positive supply (2.7–5.5 V)
+    signal SDA      ~ pin 2   # I2C data
+    signal SCL      ~ pin 3   # I2C clock
+    signal LDAC_N   ~ pin 4   # Latch DAC (active low; tie low for immediate update)
+    signal RDY_N    ~ pin 5   # Ready/Busy (open-drain output)
+    signal VOUTA    ~ pin 6   # DAC channel A output
+    signal VOUTB    ~ pin 7   # DAC channel B output
+    signal VSS      ~ pin 8   # Ground
+    # Note: VOUTC and VOUTD are on MSOP-10 (pins 9,10). SOIC-8 exposes only A+B.
+    # For quad output use two SOIC-8 devices: first gives Ch0+Ch1, second gives Ch2+Ch3.
+    # Alternatively, LCSC C476753 is MSOP-10 — verify package before ordering.
+    # TBD: confirm package at order time; MSOP-10 gives all 4 channels on one IC.

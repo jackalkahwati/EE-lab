@@ -1,0 +1,257 @@
+"""
+Control — Raspberry Pi Pico 2 (RP2350) + TPS3823 watchdog + CAN-FD + LEDs
++ UART debug header for FL-1 I/O Card Rev A.
+
+GPIO allocation:
+  GP0  / pin 1  — UART0 TX (debug)
+  GP1  / pin 2  — UART0 RX (debug)
+  GP2  / pin 4  — I2C0 SDA (all I2C devices)
+  GP3  / pin 5  — I2C0 SCL
+  GP4  / pin 6  — I2C1 SDA (backplane reserved)
+  GP5  / pin 7  — I2C1 SCL (backplane reserved)
+  GP6  / pin 9  — SPI0 SCK -> ADS1256 SCLK
+  GP7  / pin 10 — SPI0 TX  -> ADS1256 DIN
+  GP8  / pin 11 — SPI0 RX  <- ADS1256 DOUT
+  GP9  / pin 12 — ADS1256 CS_N
+  GP10 / pin 14 — ADS1256 DRDY (IRQ input, active-low)
+  GP11 / pin 15 — ADS1256 SYNC (tied high = running)
+  GP12 / pin 16 — SPI1 SCK -> DAC8552 SCLK
+  GP13 / pin 17 — SPI1 TX  -> DAC8552 DIN
+  GP14 / pin 19 — DAC8552_a SYNC_N (CS)
+  GP15 / pin 20 — DAC8552_b SYNC_N (CS)
+  GP16 / pin 21 — TCAN1042 TX (CAN-FD)
+  GP17 / pin 22 — TCAN1042 RX (CAN-FD)
+  GP18 / pin 24 — TPS3823 WDI (watchdog kick)
+  GP19 / pin 25 — FAULT output (open-drain via 2N7002)
+  GP20 / pin 26 — TRIGGER_IN (backplane)
+  GP21 / pin 27 — TRIGGER_OUT (backplane)
+  GP22 / pin 29 — MCP23017 INTA (interrupt, active-low)
+  GP26 / pin 31 — EXC1_PWM (RTD excitation 1)
+  GP27 / pin 32 — EXC2_PWM (RTD excitation 2)
+  GP28 / pin 34 — FREQ_IN_1 (counter, PIO)
+"""
+
+import ElectricPower
+import Resistor
+import Capacitor
+from "parts/RaspberryPi_Pico2/RaspberryPi_Pico2.ato" import RaspberryPi_Pico2_package
+from "parts/Texas_Instruments_TPS3823_33DBVR/Texas_Instruments_TPS3823_33DBVR.ato" import Texas_Instruments_TPS3823_33DBVR_package
+from "parts/TCAN1042VDRQ1/TCAN1042VDRQ1.ato" import TCAN1042VDRQ1_package
+from "parts/PN2N7002/PN2N7002.ato" import PN2N7002_package
+from "parts/LED_Red_0603/LED_Red_0603.ato" import LED_Red_0603_package
+
+
+module Control:
+    v3v3    = new ElectricPower
+    v5_dig  = new ElectricPower
+
+    # I2C bus (shared)
+    signal i2c0_sda
+    signal i2c0_scl
+
+    # SPI0 to ADS1256
+    signal spi0_sck
+    signal spi0_tx
+    signal spi0_rx
+    signal ads1256_cs
+    signal ads1256_drdy
+
+    # SPI1 to DAC8552
+    signal spi1_sck
+    signal spi1_tx
+    signal dac_cs_a
+    signal dac_cs_b
+
+    # MCP23017 interrupt
+    signal mcp_inta
+
+    # Excitation PWM outputs
+    signal exc1_pwm
+    signal exc2_pwm
+
+    # CAN bus (exposed)
+    signal can_h
+    signal can_l
+
+    # ==========================================================================
+    # Raspberry Pi Pico 2 (socketed)
+    # ==========================================================================
+    mcu = new RaspberryPi_Pico2_package
+
+    mcu.vsys ~ v3v3.hv
+    mcu.gnd  ~ v3v3.lv
+
+    # I2C0: GP2/GP3 = pin4/pin5
+    mcu.sda ~ i2c0_sda
+    mcu.scl ~ i2c0_scl
+
+    # SPI0: GP6=SCK(pin9), GP7=TX(pin10), GP8=RX(pin11), GP9=CS(pin12)
+    mcu.spi_sck  ~ spi0_sck
+    # Note: using existing rail signal aliases; new signals for io-card GPIO
+    signal gp7_spi0_tx
+    signal gp8_spi0_rx
+
+    # For io-card we re-map the Pico2 pins; use the raw pin aliases below
+    # GP6=pin9=spi_sck (reused alias), GP7=pin10=spi_mosi, GP8=pin11=wdi(reused)
+    # The Pico2 part uses rail1_enable etc for GP2-GP22; reuse raw pins
+    mcu.spi_sck  ~ spi0_sck      # GP6 / pin 9
+    mcu.spi_mosi ~ spi0_tx       # GP7 / pin 10
+    mcu.wdi      ~ spi0_rx       # GP8 / pin 11 (wdi alias = pin11 in Pico2 part)
+    mcu.rail1_fault_n ~ ads1256_cs    # GP9 / pin 12
+    mcu.rail2_fault_n ~ ads1256_drdy  # GP10 / pin 14
+
+    # SPI1: GP12=SCK(pin16), GP13=TX(pin17), GP14=CS_A(pin19), GP15=CS_B(pin20)
+    mcu.rail4_fault_n ~ spi1_sck    # GP12 / pin 16
+    mcu.rail1_fault_clr ~ spi1_tx   # GP13 / pin 17
+    mcu.rail2_fault_clr ~ dac_cs_a  # GP14 / pin 19
+    mcu.rail3_fault_clr ~ dac_cs_b  # GP15 / pin 20
+
+    # Watchdog kick: GP18 / pin 24
+    mcu.rail2_disch ~ wdt.WDI       # GP18 / pin 24
+
+    # Interrupts and control signals
+    mcu.rail2_led  ~ mcp_inta       # GP22 / pin 29
+
+    # Excitation PWM: GP26=pin31, GP27=pin32
+    mcu.rail3_led ~ exc1_pwm        # GP26 / pin 31
+    mcu.rail4_led ~ exc2_pwm        # GP27 / pin 32
+
+    # UART TX/RX aliases (GP0/GP1)
+    mcu.uart_tx ~ uart_tx_sig
+    mcu.uart_rx ~ uart_rx_sig
+    signal uart_tx_sig
+    signal uart_rx_sig
+
+    # CAN TX/RX: GP16/GP17 = pin21/pin22
+    mcu.rail4_fault_clr ~ can_txd   # GP16 / pin 21
+    mcu.rail1_disch     ~ can_rxd   # GP17 / pin 22
+    signal can_txd
+    signal can_rxd
+
+    # FAULT output open-drain: GP19 / pin 25
+    mcu.rail3_disch ~ fault_drv_in  # GP19 / pin 25
+    signal fault_drv_in
+
+    # MCU decoupling
+    c_mcu = new Capacitor
+    c_mcu.capacitance = 100nF +/- 10%
+    v3v3.hv ~ c_mcu.unnamed[0]
+    c_mcu.unnamed[1] ~ v3v3.lv
+
+    # ==========================================================================
+    # Watchdog: TPS3823-33DBVR (3.3V, 350ms timeout)
+    # ==========================================================================
+    wdt = new Texas_Instruments_TPS3823_33DBVR_package
+
+    wdt.VDD    ~ v3v3.hv
+    wdt.GND    ~ v3v3.lv
+    wdt.nMR    ~ v3v3.hv       # Manual reset pulled high (not used)
+    wdt.nRESET ~ mcu.wdt_reset_n
+
+    c_wdt = new Capacitor
+    c_wdt.capacitance = 100nF +/- 10%
+    v3v3.hv ~ c_wdt.unnamed[0]
+    c_wdt.unnamed[1] ~ v3v3.lv
+
+    # ==========================================================================
+    # CAN-FD transceiver: TCAN1042VDRQ1
+    # ==========================================================================
+    can_ic = new TCAN1042VDRQ1_package
+
+    can_ic.TXD  ~ can_txd
+    can_ic.RXD  ~ can_rxd
+    can_ic.VCC  ~ v5_dig.hv
+    can_ic.GND  ~ v3v3.lv
+    can_ic.VIO  ~ v3v3.hv
+    can_ic.STB  ~ v3v3.lv      # STB=GND: always active (normal mode)
+    can_ic.CANH ~ can_h
+    can_ic.CANL ~ can_l
+
+    # 120 Ohm CAN termination (populate option)
+    r_can_term = new Resistor
+    r_can_term.resistance = 120ohm +/- 5%
+    can_h ~ r_can_term.unnamed[0]
+    r_can_term.unnamed[1] ~ can_l
+
+    c_can = new Capacitor
+    c_can.capacitance = 100nF +/- 10%
+    v5_dig.hv ~ c_can.unnamed[0]
+    c_can.unnamed[1] ~ v3v3.lv
+
+    # ==========================================================================
+    # FAULT output: open-drain N-ch MOSFET (2N7002)
+    # GP19 drives gate; drain = FAULT_OUT; source = GND
+    # Pull-up on backplane side
+    # ==========================================================================
+    fault_fet = new PN2N7002_package
+    fault_fet.gate   ~ fault_drv_in
+    fault_fet.source ~ v3v3.lv
+    signal fault_out
+    fault_fet.drain  ~ fault_out
+
+    # ==========================================================================
+    # Status LEDs (6x LED_Red_0603 + 100 Ohm series resistors)
+    # BOM note: substitute appropriate color LED at DNP/assembly
+    # ==========================================================================
+    led_pwr   = new LED_Red_0603_package   # Green substitute: board PWR good
+    led_fault = new LED_Red_0603_package   # Red: fault
+    led_comm  = new LED_Red_0603_package   # Yellow/orange substitute: comm activity
+    led_wdt   = new LED_Red_0603_package   # Blue substitute: WDT heartbeat
+    led_ana   = new LED_Red_0603_package   # Yellow substitute: analog domain active
+    led_utl   = new LED_Red_0603_package   # Yellow substitute: utility/DO active
+
+    r_led_pwr = new Resistor
+    r_led_pwr.resistance = 100ohm +/- 5%
+    r_led_fault = new Resistor
+    r_led_fault.resistance = 100ohm +/- 5%
+    r_led_comm = new Resistor
+    r_led_comm.resistance = 100ohm +/- 5%
+    r_led_wdt = new Resistor
+    r_led_wdt.resistance = 100ohm +/- 5%
+    r_led_ana = new Resistor
+    r_led_ana.resistance = 100ohm +/- 5%
+    r_led_utl = new Resistor
+    r_led_utl.resistance = 100ohm +/- 5%
+
+    # PWR LED: always on from 3.3V
+    v3v3.hv ~ r_led_pwr.unnamed[0]
+    r_led_pwr.unnamed[1] ~ led_pwr.A
+    led_pwr.K ~ v3v3.lv
+
+    # FAULT LED: driven by GP28 (fault_led alias = pin34)
+    mcu.fault_led ~ r_led_fault.unnamed[0]
+    r_led_fault.unnamed[1] ~ led_fault.A
+    led_fault.K ~ v3v3.lv
+
+    # COMM LED: driven by GP0 uart_tx toggled in firmware
+    mcu.uart_tx ~ r_led_comm.unnamed[0]
+    r_led_comm.unnamed[1] ~ led_comm.A
+    led_comm.K ~ v3v3.lv
+
+    # WDT LED: driven by GP18 WDI (heartbeat blink)
+    wdt.WDI ~ r_led_wdt.unnamed[0]
+    r_led_wdt.unnamed[1] ~ led_wdt.A
+    led_wdt.K ~ v3v3.lv
+
+    # ANA LED: driven by GP11 (ADS1256 SYNC pin, toggled on conversions)
+    mcu.rail3_fault_n ~ r_led_ana.unnamed[0]   # GP11 / pin15
+    r_led_ana.unnamed[1] ~ led_ana.A
+    led_ana.K ~ v3v3.lv
+
+    # UTL LED: driven by GP21 (TRIGGER_OUT)
+    mcu.rail1_led ~ r_led_utl.unnamed[0]       # GP21 / pin27
+    r_led_utl.unnamed[1] ~ led_utl.A
+    led_utl.K ~ v3v3.lv
+
+    # ==========================================================================
+    # UART debug header (6-pin 2.54mm: GND, 3V3, TX, RX, -, -)
+    # ==========================================================================
+    signal cal_gnd
+    signal cal_3v3
+    signal cal_uart_tx
+    signal cal_uart_rx
+
+    cal_gnd     ~ v3v3.lv
+    cal_3v3     ~ v3v3.hv
+    cal_uart_tx ~ mcu.uart_tx
+    cal_uart_rx ~ mcu.uart_rx

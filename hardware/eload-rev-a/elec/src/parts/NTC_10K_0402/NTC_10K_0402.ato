@@ -1,0 +1,19 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+
+component NTC_10K_0402_package:
+    """NTC thermistor 10kOhm at 25C, B=3950K, 0402"""
+    # VERIFY: run `ato create part -s SDNT2012X103J3950 -a` to confirm LCSC C201114
+    trait is_atomic_part<manufacturer="Sunlord", partnumber="SDNT2012X103J3950HT",
+        footprint="R0402.kicad_mod",
+        symbol="SDNT2012X103J3950HT.kicad_sym",
+        model="R0402_L1.0-W0.5-H0.3.STEP">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C201114",
+        manufacturer="Sunlord", partno="SDNT2012X103J3950HT">
+    trait has_designator_prefix<prefix="RT">
+    pin 1
+    pin 2
+    signal p1 ~ pin 1
+    signal p2 ~ pin 2

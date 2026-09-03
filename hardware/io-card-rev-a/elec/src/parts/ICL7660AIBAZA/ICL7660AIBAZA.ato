@@ -1,0 +1,34 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+
+component ICL7660AIBAZA_package:
+    """+5V to -5V charge pump SOIC-8 100mA"""
+    # VERIFY: run `ato create part -s ICL7660AIBAZA -a` to confirm LCSC C155165
+    trait is_atomic_part<manufacturer="Renesas", partnumber="ICL7660AIBAZA",
+        footprint="SOIC-8_L4.9-W3.9-P1.27-LS6.0-BL.kicad_mod",
+        symbol="ICL7660AIBAZA.kicad_sym",
+        model="SOIC-8_L4.9-W3.9-H1.7-LS6.0-P1.27.STEP">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C155165",
+        manufacturer="Renesas", partno="ICL7660AIBAZA">
+    trait has_designator_prefix<prefix="U">
+    trait has_datasheet<datasheet="https://www.renesas.com/us/en/document/dst/icl7660a-datasheet">
+
+    pin 1
+    pin 2
+    pin 3
+    pin 4
+    pin 5
+    pin 6
+    pin 7
+    pin 8
+
+    signal BOOST    ~ pin 1
+    signal CAP_PLUS  ~ pin 2
+    signal CAP_MINUS ~ pin 3
+    signal GND       ~ pin 4
+    signal V_MINUS   ~ pin 5
+    signal LV        ~ pin 6
+    signal OSC       ~ pin 7
+    signal V_PLUS    ~ pin 8

@@ -1,0 +1,86 @@
+"""
+IoCard — FL-1 Low-Speed Measurement and Utility I/O Card Rev A.
+
+Board: 160 x 100 mm, 4-layer FR-4.
+Analog domain (left 0-80mm): 16-ch GP ADC, 24-bit precision ADC, 4-ch DAC,
+  RTD excitation, +5V_ANA/-5V_ANA supply.
+Digital domain (right 80-160mm): 24 DI, 16 DO LS, 8 GPIO, CAN-FD,
+  RP2350 MCU, watchdog.
+Environmental: SHT31 temp+humidity, 5x NTC.
+EEPROM: board type "FL1-IOCRD", I2C 0x50.
+"""
+
+import ElectricPower
+from "power.ato"         import PowerTree
+from "analog_domain.ato" import AnalogDomain
+from "digital_domain.ato" import DigitalDomain
+from "mcu.ato"           import Control
+from "env_sensors.ato"   import EnvSensors
+from "eeprom.ato"        import EepromModule
+
+
+module IoCard:
+    power   = new PowerTree
+    analog  = new AnalogDomain
+    digital = new DigitalDomain
+    ctl     = new Control
+    env     = new EnvSensors
+    eeprom  = new EepromModule
+
+    # 24V board input port
+    v24_in = new ElectricPower
+
+    # Power tree input
+    power.v24 ~ v24_in
+
+    # Power distribution
+    ctl.v3v3      ~ power.v3v3
+    ctl.v5_dig    ~ power.v5_dig
+    analog.v3v3   ~ power.v3v3
+    analog.v5_ana ~ power.v5_ana
+    analog.vm5_ana ~ power.vm5_ana
+    digital.v3v3  ~ power.v3v3
+    digital.v24   ~ power.v24
+    env.v3v3      ~ power.v3v3
+    eeprom.v3v3   ~ power.v3v3
+
+    # Power tree I2C (INA219 on I2C0 bus)
+    power.sda ~ ctl.i2c0_sda
+    power.scl ~ ctl.i2c0_scl
+
+    # I2C0 bus: all devices share MCU I2C0
+    ctl.i2c0_sda ~ analog.sda
+    ctl.i2c0_sda ~ digital.sda
+    ctl.i2c0_sda ~ env.sda
+    ctl.i2c0_sda ~ eeprom.sda
+    ctl.i2c0_scl ~ analog.scl
+    ctl.i2c0_scl ~ digital.scl
+    ctl.i2c0_scl ~ env.scl
+    ctl.i2c0_scl ~ eeprom.scl
+
+    # SPI0 to ADS1256 precision ADC
+    ctl.spi0_sck     ~ analog.ads1256_sclk
+    ctl.spi0_tx      ~ analog.ads1256_din
+    ctl.spi0_rx      ~ analog.ads1256_dout
+    ctl.ads1256_cs   ~ analog.ads1256_cs
+    ctl.ads1256_drdy ~ analog.ads1256_drdy
+
+    # SPI1 to DAC8552
+    ctl.spi1_sck ~ analog.dac_sclk
+    ctl.spi1_tx  ~ analog.dac_din
+    ctl.dac_cs_a ~ analog.dac_cs_a
+    ctl.dac_cs_b ~ analog.dac_cs_b
+
+    # MCP23017 interrupt
+    ctl.mcp_inta ~ digital.gpio_inta
+
+    # RTD excitation PWM
+    ctl.exc1_pwm ~ analog.exc1_pwm_in
+    ctl.exc2_pwm ~ analog.exc2_pwm_in
+
+    # NTC outputs from env sensors connect to AI13-AI16 (via external jumper/header)
+    # These are board-level connections (external NTC header wiring):
+    analog.ai_13 ~ env.ntc_1_out
+    analog.ai_14 ~ env.ntc_2_out
+    analog.ai_15 ~ env.ntc_3_out
+    analog.ai_16 ~ env.ntc_4_out

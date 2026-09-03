@@ -1,0 +1,68 @@
+{
+  "board_name": "io-card-rev-a",
+  "board_size_mm": [160, 100],
+  "layer_stack": [
+    "F.Cu (signal, analog left + digital right)",
+    "In1.Cu (AGND left x=0-80mm / DGND right x=80-160mm, single-point join at center)",
+    "In2.Cu (power planes: +5V_DIG, +3V3, +5V_ANA, -5V_ANA zones)",
+    "B.Cu (signal, routing relief)"
+  ],
+  "analog_domain_x_mm": [0, 80],
+  "digital_domain_x_mm": [80, 160],
+  "ground_split_note": "Analog GND (AGND) fills In1.Cu left of x=80mm. Digital GND fills right. Single-point connection at x=80mm board center on In1.Cu. Stitching vias at join point. Do NOT bridge AGND/DGND on F.Cu or B.Cu.",
+  "design_rules": {
+    "min_trace_mm": 0.127,
+    "min_clearance_mm": 0.127,
+    "analog_trace_mm": 0.2,
+    "power_trace_mm": 0.5,
+    "min_drill_mm": 0.2,
+    "via_drill_mm": 0.3,
+    "via_pad_mm": 0.6,
+    "courtyard_clearance_mm": 0.25
+  },
+  "fiducials": [[10, 90], [150, 10], [150, 90]],
+  "mounting_holes": {
+    "drill_mm": 3.2,
+    "pad_mm": 3.5,
+    "positions_mm": [[5, 5], [155, 5], [5, 95], [155, 95]]
+  },
+  "key_placement": {
+    "ADS1256": [15, 20],
+    "ADS1115_1": [5, 50],
+    "ADS1115_2": [25, 50],
+    "ADS1115_3": [45, 50],
+    "ADS1115_4": [65, 50],
+    "REF5025": [15, 10],
+    "ICL7660": [30, 10],
+    "TPS7A4901": [45, 10],
+    "DAC8552_A": [60, 20],
+    "DAC8552_B": [75, 20],
+    "TLV2374_BUF": [60, 35],
+    "TLV2374_EXC": [75, 35],
+    "TPS54331": [100, 10],
+    "TPS62086": [115, 10],
+    "TPS3823": [130, 10],
+    "INA219": [95, 10],
+    "Pico2": [110, 40],
+    "MCP23017_DI_A": [85, 20],
+    "MCP23017_DI_B": [100, 20],
+    "MCP23017_DO_LS": [115, 20],
+    "MCP23017_DO_LV": [130, 20],
+    "ULN2803_A": [145, 30],
+    "ULN2803_B": [145, 55],
+    "TCAN1042": [150, 10],
+    "SHT31": [85, 70],
+    "EEPROM": [140, 70]
+  },
+  "routing_notes": [
+    "ADS1256 AVDD/AVSS: route LC filter from power rails before device. Keep AVDD and AVSS pour separate from digital ground pours.",
+    "REF5025 output: short trace to ADS1256 VREFP and DAC8552 VREF pins. Decouple 10uF+100nF close to each load.",
+    "ADS1115 inputs: keep analog input traces away from switching regulators and SPI/I2C buses.",
+    "DAC output buffers (TLV2374): 100 Ohm series R on each output, placed close to TLV2374.",
+    "Power traces: TPS54331 PH/SW node, minimize loop area. L and C close to IC.",
+    "CAN bus: 120 Ohm termination R near TCAN1042, not at connector. Route CANH/CANL as differential pair.",
+    "I2C bus: 4.7kOhm pull-ups placed near EEPROM (lowest-priority device). Route away from SPI.",
+    "Thermal: ICL7660 100uF output cap close to device pin 5 (V_MINUS)."
+  ],
+  "thermal_note": "ICL7660 output cap 100uF X5R 10V placed within 3mm of V_MINUS pin. ADS1256 AVDD/AVSS require LC filtering: place 10uF + 100nF within 5mm of pins 1/2. TPS54331 switching node (PH) inductor loop area < 50mm2."
+}

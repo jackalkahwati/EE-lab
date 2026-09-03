@@ -1,0 +1,26 @@
+{
+  "board_name": "eload-rev-a",
+  "board_size_mm": [160, 100],
+  "layer_stack": ["F.Cu", "In1.Cu (GND)", "In2.Cu (PWR_5V)", "B.Cu"],
+  "design_rules": {
+    "min_trace_mm": 0.127,
+    "min_clearance_mm": 0.127,
+    "min_via_drill_mm": 0.3,
+    "min_via_annular_mm": 0.15,
+    "power_trace_mm": 0.5,
+    "high_current_trace_mm": 2.0
+  },
+  "placement_intent": {
+    "ch1_mosfet": {"x": 20, "y": 35},
+    "ch2_mosfet": {"x": 60, "y": 35},
+    "ch3_mosfet": {"x": 100, "y": 35},
+    "ch4_mosfet": {"x": 140, "y": 35},
+    "mcu": {"x": 120, "y": 12},
+    "power_buck": {"x": 40, "y": 12},
+    "dac": {"x": 100, "y": 88},
+    "eeprom": {"x": 155, "y": 88},
+    "fiducials": [[10, 90], [150, 10], [150, 90]]
+  },
+  "thermal_note": "D2PAK MOSFETs require 2cm2 copper pour + thermal vias to In1.Cu (GND). Fan connector J_FAN at board edge x=0, y=50.",
+  "high_current_note": "Load current path: DUT connector -> relay -> MOSFET drain/source -> sense resistor -> GND. Use 2mm trace minimum."
+}

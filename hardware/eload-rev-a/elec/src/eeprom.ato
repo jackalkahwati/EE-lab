@@ -1,0 +1,61 @@
+"""
+EepromModule — 24AA025UIDT-I/OT I2C EEPROM with pull-ups and decoupling.
+
+Stores board identity, calibration constants, and fault log for this
+Electronic Load board. I2C address: 0x50 (A0=A1=GND).
+
+Memory map:
+  0x00-0x07  board type   "FL1-ELOAD"
+  0x08-0x0F  revision     "REV-A\0\0\0"
+  0x10-0x17  serial no.   8-char ASCII
+  0x18       board state  0xA5 = calibrated
+  0x19-0x1C  mfg_date     uint32 LE unix timestamp
+  0x1D       checksum     XOR of 0x00-0x1C
+  0x20-0x23  cal_v_gain_ch1   float32 LE
+  0x24-0x27  cal_v_offset_ch1 float32 LE
+  0x28-0x2B  cal_i_gain_ch1   float32 LE
+  0x2C-0x2F  cal_i_offset_ch1 float32 LE
+  0x30-0x3F  cal ch2 (same pattern)
+  0x40-0x4F  cal ch3
+  0x50-0x5F  cal ch4
+  0x60-0x63  cal_dac_gain     float32 LE
+  0x64-0x67  cal_temp_offset  float32 LE
+  0x80-0xF8  unique ID (factory-programmed, read-only 64-bit MAC)
+"""
+
+import ElectricPower
+import Resistor
+import Capacitor
+from "parts/Microchip_Tech_24AA025UIDT_I_OT/Microchip_Tech_24AA025UIDT_I_OT.ato" import Microchip_Tech_24AA025UIDT_I_OT_package
+
+
+module EepromModule:
+    v3v3 = new ElectricPower   # 3.3V supply
+    signal sda
+    signal scl
+
+    eeprom = new Microchip_Tech_24AA025UIDT_I_OT_package
+
+    # Address 0x50: A0=A1=GND
+    eeprom.A0  ~ v3v3.lv
+    eeprom.A1  ~ v3v3.lv
+    eeprom.VCC ~ v3v3.hv
+    eeprom.VSS ~ v3v3.lv
+    eeprom.SDA ~ sda
+    eeprom.SCL ~ scl
+
+    # SDA/SCL pull-ups (4.7kOhm; I2C standard-mode 100 kHz)
+    r_sda = new Resistor
+    r_sda.resistance = 4.7kohm +/- 5%
+    r_scl = new Resistor
+    r_scl.resistance = 4.7kohm +/- 5%
+    v3v3.hv ~ r_sda.unnamed[0]
+    r_sda.unnamed[1] ~ sda
+    v3v3.hv ~ r_scl.unnamed[0]
+    r_scl.unnamed[1] ~ scl
+
+    # VCC decoupling
+    c_vcc = new Capacitor
+    c_vcc.capacitance = 100nF +/- 10%
+    v3v3.hv ~ c_vcc.unnamed[0]
+    c_vcc.unnamed[1] ~ v3v3.lv

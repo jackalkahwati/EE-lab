@@ -1,0 +1,76 @@
+"""
+EepromModule — 24AA025UIDT-I/OT I2C EEPROM with pull-ups and decoupling.
+
+Stores board identity, calibration constants, and fault log for the
+FL-1 I/O Card. I2C address: 0x50 (A0=A1=GND).
+
+Memory map (256-byte device):
+  0x00-0x07  board_type[8]    = "FL1-IOCRD"
+  0x08-0x0F  revision[8]      = "REV-A\0\0\0"
+  0x10-0x17  serial[8]        ASCII serial number
+  0x18       board_state      0xA5 = calibrated
+  0x19       checksum         XOR of 0x00-0x18
+  0x1A-0x1F  reserved
+  0x20-0x23  mfg_date         uint32 LE unix timestamp
+  0x24-0x27  cal_date         uint32 LE unix timestamp
+  0x28-0x2F  AI1  cal: gain(float32 LE) + offset(float32 LE)
+  0x30-0x37  AI2  cal
+  0x38-0x3F  AI3  cal
+  0x40-0x47  AI4  cal
+  0x48-0x4F  AI5  cal
+  0x50-0x57  AI6  cal
+  0x58-0x5F  AI7  cal
+  0x60-0x67  AI8  cal
+  0x68-0x6F  AI9  cal
+  0x70-0x77  AI10 cal
+  0x78-0x7F  AI11 cal
+  0x80-0x87  AI12 cal
+  0x88-0x8F  AI13 cal (NTC ch1)
+  0x90-0x97  AI14 cal (NTC ch2)
+  0x98-0x9F  AI15 cal (NTC ch3)
+  0xA0-0xA7  AI16 cal (NTC ch4)
+  0xA8-0xAF  AO1 cal: gain + offset
+  0xB0-0xB7  AO2 cal
+  0xB8-0xBF  AO3 cal
+  0xC0-0xC7  AO4 cal
+  0xC8-0xD7  DIFF1-DIFF4 offset cal (4x float32)
+  0xD8-0xF7  reserved
+  0xF8-0xFF  unique ID (factory MAC, read-only)
+"""
+
+import ElectricPower
+import Resistor
+import Capacitor
+from "parts/Microchip_Tech_24AA025UIDT_I_OT/Microchip_Tech_24AA025UIDT_I_OT.ato" import Microchip_Tech_24AA025UIDT_I_OT_package
+
+
+module EepromModule:
+    v3v3 = new ElectricPower
+    signal sda
+    signal scl
+
+    eeprom = new Microchip_Tech_24AA025UIDT_I_OT_package
+
+    # Address 0x50: A0=A1=GND
+    eeprom.A0  ~ v3v3.lv
+    eeprom.A1  ~ v3v3.lv
+    eeprom.VCC ~ v3v3.hv
+    eeprom.VSS ~ v3v3.lv
+    eeprom.SDA ~ sda
+    eeprom.SCL ~ scl
+
+    # SDA/SCL I2C pull-ups (4.7kOhm, 400kHz Fast-mode)
+    r_sda = new Resistor
+    r_sda.resistance = 4.7kohm +/- 5%
+    r_scl = new Resistor
+    r_scl.resistance = 4.7kohm +/- 5%
+    v3v3.hv ~ r_sda.unnamed[0]
+    r_sda.unnamed[1] ~ sda
+    v3v3.hv ~ r_scl.unnamed[0]
+    r_scl.unnamed[1] ~ scl
+
+    # VCC decoupling
+    c_vcc = new Capacitor
+    c_vcc.capacitance = 100nF +/- 10%
+    v3v3.hv ~ c_vcc.unnamed[0]
+    c_vcc.unnamed[1] ~ v3v3.lv

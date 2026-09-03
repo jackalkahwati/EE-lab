@@ -1,0 +1,54 @@
+import has_datasheet
+import has_designator_prefix
+import has_part_picked
+import is_atomic_part
+
+component ULN2803ADR2G_package:
+    """8x NPN Darlington array 50V 500mA SOIC-18"""
+    # VERIFY: run `ato create part -s ULN2803ADR2G -a` to confirm LCSC C6656
+    trait is_atomic_part<manufacturer="ON Semiconductor", partnumber="ULN2803ADR2G",
+        footprint="SOIC-18_L11.6-W7.5-P1.27-LS10.3-BL.kicad_mod",
+        symbol="ULN2803ADR2G.kicad_sym",
+        model="SOIC-18_L11.6-W7.5-H2.65-LS10.3-P1.27.STEP">
+    trait has_part_picked::by_supplier<supplier_id="lcsc", supplier_partno="C6656",
+        manufacturer="ON Semiconductor", partno="ULN2803ADR2G">
+    trait has_designator_prefix<prefix="U">
+    trait has_datasheet<datasheet="https://www.onsemi.com/pdf/datasheet/uln2803a-d.pdf">
+
+    pin 1
+    pin 2
+    pin 3
+    pin 4
+    pin 5
+    pin 6
+    pin 7
+    pin 8
+    pin 9
+    pin 10
+    pin 11
+    pin 12
+    pin 13
+    pin 14
+    pin 15
+    pin 16
+    pin 17
+    pin 18
+
+    signal IN1  ~ pin 1
+    signal IN2  ~ pin 2
+    signal IN3  ~ pin 3
+    signal IN4  ~ pin 4
+    signal IN5  ~ pin 5
+    signal IN6  ~ pin 6
+    signal IN7  ~ pin 7
+    signal IN8  ~ pin 8
+    signal GND  ~ pin 9
+    signal COM  ~ pin 10
+    signal OUT8 ~ pin 11
+    signal OUT7 ~ pin 12
+    signal OUT6 ~ pin 13
+    signal OUT5 ~ pin 14
+    signal OUT4 ~ pin 15
+    signal OUT3 ~ pin 16
+    signal OUT2 ~ pin 17
+    signal OUT1 ~ pin 18
