@@ -1,0 +1,105 @@
+{
+ "_doc": "AUTO-GENERATED from library/*.json by gen_design_rules.py. Hand-curated design_rules.json wins on conflict. Regenerate when the library changes.",
+ "ics": {
+  "24LC02": {
+   "class": "generic",
+   "total_pins": 8,
+   "pins": {
+    "1": "S0",
+    "2": "S1",
+    "3": "S2",
+    "4": "GND",
+    "5": "SDA",
+    "6": "SCL",
+    "7": "WP",
+    "8": "VCC"
+   },
+   "auto": true
+  },
+  "ADS1115IDGS": {
+   "class": "adc",
+   "total_pins": 10,
+   "pins": {
+    "1": "ADDR",
+    "2": "ALERT",
+    "3": "GND",
+    "4": "AIN0",
+    "5": "AIN1",
+    "6": "AIN2",
+    "7": "AIN3",
+    "8": "VDD",
+    "9": "SDA",
+    "10": "SCL"
+   },
+   "auto": true,
+   "rules": [
+    {
+     "id": "adc_has_input",
+     "check": "at_least_one_of",
+     "pins": [
+      "AIN0",
+      "AIN1",
+      "AIN2",
+      "AIN3"
+     ],
+     "severity": "fail",
+     "msg": "ADC has no analog input connected \u2014 nothing to measure"
+    },
+    {
+     "id": "adc_bus",
+     "check": "all_of",
+     "pins": [
+      "SCL",
+      "SDA"
+     ],
+     "severity": "fail",
+     "msg": "ADC bus (SCL/SDA) incomplete"
+    }
+   ]
+  },
+  "REF3025": {
+   "class": "reference",
+   "total_pins": 3,
+   "pins": {
+    "1": "IN",
+    "2": "OUT",
+    "3": "GND"
+   },
+   "auto": true,
+   "rules": [
+    {
+     "id": "ref_output_used",
+     "check": "signal_pin_count_min",
+     "min": 2,
+     "severity": "fail",
+     "msg": "voltage reference output goes nowhere (unused)"
+    }
+   ]
+  },
+  "ULN2803A": {
+   "class": "generic",
+   "total_pins": 18,
+   "pins": {
+    "1": "I1",
+    "2": "I2",
+    "3": "I3",
+    "4": "I4",
+    "5": "I5",
+    "6": "I6",
+    "7": "I7",
+    "8": "I8",
+    "9": "GND",
+    "10": "COM",
+    "11": "O8",
+    "12": "O7",
+    "13": "O6",
+    "14": "O5",
+    "15": "O4",
+    "16": "O3",
+    "17": "O2",
+    "18": "O1"
+   },
+   "auto": true
+  }
+ }
+}

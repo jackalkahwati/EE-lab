@@ -134,7 +134,7 @@
   "datasheet (not provided)"
  ],
  "unsupported_fields": [],
- "support_status": "partial",
+ "support_status": "supported",
  "_status_reasons": [],
  "datasheet_evidence": {
   "_available": false
@@ -147,5 +147,6 @@
   "by": "user",
   "status": "partial",
   "note": ""
- }
+ },
+ "_curated_by": "firstlight: promoted to supported (full pinout present)"
 }

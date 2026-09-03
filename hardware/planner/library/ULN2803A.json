@@ -1,0 +1,174 @@
+{
+ "ucs_version": "1.0",
+ "mpn": "ULN2803A",
+ "manufacturer": "",
+ "aliases": [
+  "ULN2803",
+  "ULN2803APG",
+  "ULN2803ADW"
+ ],
+ "category": "uncategorized",
+ "description": "",
+ "package": "SOIC-18W",
+ "kicad_symbol": "Transistor_Array:ULN2803A",
+ "kicad_footprint": "Package_SO:SOIC-18W_7.5x11.6mm_P1.27mm",
+ "pins": [
+  {
+   "number": "1",
+   "name": "I1",
+   "etype": "unspecified"
+  },
+  {
+   "number": "2",
+   "name": "I2",
+   "etype": "unspecified"
+  },
+  {
+   "number": "3",
+   "name": "I3",
+   "etype": "unspecified"
+  },
+  {
+   "number": "4",
+   "name": "I4",
+   "etype": "unspecified"
+  },
+  {
+   "number": "5",
+   "name": "I5",
+   "etype": "unspecified"
+  },
+  {
+   "number": "6",
+   "name": "I6",
+   "etype": "unspecified"
+  },
+  {
+   "number": "7",
+   "name": "I7",
+   "etype": "unspecified"
+  },
+  {
+   "number": "8",
+   "name": "I8",
+   "etype": "unspecified"
+  },
+  {
+   "number": "9",
+   "name": "GND",
+   "etype": "ground"
+  },
+  {
+   "number": "10",
+   "name": "COM",
+   "etype": "power_in"
+  },
+  {
+   "number": "11",
+   "name": "O8",
+   "etype": "unspecified"
+  },
+  {
+   "number": "12",
+   "name": "O7",
+   "etype": "unspecified"
+  },
+  {
+   "number": "13",
+   "name": "O6",
+   "etype": "unspecified"
+  },
+  {
+   "number": "14",
+   "name": "O5",
+   "etype": "unspecified"
+  },
+  {
+   "number": "15",
+   "name": "O4",
+   "etype": "unspecified"
+  },
+  {
+   "number": "16",
+   "name": "O3",
+   "etype": "unspecified"
+  },
+  {
+   "number": "17",
+   "name": "O2",
+   "etype": "unspecified"
+  },
+  {
+   "number": "18",
+   "name": "O1",
+   "etype": "unspecified"
+  }
+ ],
+ "power": {
+  "pins": {
+   "power": [],
+   "ground": [
+    "9"
+   ]
+  },
+  "vcc_min": null,
+  "vcc_max": null,
+  "vcc_typ": null,
+  "i_typ_ma": null,
+  "i_max_ma": null
+ },
+ "abs_max": {},
+ "recommended": {},
+ "interfaces": [
+  {
+   "type": "gpio",
+   "signals": {}
+  }
+ ],
+ "support_circuit": {
+  "decoupling": [],
+  "pullups": [],
+  "pulldowns": [],
+  "crystals": [],
+  "reset_config": [],
+  "other_passives": []
+ },
+ "programming": {},
+ "reference_circuit": null,
+ "constraints": {
+  "layout": [],
+  "routing": [],
+  "thermal": [],
+  "rf": []
+ },
+ "firmware": {},
+ "fl1_validation": {},
+ "sourcing": {},
+ "provenance": {
+  "mpn": "user",
+  "pins": "kicad_library",
+  "kicad_symbol": "kicad_library",
+  "kicad_footprint": "kicad_library",
+  "power.pins.power": "ai_inference",
+  "power.pins.ground": "ai_inference",
+  "interfaces": "ai_inference",
+  "support_circuit.decoupling": "default_assumption"
+ },
+ "confidence": {
+  "pins": 1.0,
+  "kicad_symbol": 1.0,
+  "kicad_footprint": 0.9,
+  "power.pins.power": 0.3,
+  "power.pins.ground": 0.9,
+  "interfaces": 0.8
+ },
+ "missing_fields": [
+  "power.pins.power"
+ ],
+ "unsupported_fields": [],
+ "support_status": "supported",
+ "_status_reasons": [
+  "missing critical field: power.pins.power"
+ ],
+ "_curated_by": "firstlight: relay-driver capability (signal-level low-side driver, not a motor power stage)"
+}

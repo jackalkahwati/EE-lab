@@ -1,0 +1,20 @@
+# FirstLight planner — pinned Python dependencies.
+#
+# Pins reflect the versions currently installed in the working environment.
+# Only third-party (pip-installable) imports are listed; the planner otherwise
+# relies on the Python standard library and sibling modules in this directory.
+#
+# ---------------------------------------------------------------------------
+# REQUIRED EXTERNAL BINARIES (NOT pip-installable — install separately).
+# The planner shells out to these; resolve paths via env vars where noted.
+#   - KiCad / kicad-cli        DRC, export, render        (FL_KICAD_CLI)
+#   - OpenJDK / java           freerouting autorouter     (freerouting.jar)
+#   - ngspice                  functional/analog sim      (FL_NGSPICE)
+#   - gmsh                     FEA meshing                (sim solvers)
+#   - CalculiX / ccx           structural/thermal FEA     (sim solvers)
+#   - OpenFOAM                 CFD / thermal-fluid        (sim solvers)
+#   - Elmer / ElmerSolver      multiphysics FEA           (sim solvers)
+# ---------------------------------------------------------------------------
+
+jsonschema==4.20.0
+pytest==8.4.2

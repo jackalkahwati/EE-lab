@@ -23,6 +23,17 @@ PART_ALIASES = {
     "drv8833": "DRV8833", "mcp73831": "MCP73831", "tps62162": "TPS62162",
     "ap2112": "AP2112K-3.3", "mcp2515": "MCP2515",
     "usb-c": "USB4085-GF-A", "usb c": "USB4085-GF-A", "usbc": "USB4085-GF-A",
+    # precision voltage references — an EXPLICITLY NAMED part must never be
+    # silently dropped (measured: "REF3025 2.5V reference" resolved to NEITHER an
+    # exact part NOR the voltage_reference capability, so the reference vanished
+    # from the board despite being named). Catch the family here.
+    "ref3025": "REF3025", "ref3020": "REF3020", "ref3030": "REF3030",
+    "ref3033": "REF3033", "ref3040": "REF3040", "ref5025": "REF5025",
+    "ref3012": "REF3012", "ref2025": "REF2025",
+    # measurement / instrumentation parts named in prompts
+    "ads1115": "ADS1115IDGS", "ads1015": "ADS1015IDGS",
+    "cd74hc4067": "CD74HC4067", "74hc4067": "CD74HC4067", "hc4067": "CD74HC4067",
+    "cd74hc4051": "CD74HC4051", "74hc4051": "CD74HC4051",
 }
 
 # phrase -> required capability
@@ -67,6 +78,19 @@ CAPABILITY_PHRASES = {
     "coin cell": "battery", "cr2032": "battery", "18650": "battery",
     # comms
     "lora": "lora", "gps": "gnss", "gnss": "gnss", "nfc": "nfc",
+    # analog measurement / instrumentation (FL-1 measurement board)
+    "adc": "adc", "16-bit adc": "adc", "16 bit adc": "adc", "delta-sigma": "adc",
+    "delta sigma": "adc", "analog-to-digital": "adc", "precision adc": "adc",
+    "voltage reference": "voltage_reference", "precision reference": "voltage_reference",
+    "voltage ref": "voltage_reference", "vref": "voltage_reference",
+    "reference voltage": "voltage_reference", "2.5v reference": "voltage_reference",
+    "2.048v reference": "voltage_reference", "3.0v reference": "voltage_reference",
+    "3.3v reference": "voltage_reference", "4.096v reference": "voltage_reference",
+    "5v reference": "voltage_reference", "bandgap reference": "voltage_reference",
+    "adc reference": "voltage_reference", "precision v reference": "voltage_reference",
+    "analog mux": "analog_mux", "analog multiplexer": "analog_mux",
+    "multiplexer": "analog_mux", "input mux": "analog_mux", "channel mux": "analog_mux",
+    "instrument interface": "rs485", "instrument bus": "rs485",
 }
 
 # what capabilities an unsupported part is understood to represent, so recovery

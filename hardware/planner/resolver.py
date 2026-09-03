@@ -21,13 +21,30 @@ CAPABILITY_MAP = {
     "temperature": ["BME280"], "humidity": ["BME280"], "pressure": ["BME280"],
     "environmental": ["BME280"], "air_quality": [], "gas": [], "voc": [],
     "current_sense": ["INA219"], "power_monitor": ["INA219"],
-    "accelerometer": ["LIS3DH"], "motion": ["LIS3DH"],
+    "accelerometer": ["LIS3DH"], "imu": ["LIS3DH"],
+    # NB: "motion" is NOT mapped to an accelerometer — motion CONTROL (step/dir to
+    # a motor) is not motion SENSING. That mis-map made control boards sprout a
+    # spurious IMU. Genuine motion sensing comes in as "imu"/"accelerometer".
     "rtc": ["DS3231"], "real_time_clock": ["DS3231"],
     "gpio_expander": ["MCP23017"],
     "spi_flash": ["W25Q128JVSIQ"], "flash": ["W25Q128JVSIQ"], "storage": ["W25Q128JVSIQ"],
     "rs485": ["MAX3485"], "shift_register": ["74HC595"], "led_driver": ["74HC595"],
     "addressable_led": ["WS2812B"], "rgb_led": ["WS2812B"],
     "motor_driver": ["DRV8833"], "dc_motor": ["DRV8833"],
+    # --- FL-1 machine control -------------------------------------------------
+    # SIGNAL-level interfaces to EXTERNAL drivers (octal line buffer / opto), NOT
+    # onboard motor power stages. This unblocks step/dir/enable, CAN, and relay
+    # drive for machine-controller boards; the power-stage safety gate for actual
+    # onboard motor CURRENT (H-bridge/thermal) stays in force in build_policy.
+    "stepper": ["74HC244"], "servo": ["74HC244"], "step_dir": ["74HC244"],
+    "motor_control_signals": ["74HC244"], "motion_control": ["74HC244"], "motion": ["74HC244"],
+    "can": ["MCP2542FD"], "can_bus": ["MCP2542FD"], "canbus": ["MCP2542FD"],
+    "relay": ["ULN2803A"], "relay_matrix": ["ULN2803A"], "relay_driver": ["ULN2803A"],
+    "opto_isolator": ["6N137"], "isolated_input": ["6N137"], "isolated_output": ["6N137"],
+    # --- FL-1 measurement / instrumentation (measurement board) ---
+    "adc": ["ADS1115IDGS"], "precision_adc": ["ADS1115IDGS"], "delta_sigma_adc": ["ADS1115IDGS"],
+    "voltage_reference": ["REF3025"], "precision_reference": ["REF3025"],
+    "analog_mux": ["CD74HC4067"], "multiplexer": ["CD74HC4067"], "analog_multiplexer": ["CD74HC4067"],
     "battery_charger": ["MCP73831"], "charger": ["MCP73831"],
     "buck": ["TPS62162"], "step_down": ["TPS62162"],
     "ldo": ["AP2112K-3.3"], "regulator_3v3": ["AP2112K-3.3", "TPS62162"],

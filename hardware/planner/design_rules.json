@@ -1,0 +1,75 @@
+{
+  "_doc": "Design-correctness rules DB. Per-IC pin ROLE maps + datasheet-derived requirements, plus generic completeness rules. The design_check.py gate runs a board's netlist against this. This is the layer that catches 'buildable but wrong/incomplete' designs that DRC + sims miss. Add one entry per IC; the DB is the durable asset.",
+  "ics": {
+    "RP2040": {
+      "class": "mcu",
+      "total_pins": 56,
+      "note": "RP2040 has NO internal program memory. Requires external QSPI flash to boot at all.",
+      "requires_support": [
+        {"id": "rp2040_flash", "kind": "external_flash", "detect_mpn": "W25Q|GD25|AT25|MX25|25Q\\d+|flash", "severity": "fail", "msg": "RP2040 has no external QSPI flash — it physically cannot boot or run firmware"},
+        {"id": "rp2040_xtal", "kind": "crystal", "detect_mpn": "crystal|xtal|MHz|ABM|FA-|7M-|CSTNE", "detect_footprint": "crystal|xtal|3225|2016|2012|abm", "severity": "warn", "msg": "No crystal found — RP2040 USB and accurate timing need a 12MHz crystal (internal ROSC is imprecise)"}
+      ],
+      "min_signal_pins": 12,
+      "min_signal_pins_msg": "RP2040 has almost no I/O connected — a working design uses many pins (QSPI x6, USB x2, XIN/XOUT, plus function I/O)",
+      "decoupling_min": 4
+    },
+    "ADS1115IDGS": {
+      "class": "adc",
+      "total_pins": 10,
+      "pins": {"1": "ADDR", "2": "ALERT", "3": "GND", "4": "AIN0", "5": "AIN1", "6": "AIN2", "7": "AIN3", "8": "VDD", "9": "SCL", "10": "SDA"},
+      "rules": [
+        {"id": "adc_has_input", "check": "at_least_one_of", "pins": ["AIN0", "AIN1", "AIN2", "AIN3"], "severity": "fail", "msg": "ADS1115 has NO analog input (AIN0-3) connected — nothing to measure"},
+        {"id": "adc_i2c", "check": "all_of", "pins": ["SCL", "SDA"], "severity": "fail", "msg": "ADS1115 I2C (SCL/SDA) incomplete"},
+        {"id": "adc_addr", "check": "connected", "pins": ["ADDR"], "severity": "warn", "msg": "ADS1115 ADDR pin floating — I2C address undefined; strap to GND/VDD/SDA/SCL"},
+        {"id": "adc_decoupling", "check": "decoupling_near", "pin": "VDD", "severity": "warn", "msg": "ADS1115 VDD has no local decoupling cap"}
+      ]
+    },
+    "REF3025": {
+      "class": "reference",
+      "total_pins": 3,
+      "pins": {"1": "OUT_OR_IN", "2": "GND", "3": "IN_OR_OUT"},
+      "rules": [
+        {"id": "ref_output_used", "check": "signal_pin_count_min", "min": 2, "severity": "fail", "msg": "REF3025 has <=1 signal pin connected — its 2.5V output goes nowhere (reference is unused/decorative)"},
+        {"id": "ref_bypass", "check": "decoupling_present", "severity": "warn", "msg": "REF3025 has no bypass cap"}
+      ]
+    },
+    "CD74HC4067": {
+      "class": "mux",
+      "total_pins": 24,
+      "pins": {"1": "I7", "2": "I6", "3": "I5", "4": "I4", "5": "I3", "6": "I2", "7": "I1", "8": "I0", "9": "EN", "10": "S3", "11": "S2", "12": "S1", "13": "GND", "14": "S0", "15": "COM", "16": "I15", "17": "I14", "18": "I13", "19": "I12", "20": "I11", "21": "I10", "22": "I9", "23": "I8", "24": "VCC"},
+      "rules": [
+        {"id": "mux_com", "check": "connected", "pins": ["COM"], "severity": "fail", "msg": "CD74HC4067 COM (mux output) not connected — the mux drives nothing"},
+        {"id": "mux_select", "check": "at_least_one_of", "pins": ["S0", "S1", "S2", "S3"], "severity": "fail", "msg": "CD74HC4067 select lines (S0-S3) not driven — channel can never be chosen"},
+        {"id": "mux_channels", "check": "at_least_n_of", "n": 1, "pins": ["I0", "I1", "I2", "I3", "I4", "I5", "I6", "I7", "I8", "I9", "I10", "I11", "I12", "I13", "I14", "I15"], "severity": "fail", "msg": "CD74HC4067 has no channel inputs connected — nothing to multiplex"},
+        {"id": "mux_decoupling", "check": "decoupling_near", "pin": "VCC", "severity": "warn", "msg": "CD74HC4067 VCC has no local decoupling"}
+      ]
+    },
+    "WS2812B": {
+      "class": "led",
+      "total_pins": 4,
+      "pins": {"1": "VDD", "2": "DOUT", "3": "GND", "4": "DIN"},
+      "rules": [
+        {"id": "led_din", "check": "connected", "pins": ["DIN"], "severity": "fail", "msg": "WS2812B DIN not driven — the LED gets no data (dark)"},
+        {"id": "led_decoupling", "check": "decoupling_near", "pin": "VDD", "severity": "warn", "msg": "WS2812B VDD has no local decoupling cap (needs ~100nF per LED)"}
+      ]
+    },
+    "MAX3485": {
+      "class": "transceiver",
+      "total_pins": 8,
+      "pins": {"1": "RO", "2": "RE", "3": "DE", "4": "DI", "5": "GND", "6": "A", "7": "B", "8": "VCC"},
+      "rules": [
+        {"id": "rs485_ctrl", "check": "all_of", "pins": ["RO", "DI"], "severity": "fail", "msg": "MAX3485 RO/DI not connected to a controller — no data path"},
+        {"id": "rs485_dir", "check": "at_least_one_of", "pins": ["DE", "RE"], "severity": "warn", "msg": "MAX3485 DE/RE (direction control) not driven"},
+        {"id": "rs485_bus", "check": "all_of", "pins": ["A", "B"], "severity": "fail", "msg": "MAX3485 A/B differential bus not connected"},
+        {"id": "rs485_decoupling", "check": "decoupling_near", "pin": "VCC", "severity": "warn", "msg": "MAX3485 VCC has no local decoupling"}
+      ]
+    }
+  },
+  "generic": {
+    "ic_function_min_signal_pins": {"severity": "fail", "min": 2, "msg": "IC has <2 signal pins connected (only power/ground) — it is not functionally wired"},
+    "signal_chain": [
+      {"id": "mux_to_adc", "when_classes": ["mux", "adc"], "check": "mux_com_reaches_adc_input", "severity": "fail", "msg": "measurement chain broken: the mux output (COM) does not connect to any ADC analog input"}
+    ],
+    "connector_required_if_intent": {"detect_intent": "header|connector|terminal|board-to-board|screw-terminal|mate|host", "detect_part_footprint": "header|conn|terminal|pinheader|2x|1x\\d+|screw", "severity": "fail", "msg": "design intent needs an external connector (header/terminal) but no connector part is on the board"}
+  }
+}
