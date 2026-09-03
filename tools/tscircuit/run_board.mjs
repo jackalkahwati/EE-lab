@@ -1618,8 +1618,30 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15 } = {}) {
 
   const trail = []
   let best = null
+  // The built-in autorouter scales badly with part count: MEASURED, a 120-part
+  // board spent 525s of a 527s run inside it, while the same board BUILDS in
+  // 5.4s with routing off. The ladder puts freerouting rungs first, so on a
+  // large board the tsci rungs are both the slowest option and the one we reach
+  // only after better options failed — three of them in a row can blow straight
+  // through the caller's hard wall. Skip them past a size threshold WHEN
+  // freerouting is actually available; when it isn't, they are the only router
+  // there is, so keep them and let the deadline below bound the damage.
+  const TSCI_MAX_PARTS = Number(process.env.FL_TSCI_MAX_PARTS || 60)
+  const frAvailable = Boolean(FR_JAR && JAVA)
+  // Wall for the whole ladder. Leaves room for ground-plane + DRC afterwards.
+  const LADDER_DEADLINE_MS = Number(process.env.FL_LADDER_BUDGET_MS || 240_000)
+  const tLadder = Date.now()
   for (let i = 0; i < ladder.length; i++) {
     const s = ladder[i]
+    const elapsedLadder = Date.now() - tLadder
+    if (best && elapsedLadder > LADDER_DEADLINE_MS) {
+      trail.push({ strategy: s.name, skipped: `ladder budget spent (${Math.round(elapsedLadder / 1000)}s)` })
+      continue
+    }
+    if (s.router === 'tsci' && frAvailable && parts.length > TSCI_MAX_PARTS) {
+      trail.push({ strategy: s.name, skipped: `built-in router skipped: ${parts.length} parts > ${TSCI_MAX_PARTS} (it scales superlinearly; freerouting rungs already covered this board)` })
+      continue
+    }
     // Net-aware placement (pin-facing, min-wirelength) helps BOTH routers: it puts
     // connected pins adjacent so the router has short, uncrossed channels. Re-emit
     // it per strategy so the built-in router still gets its fab-aware clearances.
@@ -1981,7 +2003,11 @@ async function main() {
   }
   // Fallbacks: explicit code input, or iterative unavailable/failed.
   if (!cj) {
-    code = input.code || (input.parts ? buildCode(input.parts, input.nets) : '')
+    // routingDisabled is honoured here so a caller can ask for a PLACED board
+    // without paying for the built-in autorouter — the pipeline routes with
+    // freerouting anyway, and on a large board the built-in route dominates
+    // the whole run (a 120-part board spent 525s of 527s in it).
+    code = input.code || (input.parts ? buildCode(input.parts, input.nets, { routingDisabled: input.routingDisabled === true }) : '')
     cj = await buildCircuit(code, 'fallback build')
     // board features BEFORE the DRC so the check runs against the real outline+holes
     boardFeatures = applyBoardFeatures(cj, input, 'standard')
