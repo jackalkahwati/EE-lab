@@ -17,7 +17,8 @@
     "mustConverge": false
   },
   "short": {
-    "maxErrors": 6,
+    "_was": "6 before the residual-repair fixes (bbox parse, targeting, step sizing)",
+    "maxErrors": 5,
     "maxUnrouted": 0,
     "mustConverge": false
   },

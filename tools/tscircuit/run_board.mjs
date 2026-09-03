@@ -404,6 +404,8 @@ const RESIDUAL_NUDGE_MAX = 5
 const RESIDUAL_NUDGE_DISP_BOOST = 0.1 // mm over the last accepted legalizer displacement
 const RESIDUAL_NUDGE_TARGET_R = 1.0 // mm — only copper this close to a violation moves
 const RESIDUAL_NUDGE_TYPES = new Set(['hole_clearance', 'clearance'])
+// How many times the residual pass may re-sweep an already-improved board.
+const RESIDUAL_NUDGE_SWEEPS = Number(process.env.FL_RESIDUAL_SWEEPS || 3)
 // DRC classes that are NOT copper/electrical: library-vs-board footprint drift,
 // text sizes, silkscreen. They are reported separately (drc.nonElectrical) and
 // do not count toward `errors` / `converged` unless strict mode is on
@@ -440,7 +442,14 @@ function edgeCutsBbox(pcbText) {
     }
     const block = pcbText.slice(i, j)
     i = j
-    if (!/\(layer\s+"Edge\.Cuts"\)/.test(block)) continue
+    // KiCad writes the layer name UNQUOTED in board files it generates
+    // ((layer Edge.Cuts)) but QUOTED in library/footprint contexts. Requiring
+    // the quotes skipped every outline segment, so this returned null, so
+    // mapDrcPositions could never map a violation, so the residual repair pass
+    // fell back to moving the WHOLE board instead of the handful of offending
+    // points — which regressed connectivity and was rejected every time.
+    // Accept both spellings.
+    if (!/\(layer\s+"?Edge\.Cuts"?\)/.test(block)) continue
     if (block.startsWith('(gr_circle')) {
       const c = block.match(/\(center\s+(-?[\d.]+)\s+(-?[\d.]+)\)/), e = block.match(/\(end\s+(-?[\d.]+)\s+(-?[\d.]+)\)/)
       if (c && e) { const r = Math.hypot(+e[1] - +c[1], +e[2] - +c[2]); xs.push(+c[1] - r, +c[1] + r); ys.push(+c[2] - r, +c[2] + r) }
@@ -496,11 +505,22 @@ function mapDrcPositions(pcbText, cj, errs) {
     }
     return false
   }
+  // How far SHORT each violation falls, straight out of KiCad's own text
+  // ("clearance 0.4000 mm; actual 0.3701 mm" -> 0.0299). The repair pass sizes
+  // its first displacement from this: these are hundredths-of-a-millimetre
+  // misses, and moving copper by a tenth of a millimetre to close a
+  // three-hundredths gap is what used to break connectivity.
+  const shortfallOf = (desc) => {
+    const m = /clearance\s+([\d.]+)\s*mm;\s*actual\s+([\d.]+)\s*mm/i.exec(String(desc || ''))
+    if (!m) return null
+    const gap = +m[1] - +m[2]
+    return Number.isFinite(gap) && gap > 0 ? +gap.toFixed(4) : null
+  }
   const items = []
-  for (const v of errs) for (const it of (v.items || [])) if (it?.pos && Number.isFinite(+it.pos.x) && Number.isFinite(+it.pos.y)) items.push({ type: v.type, kx: +it.pos.x, ky: +it.pos.y })
+  for (const v of errs) for (const it of (v.items || [])) if (it?.pos && Number.isFinite(+it.pos.x) && Number.isFinite(+it.pos.y)) items.push({ type: v.type, kx: +it.pos.x, ky: +it.pos.y, shortfallMm: shortfallOf(v.description) })
   if (!items.length) return { mapped: false, points: [] }
   const tryFlip = (s) => {
-    const out = items.map((it) => ({ type: it.type, x: +(it.kx - ex + bx).toFixed(4), y: +(s * (it.ky - ey) + by).toFixed(4) }))
+    const out = items.map((it) => ({ type: it.type, x: +(it.kx - ex + bx).toFixed(4), y: +(s * (it.ky - ey) + by).toFixed(4), shortfallMm: it.shortfallMm }))
     return { out, hits: out.filter((p) => onCopper(p.x, p.y)).length }
   }
   const down = tryFlip(-1), up = tryFlip(1)
@@ -1915,31 +1935,84 @@ async function main() {
       const nudgeCfg = input.residualNudge
       const nudgeMax = nudgeCfg === false ? 0
         : (Number.isFinite(+nudgeCfg?.maxErrors) && +nudgeCfg.maxErrors >= 1 && +nudgeCfg.maxErrors <= 10 ? +nudgeCfg.maxErrors : RESIDUAL_NUDGE_MAX)
+      // Gate on the NUDGEABLE errors, not the total.
+      //
+      // The old gate required drc.errors <= max AND every error type to be
+      // nudgeable, so a single unrelated error vetoed the whole pass. Measured
+      // on the golden `short` board: 5 hole_clearance violations at 0.3701 mm
+      // against a 0.4000 mm rule — short by three hundredths of a millimetre,
+      // exactly what this pass exists to close — plus 1 unconnected_items. Six
+      // errors and a non-nudgeable type, so the board was reported as a failure
+      // untouched. `dense` was vetoed the same way by a short.
+      //
+      // Now: fire when there is a workable number of clearance-type violations,
+      // whatever else is also wrong. The pass simply cannot fix a short or an
+      // open net, and never claimed to; refusing to fix what it CAN because
+      // something else is broken just leaves more errors on the board. The
+      // acceptance test below is unchanged and still refuses any result that
+      // raises the total or strands a net, so this can only help.
       const errTypes = Object.keys(drc?.errorTypes || {})
-      if (drc?.available && drc.errors > 0 && drc.errors <= nudgeMax && (res.best.unrouted ?? 0) === 0
-          && errTypes.length && errTypes.every((t) => RESIDUAL_NUDGE_TYPES.has(t))
+      const nudgeableCount = errTypes.reduce((n, t) => n + (RESIDUAL_NUDGE_TYPES.has(t) ? (drc.errorTypes[t] || 0) : 0), 0)
+      if (drc?.available && drc.errors > 0 && nudgeableCount > 0 && nudgeableCount <= nudgeMax && (res.best.unrouted ?? 0) === 0
           && (Date.now() - T_START) + 20_000 < BUDGET_MS) {
         const targets = (drc.violations || []).filter((v) => RESIDUAL_NUDGE_TYPES.has(v.type)).map((v) => ({ x: v.x, y: v.y }))
         const targeted = !!drc.positionsMapped && targets.length > 0
-        const md = +((lastMd ?? 0.3) + RESIDUAL_NUDGE_DISP_BOOST).toFixed(2)
-        const cjTry = JSON.parse(JSON.stringify(cj))
-        const vm = legalizeVias(cjTry, { minClear: legalClear, maxDisp: md, iters: 260, targets: targeted ? targets : null }).moved
-        const tm = legalizeTraces(cjTry, { minClear: legalClear, maxDisp: md, iters: 200, targets: targeted ? targets : null }).moved
+        // Displacement ladder, smallest first.
+        //
+        // A single large step was the whole problem. These violations miss by
+        // HUNDREDTHS of a millimetre (measured: 0.3701 mm against a 0.4000 mm
+        // rule), and the pass was shoving copper up to 0.3 mm — ten times the
+        // needed correction — which drags traces off their pads and regresses
+        // connectivity, so every attempt was correctly rejected and the board
+        // shipped dirty while sitting 0.03 mm from clean.
+        //
+        // Start at the size of the actual shortfall and only escalate if that
+        // is not enough. The first attempt that improves the board without
+        // regressing connectivity wins; if none does, nothing is applied. Each
+        // rung costs one DRC run, so the ladder is short and bounded by the
+        // remaining time budget.
+        const shortfalls = (drc.violations || [])
+          .map((v) => v.shortfallMm)
+          .filter((n) => Number.isFinite(n) && n > 0)
+        const worst = shortfalls.length ? Math.max(...shortfalls) : null
+        const first = worst ? +Math.min(0.15, Math.max(0.03, worst * 1.6)).toFixed(3) : 0.05
+        const ladderMd = [...new Set([first, 0.1, 0.2, +((lastMd ?? 0.3) + RESIDUAL_NUDGE_DISP_BOOST).toFixed(2)])]
+          .filter((v) => v > 0)
+          .sort((a, b) => a - b)
+
         const before = drc.errors
         let after = before, accepted = false, reason = 'nothing to move'
-        if (vm + tm > 0) {
-          const drc2 = await realDrc(cjTry, res.best.drc.profileKey || 'standard')
-          const unbefore = drc.errorTypes?.unconnected_items || 0
-          const unafter = drc2.errorTypes?.unconnected_items || 0
-          if (drc2.available && drc2.errors <= drc.errors && unafter <= unbefore) {
-            cj = cjTry; drc = drc2; accepted = true; after = drc2.errors
-            reason = drc2.errors < before ? 'fewer errors' : 'no change in count'
-          } else {
-            after = drc2.available ? drc2.errors : null
-            reason = !drc2.available ? 'DRC unavailable' : unafter > unbefore ? 'connectivity regressed' : 'error count rose'
+        let md = ladderMd[0], movedTotal = 0
+        const rungs = []
+        // Take the BEST rung, not the first that happens to help, and then run
+        // the whole pass again on the improved board: closing one violation
+        // changes what the neighbouring copper can do, so a second sweep often
+        // reaches sites the first could not. Stops as soon as a sweep buys
+        // nothing, and every sweep is bounded by the remaining time budget.
+        for (let sweep = 0; sweep < RESIDUAL_NUDGE_SWEEPS; sweep++) {
+          let bestCj = null, bestDrc = null, bestMd = null, bestMoved = 0
+          for (const step of ladderMd) {
+            if ((Date.now() - T_START) + 15_000 > BUDGET_MS) { rungs.push({ sweep, md: step, skipped: 'budget' }); break }
+            const cjTry = JSON.parse(JSON.stringify(cj))
+            const vm = legalizeVias(cjTry, { minClear: legalClear, maxDisp: step, iters: 260, targets: targeted ? targets : null }).moved
+            const tm = legalizeTraces(cjTry, { minClear: legalClear, maxDisp: step, iters: 200, targets: targeted ? targets : null }).moved
+            if (vm + tm === 0) { rungs.push({ sweep, md: step, moved: 0, result: 'nothing to move' }); continue }
+            const drc2 = await realDrc(cjTry, res.best.drc.profileKey || 'standard')
+            const unbefore = drc.errorTypes?.unconnected_items || 0
+            const unafter = drc2.errorTypes?.unconnected_items || 0
+            const ok = drc2.available && drc2.errors <= drc.errors && unafter <= unbefore
+            rungs.push({ sweep, md: step, moved: vm + tm, errors: drc2.available ? drc2.errors : null,
+              result: ok ? 'candidate' : (!drc2.available ? 'DRC unavailable' : unafter > unbefore ? 'connectivity regressed' : 'error count rose') })
+            if (ok && (!bestDrc || drc2.errors < bestDrc.errors)) { bestCj = cjTry; bestDrc = drc2; bestMd = step; bestMoved = vm + tm }
           }
+          if (!bestDrc || bestDrc.errors >= drc.errors) break
+          cj = bestCj; drc = bestDrc; accepted = true
+          after = bestDrc.errors; md = bestMd; movedTotal += bestMoved
+          reason = 'fewer errors'
+          if (drc.errors === 0) break
         }
-        drcRepair.residualNudge = { attempted: true, targeted, targets: targets.length, moved: vm + tm, maxDisp: md, minClear: legalClear, before, after, accepted, reason }
+        if (accepted && after === before) reason = 'no change in count'
+        drcRepair.residualNudge = { attempted: true, targeted, targets: targets.length, moved: movedTotal, maxDisp: md, ladder: rungs, minClear: legalClear, before, after, accepted, reason }
         if (process.env.FL_FR_DEBUG) process.stderr.write(`[residualNudge] ${before} -> ${after} (${reason}; targeted=${targeted}, moved=${vm + tm}, md=${md})\n`)
         drcRepair.fixes = [...drcRepair.fixes,
           `residual nudge (${targeted ? `${targets.length} violation site(s)` : 'untargeted — positions not mappable'}, ${md}mm): ${accepted ? `${before} → ${after} DRC error(s)` : `rejected (${reason}), kept ${before}`}`]
