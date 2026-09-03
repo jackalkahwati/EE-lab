@@ -57,7 +57,14 @@ export async function harvestWorkItems(runId: string): Promise<WorkItem[]> {
   const mech = await readJson(runId, 'mechanical/mechanical.json')
   if (mech) {
     if (mech.fitCheck && mech.fitCheck.fits === false) {
-      push('mechanical', `PCB does not fit the enclosure cavity (${mech.fitCheck.pcbMm?.w}×${mech.fitCheck.pcbMm?.h} vs ${mech.fitCheck.enclosureMm?.w}×${mech.fitCheck.enclosureMm?.h} mm)`, 'blocking', 'mechanical/mechanical.json:fitCheck')
+      // Report the CAVITY the board was tested against, never the outer body
+      // (the old message printed enclosureMm, which misled the redesign loop).
+      const fc = mech.fitCheck
+      const cav = fc.cavityMm ?? fc.enclosureMm
+      const first = Array.isArray(fc.problems) && fc.problems.length ? fc.problems[0] : null
+      push('mechanical', first ?? `PCB does not fit the enclosure cavity (${fc.pcbMm?.w}×${fc.pcbMm?.h} vs cavity ${cav?.w}×${cav?.h} mm)`, 'blocking', 'mechanical/mechanical.json:fitCheck')
+    } else if (mech.fitCheck && mech.fitCheck.verdict === 'unknown') {
+      push('mechanical', mech.fitCheck.problems?.[0] ?? 'PCB fit not verified: no board cavity identified in the plan', 'advisory', 'mechanical/mechanical.json:fitCheck')
     }
     for (const f of mech.opsFailed ?? []) {
       push('mechanical', `CAD op skipped: ${f.op} (${f.error})`, 'advisory', 'mechanical/mechanical.json:opsFailed')

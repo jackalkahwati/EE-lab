@@ -24,7 +24,14 @@ type Result = {
   onshapeUrl?: string
   opsRendered?: string[]
   opsFailed?: { op: string; error: string }[]
-  fitCheck?: { fits: boolean; enclosureMm: { w: number; h: number }; pcbMm: { w: number; h: number } } | null
+  fitCheck?: {
+    fits: boolean
+    verdict?: 'fits' | 'does_not_fit' | 'unknown'
+    enclosureMm: { w: number; h: number }
+    cavityMm?: { w: number; h: number; d?: number } | null
+    pcbMm: { w: number; h: number }
+    problems?: string[]
+  } | null
   error?: string
 }
 
@@ -109,14 +116,23 @@ export function MechanicalStage({ spec, runId, onBuilt }: { spec: ProductSpec | 
             // eslint-disable-next-line @next/next/no-img-element
             <img src={res.previewUrl} alt={`${res.part} CAD preview`} className="mx-auto max-h-[32vh] w-auto rounded-md border border-border bg-white" />
           ) : null}
-          {res.fitCheck && (
-            <div className={cn('rounded-md border px-3 py-2 text-[12px]',
-              res.fitCheck.fits ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
-                : 'border-destructive/50 bg-destructive/10 text-destructive')}>
-              {res.fitCheck.fits ? '✓ PCB fits the cavity' : '✗ PCB does NOT fit the enclosure'} — board {res.fitCheck.pcbMm.w}×{res.fitCheck.pcbMm.h} mm vs enclosure {res.fitCheck.enclosureMm.w}×{res.fitCheck.enclosureMm.h} mm.
-              {!res.fitCheck.fits && ' The board is placed at true size (not shrunk) — this is the electronics gap, surfaced honestly for the redesign loop.'}
-            </div>
-          )}
+          {res.fitCheck && (() => {
+            const fc = res.fitCheck
+            const unknown = fc.verdict === 'unknown'
+            const cav = fc.cavityMm ?? fc.enclosureMm
+            const tone = unknown
+              ? 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400'
+              : fc.fits ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+                : 'border-destructive/50 bg-destructive/10 text-destructive'
+            const headline = unknown ? '? PCB fit not verified' : fc.fits ? '✓ PCB fits the cavity' : '✗ PCB does NOT fit the cavity'
+            return (
+              <div className={cn('rounded-md border px-3 py-2 text-[12px]', tone)}>
+                {headline} — board {fc.pcbMm.w}×{fc.pcbMm.h} mm{!unknown && ` vs cavity ${cav.w}×${cav.h} mm`}.
+                {fc.problems?.[0] && ` ${fc.problems[0]}`}
+                {!unknown && !fc.fits && ' The board is placed at true size (not shrunk) — this is the electronics gap, surfaced honestly for the redesign loop.'}
+              </div>
+            )
+          })()}
           <div className="flex flex-wrap items-center gap-2">
             {res.stepUrl && (
               <a href={res.stepUrl} download className="flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[12px] text-foreground hover:bg-secondary/50">
