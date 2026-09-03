@@ -264,10 +264,10 @@ npm i -g ./software/firstlight-cli`}</CodeBlock>
 #   running (pipeline)  ✓ electronics  … mechanical  … firmware …
 #   complete  ✓ electronics ✓ mechanical ✓ simulation ✓ firmware ✓ manufacturing ✓ supplyChain ✓ validation
 
-firstlight artifacts <runId>
-firstlight get <runId> step -o enclosure.step
-firstlight get <runId> fab-package -o fab.zip
-firstlight status <runId> --watch
+firstlight artifacts &lt;runId&gt;
+firstlight get &lt;runId&gt; step -o enclosure.step
+firstlight get &lt;runId&gt; fab-package -o fab.zip
+firstlight status &lt;runId&gt; --watch
 firstlight boards`}</CodeBlock>
           <p>
             Add <code>--json</code> to any command for machine output. Set{" "}
@@ -401,7 +401,7 @@ function Endpoint({
     <div className="doc-endpoint">
       <div className="doc-endpoint-sig">
         <span className={`doc-verb doc-verb-${verb.toLowerCase()}`}>{verb}</span>
-        <code dangerouslySetInnerHTML={{ __html: path }} />
+        <code>{path}</code>
       </div>
       <p>{children}</p>
     </div>

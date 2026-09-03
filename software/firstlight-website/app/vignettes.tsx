@@ -1,10 +1,10 @@
 /**
- * Animated documentation vignettes — rebuilt, zoomed-in fragments of real
- * Compose output that animate in a loop (cursor.com-style motion), instead of
+ * Documentation vignettes — rebuilt, zoomed-in fragments of real Compose
+ * output, set in the instrument face (mono) on the light table, instead of
  * static screenshots. Every line of content is lifted verbatim from one real
  * run's generated artifacts (the Desk Presence Puck build), including the
  * honest amber flags — the vignette is a re-typeset zoom, never a mockup.
- * Pure CSS animation; prefers-reduced-motion renders the final static state.
+ * Static by design: the hero glow is the site's only animation.
  */
 
 function Row({
@@ -17,7 +17,7 @@ function Row({
   className?: string;
 }) {
   return (
-    <div className={`vg-row ${className}`} style={{ animationDelay: `${i * 0.55}s` }}>
+    <div className={`vg-row ${className}`} data-row={i}>
       {children}
     </div>
   );

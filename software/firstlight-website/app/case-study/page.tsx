@@ -59,7 +59,7 @@ const JOURNEY = [
 
 export default function CaseStudyPage() {
   return (
-    <main id="main-content">
+    <main id="main-content" className="case-study">
       <nav className="nav" aria-label="Primary navigation">
         <div className="container nav-inner">
           <Link href="/" className="wordmark">
@@ -85,7 +85,7 @@ export default function CaseStudyPage() {
 
       {/* Hero */}
       <header className="hero" id="top">
-        <div className="container narrow center">
+        <div className="container narrow">
           <p className="kicker">Case study · Built with Compose</p>
           <h1>
             We used Compose to build the machine that{" "}
@@ -188,9 +188,7 @@ export default function CaseStudyPage() {
               <div className="roi-card" key={path}>
                 <h3>{path}</h3>
                 <p>{proves}.</p>
-                <p className="accent" style={{ fontFamily: "var(--mono)", marginTop: "0.5rem" }}>
-                  {result}
-                </p>
+                <p className="receipt-result">{result}</p>
               </div>
             ))}
           </div>
@@ -223,14 +221,10 @@ export default function CaseStudyPage() {
           <div className="roi-grid">
             {JOURNEY.map(([found, foundBody, built]) => (
               <div className="roi-card" key={found}>
-                <p className="kicker" style={{ color: "var(--text-dim)" }}>
-                  Found on the bench
-                </p>
+                <p className="kicker">Found on the bench</p>
                 <h3>{found}</h3>
                 <p>{foundBody}</p>
-                <p className="kicker accent" style={{ marginTop: "1rem" }}>
-                  Shipped in Compose
-                </p>
+                <p className="kicker kicker-shipped">Shipped in Compose</p>
                 <p>{built}</p>
               </div>
             ))}
@@ -240,7 +234,7 @@ export default function CaseStudyPage() {
 
       {/* CTA */}
       <section className="section" id="start">
-        <div className="container narrow center">
+        <div className="container narrow">
           <p className="kicker">The takeaway</p>
           <h2>
             Compose builds your product. And the{" "}
@@ -251,7 +245,7 @@ export default function CaseStudyPage() {
             electrical, mechanical, and firmware, and it is exactly what this
             pipeline compresses. We know, because we built ours with it.
           </p>
-          <div className="section-cta">
+          <div className="cta-row">
             <a href={COMPOSE_URL} className="btn btn-large">
               Start a free trial
             </a>
@@ -259,7 +253,7 @@ export default function CaseStudyPage() {
               See the FL-1 machine
             </Link>
           </div>
-          <p className="how-lede" style={{ marginTop: "2rem", fontSize: "0.9rem" }}>
+          <p className="how-lede fine">
             FL-1 is a live, in-progress build. Everything here was produced by
             Compose through the iterative process described above. Where the
             automated pipeline still lands short of a clean board on the densest

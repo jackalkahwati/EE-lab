@@ -100,7 +100,7 @@ export default function Home() {
 
       {/* Hero, Compose */}
       <header className="hero" id="top">
-        <div className="container">
+        <div className="container hero-grid">
           <div className="hero-copy">
             <p className="kicker">FirstLight Compose · AI product engineering</p>
             <h1>
@@ -139,26 +139,26 @@ export default function Home() {
               </li>
             </ul>
           </div>
-        </div>
-        <div className="container hero-shot">
-          <div className="shot-stage">
-            <WindowFrame title="FirstLight Compose">
-              <Image
-                src="/media/compose-hero.jpg"
-                alt="The Compose workspace, with a circular PCBA rendered in 3D, every pipeline discipline green, live logs streaming in the terminal"
-                width={1600}
-                height={914}
-                sizes="(max-width: 1248px) calc(100vw - 48px), 1152px"
-                priority
-              />
-            </WindowFrame>
+          <div className="hero-shot">
+            <div className="shot-stage">
+              <WindowFrame title="FirstLight Compose">
+                <Image
+                  src="/media/compose-hero.jpg"
+                  alt="The Compose workspace, with a circular PCBA rendered in 3D, every pipeline discipline green, live logs streaming in the terminal"
+                  width={1600}
+                  height={914}
+                  sizes="(max-width: 860px) calc(100vw - 48px), 576px"
+                  priority
+                />
+              </WindowFrame>
+            </div>
           </div>
         </div>
       </header>
 
       {/* Toolchain — real third-party integrations */}
       <section className="toolchain" aria-label="Tools and services Compose integrates with">
-        <div className="container center">
+        <div className="container">
           <p className="kicker">Integrations</p>
           <p className="toolchain-lede">
             Every run drives the same tools professional hardware teams
@@ -175,7 +175,7 @@ export default function Home() {
 
       {/* Simulation stack — real solvers behind the physics gates */}
       <section className="toolchain toolchain-follow" aria-label="Simulation solvers Compose runs">
-        <div className="container center">
+        <div className="container">
           <p className="kicker">Simulation</p>
           <p className="toolchain-lede">
             Six real solvers, plus gmsh meshing, behind the physics gates.
@@ -238,15 +238,16 @@ export default function Home() {
       {/* How Compose works */}
       <section className="section" id="how">
         <div className="container">
-          <p className="kicker">How it works</p>
+          <p className="kicker kicker-seq">How it works</p>
           <h2>From a prompt to a manufacturable board, in one run.</h2>
-          <div className="pipeline">
-            {PIPELINE.map((s) => (
-              <span key={s} className="pipeline-stage">
-                ✓ {s}
-              </span>
+          <ol className="pipeline">
+            {PIPELINE.map((s, i) => (
+              <li key={s} className="pipeline-stage">
+                <span className="pipeline-num">{String(i + 1).padStart(2, "0")}</span>
+                <span className="pipeline-name">{s}</span>
+              </li>
             ))}
-          </div>
+          </ol>
           <p className="how-lede">
             A short design interview fills in what matters, like size, volume,
             and connectivity. Then the full pipeline runs in front of you, live
@@ -356,7 +357,7 @@ export default function Home() {
       </section>
 
       {/* Pricing */}
-      <section className="section section-dark" id="pricing">
+      <section className="section" id="pricing">
         <div className="container">
           <p className="kicker">Pricing</p>
           <h2>Pay for outcomes, not tokens.</h2>
@@ -425,7 +426,7 @@ export default function Home() {
       </section>
 
       {/* FL-1, coming next, reserve */}
-      <section className="section" id="fl1">
+      <section className="section band-dark" id="fl1">
         <div className="container">
           <p className="kicker">Coming next · FirstLight FL-1</p>
           <h2>The machine that brings your board to life.</h2>
@@ -474,8 +475,8 @@ export default function Home() {
       </section>
 
       {/* Demo video */}
-      <section className="section section-dark" id="demo">
-        <div className="container narrow center">
+      <section className="section" id="demo">
+        <div className="container narrow">
           <h2>First board, first light.</h2>
           <p>
             FL-1 in motion, a CAD-rendered concept film from the production

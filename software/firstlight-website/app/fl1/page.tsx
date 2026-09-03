@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Fragment } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { ReserveButton } from "../reserve-button";
@@ -89,32 +90,34 @@ export default function FL1Page() {
       </nav>
 
       {/* Hero */}
-      <header className="hero fl1-hero" id="top">
-        <div className="container narrow center">
-          <p className="kicker">FirstLight FL-1 · Autonomous hardware bring-up</p>
-          <h1>
-            One platform that brings your <span className="accent">board to life.</span>
-          </h1>
-          <p className="hero-value fl1-hero-value">
-            A $40,000 bench of instruments and the weeks of engineer time each
-            board bring-up costs, in one machine that runs it in hours.
-          </p>
-          <p className="lede fl1-lede">
-            Insert the assembled PCB. Press start. FL-1 powers it up, probes it,
-            and gives you an evidence-based diagnosis of exactly what works and
-            what failed. One machine that grows with your lab, not a product line
-            you outgrow.
-          </p>
-        </div>
-        <div className="container fl1-hero-img">
-          <Image
-            src="/media/fl1-hero-open.png"
-            alt="FirstLight FL-1 with the canopy open, probing a circuit board"
-            width={1402}
-            height={1122}
-            sizes="(max-width: 948px) calc(100vw - 48px), 900px"
-            priority
-          />
+      <header className="hero fl1-hero band-dark" id="top">
+        <div className="container hero-grid">
+          <div className="hero-copy">
+            <p className="kicker">FirstLight FL-1 · Autonomous hardware bring-up</p>
+            <h1>
+              One platform that brings your <span className="accent">board to life.</span>
+            </h1>
+            <p className="hero-value fl1-hero-value">
+              A $40,000 bench of instruments and the weeks of engineer time each
+              board bring-up costs, in one machine that runs it in hours.
+            </p>
+            <p className="lede fl1-lede">
+              Insert the assembled PCB. Press start. FL-1 powers it up, probes it,
+              and gives you an evidence-based diagnosis of exactly what works and
+              what failed. One machine that grows with your lab, not a product line
+              you outgrow.
+            </p>
+          </div>
+          <div className="hero-shot fl1-hero-img">
+            <Image
+              src="/media/fl1-hero-open.png"
+              alt="FirstLight FL-1 with the canopy open, probing a circuit board"
+              width={1402}
+              height={1122}
+              sizes="(max-width: 860px) calc(100vw - 48px), 576px"
+              priority
+            />
+          </div>
         </div>
       </header>
 
@@ -164,14 +167,14 @@ export default function FL1Page() {
         <div className="container">
           <p className="kicker">Standard tool heads</p>
           <h2>One arm, the right tool for each job.</h2>
-          <div className="heads-grid">
+          <dl className="spec-table">
             {HEADS.map(([title, body]) => (
-              <div className="head-card" key={title}>
-                <h3>{title}</h3>
-                <p>{body}</p>
-              </div>
+              <Fragment key={title}>
+                <dt>{title}</dt>
+                <dd>{body}</dd>
+              </Fragment>
             ))}
-          </div>
+          </dl>
         </div>
       </section>
 
@@ -236,7 +239,7 @@ export default function FL1Page() {
 
       {/* Closed loop */}
       <section className="section section-dark">
-        <div className="container narrow center">
+        <div className="container narrow">
           <p className="kicker">The closed loop</p>
           <h2>Compose designs it. FL-1 proves it.</h2>
           <p>
@@ -253,7 +256,7 @@ export default function FL1Page() {
 
       {/* Reserve */}
       <section className="section section-cta" id="reserve">
-        <div className="container narrow center">
+        <div className="container narrow">
           <p className="kicker">Reserve your FL-1</p>
           <h2>Hold your place in line for the first production units.</h2>
           <p>
