@@ -74,3 +74,16 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
+
+  footprints:
+    name: Footprint geometry
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # No KiCad, no JVM, no install: the generator is dependency-free, so the
+      # land patterns can be checked on every push while the full golden board
+      # suite stays opt-in.
+      - run: node tools/tscircuit/test-footprints.mjs
