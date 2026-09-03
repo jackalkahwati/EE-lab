@@ -1,9 +1,0 @@
-{
-  "part": "view-check",
-  "units": "mm",
-  "operations": [
-    { "op": "sketch", "name": "base", "plane": "top", "profile": { "kind": "roundedRect", "cx": 0, "cy": 0, "w": 30, "h": 12, "r": 2 } },
-    { "op": "extrude", "name": "body", "sketch": "base", "depth": 50 },
-    { "op": "cutout", "name": "frontSlot", "face": "front", "cx": 0, "cy": 25, "w": 10, "h": 30, "depth": 3, "offsetMm": 3 }
-  ]
-}
