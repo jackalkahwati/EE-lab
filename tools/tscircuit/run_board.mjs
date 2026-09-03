@@ -633,6 +633,8 @@ async function realDrcInner(cj, profileKey = 'standard') {
   }
 }
 
+import { synthFootprint, SYNTH_FAMILIES } from './footprints.mjs'
+
 // approx footprint sizes [w,h] mm — for deterministic placement
 const FP = {
   qfn48: [7, 7], qfn32: [5, 5], qfn24: [4, 4], qfn20: [4, 4], qfn16: [3, 3], qfn12: [2.5, 2.5],
@@ -646,20 +648,33 @@ const fpSize = (f) => FP[f] || FP[(String(f).match(/qfn\d+|0\d{3}/) || [])[0]] |
  *  placement. Returns null if it has no usable SMD pads. */
 function kicadModToFootprint(mod) {
   const re = /\(pad\s+(\S+)\s+smd\s+\w+\s+\(at\s+(-?[\d.]+)\s+(-?[\d.]+)(?:\s+-?[\d.]+)?\)\s+\(size\s+([\d.]+)\s+([\d.]+)\)/g
+  // Through-hole pads too: headers, terminal blocks and TO-package tabs are
+  // ordinary parts, and refusing them was the single most common reason a real
+  // netlist bounced. These become <platedhole> rather than <smtpad>.
+  const thtRe = /\(pad\s+(\S+)\s+thru_hole\s+\w+\s+\(at\s+(-?[\d.]+)\s+(-?[\d.]+)(?:\s+-?[\d.]+)?\)\s+\(size\s+([\d.]+)\s+([\d.]+)\)\s+\(drill\s+([\d.]+)\)/g
+  const holes = []
+  let t
+  while ((t = thtRe.exec(mod))) {
+    holes.push({ n: t[1].replace(/"/g, ''), x: +t[2], y: -+t[3], d: +t[4], drill: +t[6] })
+  }
   const pads = []
   let m
   // pad names are quoted in KiCad-library .kicad_mod (`(pad "1" smd ...)`) but
   // bare in easyeda2kicad output — strip quotes so BOTH parse (a quoted name left
   // in produced portHints={[""1""...]}, breaking the generated JSX).
   while ((m = re.exec(mod))) pads.push({ n: m[1].replace(/"/g, ''), x: +m[2], y: -+m[3], w: +m[4], h: +m[5] })
-  if (!pads.length) return null
-  const ext = (sel, half) => pads.map((p) => sel(p) + half(p))
-  const maxX = Math.max(...ext((p) => p.x, (p) => p.w / 2))
-  const minX = Math.min(...pads.map((p) => p.x - p.w / 2))
-  const maxY = Math.max(...ext((p) => p.y, (p) => p.h / 2))
-  const minY = Math.min(...pads.map((p) => p.y - p.h / 2))
-  const jsx = '<footprint>' + pads.map((p) =>
-    `<smtpad portHints={["${p.n}","pin${p.n}"]} pcbX="${p.x.toFixed(3)}mm" pcbY="${p.y.toFixed(3)}mm" width="${p.w}mm" height="${p.h}mm" shape="rect" />`).join('') + '</footprint>'
+  if (!pads.length && !holes.length) return null
+  // Bounding box spans BOTH pad kinds, so a header's board area is honest.
+  const xs = [...pads.map((p) => [p.x - p.w / 2, p.x + p.w / 2]), ...holes.map((h) => [h.x - h.d / 2, h.x + h.d / 2])].flat()
+  const ys = [...pads.map((p) => [p.y - p.h / 2, p.y + p.h / 2]), ...holes.map((h) => [h.y - h.d / 2, h.y + h.d / 2])].flat()
+  const maxX = Math.max(...xs), minX = Math.min(...xs)
+  const maxY = Math.max(...ys), minY = Math.min(...ys)
+  const jsx = '<footprint>'
+    + pads.map((p) =>
+      `<smtpad portHints={["${p.n}","pin${p.n}"]} pcbX="${p.x.toFixed(3)}mm" pcbY="${p.y.toFixed(3)}mm" width="${p.w}mm" height="${p.h}mm" shape="rect" />`).join('')
+    + holes.map((h) =>
+      `<platedhole portHints={["${h.n}","pin${h.n}"]} pcbX="${h.x.toFixed(3)}mm" pcbY="${h.y.toFixed(3)}mm" shape="circle" holeDiameter="${h.drill}mm" outerDiameter="${h.d}mm" />`).join('')
+    + '</footprint>'
   return { jsx, w: +(maxX - minX).toFixed(2), h: +(maxY - minY).toFixed(2) }
 }
 
@@ -838,6 +853,70 @@ async function netAwarePlace(parts, nets, { maxW = 15, gap = 2.1 } = {}) {
   const gapBetween = (a, b) => Math.max(Math.max(a[0] - b[2], b[0] - a[2]), Math.max(a[1] - b[3], b[1] - a[3]))
   const pinPos = (st, pinNum) => { const o = offsets[st.name]?.[pinNum] || [0, 0]; const ro = rot(o, st.rot); return [st.x + ro[0], st.y + ro[1]] }
   const TARGET = 1.0
+
+  // ---- exact spatial index -------------------------------------------------
+  // The pairwise spacing / overlap sweeps below are O(parts^2), and SA runs them
+  // 6000 times per seed — fine at 25 parts, fatal at 200. A uniform grid over
+  // part CENTRES replaces the sweep, and it is EXACT, not a proximity heuristic:
+  //   gapBetween() = max(sepX, sepY) with sepX = |dx| - (w_i + w_j)/2, so two
+  //   parts can only be closer than `reach` when BOTH |dx| and |dy| are under
+  //   (w_i + w_j)/2 + reach. Every part's courtyard is at most `maxExtent` on
+  //   either side in EITHER orientation, so (w_i + w_j)/2 <= maxExtent and any
+  //   interacting pair is within maxExtent + reach on both axes. Sizing a cell
+  //   at exactly that bound puts such a pair in the same cell or an adjacent
+  //   one, so scanning the 3x3 neighbourhood provably misses NOTHING. A smaller
+  //   cell would NOT be safe; a larger one only adds no-op candidates.
+  // maxExtent takes max(w, h) per part so it bounds all four rotations.
+  let maxExtent = 0
+  for (const p of initPlaced) { const [cw, ch] = courtyard[p.name] || partSize(p); maxExtent = Math.max(maxExtent, cw, ch) }
+  // The ±1-cell proof is in exact arithmetic; Math.floor(x / cell) can straddle
+  // an integer when |dx| sits within a few ulps of `cell`, so pad the cell by a
+  // relative epsilon. Padding can only widen the candidate set, never shrink it.
+  const gridCell = (reach) => (maxExtent + reach) * (1 + 1e-9) || 1
+  // Grid over a LIVE states array: buckets hold indices and are updated in place
+  // by move(i), so every query reads current positions (the legalize/compact
+  // sweeps mutate parts mid-pass and must still see an exact neighbourhood).
+  const makeGrid = (states, reach) => {
+    const cell = gridCell(reach)
+    const buckets = new Map()
+    const keys = new Array(states.length)
+    const add = (i) => {
+      const k = `${Math.floor(states[i].x / cell)}|${Math.floor(states[i].y / cell)}`
+      keys[i] = k
+      let b = buckets.get(k); if (!b) buckets.set(k, b = []); b.push(i)
+    }
+    const del = (i) => { const b = buckets.get(keys[i]); if (b) { const at = b.indexOf(i); if (at >= 0) b.splice(at, 1) } }
+    for (let i = 0; i < states.length; i++) add(i)
+    return {
+      move: (i) => { del(i); add(i) }, // call AFTER the state's x/y is updated
+      near: (x, y, out) => {
+        out.length = 0
+        const gx = Math.floor(x / cell), gy = Math.floor(y / cell)
+        for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+          const b = buckets.get(`${gx + dx}|${gy + dy}`)
+          if (b) for (let t = 0; t < b.length; t++) out.push(b[t])
+        }
+        return out
+      },
+    }
+  }
+  // Net adjacency index: for every part, the net endpoints that touch it
+  // ([otherPartIndex, myPin, otherPin]), so an SA move can rescore just that
+  // part's nets instead of every net on the board. Built from initPlaced, whose
+  // ORDER every derived states array preserves (legalize/compact both .map()).
+  // Map lookups mirror `states.find()` by keeping the FIRST part of a duplicate
+  // name, and skip endpoints with no matching part exactly like cost() does.
+  const nameIdx = new Map()
+  initPlaced.forEach((p, i) => { if (!nameIdx.has(p.name)) nameIdx.set(p.name, i) })
+  const netAdj = initPlaced.map(() => [])
+  for (const [a, b] of nets) {
+    const [ca, pa] = String(a).split('.'), [cb, pb] = String(b).split('.')
+    const ia = nameIdx.get(ca), ib = nameIdx.get(cb)
+    if (ia === undefined || ib === undefined) continue
+    netAdj[ia].push([ib, pa || '1', pb || '1'])
+    if (ib !== ia) netAdj[ib].push([ia, pb || '1', pa || '1']) // self-nets counted once
+  }
+
   // Courtyard legalization: SA's spacing term is only a SOFT penalty, so when a
   // net's wirelength pull beats it the annealer settles two parts into overlap —
   // which downstream becomes overlapping pads, shorts, and mask bridges. This
@@ -849,10 +928,19 @@ async function netAwarePlace(parts, nets, { maxW = 15, gap = 2.1 } = {}) {
   const MIN_CLEAR = 0.5
   const legalize = (statesIn) => {
     const states = statesIn.map((p) => ({ ...p }))
+    // A pair only pushes when |dx| < (wi+wj)/2 + MIN_CLEAR, so reach = MIN_CLEAR
+    // is the exact grid bound for this sweep (see the spatial-index note above).
+    const grid = makeGrid(states, MIN_CLEAR)
+    const nb = []
+    // Candidates > after, in ASCENDING index order, so the pair order and the
+    // in-sweep mutations are identical to the original i<j double loop.
+    const above = (i, after) => grid.near(states[i].x, states[i].y, nb).filter((j) => j > after).sort((x, y) => x - y)
     for (let iter = 0; iter < 400; iter++) {
       let moved = false
       for (let i = 0; i < states.length; i++) {
-        for (let j = i + 1; j < states.length; j++) {
+        let cands = above(i, i), at = 0
+        while (at < cands.length) {
+          const j = cands[at]
           const [wi, hi] = size(states[i]), [wj, hj] = size(states[j])
           const dx = states[j].x - states[i].x, dy = states[j].y - states[i].y
           const ox = (wi + wj) / 2 + MIN_CLEAR - Math.abs(dx)
@@ -861,7 +949,11 @@ async function netAwarePlace(parts, nets, { maxW = 15, gap = 2.1 } = {}) {
             moved = true
             if (ox <= oy) { const push = ox / 2 + 1e-3, s = dx >= 0 ? 1 : -1; states[i].x -= s * push; states[j].x += s * push }
             else { const push = oy / 2 + 1e-3, s = dy >= 0 ? 1 : -1; states[i].y -= s * push; states[j].y += s * push }
-          }
+            grid.move(i); grid.move(j)
+            // i just moved, so its neighbourhood changed — re-query it (still
+            // only ahead of j, matching the brute-force loop's forward scan).
+            cands = above(i, j); at = 0
+          } else at++
         }
       }
       if (!moved) break
@@ -883,41 +975,93 @@ async function netAwarePlace(parts, nets, { maxW = 15, gap = 2.1 } = {}) {
     const routeClear = MIN_CLEAR + Math.min(1.2, Math.max(0, ((nets?.length || 0) - 13) * 0.2))
     const cx = states.reduce((a, p) => a + p.x, 0) / states.length
     const cy = states.reduce((a, p) => a + p.y, 0) / states.length
-    const clashes = (s) => states.some((o) => o !== s && gapBetween(aabb(s), aabb(o)) < routeClear)
+    // routeClear (not TARGET) is this sweep's reach — it can exceed TARGET on
+    // net-dense boards, and the cell must bound the LARGEST interaction radius.
+    const grid = makeGrid(states, routeClear)
+    const nb = []
+    const clashes = (si) => {
+      const box = aabb(states[si]), near = grid.near(states[si].x, states[si].y, nb)
+      for (let t = 0; t < near.length; t++) { const j = near[t]; if (j !== si && gapBetween(box, aabb(states[j])) < routeClear) return true }
+      return false
+    }
     for (let iter = 0; iter < 120; iter++) {
       let moved = false
-      for (const s of states) {
+      for (let si = 0; si < states.length; si++) {
+        const s = states[si]
         const ox = s.x, oy = s.y
         s.x += (cx - s.x) * 0.12; s.y += (cy - s.y) * 0.12
-        if (clashes(s)) { s.x = ox; s.y = oy } else if (Math.abs(s.x - ox) + Math.abs(s.y - oy) > 0.02) moved = true
+        grid.move(si)
+        if (clashes(si)) { s.x = ox; s.y = oy; grid.move(si) } else if (Math.abs(s.x - ox) + Math.abs(s.y - oy) > 0.02) moved = true
       }
       if (!moved) break
     }
     return states
   }
-  const byName = (states, n) => states.find((s) => s.name === n)
+  // name -> state, rebuilt per states array. Keeps the FIRST entry for a
+  // duplicate name so it resolves exactly like the states.find() it replaces.
+  const byNameMap = (states) => { const m = new Map(); for (const s of states) if (!m.has(s.name)) m.set(s.name, s); return m }
   const cost = (states) => {
+    const byName = byNameMap(states)
     let wl = 0
-    for (const [a, b] of nets) { const [ca, pa] = String(a).split('.'), [cb, pb] = String(b).split('.'); const A = byName(states, ca), B = byName(states, cb); if (!A || !B) continue; const pA = pinPos(A, pa || '1'), pB = pinPos(B, pb || '1'); wl += Math.hypot(pA[0] - pB[0], pA[1] - pB[1]) }
+    for (const [a, b] of nets) { const [ca, pa] = String(a).split('.'), [cb, pb] = String(b).split('.'); const A = byName.get(ca), B = byName.get(cb); if (!A || !B) continue; const pA = pinPos(A, pa || '1'), pB = pinPos(B, pb || '1'); wl += Math.hypot(pA[0] - pB[0], pA[1] - pB[1]) }
     let sp = 0
-    for (let i = 0; i < states.length; i++) for (let j = i + 1; j < states.length; j++) { const g = gapBetween(aabb(states[i]), aabb(states[j])); if (g < TARGET) sp += (TARGET - g) ** 2 }
+    // Grid-accelerated pairwise spacing. Neighbours are filtered to j > i and
+    // sorted, so pairs accumulate in the SAME order as the old double loop and
+    // the sum is bit-for-bit identical (skipped pairs have g >= TARGET, which
+    // the old loop added nothing for either).
+    const grid = makeGrid(states, TARGET), nb = []
+    for (let i = 0; i < states.length; i++) {
+      const box = aabb(states[i])
+      const near = grid.near(states[i].x, states[i].y, nb).filter((j) => j > i).sort((x, y) => x - y)
+      for (const j of near) { const g = gapBetween(box, aabb(states[j])); if (g < TARGET) sp += (TARGET - g) ** 2 }
+    }
     return wl + sp * 20
   }
   // One SA run from a given seed (positions + rotations); returns placed parts.
   const saOptimize = (seedInit) => {
     let seed = seedInit
     const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff }
-    let cur = initPlaced.map((p) => ({ ...p, x: p.pcbX, y: p.pcbY, rot: 0 }))
+    // `cur` is never reassigned — the grid below indexes it by reference.
+    const cur = initPlaced.map((p) => ({ ...p, x: p.pcbX, y: p.pcbY, rot: 0 }))
     let curCost = cost(cur), best = cur.map((p) => ({ ...p })), bestCost = curCost
+    // Incremental scoring: a candidate move/rotation touches exactly ONE part,
+    // so only that part's nets and its pairwise spacing terms change. Rescore
+    // just those (grid-bounded, hence O(1) neighbours) instead of the whole
+    // O(nets + parts^2) cost — the difference is what makes 200 parts tractable.
+    const grid = makeGrid(cur, TARGET), nb = []
+    const wlOf = (i, sti) => { // sti stands in for cur[i]; self-nets use it for both ends
+      let wl = 0
+      for (const [j, mp, op] of netAdj[i]) {
+        const pA = pinPos(sti, mp), pB = pinPos(j === i ? sti : cur[j], op)
+        wl += Math.hypot(pA[0] - pB[0], pA[1] - pB[1])
+      }
+      return wl
+    }
+    const spOf = (i, sti) => { // every OTHER part is at its current position
+      const box = aabb(sti), near = grid.near(sti.x, sti.y, nb)
+      let sp = 0
+      for (let t = 0; t < near.length; t++) {
+        const j = near[t]; if (j === i) continue
+        const g = gapBetween(box, aabb(cur[j])); if (g < TARGET) sp += (TARGET - g) ** 2
+      }
+      return sp
+    }
+    let accepted = 0
     const STEPS = 6000
     for (let step = 0; step < STEPS; step++) {
       const T = 8 * (1 - step / STEPS) + 0.05
-      const cand = cur.map((p) => ({ ...p }))
-      const i = Math.floor(rnd() * cand.length)
-      if (rnd() < 0.3) cand[i].rot = [0, 90, 180, 270][Math.floor(rnd() * 4)]
-      else { cand[i].x += (rnd() - 0.5) * T; cand[i].y += (rnd() - 0.5) * T }
-      const cc = cost(cand)
-      if (cc < curCost || rnd() < Math.exp((curCost - cc) / (T * 0.3))) { cur = cand; curCost = cc; if (cc < bestCost) { best = cand.map((p) => ({ ...p })); bestCost = cc } }
+      const i = Math.floor(rnd() * cur.length)
+      const st = { ...cur[i] }
+      if (rnd() < 0.3) st.rot = [0, 90, 180, 270][Math.floor(rnd() * 4)]
+      else { st.x += (rnd() - 0.5) * T; st.y += (rnd() - 0.5) * T }
+      const cc = curCost + (wlOf(i, st) - wlOf(i, cur[i])) + (spOf(i, st) - spOf(i, cur[i])) * 20
+      if (cc < curCost || rnd() < Math.exp((curCost - cc) / (T * 0.3))) {
+        cur[i] = st; grid.move(i); curCost = cc
+        if (cc < bestCost) { best = cur.map((p) => ({ ...p })); bestCost = cc }
+        // Summing deltas accumulates float drift; resync off a full recompute
+        // periodically so curCost can't wander away from the true cost.
+        if (++accepted % 512 === 0) curCost = cost(cur)
+      }
     }
     best = compact(legalize(best)) // resolve overlaps, then shrink-wrap back to compact
     // Score the FINAL (legalized) placement so seeds are ranked on what actually
@@ -1534,10 +1678,22 @@ async function main() {
       const fp = String(p?.footprint ?? '')
       const m = fp.match(/^qfn(\d+)$/)
       const ok = m ? (+m[1] >= 4 && +m[1] <= 64) : /^0\d{3}$/.test(fp)
-      if (!ok) {
-        process.stdout.write(JSON.stringify({ ok: false, error: `unsupported footprint "${fp}" on ${p?.name ?? '?'} — use qfn4..qfn64 or an 0402-class passive (or supply a real LCSC kicadMod)` }))
-        return
+      if (ok) continue
+      // Not one of the two natively-emitted shapes. Before rejecting the whole
+      // board, try to SYNTHESIZE the land pattern: a header, SOIC, SOT, QFP or
+      // terminal block is an ordinary part, and bouncing the netlist over one
+      // was the main thing stopping a more complicated product from building.
+      // A supplier-supplied kicadMod always wins (handled by the `continue`
+      // above); this is the fallback, and it is marked so reports can say the
+      // geometry is generic rather than from a datasheet.
+      const synth = synthFootprint(fp)
+      if (synth) {
+        p.kicadMod = synth
+        p.syntheticFootprint = true
+        continue
       }
+      process.stdout.write(JSON.stringify({ ok: false, error: `unsupported footprint "${fp}" on ${p?.name ?? '?'} — supply a real LCSC kicadMod, or use qfn4..qfn64, or one of: ${SYNTH_FAMILIES.join('; ')}` }))
+      return
     }
   }
 
