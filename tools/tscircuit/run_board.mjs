@@ -403,6 +403,35 @@ const LEGALIZE_MARGIN_MM = 0.05
 const RESIDUAL_NUDGE_MAX = 5
 const RESIDUAL_NUDGE_DISP_BOOST = 0.1 // mm over the last accepted legalizer displacement
 const RESIDUAL_NUDGE_TARGET_R = 1.0 // mm — only copper this close to a violation moves
+/**
+ * How bad each DRC class actually is, for ranking candidate boards.
+ *
+ * ELECTRICAL faults (a short, a crossing, a connection that isn't there) mean
+ * the board is WRONG — it will not do what the netlist says. FAB faults
+ * (clearance, hole clearance, mask bridge, edge clearance) mean the board works
+ * but the fab may flag or refuse it. Ranking on a raw error count treats those
+ * as interchangeable and will happily choose a non-functional board because it
+ * has a smaller number next to it.
+ */
+const DRC_SEVERITY = {
+  shorting_items: 25,
+  tracks_crossing: 25,
+  unconnected_items: 25,
+  starved_thermal: 2,
+  solder_mask_bridge: 2,
+  copper_edge_clearance: 2,
+}
+const DRC_SEVERITY_DEFAULT = 1
+/** Weighted badness of a routed board: lower is better. */
+function drcScore(drc, unrouted = 0) {
+  const types = drc?.errorTypes || {}
+  let n = 0
+  for (const [t, c] of Object.entries(types)) n += c * (DRC_SEVERITY[t] ?? DRC_SEVERITY_DEFAULT)
+  // A net the router never completed is the same class of wrong as one it
+  // shorted — the netlist is not honoured either way.
+  return n + unrouted * DRC_SEVERITY.unconnected_items
+}
+
 const RESIDUAL_NUDGE_TYPES = new Set(['hole_clearance', 'clearance'])
 // How many times the residual pass may re-sweep an already-improved board.
 const RESIDUAL_NUDGE_SWEEPS = Number(process.env.FL_RESIDUAL_SWEEPS || 3)
@@ -1705,7 +1734,14 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15 } = {}) {
     }
     const drc = await realDrc(cj, s.profile)
     if (!drc.available) return { available: false, drc, trail, best: null }
-    const score = drc.errors + unrouted * 5 // unrouted nets are worse than a DRC nit
+    // Severity-weighted score. Counting every error equally made the ladder
+    // pick a BROKEN board over a manufacturable one: measured on the `dense`
+    // fixture, it chose a 7-error board carrying a SHORT and 2 open nets over a
+    // 13-error board with zero shorts and 1 open net. A short or a missing
+    // connection means the board does not work; a hole/copper clearance nit
+    // means the fab raises an eyebrow and the board still functions. Those are
+    // not the same unit and must not be summed as if they were.
+    const score = drcScore(drc, unrouted)
     trail.push({ iter: i + 1, strategy: s.name, profile: FAB_PROFILES[s.profile].label, errors: drc.errors, errorTypes: drc.errorTypes, unrouted })
     if (!best || score < best.score) best = { cj, drc, fixes, unrouted, score, strategy: s.name, layers: s.layers ?? 2 }
     if (drc.errors === 0 && unrouted === 0) break // fully routed AND fab-clean — done
@@ -2013,7 +2049,7 @@ async function main() {
         }
         if (accepted && after === before) reason = 'no change in count'
         drcRepair.residualNudge = { attempted: true, targeted, targets: targets.length, moved: movedTotal, maxDisp: md, ladder: rungs, minClear: legalClear, before, after, accepted, reason }
-        if (process.env.FL_FR_DEBUG) process.stderr.write(`[residualNudge] ${before} -> ${after} (${reason}; targeted=${targeted}, moved=${vm + tm}, md=${md})\n`)
+        if (process.env.FL_FR_DEBUG) process.stderr.write(`[residualNudge] ${before} -> ${after} (${reason}; targeted=${targeted}, moved=${movedTotal}, md=${md}, sweeps=${rungs.length})\n`)
         drcRepair.fixes = [...drcRepair.fixes,
           `residual nudge (${targeted ? `${targets.length} violation site(s)` : 'untargeted — positions not mappable'}, ${md}mm): ${accepted ? `${before} → ${after} DRC error(s)` : `rejected (${reason}), kept ${before}`}`]
         if (accepted) drcRepair.errorsBest = drc.errors

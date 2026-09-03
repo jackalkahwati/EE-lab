@@ -98,8 +98,16 @@ for (const name of fixtures) {
   const secs = Math.round((Date.now() - started) / 1000)
   const drc = r.drc ?? {}
   const rep = r.drcRepair ?? {}
+  // Track ELECTRICAL faults separately from fab nits. A raw error count hides
+  // the thing that decides whether a board works: the ladder can legitimately
+  // accept MORE clearance nits to shed a short, and a bar on the total alone
+  // would read that improvement as a regression.
+  const types = drc.errorTypes ?? {}
+  const electrical = (types.shorting_items ?? 0) + (types.tracks_crossing ?? 0)
+    + (types.unconnected_items ?? 0) + (rep.unrouted ?? 0)
   const got = {
     errors: drc.errors ?? null,
+    electrical,
     unrouted: rep.unrouted ?? null,
     converged: rep.converged ?? null,
     traces: r.routedTraces ?? null,
@@ -108,17 +116,21 @@ for (const name of fixtures) {
 
   if (UPDATE) {
     console.log(`recorded (errors ${got.errors}, unrouted ${got.unrouted}, ${secs}s)`)
-    expected[name] = { maxErrors: got.errors, maxUnrouted: got.unrouted, mustConverge: got.converged === true }
+    expected[name] = { maxErrors: got.errors, maxElectrical: got.electrical, maxUnrouted: got.unrouted, mustConverge: got.converged === true }
     continue
   }
 
   // Bars, not exact equality: the router has non-deterministic timing, so a
   // board may legitimately land on a different-but-equally-clean layout. A
   // regression is MORE errors or LOST convergence, never a different route.
-  const bar = expected[name] ?? { maxErrors: 0, maxUnrouted: 0, mustConverge: true }
+  const bar = expected[name] ?? { maxErrors: 0, maxElectrical: 0, maxUnrouted: 0, mustConverge: true }
   const problems = []
   if (got.errors === null) problems.push('no DRC result')
   else if (got.errors > bar.maxErrors) problems.push(`DRC errors ${got.errors} > ${bar.maxErrors}`)
+  // The bar that actually matters: shorts, crossings and missing connections.
+  if (bar.maxElectrical != null && got.electrical > bar.maxElectrical) {
+    problems.push(`ELECTRICAL faults ${got.electrical} > ${bar.maxElectrical} (shorts/crossings/open nets)`)
+  }
   if (got.unrouted !== null && got.unrouted > bar.maxUnrouted) {
     problems.push(`unrouted ${got.unrouted} > ${bar.maxUnrouted}`)
   }
@@ -128,7 +140,7 @@ for (const name of fixtures) {
     console.log(`FAIL (${secs}s)\n  ${problems.join('\n  ')}`)
     failed += 1
   } else {
-    console.log(`ok (${got.errors} DRC, ${got.unrouted} unrouted, ${got.traces} traces, ${secs}s)`)
+    console.log(`ok (${got.errors} DRC, ${got.electrical} electrical, ${got.unrouted} unrouted, ${got.traces} traces, ${secs}s)`)
   }
 }
 
@@ -140,6 +152,6 @@ if (UPDATE) {
 
 console.log(`\n${results.length - failed}/${fixtures.length} boards met their bar`)
 for (const r of results) {
-  console.log(`  ${r.name.padEnd(9)} ${String(r.errors).padStart(3)} DRC  ${String(r.unrouted).padStart(2)} unrouted  ${r.secs}s`)
+  console.log(`  ${r.name.padEnd(9)} ${String(r.errors).padStart(3)} DRC  ${String(r.electrical).padStart(2)} electrical  ${String(r.unrouted).padStart(2)} unrouted  ${r.secs}s`)
 }
 process.exit(failed ? 1 : 0)
