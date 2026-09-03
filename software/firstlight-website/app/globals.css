@@ -9,6 +9,12 @@
    ========================================================================== */
 
 /* 1. Tokens ---------------------------------------------------------------- */
+/* Page-level backstop: nothing may scroll the document sideways. `clip`
+   leaves position: sticky working, unlike overflow-x: hidden. */
+html {
+  overflow-x: clip;
+}
+
 :root {
   /* ground */
   --ground: #edeef0;
@@ -290,6 +296,9 @@ a {
   border-top: none;
   /* the 2px amber "power line", echoing the strip on the FL-1 front */
   border-bottom: 2px solid var(--amber);
+  /* contains the machine's amber glow (.fl1-image::before /
+     .fl1-hero-img::before) the same way .hero does — see the note there. */
+  overflow-x: clip;
 }
 
 .band-dark h1,
@@ -800,6 +809,14 @@ a {
 /* Home hero: copy 6/12, product 6/12, no 100vh */
 .hero {
   padding: 64px 0 80px;
+  /* The amber glow is a pseudo-element inset NEGATIVELY past its container
+     (see .shot-stage::before), so it bleeds ~89px wider than the image. With
+     overflow visible that widened the whole document: at a 390px viewport the
+     body scrollWidth was 455px and every page scrolled sideways. `clip` (not
+     `hidden`) contains the bleed WITHOUT creating a scroll container, so the
+     glow still spills softly around the image and sticky/positioned children
+     keep working. */
+  overflow-x: clip;
 }
 
 .hero-grid {
@@ -1878,19 +1895,51 @@ a {
     --section: var(--section-mobile);
   }
 
-  .nav-center {
-    display: none;
-  }
-
+  /* Below 860px the centre links can't sit beside the wordmark and the CTA.
+     Rather than hiding them (which stranded /fl1 and /developers with no way
+     back on a phone), the nav becomes two rows: identity + CTA, then the
+     links as a scrollable strip. No JS, no hamburger — it matches the flat
+     hairline system and every destination stays one tap away. */
   .nav-inner {
     grid-template-columns: auto 1fr;
+    grid-template-rows: var(--nav-h) auto;
+    height: auto;
+    row-gap: 0;
   }
 
   .nav-actions {
     grid-column: 2;
+    grid-row: 1;
   }
 
-  .nav-links a:not(.btn) {
+  .nav-center,
+  .nav-links {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-content: flex-start;
+    gap: 22px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    padding: 10px 0;
+    border-top: 1px solid var(--line);
+    /* the strip scrolls; the page never does */
+    max-width: 100%;
+  }
+
+  .nav-center::-webkit-scrollbar,
+  .nav-links::-webkit-scrollbar {
+    display: none;
+  }
+
+  .nav-center a,
+  .nav-links a {
+    white-space: nowrap;
+    font-size: 0.875rem;
+  }
+
+  /* the CTA already carries the action; a second copy in the strip is noise */
+  .nav-links a.btn {
     display: none;
   }
 
