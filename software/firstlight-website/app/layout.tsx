@@ -11,7 +11,7 @@ export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: "FirstLight Compose | Design a real product from a sentence",
   description:
-    "FirstLight Compose turns a plain-language description into a manufacturable product. A routed, DRC-gated board, a fit-checked enclosure, real physics simulation, firmware, and the manufacturing, sourcing, and test plans to build it. Start free.",
+    "FirstLight Compose turns a plain-language description into manufacturable measurement and sensor electronics. A routed, DRC-gated board, a fit-checked enclosure, real physics simulation, firmware, and the manufacturing, sourcing, and test plans to build it. Start a free trial.",
   openGraph: {
     title: "FirstLight Compose | Design a real product from a sentence",
     description:

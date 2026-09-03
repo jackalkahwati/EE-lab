@@ -22,7 +22,7 @@ const OUTPUTS = [
   ["Manufacturable fab package", "Gerbers, drill, pick-and-place, and BOM, routed and gated on real KiCad DRC. A board only goes green when the checks actually pass."],
   ["Enclosure CAD", "A two-shell enclosure generated to match the industrial design, with bosses aligned to the board's mounting holes, fit-checked and exported as real STEP."],
   ["Boards shaped to the product", "A round product gets a circular board with mounting holes on a bolt circle. The PCB follows the enclosure, not the other way around."],
-  ["Physics simulation", "Real solves, honestly labeled: FEM thermal and modal, 3D FEA in CalculiX, natural-convection CFD in OpenFOAM, cavity acoustics in Elmer, antenna FDTD in openEMS, rail impedance in ngspice. A design that runs hot fails in simulation before anyone tools a mold."],
+  ["Physics simulation", "Real solves, honestly labeled and run as each design needs them: FEM thermal and modal, 3D FEA in CalculiX, natural-convection CFD in OpenFOAM, cavity acoustics in Elmer, antenna FDTD in openEMS, rail impedance in ngspice. A design that runs hot fails in simulation before anyone tools a mold."],
   ["Firmware", "A compiled firmware image that targets the board that actually shipped, with the peripheral map, power states, and USB reporting."],
   ["Manufacturing, sourcing & test", "An NPI package sized to your volume, a sourcing plan with real parts and lead-time risks called out, and an FL-1 validation test plan with the gaps flagged, never papered over."],
 ];
@@ -51,7 +51,7 @@ const TOOLCHAIN: Tool[] = [
   ["macrofab", "MacroFab", "assembly quotes", 128, 128],
 ];
 
-// Physics solvers that gate every run
+// Physics solvers behind the gates; the sim-router runs the subset each design needs
 const SIM_STACK: Tool[] = [
   ["scipy", "SciPy", "thermal & modal FEM", 64, 64],
   ["gmsh", "gmsh", "FEA meshing", 128, 128],
@@ -92,7 +92,7 @@ export default function Home() {
               Sign in
             </a>
             <a href={COMPOSE_URL} className="btn btn-small">
-              Start free
+              Start free trial
             </a>
           </div>
         </div>
@@ -117,11 +117,12 @@ export default function Home() {
               and routes the board, wraps it in an enclosure that actually fits,
               runs real physics simulation, generates firmware for the board that
               shipped, and hands you the manufacturing, sourcing, and test plans
-              to build it.
+              to build it. It is proven today on precision measurement and sensor
+              boards, an MCU with analog and I&#178;C front ends on rigid FR-4.
             </p>
             <TryCompose />
             <p className="run-caption">
-              Free to start on your own model key, no card required.{" "}
+              Start with a free Pro trial on your own model key.{" "}
               <a href={COMPOSE_URL} className="compose-link">
                 Open Compose &rarr;
               </a>
@@ -177,16 +178,18 @@ export default function Home() {
         <div className="container center">
           <p className="kicker">Simulation</p>
           <p className="toolchain-lede">
-            Six real solvers gate every design. Nothing goes green without
-            a solve.
+            Six real solvers, plus gmsh meshing, behind the physics gates.
+            Compose runs the analyses each design needs, and nothing goes green
+            without the solves it calls for.
           </p>
           <ToolStrip tools={SIM_STACK} />
           <p className="toolchain-note">
+            When a design calls for them, SciPy runs the thermal and modal FEM;
             gmsh meshes and CalculiX solves the 3D FEA. OpenFOAM runs the
             natural-convection CFD, Elmer the cavity acoustics, openEMS the
-            antenna FDTD, and ngspice sweeps the rail decoupling network.
-            Every result is labeled with the tool and fidelity that produced
-            it, and a gate that fails says so.
+            antenna FDTD, and ngspice sweeps the rail decoupling network. Every
+            result is labeled with the tool and fidelity that produced it, and a
+            gate that fails says so.
           </p>
         </div>
       </section>
@@ -227,7 +230,7 @@ export default function Home() {
           </p>
           <p className="statement">
             Describe it. Compose builds it.
-            <span className="accent"> A manufacturable product. Board, enclosure, firmware, and the plans to ship it.</span>
+            <span className="accent"> A manufacturable board, its enclosure, firmware, and the plans to ship it.</span>
           </p>
         </div>
       </section>
@@ -236,7 +239,7 @@ export default function Home() {
       <section className="section" id="how">
         <div className="container">
           <p className="kicker">How it works</p>
-          <h2>From a prompt to a manufacturable product, in one run.</h2>
+          <h2>From a prompt to a manufacturable board, in one run.</h2>
           <div className="pipeline">
             {PIPELINE.map((s) => (
               <span key={s} className="pipeline-stage">
@@ -360,39 +363,24 @@ export default function Home() {
           <p className="pricing-note">
             FirstLight compresses years of product development into minutes.
             Bring your own model key, and a plan buys platform runs, priced by
-            board size &mdash; so runs are deliberately valuable. Free to explore;
-            ship on a plan, and license annually for a team.
+            board size &mdash; so runs are deliberately valuable. Start Pro with a
+            free trial; ship on a plan, and license annually for a team.
           </p>
           <div className="pricing-grid">
-            <div className="price-card">
-              <h3>Free</h3>
-              <p className="price">
-                $0<span>/explore</span>
-              </p>
-              <ul>
-                <li>3 runs to try it</li>
-                <li>Bring your own model key</li>
-                <li>Every model &mdash; Sonnet, GPT, Opus, Gemini</li>
-                <li>Full pipeline: schematic &rarr; routed PCB &rarr; BOM</li>
-              </ul>
-              <a href={COMPOSE_URL} className="btn btn-ghost price-cta">
-                Start free
-              </a>
-            </div>
             <div className="price-card price-card-pro">
-              <span className="price-badge">Most popular</span>
+              <span className="price-badge">Free trial</span>
               <h3>Pro</h3>
               <p className="price">
                 $49<span>/month</span>
               </p>
               <ul>
-                <li>Build &amp; ship a product or two, then top off</li>
+                <li>Starts with a free trial</li>
+                <li>Bring your own model key, every model</li>
                 <li>Full exports &mdash; Gerbers, BOM, CAD, firmware</li>
-                <li>Priority build queue</li>
-                <li>Revision history &amp; email support</li>
+                <li>Priority build queue, revision history</li>
               </ul>
               <a href={COMPOSE_URL} className="btn price-cta">
-                Start with Pro
+                Start free trial
               </a>
             </div>
             <div className="price-card">
@@ -467,6 +455,11 @@ export default function Home() {
                 FL-1 is in engineering validation. Reserve your place in line for
                 the first production units.
               </p>
+              <p className="fl1-dogfood">
+                And FL-1 itself was designed in Compose. We used our own product
+                to build the machine that tests hardware.{" "}
+                <Link href="/case-study">Read the case study &rarr;</Link>
+              </p>
               <div className="fl1-cta-row">
                 <Link className="btn" href="/fl1#reserve">
                   Reserve an FL-1
@@ -515,6 +508,7 @@ export default function Home() {
           <span className="footer-tag">Every board&apos;s first light.</span>
           <span className="footer-links">
             <a href={COMPOSE_URL}>Sign in</a>
+            <Link href="/case-study">Case study</Link>
             <Link href="/developers">Developers</Link>
             <Link href="/terms">Terms of Use</Link>
             <Link href="/privacy">Privacy Policy</Link>

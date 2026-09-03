@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { CopyForAi } from "./CopyForAi";
 
 const COMPOSE_URL =
   process.env.NEXT_PUBLIC_COMPOSE_URL ?? "https://compose.firstlight.build";
@@ -8,6 +9,19 @@ export const metadata: Metadata = {
   title: "FirstLight Developers | API, CLI and MCP",
   description:
     "Drive the FirstLight Compose pipeline programmatically. REST API for builds and artifacts, a CLI for CI, and an MCP server so any AI agent can design real hardware.",
+  openGraph: {
+    title: "FirstLight Developers | API, CLI and MCP",
+    description:
+      "A prompt goes in over REST. A routed, DRC-gated PCBA, a real CAD enclosure, simulations, firmware, and manufacturing docs come out. Drive it from CI or hand it to an AI agent as MCP tools.",
+    images: [
+      {
+        url: "/media/fl1-front.png",
+        width: 1402,
+        height: 1122,
+        alt: "FirstLight FL-1 autonomous PCB bring-up station",
+      },
+    ],
+  },
 };
 
 export default function Developers() {
@@ -21,6 +35,8 @@ export default function Developers() {
           </Link>
           <div className="nav-center">
             <Link href="/#how">How it works</Link>
+            <Link href="/#iterate">Iterate</Link>
+            <Link href="/#pricing">Pricing</Link>
             <Link href="/fl1">FL-1 machine</Link>
             <Link href="/developers" aria-current="page">
               Developers
@@ -31,7 +47,7 @@ export default function Developers() {
               Sign in
             </a>
             <a href={COMPOSE_URL} className="btn btn-small">
-              Start free
+              Start free trial
             </a>
           </div>
         </div>
@@ -57,6 +73,13 @@ export default function Developers() {
               Drive it from CI with the CLI, or hand it to an AI agent as MCP
               tools.
             </p>
+            <div className="hero-cta">
+              <CopyForAi />
+              <span className="hero-cta-note">
+                Paste the whole reference into Claude, Cursor or ChatGPT so it
+                can build with FirstLight for you.
+              </span>
+            </div>
           </div>
         </div>
       </header>
@@ -134,10 +157,95 @@ curl -X POST https://compose.firstlight.build/api/v1/boards \\
         </div>
       </section>
 
+      {/* Limits, status codes & artifacts */}
+      <section className="section section-dark" id="limits">
+        <div className="container doc">
+          <h2>Limits</h2>
+          <ul className="doc-list">
+            <li>
+              <strong>Prompt length</strong> — 8 to 2000 characters. Outside that
+              range returns <code>400</code>. (A rebuild carries no prompt.)
+            </li>
+            <li>
+              <strong>Build queue</strong> — up to five builds may be pending per
+              instance. A sixth returns <code>429</code>; retry once one drains.
+            </li>
+            <li>
+              <strong>Serialized</strong> — builds run one at a time.{" "}
+              <code>POST /boards</code> returns your <code>queuePosition</code>{" "}
+              immediately, then the pipeline runs in the background.
+            </li>
+            <li>
+              <strong>Build time</strong> — a full run takes about seven minutes.
+              Poll <code>statusUrl</code>; do not hold the connection open.
+            </li>
+            <li>
+              <strong>Credits</strong> — each build spends a platform run-credit.
+              Plan credits reset monthly (use-or-lose); purchased credits roll
+              over. Frontier-model builds are plan-gated — see <code>402</code>.
+            </li>
+            <li>
+              <strong>Key scope</strong> — <code>read</code> can poll and
+              download; <code>read_write</code> is required to create or import.
+            </li>
+          </ul>
+
+          <h2 style={{ marginTop: "2.75rem" }}>Status codes</h2>
+          <ul className="doc-list">
+            <li><code>202</code> — build accepted and queued.</li>
+            <li><code>400</code> — bad input (prompt length, wrong file types).</li>
+            <li>
+              <code>401</code> — missing, invalid, or revoked key (creating needs{" "}
+              <code>read_write</code>).
+            </li>
+            <li>
+              <code>402</code> — plan gate: your plan or credits do not allow the
+              requested model. Upgrade, or bring your own LLM key.
+            </li>
+            <li><code>403</code> — the run is not owned by your key.</li>
+            <li><code>404</code> — unknown run.</li>
+            <li><code>429</code> — build queue full (five pending). Retry later.</li>
+          </ul>
+
+          <h2 style={{ marginTop: "2.75rem" }}>Artifact kinds</h2>
+          <p>
+            Every kind you can pass to <code>/artifacts/&lt;kind&gt;</code>. Only
+            kinds the run actually produced appear in its inventory.
+          </p>
+          <ul className="doc-list">
+            <li><code>spec</code> — resolved product spec (JSON)</li>
+            <li><code>board</code> — placements, nets, board stats (JSON)</li>
+            <li><code>schematic</code> — schematic (SVG)</li>
+            <li><code>layout</code> — layout (SVG)</li>
+            <li><code>pcb</code> — KiCad <code>.kicad_pcb</code></li>
+            <li><code>fab-package</code> — Gerbers, drill, BOM, CPL (zip)</li>
+            <li><code>bom</code> — bill of materials (CSV)</li>
+            <li><code>step</code> — enclosure (STEP)</li>
+            <li><code>glb</code> — enclosure (GLB)</li>
+            <li><code>mechanical</code> — mechanical fit report (JSON)</li>
+            <li><code>firmware</code> — firmware (zip)</li>
+            <li><code>simulation</code> — simulation report</li>
+            <li><code>manufacturing</code> — manufacturing report</li>
+            <li><code>supply-chain</code> — sourcing report</li>
+            <li><code>validation</code> — validation report</li>
+            <li><code>id-brief</code> — industrial-design brief</li>
+            <li><code>concept-render</code> — concept render (JPG)</li>
+            <li><code>timing</code> — per-stage timing (JSON)</li>
+          </ul>
+        </div>
+      </section>
+
       {/* CLI */}
-      <section className="section section-dark" id="cli">
+      <section className="section" id="cli">
         <div className="container doc">
           <h2>CLI</h2>
+          <p>
+            Install once, then it wraps the API for terminals and CI. Set{" "}
+            <code>FIRSTLIGHT_API_KEY</code>; for self-hosted instances also set{" "}
+            <code>FIRSTLIGHT_URL</code>.
+          </p>
+          <CodeBlock title="install">{`npm install -g firstlight
+export FIRSTLIGHT_API_KEY=flk_live_...`}</CodeBlock>
           <p>
             The <code>firstlight</code> CLI wraps the API for terminals and CI.{" "}
             <code>build --wait</code> exits 0 only when every stage finishes

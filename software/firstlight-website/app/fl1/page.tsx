@@ -280,6 +280,7 @@ export default function FL1Page() {
           <span className="footer-tag">Every board&apos;s first light.</span>
           <span className="footer-links">
             <Link href="/">Compose</Link>
+            <Link href="/case-study">Case study</Link>
             <Link href="/developers">Developers</Link>
             <Link href="/terms">Terms of Use</Link>
             <Link href="/privacy">Privacy Policy</Link>
