@@ -38,13 +38,25 @@ REMOTE="${FL_BACKUP_REMOTE:-}"
 STAMP="$(date '+%Y%m%d-%H%M%S')"
 SNAP_DIR="$BACKUP_DIR/$STAMP"
 
-# Sources to snapshot (space-separated, relative to APP_DIR).
-SOURCES=("data" "public/runs")
+# Previous snapshot (newest timestamp dir), used as rsync --link-dest so an
+# unchanged file is a hard link, not a second copy. 14 snapshots of a 5 GB
+# run store then cost ~5 GB plus deltas instead of ~70 GB.
+PREV_SNAP=""
+if [ -d "$BACKUP_DIR" ]; then
+  PREV_SNAP="$(find "$BACKUP_DIR" -mindepth 1 -maxdepth 1 -type d -name '[0-9]*-[0-9]*' 2>/dev/null | sort -r | head -n 1)"
+fi
+
+# Sources to snapshot (space-separated, relative to APP_DIR). Override with
+# FL_BACKUP_SOURCES="data" to back up only the account/enterprise store.
+# Order matters: the small, irreplaceable store first, so it always lands
+# even if the big run store has to be skipped for space.
+SOURCES=(${FL_BACKUP_SOURCES:-data public/runs})
 
 log "FirstLight Compose data backup starting"
 log "App dir:    $APP_DIR"
 log "Backup dir: $BACKUP_DIR"
 log "Snapshot:   $SNAP_DIR"
+log "Link-dest:  ${PREV_SNAP:-(none, first snapshot)}"
 log "Retain:     last $KEEP snapshots"
 
 mkdir -p "$SNAP_DIR"
@@ -58,11 +70,28 @@ for rel in "${SOURCES[@]}"; do
     continue
   fi
   dest="$SNAP_DIR/$rel"
+  # Free-space guard: never fill the backup disk. With --link-dest the real
+  # cost is only the delta, but we check the full size to be safe; skipping
+  # one source must not stop the others.
+  # Both measured inside `if` so a failure is logged, never a silent exit
+  # under set -e (launchd runs showed exactly that: exit 1, empty log).
+  need_kb=""; free_kb=""
+  if ! need_kb="$(du -sk "$src" | awk '{print $1}')"; then warn "could not measure $src (du failed); skipping the space check"; need_kb=""; fi
+  if ! free_kb="$(df -k "$BACKUP_DIR" | awk 'NR==2{print $4}')"; then warn "could not measure free space at $BACKUP_DIR"; free_kb=""; fi
+  if [ -n "$need_kb" ] && [ -n "$free_kb" ] && [ "$need_kb" -gt "$free_kb" ] && [ -z "$PREV_SNAP" ]; then
+    warn "SKIPPING $rel: needs ${need_kb} KB, only ${free_kb} KB free at $BACKUP_DIR (set FL_BACKUP_REMOTE or a bigger FL_BACKUP_DIR)"
+    continue
+  fi
   mkdir -p "$(dirname "$dest")"
   log "copying $rel ..."
   # -a preserves timestamps/perms; source is only read. Never --delete on live.
   if command -v rsync >/dev/null 2>&1; then
-    rsync -a "$src/" "$dest/" 2>/dev/null || rsync -a "$src" "$(dirname "$dest")/"
+    link_opt=()
+    if [ -n "$PREV_SNAP" ] && [ -d "$PREV_SNAP/$rel" ]; then
+      link_opt=(--link-dest="$PREV_SNAP/$rel/")
+      log "  hard-linking unchanged files against $PREV_SNAP/$rel"
+    fi
+    rsync -a ${link_opt[@]+"${link_opt[@]}"} "$src/" "$dest/" 2>/dev/null || rsync -a "$src" "$(dirname "$dest")/"
   else
     cp -a "$src" "$(dirname "$dest")/"
   fi

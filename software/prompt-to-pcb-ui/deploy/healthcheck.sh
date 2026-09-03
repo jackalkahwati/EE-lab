@@ -34,8 +34,10 @@ check_drive() {
   if [ -d "$DRIVE" ] && mount | grep -q " on $DRIVE "; then
     log "OK   (a) external drive mounted: $DRIVE"
   elif [ -d "$DRIVE" ]; then
-    # Directory exists but may not be a real mount; still usable-ish, warn hard.
-    log "OK   (a) drive path present: $DRIVE"
+    # Directory exists but is not a mount point: a stale mountpoint after an
+    # unclean unmount. The data is NOT there. Fail, don't reassure.
+    log "FAIL (a) drive path exists but is NOT mounted: $DRIVE"
+    FAILURES+=("'$DRIVE' exists as a bare directory but no volume is mounted there — data + app working dir are gone")
   else
     log "FAIL (a) external drive NOT mounted: $DRIVE"
     FAILURES+=("external drive '$DRIVE' is not mounted — data + app working dir are gone")
