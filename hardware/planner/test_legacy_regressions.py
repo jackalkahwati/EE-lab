@@ -8,7 +8,7 @@ import pytest
 
 
 HERE = Path(__file__).resolve().parent
-NATIVE_TESTS = {"test_core_regressions.py", "test_legacy_regressions.py"}
+NATIVE_TESTS = {"test_core_regressions.py", "test_legacy_regressions.py", "test_design_gate.py"}
 LEGACY_SCRIPTS = sorted(
     path for path in HERE.glob("test_*.py") if path.name not in NATIVE_TESTS
 )

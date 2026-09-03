@@ -6,73 +6,135 @@
  * and the INTERACTIVE pipeline (app/api/pipeline/run/route.ts) call these, so a
  * board can't ship hollow from either entry point.
  *
- * Everything here is fail-SAFE: if the Python can't run, callers get null and
- * treat it as "don't block" — a broken gate never wedges the pipeline. The HARD
- * block is only on an actual GATE FAIL verdict.
+ * CONTRACT (mirrors the Python scripts' stdout/exit-code contract exactly):
+ *   design_check.py   last line `GATE PASS` (exit 0)  -> { pass: true }
+ *                     `GATE FAIL <n>` (exit 1)        -> { pass: false, failCount: n, issues }
+ *                     `GATE ERROR <why>` (exit 2), no GATE line at all, exit 2,
+ *                     a timeout (25 s SIGTERM -> code === null), ENOENT / spawn
+ *                     failure                          -> null  ("gate NOT RUN")
+ *   functional_wire.py `FUNCWIRE <n>` (exit 0)        -> n
+ *                     anything else                    -> null  ("not run")
+ * Every null path also console.error()s ONE loud line
+ *   `[design-gate] not run: <reason>`
+ * and hands the same reason to opts.onNotRun so a caller can surface it in its
+ * stage detail. Callers treat null as "the gate did not run" — they surface it
+ * and NEVER block on it; only a true `GATE FAIL` (pass:false) blocks. A missing
+ * verdict line is never read as a fail (that used to produce a hard block with
+ * "FAIL — 0 issue(s)") and never as a pass (timeouts used to pass silently).
  */
 import { spawn } from 'node:child_process'
 import path from 'node:path'
+
+const TIMEOUT_MS = 25_000
+
+export type GateRunOptions = {
+  /** Receives the one-line reason whenever the tool did NOT run (result null). */
+  onNotRun?: (reason: string) => void
+}
+
+export type DesignGateResult = {
+  pass: boolean
+  failCount: number
+  warnCount: number
+  /** The `✗ FAIL` finding lines (ref: message), in report order. */
+  issues: string[]
+  /** First three issues, joined — for a one-line stage detail. */
+  summary: string
+}
 
 function plannerDir(): string {
   return path.join(process.cwd(), '..', '..', 'hardware', 'planner')
 }
 
-/** Functional-wiring synthesis: adds the application signal chains (mux->ADC,
- *  MCU drives mux select, reference->channel, input/host connectors, module
- *  flag) the per-IC bus/power synthesis omits. Mutates the spec file in place;
- *  conservative (only wires patterns it matches, no-op otherwise). Best-effort. */
-export async function runFunctionalWire(specPath: string, prompt: string): Promise<number> {
+function notRun(tool: string, reason: string, opts?: GateRunOptions): null {
+  const msg = `[design-gate] not run: ${tool}: ${reason}`
+  console.error(msg)
+  try { opts?.onNotRun?.(`${tool}: ${reason}`) } catch { /* caller's problem, never ours */ }
+  return null
+}
+
+/** Spawn a planner script and collect stdout+stderr. Resolves to
+ *  { code, signal, out } on close, or { error } when the process could not be
+ *  started (ENOENT: python missing) / spawn threw. */
+function runPlannerScript(
+  script: string,
+  args: string[],
+  timeoutMs: number,
+): Promise<{ code: number | null; signal: NodeJS.Signals | null; out: string } | { error: string }> {
   const dir = plannerDir()
   return new Promise((resolve) => {
-    let py
+    let py: ReturnType<typeof spawn>
     try {
-      py = spawn(process.env.FL_PYTHON || 'python3',
-        [path.join(dir, 'functional_wire.py'), specPath, path.join(dir, 'design_rules.json'), prompt],
-        { timeout: 25_000 })
-    } catch { resolve(0); return }
+      py = spawn(process.env.FL_PYTHON || 'python3', [path.join(dir, script), ...args], { timeout: timeoutMs })
+    } catch (e) {
+      resolve({ error: `spawn failed: ${String(e).slice(0, 160)}` }); return
+    }
     let out = ''
-    py.stdout.on('data', (d) => (out += d))
-    py.on('error', () => resolve(0))
-    py.on('close', () => {
-      const m = out.match(/FUNCWIRE (\d+)/)
-      resolve(m ? Number(m[1]) : 0)
+    let settled = false
+    py.stdout?.on('data', (d) => (out += d))
+    py.stderr?.on('data', (d) => (out += d))
+    py.on('error', (e: NodeJS.ErrnoException) => {
+      if (settled) return
+      settled = true
+      resolve({ error: e.code === 'ENOENT' ? `python not found (${process.env.FL_PYTHON || 'python3'})` : String(e).slice(0, 160) })
+    })
+    py.on('close', (code, signal) => {
+      if (settled) return
+      settled = true
+      resolve({ code, signal, out })
     })
   })
 }
 
-/** The design-correctness gate. Returns {pass, failCount, warnCount, summary},
- *  or null if the gate itself couldn't run (Python missing / script absent) —
- *  callers treat null as "don't block". */
+/** Functional-wiring synthesis: adds the application signal chains (mux->ADC,
+ *  MCU drives mux select, reference->channel, input/host connectors, module
+ *  flag) the per-IC bus/power synthesis omits. Mutates the spec file in place;
+ *  idempotent (a re-run on an already-wired spec adds 0). Returns the number of
+ *  connections/parts added, or null when the pass did NOT run (see CONTRACT). */
+export async function runFunctionalWire(specPath: string, prompt: string, opts?: GateRunOptions): Promise<number | null> {
+  const r = await runPlannerScript('functional_wire.py', [specPath, path.join(plannerDir(), 'design_rules.json'), prompt], TIMEOUT_MS)
+  if ('error' in r) return notRun('functional_wire', r.error, opts)
+  const err = r.out.match(/^FUNCWIRE ERROR (.*)$/m)
+  if (err) return notRun('functional_wire', err[1].trim().slice(0, 200), opts)
+  if (r.code === null) return notRun('functional_wire', `killed (${r.signal ?? 'timeout'} after ${TIMEOUT_MS / 1000}s)`, opts)
+  const m = r.out.match(/^FUNCWIRE (\d+)\s*$/m)
+  if (!m || r.code !== 0) return notRun('functional_wire', `exit ${r.code}, ${m ? 'unexpected exit' : 'no FUNCWIRE line'}`, opts)
+  return Number(m[1])
+}
+
+/** The design-correctness gate (hardware/planner/design_check.py). Returns a
+ *  DesignGateResult, or null when the gate did NOT run — see the CONTRACT at
+ *  the top of this file. Callers block ONLY on `pass === false`. */
 export async function runDesignGate(
   specPath: string,
   prompt: string,
-): Promise<{ pass: boolean; failCount: number; warnCount: number; summary: string } | null> {
-  const dir = plannerDir()
-  return new Promise((resolve) => {
-    let py
-    try {
-      py = spawn(process.env.FL_PYTHON || 'python3',
-        [path.join(dir, 'design_check.py'), specPath, path.join(dir, 'design_rules.json'), prompt],
-        { timeout: 25_000 })
-    } catch { resolve(null); return }
-    let out = ''
-    py.stdout.on('data', (d) => (out += d))
-    py.stderr.on('data', (d) => (out += d))
-    py.on('error', () => resolve(null))
-    py.on('close', (code) => {
-      if (code === null) { resolve(null); return }
-      const fails = out.split('\n')
-        .filter((l) => l.includes('FAIL ') && l.includes('✗'))
-        .map((l) => l.replace(/^.*?✗\s*FAIL\s*/, '').trim())
-      const warns = out.split('\n').filter((l) => l.includes('WARN') && l.includes('⚠')).length
-      const fm = out.match(/GATE FAIL (\d+)/)
-      const failCount = fm ? Number(fm[1]) : fails.length
-      resolve({
-        pass: /GATE PASS/.test(out) || (code === 0 && failCount === 0),
-        failCount,
-        warnCount: warns,
-        summary: fails.slice(0, 3).join(' · ').slice(0, 240) || 'see design-check log',
-      })
-    })
-  })
+  opts?: GateRunOptions,
+): Promise<DesignGateResult | null> {
+  const r = await runPlannerScript('design_check.py', [specPath, path.join(plannerDir(), 'design_rules.json'), prompt], TIMEOUT_MS)
+  if ('error' in r) return notRun('design_check', r.error, opts)
+  const { code, signal, out } = r
+  const err = out.match(/^GATE ERROR (.*)$/m)
+  if (err) return notRun('design_check', err[1].trim().slice(0, 200), opts)
+  if (code === null) return notRun('design_check', `killed (${signal ?? 'timeout'} after ${TIMEOUT_MS / 1000}s)`, opts)
+  if (code === 2) return notRun('design_check', `exit 2 without a GATE line: ${out.trim().split('\n').pop()?.slice(0, 160) || 'no output'}`, opts)
+  const lines = out.split('\n')
+  const issues = lines
+    .filter((l) => l.includes('✗') && l.includes('FAIL'))
+    .map((l) => l.replace(/^.*?✗\s*FAIL\s*/, '').trim())
+  const warnCount = lines.filter((l) => l.includes('⚠') && l.includes('WARN')).length
+  const fm = out.match(/^GATE FAIL (\d+)\s*$/m)
+  if (fm) {
+    const failCount = Number(fm[1])
+    return {
+      pass: false,
+      failCount,
+      warnCount,
+      issues,
+      summary: issues.slice(0, 3).join(' · ').slice(0, 240) || `${failCount} finding(s), see design-check log`,
+    }
+  }
+  if (/^GATE PASS\s*$/m.test(out)) {
+    return { pass: true, failCount: 0, warnCount, issues: [], summary: warnCount ? `${warnCount} advisory` : 'no findings' }
+  }
+  return notRun('design_check', `no GATE line (exit ${code}): ${out.trim().split('\n').pop()?.slice(0, 160) || 'no output'}`, opts)
 }

@@ -161,7 +161,7 @@ export function judgeThermal(result: Record<string, any> | null | undefined, env
   // (FEM peak / lumped case temp). detail.junctionTempC already includes rjc, so
   // it is the last resort only and is corrected back to a case value below.
   let peak = num(result.peakC) ?? num(result.value)
-  let rjc = num(result.rjcKperW) ?? num(d.R_jc_KperW) ?? DEFAULT_RJC_KPERW
+  const rjc = num(result.rjcKperW) ?? num(d.R_jc_KperW) ?? DEFAULT_RJC_KPERW
   if (num(result.rjcKperW) == null && num(d.R_jc_KperW) == null) assumptions.push(`junction-to-case ${DEFAULT_RJC_KPERW} K/W assumed (no package data)`)
   let powerW = num(result.powerW) ?? num(d.powerW) ?? null
   if (peak == null && num(d.junctionTempC) != null && powerW != null) peak = num(d.junctionTempC)! - powerW * rjc

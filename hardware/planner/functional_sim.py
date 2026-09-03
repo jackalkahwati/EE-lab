@@ -18,7 +18,20 @@ Usage:
 
 Output (one line per deck):
     SIM <name> PASS|FAIL|SKIP <key metric or reason>
-    FUNCSIM PASS   (exit 0)   |   FUNCSIM FAIL <n>   (exit 1)
+then ONE verdict line last:
+    FUNCSIM PASS             exit 0   >=1 deck ran and none failed
+    FUNCSIM FAIL <n>         exit 1   n decks failed their criterion
+    FUNCSIM SKIP 0           exit 0   nothing could be evaluated (no known ICs /
+                                      no caps / all decks SKIP) — NOT a pass, and
+                                      only PASS/FAIL decks count as "ran"
+    FUNCSIM ERROR <reason>   exit 2   could not run: unreadable/malformed spec
+                                      (missing 'parts', null 'gnd', nameless
+                                      part), bad rules DB, ngspice binary missing
+                                      when there were decks to run, any exception.
+                                      Never a traceback.
+MPN -> rule lookup is rule_match.match_rule (shared with design_check /
+functional_wire), also for DEVICE_DB below — so a REF3025AIDBZR that passes the
+gate is simulated with the REF3025 parameters instead of being silently dropped.
 
 HONEST SCOPE: these are critical-path / capability checks with datasheet-class
 device parameters (stated inline in every generated deck), NOT whole-board
@@ -34,6 +47,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+
+from rule_match import load_rules, match_rule, validate_spec
 
 
 def _resolve_ngspice():
@@ -111,12 +126,13 @@ class Board:
     """Parsed chipscale-spec with union-find net connectivity + pin roles."""
 
     def __init__(self, spec, rules):
+        parts, nets, gnd = validate_spec(spec)   # raises ValueError on a malformed spec
         self.spec = spec
         self.rules = rules
-        self.ics = rules.get("ics", {})
-        self.parts = {p["name"]: p for p in spec.get("parts", [])}
-        self.nets = spec.get("nets", [])
-        self.gnd_pins = set(spec.get("gnd", []))
+        self.ics = rules.get("ics", {}) if isinstance(rules, dict) else {}
+        self.parts = {p["name"]: p for p in parts}
+        self.nets = nets
+        self.gnd_pins = set(gnd)
         # union-find over pins
         self._parent = {}
         for net in self.nets:
@@ -172,12 +188,16 @@ class Board:
             mpn = part.get("mpn")
             if not mpn:
                 continue
-            rule = self.ics.get(mpn)
+            rule = match_rule(mpn, self.ics)
             if not rule:
                 continue
             cls = rule.get("class")
             params = dict(CLASS_FALLBACK.get(cls, {}))
-            params.update(DEVICE_DB.get(mpn, {}))
+            # same family matching for the device-parameter DB (REF3025AIDBZR ->
+            # REF3025), but only when the DB entry's class agrees with the rule
+            dev = match_rule(mpn, DEVICE_DB) or {}
+            if dev.get("class") == cls:
+                params.update(dev)
             out.append((ref, mpn, cls, params))
         return out
 
@@ -192,7 +212,7 @@ class Board:
         part = self.parts.get(ref)
         if not part:
             return []
-        rule = self.ics.get(part.get("mpn"), {})
+        rule = match_rule(part.get("mpn"), self.ics) or {}
         pinmap = rule.get("pins") or {}
         out = []
         for pinnum, role in pinmap.items():
@@ -496,16 +516,31 @@ def gen_pdn(board):
 # ----------------------------------------------------------------------------
 # Orchestrator
 # ----------------------------------------------------------------------------
-def main(argv):
-    if len(argv) < 2:
-        print("usage: functional_sim.py <chipscale-spec.json> [design_rules.json]",
-              file=sys.stderr)
+def _one_line(e):
+    s = "%s: %s" % (type(e).__name__, e) if not isinstance(e, ValueError) else str(e)
+    return " ".join(s.split())[:240] or type(e).__name__
+
+
+USAGE = "usage: functional_sim.py <chipscale-spec.json> [design_rules.json]"
+
+
+def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if not argv or argv[0] in ("-h", "--help"):
+        print(USAGE, file=sys.stderr)
         return 2
-    spec_path = argv[1]
-    here = os.path.dirname(os.path.abspath(__file__))
-    rules_path = argv[2] if len(argv) > 2 else os.path.join(here, "design_rules.json")
-    spec = json.load(open(spec_path))
-    rules = json.load(open(rules_path))
+    try:
+        return _run(argv)
+    except Exception as e:  # anything that stops the stage RUNNING is ERROR, not a verdict
+        print("FUNCSIM ERROR {}".format(_one_line(e)))
+        return 2
+
+
+def _run(argv):
+    spec_path = argv[0]
+    with open(spec_path) as f:
+        spec = json.load(f)
+    rules = load_rules(argv[1] if len(argv) > 1 else None)
     board = Board(spec, rules)
 
     ref_ic = board.first_of_class("reference")
@@ -534,7 +569,8 @@ def main(argv):
     decks.append(("pdn-rail-impedance", d, ev))
 
     fails = 0
-    ran_any = False
+    ran_any = False          # only a deck that produced a PASS or FAIL counts
+    tool_missing = None
     workdir = tempfile.mkdtemp(prefix="funcsim_")
     for name, deck, ev_or_reason in decks:
         if deck is None:
@@ -542,23 +578,31 @@ def main(argv):
             continue
         vals, raw = run_deck(deck, name, workdir)
         if vals is None:
+            if "not found" in str(raw):
+                tool_missing = str(raw)
             print("SIM {} SKIP ngspice error: {}".format(name, raw))
             continue
-        ran_any = True
         status, metric = ev_or_reason(vals)
         if status == "FAIL":
             fails += 1
+        if status in ("PASS", "FAIL"):
+            ran_any = True
         print("SIM {} {} {}".format(name, status, metric))
 
-    if fails == 0 and ran_any:
+    if fails:
+        print("FUNCSIM FAIL {}".format(fails))
+        return 1
+    if ran_any:
         print("FUNCSIM PASS")
         return 0
-    if not ran_any:
-        print("FUNCSIM FAIL 0 (no functional paths could be simulated)")
-        return 1
-    print("FUNCSIM FAIL {}".format(fails))
-    return 1
+    if tool_missing:
+        # there WERE decks to run and the simulator is absent: the stage did not
+        # run — say so, never report a pass or a skip
+        print("FUNCSIM ERROR {}".format(tool_missing))
+        return 2
+    print("FUNCSIM SKIP 0 (nothing to evaluate: no known ICs / decks all skipped)")
+    return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    sys.exit(main())

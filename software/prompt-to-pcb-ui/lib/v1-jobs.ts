@@ -23,6 +23,7 @@ import { runFullPipeline, type PipeStage, type StageEvent } from '@/lib/run-pipe
 import { trackAndSync } from '@/lib/programs-sync'
 import { writeWorkItems } from '@/lib/work-items'
 import { normalizeIdBrief, type IdBrief } from '@/lib/id-brief'
+import { runDesignGate, runFunctionalWire } from '@/lib/design-gate'
 import type { ProductSpec } from '@/lib/product-spec'
 
 export type V1Job = {
@@ -45,88 +46,47 @@ let queued = 0
 
 const runDir = (runId: string) => path.join(process.cwd(), 'public', 'runs', runId)
 
-/** Functional-wiring synthesis (hardware/planner/functional_wire.py): adds the
- *  APPLICATION signal chains the per-IC bus/power synthesis omits (mux->ADC, MCU
- *  drives mux select, reference->channel, input/host connectors, module flag).
- *  Mutates the spec file in place; conservative (only wires patterns it matches,
- *  a no-op otherwise). Best-effort — a failure leaves the spec untouched. */
-async function runFunctionalWire(specPath: string, prompt: string): Promise<number> {
-  const plannerDir = path.join(process.cwd(), '..', '..', 'hardware', 'planner')
-  return new Promise((resolve) => {
-    let py
-    try {
-      py = spawn(process.env.FL_PYTHON || 'python3', [path.join(plannerDir, 'functional_wire.py'), specPath, path.join(plannerDir, 'design_rules.json'), prompt], { timeout: 25_000 })
-    } catch { resolve(0); return }
-    let out = ''
-    py.stdout.on('data', (d) => (out += d))
-    py.on('error', () => resolve(0))
-    py.on('close', () => {
-      const m = out.match(/FUNCWIRE (\d+)/)
-      resolve(m ? Number(m[1]) : 0)
-    })
-  })
-}
+// runFunctionalWire / runDesignGate live in lib/design-gate.ts (the ONE
+// implementation, shared with app/api/pipeline/run/route.ts) — see its CONTRACT.
 
 /** Run the FUNCTIONAL simulation stage (hardware/planner/functional_sim.py):
  *  auto-generates + runs real ngspice decks for the board's critical paths
  *  (reference stability, mux->ADC settling, RS485 drive, PDN rail impedance),
- *  parameterized from the actual netlist. Returns {pass, failCount, summary} or
- *  null if it couldn't run. This is what makes "goes through simulation" mean
+ *  parameterized from the actual netlist. Returns {status, failCount, summary}
+ *  — status PASS | FAIL | SKIP (nothing evaluable; NOT a pass) — or null when
+ *  it did NOT run (`FUNCSIM ERROR`, timeout, python missing, no verdict line),
+ *  logged loudly. This is what makes "goes through simulation" mean
  *  FUNCTIONAL-circuit, not just thermal — reported, not hard-blocking (it's a
  *  critical-path capability check with datasheet-class assumptions). */
-async function runFunctionalSim(specPath: string): Promise<{ pass: boolean; failCount: number; summary: string } | null> {
+async function runFunctionalSim(specPath: string): Promise<{ status: 'PASS' | 'FAIL' | 'SKIP'; failCount: number; summary: string } | null> {
   const plannerDir = path.join(process.cwd(), '..', '..', 'hardware', 'planner')
+  const notRun = (reason: string): null => { console.error(`[design-gate] not run: functional_sim: ${reason}`); return null }
   return new Promise((resolve) => {
     let py
     try {
       py = spawn(process.env.FL_PYTHON || 'python3', [path.join(plannerDir, 'functional_sim.py'), specPath, path.join(plannerDir, 'design_rules.json')], { timeout: 90_000 })
-    } catch { resolve(null); return }
+    } catch (e) { resolve(notRun(`spawn failed: ${String(e).slice(0, 120)}`)); return }
     let out = ''
+    let settled = false
     py.stdout.on('data', (d) => (out += d))
-    py.on('error', () => resolve(null))
-    py.on('close', (code) => {
-      if (code === null) { resolve(null); return }
-      const sims = out.split('\n').filter((l) => l.startsWith('SIM ')).map((l) => l.replace(/^SIM /, '').trim())
-      const fm = out.match(/FUNCSIM FAIL (\d+)/)
-      resolve({ pass: /FUNCSIM PASS/.test(out), failCount: fm ? Number(fm[1]) : 0, summary: sims.map((s) => s.split(/\s+/).slice(0, 2).join(' ')).join(', ').slice(0, 200) })
+    py.on('error', (e: NodeJS.ErrnoException) => {
+      if (settled) return
+      settled = true
+      resolve(notRun(e.code === 'ENOENT' ? 'python not found' : String(e).slice(0, 120)))
     })
-  })
-}
-
-/** Run the design-correctness gate (hardware/planner/design_check.py) on a
- *  synthesized netlist. Returns {pass, failCount, warnCount, summary}, or null
- *  if the gate itself couldn't run (Python missing / script absent) — the caller
- *  treats null as "don't block", so a broken gate never wedges the pipeline. */
-async function runDesignGate(
-  specPath: string,
-  prompt: string,
-): Promise<{ pass: boolean; failCount: number; warnCount: number; summary: string } | null> {
-  const plannerDir = path.join(process.cwd(), '..', '..', 'hardware', 'planner')
-  const script = path.join(plannerDir, 'design_check.py')
-  const rules = path.join(plannerDir, 'design_rules.json')
-  return new Promise((resolve) => {
-    let py
-    try {
-      py = spawn(process.env.FL_PYTHON || 'python3', [script, specPath, rules, prompt], { timeout: 25_000 })
-    } catch {
-      resolve(null); return
-    }
-    let out = ''
-    py.stdout.on('data', (d) => (out += d))
-    py.stderr.on('data', (d) => (out += d))
-    py.on('error', () => resolve(null))
-    py.on('close', (code) => {
-      if (code === null) { resolve(null); return } // killed / never ran cleanly
-      const fails = out.split('\n').filter((l) => l.includes('FAIL ') && l.includes('✗')).map((l) => l.replace(/^.*?✗\s*FAIL\s*/, '').trim())
-      const warns = out.split('\n').filter((l) => l.includes('WARN') && l.includes('⚠')).length
-      const fm = out.match(/GATE FAIL (\d+)/)
-      const failCount = fm ? Number(fm[1]) : fails.length
-      resolve({
-        pass: /GATE PASS/.test(out) || (code === 0 && failCount === 0),
-        failCount,
-        warnCount: warns,
-        summary: fails.slice(0, 3).join(' · ').slice(0, 240) || 'see design-check log',
-      })
+    py.on('close', (code, signal) => {
+      if (settled) return
+      settled = true
+      const err = out.match(/^FUNCSIM ERROR (.*)$/m)
+      if (err) { resolve(notRun(err[1].trim().slice(0, 200))); return }
+      if (code === null) { resolve(notRun(`killed (${signal ?? 'timeout'})`)); return }
+      const sims = out.split('\n').filter((l) => l.startsWith('SIM ')).map((l) => l.replace(/^SIM /, '').trim())
+      const summary = sims.map((s) => s.split(/\s+/).slice(0, 2).join(' ')).join(', ').slice(0, 200)
+      const fm = out.match(/^FUNCSIM FAIL (\d+)/m)
+      if (fm) { resolve({ status: 'FAIL', failCount: Number(fm[1]), summary }); return }
+      if (/^FUNCSIM PASS/m.test(out)) { resolve({ status: 'PASS', failCount: 0, summary }); return }
+      if (/^FUNCSIM SKIP/m.test(out)) { resolve({ status: 'SKIP', failCount: 0, summary: summary || 'nothing to evaluate' }); return }
+      resolve(notRun(`no FUNCSIM line (exit ${code})`))
     })
   })
 }
@@ -438,25 +398,36 @@ async function runJob(job: V1Job, baseUrl: string) {
         // per-IC bus/power synthesis omits, BEFORE the gate checks and the router
         // builds, so what gets routed is the complete functional board, not a hollow
         // one. (Runs first; the gate then verifies the augmented netlist.)
-        const wired = await runFunctionalWire(specPath, job.prompt)
-        const gate = await runDesignGate(specPath, job.prompt)
-        const wireNote = wired ? ` · functional-wire +${wired}` : ''
+        // Both return null when the tool did NOT run (timeout / python missing /
+        // `ERROR` verdict / no verdict line) — surfaced in the stage detail with the
+        // reason, NEVER treated as a fail or a pass. Only a true GATE FAIL blocks.
+        let wireNotRun = ''
+        let gateNotRun = ''
+        const wired = await runFunctionalWire(specPath, job.prompt, { onNotRun: (r) => { wireNotRun = r } })
+        const gate = await runDesignGate(specPath, job.prompt, { onNotRun: (r) => { gateNotRun = r } })
+        const wireNote = wired === null
+          ? ` · functional-wire not run (${wireNotRun.slice(0, 120)})`
+          : wired ? ` · functional-wire +${wired}` : ''
         if (gate && !gate.pass) {
           job.stages['design plan' as PipeStage] = {
             status: 'failed',
             detail: `design-correctness gate FAILED (${gate.failCount} issue${gate.failCount === 1 ? '' : 's'})${wireNote}: ${gate.summary}`,
           }
         } else {
-          // Gate passed → the design is correct + complete, so a FUNCTIONAL sim is
-          // meaningful: run the netlist-parameterized ngspice decks (reference,
-          // signal chain, driver, PDN) so "goes through simulation" means the real
-          // circuit paths, not just thermal. Reported in the stage detail; the
-          // critical-path checks carry datasheet-class assumptions so this informs
-          // rather than hard-blocks (the connectivity gate is the hard block).
+          // Gate passed (or did not run) → run the FUNCTIONAL sim: the netlist-
+          // parameterized ngspice decks (reference, signal chain, driver, PDN) so
+          // "goes through simulation" means the real circuit paths, not just
+          // thermal. Reported in the stage detail; the critical-path checks carry
+          // datasheet-class assumptions so this informs rather than hard-blocks
+          // (the connectivity gate is the hard block).
           const fsim = await runFunctionalSim(specPath)
           const cur = job.stages['design plan' as PipeStage] as { status: string; detail: string }
-          const pass = gate ? ` · design gate PASS${gate.warnCount ? ` (${gate.warnCount} advisory)` : ''}` : ''
-          const fnote = fsim ? ` · funcsim ${fsim.pass ? 'PASS' : `FAIL(${fsim.failCount})`}` : ''
+          const pass = gate
+            ? ` · design gate PASS${gate.warnCount ? ` (${gate.warnCount} advisory)` : ''}`
+            : ` · [design-gate] not run: ${gateNotRun.slice(0, 160)}`
+          const fnote = fsim
+            ? ` · funcsim ${fsim.status === 'FAIL' ? `FAIL(${fsim.failCount})` : fsim.status}`
+            : ' · funcsim not run'
           job.stages['design plan' as PipeStage] = { status: cur.status as any, detail: `${cur.detail}${wireNote}${pass}${fnote}` }
         }
       }

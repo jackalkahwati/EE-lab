@@ -21,29 +21,52 @@ if done.
 | `recovery.py` | 9 | Capability-aware Design Recovery Loop: unsupported → supported alternative preserving intent, honest preserved/lost report, approval flag |
 | `intent.py` | 1 | Design Intent Model (intent vs implementation) + deterministic parser |
 | `planner.py` | 8, 9, 20, 22 | Orchestrator + honest report + the end-to-end demo |
+| `synth.py` | 10, 11 | Board synthesis from a UCS design: places footprints, wires buses/power, adds passives, emits a KiCad board; `--netlist` exports the run_board `{parts, nets, gnd}` chipscale-spec the pipeline gates on |
+| `design_check.py` | 19 | Design-correctness GATE on a chipscale-spec: per-IC pin-role rules + cross-IC signal chain + connector-required. `GATE PASS`/`FAIL n`/`ERROR why` (exit 0/1/2) |
+| `functional_wire.py` | 11, 19 | Synthesizes the application signal chains bus synthesis omits (mux->ADC, MCU->mux select, reference->channel, connectors); idempotent, `FUNCWIRE n` / `FUNCWIRE ERROR` |
+| `functional_sim.py` | 19 | Functional ngspice stage: generates reference/mux-ADC/RS-485/PDN decks from the netlist, `FUNCSIM PASS`/`FAIL n`/`SKIP 0`/`ERROR why` |
+| `rule_match.py` | 19 | The ONE MPN->design-rule lookup (exact > family prefix > truncated > token) + `load_rules` (curated + auto merge) + `validate_spec` shape check, shared by the three tools above |
+| `gen_design_rules.py` | 19 | Auto-grows `design_rules_auto.json` from `library/*.json` (pin-role map + class requirements) so gate coverage tracks the part library |
+| `auto_partition.py` | 14, 19.x | Splits a too-dense chipscale netlist into two routable sub-boards along the analog/digital seam with a synthesized board-to-board connector |
+| `build_kit.py` | 19.x | Builds + routes + DRCs EACH half of an auto_partition (run_board.mjs) and writes the multi-board kit with its interconnect map |
+| `flex_decision.py` | 19.x | Rigid / flex / rigid-flex decision from real drivers (mechanical bend/fold, partition interconnect, dynamic flex), with reasons |
+| `rigid_flex_synth.py` | 19.x | Fuses a 2-board partition into ONE rigid-flex spec: drops the connectors, reconnects bridged nets across a flex section |
+| `fab_processes.py` | 17, 20 | Manufacturing-process catalog (rigid, flex, rigid-flex, …): stackup family, extra fab layers, DRC deltas, who offers it, rough cost |
 
 ## Phase coverage (honest)
 
+(This table was written when only the decision spine existed; the sections
+below record each later phase as it landed. Current state:)
+
 **Built + tested:** 1 (intent), 2 (UCS + validation), 3 (ingestion: KiCad/spec/
-block/pin-table; datasheet+distributor honestly stubbed), 5 (symbol/footprint
-resolve + pin/pad validation), 7 (interface inference), 8 (resolver), 9 (recovery
-loop), 17 (provenance/confidence), 20 (honest reporting), 21 (seeds), 22 (demo:
-live-ingests MCP2515, recovers BME688→BME280).
+block/pin-table), 4 (datasheet extraction — `ingest_datasheet.py` /
+`datasheet_ingest_v2.py`, real pdftotext with per-field provenance; not-found
+stays UNKNOWN), 5 (symbol/footprint resolve + pin/pad validation), 7 (interface
+inference), 8 (resolver), 9 (recovery loop — `recovery_loop.py`), **10/11**
+(board synthesis from UCS — `synth.py`, see "Phase 11" below; application
+signal chains via `functional_wire.py`), **12** (constraint manager —
+`constraints.py`; FL-1 compute/RF boards), **13** (routing capability classes —
+fine-pitch escape, benchmarks, signoff), **14** (layout intelligence —
+instrument adapter layer, `auto_partition.py`), 15 (FL-1 instrument core;
+firmware is generated + `cargo build`-gated in the compose pipeline), 16
+(calibration / traceability / closed-loop redesign), 17 (provenance +
+first-article manufacturing readiness), **18** (architecture search +
+trade-space explorer — `arch_search.py`), **19** (design review engine —
+`design_check.py` gate + `functional_sim.py` + multi-board/rigid-flex
+co-design), 20 (production line + honest reporting), 21 (general PCBA engine +
+seeds), 22 (physical build + fleet learning loop), 23.x and milestones M1–M6
+(chip-down synthesis, bare-MCU productization, multi-rail) — each documented in
+its own section below with its regression count.
 
-**Partial:** 6 (application circuit — support-circuit is captured per-spec, not a
-full inference engine), 15 (firmware — driver/test hints captured per-spec, not
-yet generated+compiled), 16 (FL-1 Validation Package — the generator exists in
-the compose pipeline; wiring the UCS design through it needs Phase 11).
+**Partial / honest limits:** 6 (application circuit — per-IC patterns in
+`functional_wire.py` cover measurement / LED / connector chains, not a general
+inference engine), 15 (firmware beyond the generated control loop is not
+synthesized), 16 (FL-1 Validation Package wiring is per-board, see Phase 14–16
+sections). Distributor/live-sourcing ingestion remains an honest stub.
 
-**Deferred (NOT faked) — the next increments:**
-- **4** datasheet PDF AI extraction — honest stub; needs a real extraction +
-  validation pipeline before it can be trusted.
-- **10/11** planner board synthesis from UCS specs (place footprints, wire
-  arbitrary pins/buses, add passives) — the big bridge from decision to board.
-  Today the decision layer produces a validated buildable design; turning an
-  arbitrary UCS set into a routed board is the next focused effort.
-- **12** constraint manager, **13** routing capability classes, **14** layout
-  intelligence, **18** review UI, **19** design review engine.
+**Not built (NOT faked):** a review UI inside this planner (the review surface
+is the Compose web app — `software/prompt-to-pcb-ui`); the physical
+first-article loop (M3) is executed by hand and recorded, not automated.
 
 ## Run the demo
 

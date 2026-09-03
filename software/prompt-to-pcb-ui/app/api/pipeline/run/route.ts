@@ -781,10 +781,17 @@ export async function GET(req: Request) {
           // spec. Fail-SAFE: if the gate itself can't run, don't block.
           const csSpecPath = path.join(pubData, 'chipscale-spec.json')
           if (fs.existsSync(csSpecPath)) {
-            const wired = await runFunctionalWire(csSpecPath, prompt)
-            if (wired > 0)
+            // Both helpers return null when the tool did NOT run (timeout, python
+            // missing, `ERROR` verdict, no verdict line). That is surfaced here with
+            // the reason and never blocks — only a true GATE FAIL (pass:false) does.
+            let wireNotRun = ''
+            let gateNotRun = ''
+            const wired = await runFunctionalWire(csSpecPath, prompt, { onNotRun: (r) => { wireNotRun = r } })
+            if (wired === null)
+              log('design', `functional wiring not run: ${wireNotRun.slice(0, 160)} — continuing with the spec as synthesized`, 'warn')
+            else if (wired > 0)
               log('design', `functional wiring: added ${wired} application signal-chain connection(s) the bus synthesis omitted`, 'ok')
-            const gate = await runDesignGate(csSpecPath, prompt)
+            const gate = await runDesignGate(csSpecPath, prompt, { onNotRun: (r) => { gateNotRun = r } })
             if (gate && !gate.pass) {
               log('design', `GATE design-correctness: FAIL — ${gate.failCount} issue(s): ${gate.summary}`, 'err')
               log('design', 'This design is not yet wired to work. Compose reliably builds measurement and sensor boards (an MCU with I2C / analog front ends) today; a design outside that supported envelope is blocked here rather than shipped hollow.', 'warn')
@@ -796,6 +803,10 @@ export async function GET(req: Request) {
             }
             if (gate)
               log('design', `GATE design-correctness: PASS${gate.warnCount ? ` (${gate.warnCount} advisory)` : ''}`, 'ok')
+            else
+              log('design', `GATE design-correctness: [design-gate] not run: ${gateNotRun.slice(0, 160)} — not blocking (the gate produced no verdict, so this design is UNCHECKED, not passed)`, 'warn')
+          } else {
+            log('design', 'GATE design-correctness: design gate skipped: spec export failed (no data/chipscale-spec.json) — the netlist was NOT checked for functional completeness', 'warn')
           }
 
           // ---- EARLY CHIP-SCALE BUILD (plan mode) ---------------------------
