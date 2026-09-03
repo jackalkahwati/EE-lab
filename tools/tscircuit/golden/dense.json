@@ -1,0 +1,332 @@
+{
+ "parts": [
+  {
+   "name": "U1",
+   "kind": "chip",
+   "footprint": "qfn48",
+   "mpn": "RP2040"
+  },
+  {
+   "name": "C2",
+   "kind": "capacitor",
+   "footprint": "0402"
+  },
+  {
+   "name": "C3",
+   "kind": "capacitor",
+   "footprint": "0402"
+  },
+  {
+   "name": "R10",
+   "kind": "resistor",
+   "footprint": "0402"
+  },
+  {
+   "name": "R11",
+   "kind": "resistor",
+   "footprint": "0402"
+  },
+  {
+   "name": "U2",
+   "kind": "chip",
+   "footprint": "qfn6",
+   "mpn": "AP2112K-3.3"
+  },
+  {
+   "name": "C9",
+   "kind": "capacitor",
+   "footprint": "0402"
+  },
+  {
+   "name": "C10",
+   "kind": "capacitor",
+   "footprint": "0402"
+  },
+  {
+   "name": "R59",
+   "kind": "resistor",
+   "footprint": "0402"
+  },
+  {
+   "name": "U3",
+   "kind": "chip",
+   "footprint": "0402",
+   "mpn": "MX126-5.0-02P"
+  },
+  {
+   "name": "U4",
+   "kind": "chip",
+   "footprint": "qfn8",
+   "mpn": "MAX3485"
+  },
+  {
+   "name": "C15",
+   "kind": "capacitor",
+   "footprint": "0402"
+  },
+  {
+   "name": "U5",
+   "kind": "chip",
+   "footprint": "qfn16",
+   "mpn": "ADS1115IDGS"
+  },
+  {
+   "name": "C18",
+   "kind": "capacitor",
+   "footprint": "0402"
+  },
+  {
+   "name": "U6",
+   "kind": "chip",
+   "footprint": "qfn6",
+   "mpn": "REF3025"
+  },
+  {
+   "name": "C21",
+   "kind": "capacitor",
+   "footprint": "0402"
+  },
+  {
+   "name": "U7",
+   "kind": "chip",
+   "footprint": "qfn24",
+   "mpn": "CD74HC4067"
+  },
+  {
+   "name": "C24",
+   "kind": "capacitor",
+   "footprint": "0402"
+  },
+  {
+   "name": "U8",
+   "kind": "chip",
+   "footprint": "qfn16",
+   "mpn": "W25Q32JVSSIQ",
+   "lcsc": "C179173"
+  },
+  {
+   "name": "C27",
+   "kind": "capacitor",
+   "footprint": "0402"
+  },
+  {
+   "name": "R77",
+   "kind": "resistor",
+   "footprint": "0402"
+  },
+  {
+   "name": "R78",
+   "kind": "resistor",
+   "footprint": "0402"
+  },
+  {
+   "name": "R90",
+   "kind": "resistor",
+   "footprint": "0402"
+  },
+  {
+   "name": "R91",
+   "kind": "resistor",
+   "footprint": "0402"
+  },
+  {
+   "name": "R92",
+   "kind": "resistor",
+   "footprint": "0402"
+  }
+ ],
+ "nets": [
+  [
+   "U1.40",
+   "U1.39"
+  ],
+  [
+   "U1.39",
+   "C3.1"
+  ],
+  [
+   "C3.1",
+   "U3.1"
+  ],
+  [
+   "U1.36",
+   "C2.1"
+  ],
+  [
+   "C2.1",
+   "R10.2"
+  ],
+  [
+   "R10.2",
+   "R11.2"
+  ],
+  [
+   "R11.2",
+   "U2.1"
+  ],
+  [
+   "U2.1",
+   "C9.1"
+  ],
+  [
+   "C9.1",
+   "C10.1"
+  ],
+  [
+   "C10.1",
+   "R59.2"
+  ],
+  [
+   "R59.2",
+   "U4.8"
+  ],
+  [
+   "U4.8",
+   "C15.1"
+  ],
+  [
+   "C15.1",
+   "U5.8"
+  ],
+  [
+   "U5.8",
+   "C18.1"
+  ],
+  [
+   "C18.1",
+   "U6.1"
+  ],
+  [
+   "U6.1",
+   "C21.1"
+  ],
+  [
+   "C21.1",
+   "U7.24"
+  ],
+  [
+   "U7.24",
+   "C24.1"
+  ],
+  [
+   "C24.1",
+   "U8.8"
+  ],
+  [
+   "U8.8",
+   "C27.1"
+  ],
+  [
+   "C27.1",
+   "R77.2"
+  ],
+  [
+   "R77.2",
+   "R78.2"
+  ],
+  [
+   "R78.2",
+   "R90.2"
+  ],
+  [
+   "R90.2",
+   "R91.2"
+  ],
+  [
+   "U1.4",
+   "U8.6"
+  ],
+  [
+   "U1.5",
+   "U8.5"
+  ],
+  [
+   "U1.6",
+   "U8.2"
+  ],
+  [
+   "U1.7",
+   "U8.1"
+  ],
+  [
+   "U1.11",
+   "R10.1"
+  ],
+  [
+   "R10.1",
+   "U5.9"
+  ],
+  [
+   "U5.9",
+   "R90.1"
+  ],
+  [
+   "U1.12",
+   "R11.1"
+  ],
+  [
+   "R11.1",
+   "U5.10"
+  ],
+  [
+   "U5.10",
+   "R91.1"
+  ],
+  [
+   "U1.19",
+   "U4.4"
+  ],
+  [
+   "U1.20",
+   "U4.1"
+  ],
+  [
+   "U1.21",
+   "U4.3"
+  ],
+  [
+   "U4.3",
+   "U4.2"
+  ],
+  [
+   "U2.3",
+   "R59.1"
+  ],
+  [
+   "U4.6",
+   "R92.1"
+  ],
+  [
+   "U4.7",
+   "R92.2"
+  ],
+  [
+   "U8.3",
+   "R77.1"
+  ],
+  [
+   "U8.7",
+   "R78.1"
+  ]
+ ],
+ "gnd": [
+  "U1.38",
+  "C2.2",
+  "C3.2",
+  "U2.2",
+  "C9.2",
+  "C10.2",
+  "U3.2",
+  "U4.5",
+  "C15.2",
+  "U5.3",
+  "C18.2",
+  "U6.3",
+  "C21.2",
+  "U7.12",
+  "C24.2",
+  "U8.4",
+  "U8.9",
+  "C27.2"
+ ]
+}

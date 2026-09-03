@@ -1,0 +1,29 @@
+{
+  "_note": "Bars record what the router ACTUALLY does today, not what we want it to do. A regression is MORE errors or LOST convergence. Lowering a bar is a deliberate act: do it in the same commit that improves the router, never to make a red suite go green.",
+  "tiny": {
+    "maxErrors": 1,
+    "maxUnrouted": 0,
+    "mustConverge": false
+  },
+  "baseline": {
+    "maxErrors": 0,
+    "maxUnrouted": 0,
+    "mustConverge": true
+  },
+  "residual": {
+    "_skip": "runner rejects this netlist: footprint header_1x17 on J92 is outside the native qfn4..qfn64 + 0402-passive vocabulary. Kept as the standing regression for footprint coverage \u2014 when headers are supported this fixture should route.",
+    "maxErrors": 0,
+    "maxUnrouted": 0,
+    "mustConverge": true
+  },
+  "short": {
+    "maxErrors": 6,
+    "maxUnrouted": 0,
+    "mustConverge": false
+  },
+  "dense": {
+    "maxErrors": 7,
+    "maxUnrouted": 0,
+    "mustConverge": false
+  }
+}
