@@ -20,6 +20,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { sessionEmail } from '@/lib/auth'
 import { overrideForRequest } from '@/lib/byok'
+import { assertCanSpend } from '@/lib/spend-gate'
 import { callLLMText, type LLMOverride } from '@/lib/llm'
 import { MODEL } from '@/lib/model-tiers'
 import { DEPENDENCY_EDGES, affectedBy, type ProductState } from '@/lib/product-state'
@@ -236,6 +237,11 @@ export async function GET(req: Request) {
     if (!failures.length) {
       scorecard.diagnosis = { state: 'not-needed', reason: 'no failing requirements' }
     } else {
+      // Spend gate: diagnosis is the only LLM call on this route, and it only
+      // runs when there ARE failures — so gate here, not at the top, or a
+      // clean scorecard would 402 for an account at 0 credits.
+      const gate = assertCanSpend(req)
+      if (gate) return gate
       const override = overrideForRequest(req)
       const correctives: Corrective[] = []
       const errors: string[] = []

@@ -11,6 +11,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { runAccess, isValidRunId } from '@/lib/auth'
 import { overrideForRequest } from '@/lib/byok'
+import { assertCanSpend } from '@/lib/spend-gate'
 import { classifyEdit } from '@/lib/edit-intent'
 import { forkRun } from '@/lib/run-fork'
 import { recordRun } from '@/lib/auth'
@@ -47,6 +48,13 @@ export async function POST(req: Request) {
     let spec: any
     try { spec = JSON.parse(await fs.readFile(specPath, 'utf8')) }
     catch { return Response.json({ error: 'run has no product spec (targeted edits need a built product)' }, { status: 400 }) }
+
+    // Spend gate before the classifier — the dryRun path calls it too, so an
+    // account at 0 credits must not be able to spend by asking for an estimate.
+    {
+      const gate = assertCanSpend(req)
+      if (gate) return gate
+    }
 
     const intent = await classifyEdit(
       message,
