@@ -12,3 +12,6 @@ tools/tscircuit/[0-9]*/
 # Stray Onshape exports dropped at the repo root (real CAD lives under cad/ and hardware/).
 # Root-only: does not affect .step files tracked in subdirectories.
 /*.step
+
+# golden suite scratch renders
+tools/tscircuit/golden/.out-*
