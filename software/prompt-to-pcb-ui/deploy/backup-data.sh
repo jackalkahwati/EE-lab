@@ -16,6 +16,14 @@
 #   FL_APP_DIR        App root. Default: the repo this script lives in.
 #   FL_BACKUP_DIR     Where snapshots go. Default: ~/firstlight-backups
 #   FL_BACKUP_KEEP    How many snapshots to retain. Default: 14
+#   FL_BACKUP_S3_SOURCES  What the S3 mirror covers. Default: "data public/runs"
+#                     (i.e. everything), independent of FL_BACKUP_SOURCES.
+#   FL_BACKUP_S3      Optional S3 destination, e.g. s3://bucket/firstlight.
+#                     Syncs the LIVE sources straight to <dest>/current/, so it
+#                     needs NO local disk — this is how the multi-GB run store
+#                     gets off the machine when the boot volume is nearly full.
+#                     Point-in-time history comes from S3 bucket VERSIONING
+#                     (enable it), not from copying the data again each run.
 #   FL_BACKUP_REMOTE  Optional off-machine target for rsync, e.g.
 #                       user@host:/path/firstlight-backups
 #                       /Volumes/OtherDrive/firstlight-backups
@@ -34,6 +42,7 @@ APP_DIR="${FL_APP_DIR:-$(cd "$SCRIPT_DIR/.." >/dev/null 2>&1 && pwd)}"
 BACKUP_DIR="${FL_BACKUP_DIR:-$HOME/firstlight-backups}"
 KEEP="${FL_BACKUP_KEEP:-14}"
 REMOTE="${FL_BACKUP_REMOTE:-}"
+S3_DEST="${FL_BACKUP_S3:-}"
 
 STAMP="$(date '+%Y%m%d-%H%M%S')"
 SNAP_DIR="$BACKUP_DIR/$STAMP"
@@ -51,6 +60,11 @@ fi
 # Order matters: the small, irreplaceable store first, so it always lands
 # even if the big run store has to be skipped for space.
 SOURCES=(${FL_BACKUP_SOURCES:-data public/runs})
+# The S3 mirror has its OWN source list. The local snapshot is often narrowed
+# (FL_BACKUP_SOURCES=data) because the boot volume is small, but S3 has no such
+# limit — so the multi-GB run store must not inherit that narrowing, or it would
+# silently never leave the machine.
+S3_SOURCES=(${FL_BACKUP_S3_SOURCES:-data public/runs})
 
 log "FirstLight Compose data backup starting"
 log "App dir:    $APP_DIR"
@@ -122,6 +136,41 @@ fi
 SNAP_SIZE="$(du -sh "$SNAP_DIR" 2>/dev/null | awk '{print $1}')"
 log "snapshot complete: $SNAP_DIR (${SNAP_SIZE:-unknown})"
 
+# --- Optional S3 mirror (live sources; no local disk needed) ------------------
+# Syncs the LIVE directories rather than the local snapshot: the snapshot may
+# legitimately skip a huge source for space (see the guard above), and S3 has no
+# such limit. --delete keeps the mirror faithful; with bucket versioning on, an
+# overwritten or deleted object is retained as a previous version, so history is
+# preserved without re-uploading unchanged files every run.
+S3_OK=0
+if [ -n "$S3_DEST" ]; then
+  if command -v aws >/dev/null 2>&1; then
+    s3_failed=0
+    for rel in "${S3_SOURCES[@]}"; do
+      src="$APP_DIR/$rel"
+      [ -e "$src" ] || continue
+      log "s3 sync $rel -> $S3_DEST/current/$rel ..."
+      if aws s3 sync "$src/" "$S3_DEST/current/$rel/" --delete --only-show-errors; then
+        log "  s3 sync ok: $rel"
+      else
+        warn "  s3 sync FAILED: $rel"
+        s3_failed=1
+      fi
+    done
+    # A stamp file makes "when did this last run?" answerable from S3 alone.
+    if [ "$s3_failed" -eq 0 ]; then
+      printf 'last_backup=%s\nhost=%s\napp_dir=%s\n' "$STAMP" "$(hostname)" "$APP_DIR" \
+        | aws s3 cp - "$S3_DEST/current/BACKUP_STAMP.txt" --only-show-errors 2>/dev/null || true
+      log "s3 mirror complete: $S3_DEST/current (versioned)"
+      S3_OK=1
+    else
+      warn "s3 mirror incomplete — see errors above"
+    fi
+  else
+    warn "aws CLI not found; cannot mirror to $S3_DEST"
+  fi
+fi
+
 # --- Optional off-machine mirror ---------------------------------------------
 if [ -n "$REMOTE" ]; then
   log "mirroring snapshot to remote: $REMOTE"
@@ -135,10 +184,10 @@ if [ -n "$REMOTE" ]; then
   else
     warn "rsync not available; cannot mirror to $REMOTE (local snapshot intact)"
   fi
-else
-  warn "FL_BACKUP_REMOTE is unset — backups live ONLY on this machine ($BACKUP_DIR)."
-  warn "A drive/machine loss loses both the live data AND its backups. Set"
-  warn "FL_BACKUP_REMOTE to an off-drive or remote target for real durability."
+elif [ "$S3_OK" -ne 1 ]; then
+  warn "No off-machine copy: FL_BACKUP_S3 and FL_BACKUP_REMOTE are both unset or"
+  warn "failed, so backups live ONLY on this machine ($BACKUP_DIR). A drive or"
+  warn "machine loss would take the live data AND its backups. Set one of them."
 fi
 
 # --- Prune old snapshots (backup dir only; never touches live data) ----------

@@ -46,11 +46,18 @@
     <!-- Internal disk: off the USB drive the live data sits on. -->
     <key>FL_BACKUP_DIR</key><string>/Users/jackal-kahwati/firstlight-backups</string>
     <key>FL_BACKUP_KEEP</key><string>14</string>
-    <!-- This Mac's internal disk has only a few GB free, so only the 52 MB
-         account/enterprise store is snapshotted locally. Remove this line (or
-         set it to "data public/runs") once FL_BACKUP_REMOTE or a larger
-         FL_BACKUP_DIR exists; the 4.6 GB run store is NOT backed up until then. -->
+    <!-- LOCAL snapshots stay limited to the 52 MB account/enterprise store:
+         this Mac's boot volume has only a few GB free and the run store is
+         4.6 GB. The run store still leaves the machine — FL_BACKUP_S3 below
+         syncs the LIVE sources to S3, which needs no local disk. -->
     <key>FL_BACKUP_SOURCES</key><string>data</string>
+    <!-- Off-machine copy of EVERYTHING (data + public/runs). The bucket is
+         private, encrypted and versioned, so overwritten/deleted objects are
+         retained for 90 days as previous versions. -->
+    <key>FL_BACKUP_S3</key><string>s3://firstlight-backups-120987622881/compose</string>
+    <!-- aws lives in /opt/homebrew/bin, already on PATH above. HOME is needed
+         so the CLI finds ~/.aws/credentials under launchd. -->
+    <key>HOME</key><string>/Users/jackal-kahwati</string>
     <!-- Optional: uncomment and set an off-MACHINE target for real durability.
     <key>FL_BACKUP_REMOTE</key><string>user@host:/path/firstlight-backups</string>
     -->
