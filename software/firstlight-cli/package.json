@@ -8,8 +8,13 @@
     "firstlight-mcp": "./bin/mcp.mjs"
   },
   "engines": { "node": ">=18" },
+  "files": ["bin", "lib", "README.md"],
+  "scripts": {
+    "test": "node --check bin/cli.mjs && node --check bin/mcp.mjs"
+  },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.0"
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^4.0.0"
   },
   "license": "UNLICENSED"
 }

@@ -8,3 +8,7 @@ tools/parts/registry.sqlite-shm
 
 # tscircuit scratch outputs (dsn passes, drc runs)
 tools/tscircuit/[0-9]*/
+
+# Stray Onshape exports dropped at the repo root (real CAD lives under cad/ and hardware/).
+# Root-only: does not affect .step files tracked in subdirectories.
+/*.step

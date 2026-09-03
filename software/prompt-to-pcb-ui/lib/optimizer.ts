@@ -73,10 +73,6 @@ function generate(problem: DesignProblem, cap: number): { candidates: Candidate[
   return { candidates, total }
 }
 
-function directionOf(problem: DesignProblem, name: string): 'min' | 'max' {
-  return problem.objectives.find((o) => o.name === name)?.direction ?? 'min'
-}
-
 /** a dominates b iff a is no worse on every shared scored axis and better on ≥1. */
 function dominates(a: Evaluated, b: Evaluated, axes: Objective[]): boolean {
   let strictlyBetter = false

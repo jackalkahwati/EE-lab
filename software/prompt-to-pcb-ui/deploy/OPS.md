@@ -60,6 +60,58 @@ Same pattern for `build.firstlight.cloudflared` and `build.firstlight.llmproxy`
 
 ---
 
+## Ship new code
+
+Production serves the checkout on the `T9 Backup` drive, so shipping is:
+sync that checkout to `origin/main`, rebuild, and reload the launchd job.
+`next start` serves the last `pnpm build` output, so a rebuild is mandatory —
+restarting the job without one keeps serving the old bundle.
+
+```bash
+cd "/Volumes/T9 Backup/EE-lab" \
+  && git fetch \
+  && git checkout -f -B main origin/main \
+  && cd software/prompt-to-pcb-ui \
+  && pnpm install --frozen-lockfile \
+  && pnpm build \
+  && launchctl bootout gui/$UID/build.firstlight.compose; \
+launchctl bootstrap gui/$UID ~/Library/LaunchAgents/build.firstlight.compose.plist \
+  && curl -sI localhost:4500 | head -1
+```
+
+Expect `HTTP/1.1 200 OK` (or a 3xx redirect to sign-in) from the final `curl`.
+Then run `./deploy/healthcheck.sh` to confirm the public host is back.
+
+When anything under `tools/` changed (tscircuit routing, KiCad helpers), also
+refresh the tscircuit toolchain the pipeline shells out to:
+
+```bash
+cd ../../tools/tscircuit && npm install
+```
+
+### Environment for the compose launchd job
+
+The plist for `build.firstlight.compose` carries the app's environment
+(`EnvironmentVariables` dict). Two rules:
+
+- **`FL_TERMINAL` must NOT be set** in the compose plist. `FL_TERMINAL=1`
+  enables the in-product Shell tab (`/api/admin/me` → `terminalEnabled`), which
+  gives admins a shell on the production Mac. Leave it unset in production.
+- `deploy/env.example` documents the full variable set. The ones below are not
+  obvious from the code paths but matter operationally:
+
+| Variable | Why it matters |
+|----------|----------------|
+| `FL_PYTHON` | Interpreter for every planner/sim subprocess (`lib/v1-jobs.ts`, `lib/design-gate.ts`, `app/api/*`). Point it at the python that has `jsonschema`, `easyeda2kicad`, and the sim deps; default `python3`. |
+| `FL_ADMIN_EMAILS` | Comma list of admin accounts (`lib/auth.ts`). Gates admin routes; `FL_ADMIN_EMAILS[0]` is also the default `CONTACT_NOTIFY_EMAIL` for `/api/contact`. |
+| `FL_SELF_URL` | Public origin used to build absolute `statusUrl`/`artifactsUrl` in the v1 API (`app/api/v1/boards`, `app/api/runs/targeted`). Behind the Cloudflare tunnel the request origin is `localhost:4500`, so set this to `https://app.firstlight.build`. |
+| `FL_KICAD_CLI` / `FL_KICAD_PYTHON` | Paths to `kicad-cli` and KiCad's bundled python (`lib/toolchain.ts`). Needed for DRC, exports, and 3D renders; the homebrew fallback is a guess. |
+| `OPENROUTER_API_KEY` | Platform-funded model for users with no BYOK key. Without it free/Pro users get a 402 on every run. |
+| `STRIPE_WEBHOOK_SECRET` | Billing webhook returns 503 until set; async payment/cancellation events are dropped without it. |
+| `FL_BACKUP_DIR` / `FL_BACKUP_REMOTE` | Where `deploy/backup-data.sh` writes snapshots and the off-machine mirror target. Set the remote; the default keeps backups on the same drive as the live data. |
+
+---
+
 ## Where data lives (and what is NOT redundant)
 
 All persistent state is on the external USB drive `T9 Backup`:

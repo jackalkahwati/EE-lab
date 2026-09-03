@@ -10,7 +10,6 @@
  * invents geometry — the scaffold is the mm values plotted.
  */
 import { useState, useEffect, useRef } from 'react'
-import { cn } from '@/lib/utils'
 import { Loader2, ImageIcon, Box } from 'lucide-react'
 import type { IdBrief } from '@/lib/id-brief'
 import { IdScaffold, ID_SCAFFOLD_SVG_ID } from '@/components/id-scaffold'

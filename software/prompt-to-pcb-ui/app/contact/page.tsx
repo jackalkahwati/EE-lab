@@ -6,6 +6,7 @@
  * stores the lead, notifies the team, and auto-replies with a booking link.
  */
 import { Suspense, useEffect, useState } from 'react'
+import Link from 'next/link'
 
 function ContactForm() {
   const [plan, setPlan] = useState('')
@@ -65,7 +66,7 @@ function ContactForm() {
           </a>
         )}
         <div className="mt-4">
-          <a href="/" className="text-sm text-primary hover:underline">Back to FirstLight</a>
+          <Link href="/" className="text-sm text-primary hover:underline">Back to FirstLight</Link>
         </div>
       </div>
     )

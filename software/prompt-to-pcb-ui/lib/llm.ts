@@ -261,7 +261,7 @@ const PROVIDERS: Record<string, (s: string, u: string, k?: string, m?: string) =
   'claude-code': claudeCodeCall,
 }
 
-const useClaudeCodeCli = () =>
+const shouldUseClaudeCodeCli = () =>
   process.env.USE_CLAUDE_CODE_CLI === '1' || process.env.USE_CLAUDE_CODE_CLI === 'true'
 
 /** Read a BYOK override out of request headers (x-llm-provider / x-llm-key). */
@@ -302,7 +302,7 @@ export async function callLLMText(
   // lib/plan-llm.ts, and must NOT borrow the subscription. So only fire the CLI
   // when there is NO provider pin and NO user key — i.e. the admin path, which
   // resolves to a model-only override.
-  if (useClaudeCodeCli() && !override?.provider && !override?.apiKey) {
+  if (shouldUseClaudeCodeCli() && !override?.provider && !override?.apiKey) {
     try {
       return { text: await claudeCodeCall(system, user, undefined, override?.model), provider: 'claude-code (subscription)' }
     } catch (e) {

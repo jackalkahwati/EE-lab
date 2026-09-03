@@ -1,3 +1,7 @@
+> **NOT the current deployment.** Production runs on a Mac via launchd; see
+> `software/prompt-to-pcb-ui/deploy/OPS.md`. This document is a design for a
+> future containerized deploy and has not been exercised against production.
+
 # Tier-1 cloud deploy — get Compose off the Mac onto one reliable box
 
 Goal: run the whole backend (Next app + the KiCad/freerouting/flroute/Python

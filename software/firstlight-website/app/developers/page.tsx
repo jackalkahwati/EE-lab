@@ -3,7 +3,7 @@ import Link from "next/link";
 import { CopyForAi } from "./CopyForAi";
 
 const COMPOSE_URL =
-  process.env.NEXT_PUBLIC_COMPOSE_URL ?? "https://compose.firstlight.build";
+  process.env.NEXT_PUBLIC_COMPOSE_URL ?? "https://app.firstlight.build";
 
 export const metadata: Metadata = {
   title: "FirstLight Developers | API, CLI and MCP",
@@ -94,7 +94,7 @@ export default function Developers() {
           </p>
           <CodeBlock title="terminal">{`export FIRSTLIGHT_API_KEY=flk_live_...
 
-curl -X POST https://compose.firstlight.build/api/v1/boards \\
+curl -X POST https://app.firstlight.build/api/v1/boards \\
   -H "Authorization: Bearer $FIRSTLIGHT_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{"prompt": "USB-C powered desk presence puck with a 60GHz radar module and an LED status ring"}'
@@ -148,7 +148,7 @@ curl -X POST https://compose.firstlight.build/api/v1/boards \\
               The enterprise board portfolio visible to this key.
             </Endpoint>
           </div>
-          <CodeBlock title="poll until complete">{`curl -s https://compose.firstlight.build/api/v1/runs/$RUN_ID \\
+          <CodeBlock title="poll until complete">{`curl -s https://app.firstlight.build/api/v1/runs/$RUN_ID \\
   -H "Authorization: Bearer $FIRSTLIGHT_API_KEY"
 
 # { "status": "running",
@@ -240,12 +240,20 @@ curl -X POST https://compose.firstlight.build/api/v1/boards \\
         <div className="container doc">
           <h2>CLI</h2>
           <p>
-            Install once, then it wraps the API for terminals and CI. Set{" "}
-            <code>FIRSTLIGHT_API_KEY</code>; for self-hosted instances also set{" "}
-            <code>FIRSTLIGHT_URL</code>.
+            The CLI ships in the repository under{" "}
+            <code>software/firstlight-cli</code> (it is not yet published to
+            npm). Clone the repo and run it directly with Node 18+, or install
+            it globally from your checkout. Set <code>FIRSTLIGHT_API_KEY</code>;
+            for self-hosted instances also set <code>FIRSTLIGHT_URL</code>{" "}
+            (default <code>https://app.firstlight.build</code>).
           </p>
-          <CodeBlock title="install">{`npm install -g firstlight
-export FIRSTLIGHT_API_KEY=flk_live_...`}</CodeBlock>
+          <CodeBlock title="install">{`export FIRSTLIGHT_API_KEY=flk_live_...
+
+# run straight from a checkout
+node /path/to/EE-lab/software/firstlight-cli/bin/cli.mjs build "..." --wait
+
+# or install the firstlight / firstlight-mcp binaries globally from the checkout
+npm i -g ./software/firstlight-cli`}</CodeBlock>
           <p>
             The <code>firstlight</code> CLI wraps the API for terminals and CI.{" "}
             <code>build --wait</code> exits 0 only when every stage finishes
@@ -280,12 +288,17 @@ firstlight boards`}</CodeBlock>
           </p>
           <CodeBlock title="Claude Code">{`claude mcp add firstlight \\
   -e FIRSTLIGHT_API_KEY=flk_live_... \\
-  -- npx firstlight-mcp`}</CodeBlock>
-          <p>Five tools, mapped one to one onto the API</p>
+  -- node /path/to/EE-lab/software/firstlight-cli/bin/mcp.mjs`}</CodeBlock>
+          <p>Six tools, mapped one to one onto the API</p>
           <ul className="doc-list">
             <li>
               <code>create_board</code> starts a build from a prompt and
               returns the runId
+            </li>
+            <li>
+              <code>import_design</code> seeds a product from an existing{" "}
+              <code>.kicad_pcb</code> and/or <code>.step</code> on disk instead
+              of a prompt
             </li>
             <li>
               <code>board_status</code> reports stage progress and the honest

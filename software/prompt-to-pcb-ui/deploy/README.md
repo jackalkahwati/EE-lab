@@ -1,3 +1,8 @@
+> **NOT the current deployment.** Production runs on a Mac via launchd; see
+> `software/prompt-to-pcb-ui/deploy/OPS.md` (same directory as this file).
+> The Oracle VM path below is the intended migration target, not what serves
+> `app.firstlight.build` today.
+
 # Deploying Compose to the Oracle VM (app.firstlight.build)
 
 Compose is filesystem-backed (accounts, run artifacts, enterprise store), so it

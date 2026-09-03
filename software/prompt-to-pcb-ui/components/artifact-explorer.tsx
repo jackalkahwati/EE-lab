@@ -258,9 +258,6 @@ export function ArtifactExplorer({ runId, compact, onOpen }: {
   if (err) return <div className="p-4 text-xs text-red-400">Could not list files: {err}</div>
   if (!tree) return <div className="p-4 text-xs text-muted-foreground">Loading file tree…</div>
 
-  const e = sel ? ext(sel.name) : ''
-  const url = sel ? `/runs/${runId}/${sel.path}` : ''
-
   return (
     <div className="flex h-full min-h-0 text-sm">
       {/* tree pane */}

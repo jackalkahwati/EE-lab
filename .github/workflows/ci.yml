@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  planner:
+    name: planner (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: hardware/planner/requirements.txt
+      - run: pip install -r hardware/planner/requirements.txt
+      - run: python -m pytest -q hardware/planner
+
+  station:
+    name: station (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: software/station/pyproject.toml
+      - run: pip install -e "software/station[dev]"
+      - run: python -m pytest -q software/station
+
+  compose:
+    name: compose app (typecheck, lint, tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: software/prompt-to-pcb-ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          # package.json has no packageManager field; pnpm-lock.yaml is lockfileVersion 9.
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: software/prompt-to-pcb-ui/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test:unit
+      - run: pnpm test:enterprise
+
+  website:
+    name: website (lint, typecheck)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: software/firstlight-website
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: software/firstlight-website/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck

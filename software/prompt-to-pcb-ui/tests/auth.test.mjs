@@ -91,7 +91,14 @@ test('run access distinguishes owners, other accounts, and shared demos', async 
     'https://compose.test/runs/golden-demo/data/board.json',
     { headers: req.headers },
   ))
-  assert.equal(sharedDemo.headers.get('x-middleware-next'), '1')
+  // Authorized /runs/* requests are rewritten to the dynamic file route (proxy.ts)
+  // so artifacts written after a deploy are served live from disk.
+  const rewrite = sharedDemo.headers.get('x-middleware-rewrite')
+  assert.ok(rewrite, 'expected an x-middleware-rewrite header')
+  assert.ok(
+    new URL(rewrite).pathname.endsWith('/api/run-file/runs/golden-demo/data/board.json'),
+    `unexpected rewrite target: ${rewrite}`,
+  )
 
   fs.mkdirSync(path.join(tmp, 'data', 'enterprise'), { recursive: true })
   fs.writeFileSync(

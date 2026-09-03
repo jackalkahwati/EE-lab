@@ -11,7 +11,7 @@ const DOC_MD = `# FirstLight Compose API — how to use it
 
 FirstLight turns a natural-language product prompt into real, manufacturable hardware: a routed, DRC-gated PCBA (KiCad), a CAD enclosure, simulations, firmware, and manufacturing docs. Everything the Compose app does in the browser is available over a REST API, a CLI, and an MCP server.
 
-Base URL: https://compose.firstlight.build
+Base URL: https://app.firstlight.build
 Auth: every request needs the header  Authorization: Bearer flk_live_...
 Mint a key in Compose -> Integrations. Keys start read-only; creating builds needs the read_write scope. Each run is owned by and private to the key's creator.
 
@@ -48,7 +48,10 @@ spec, board, schematic, layout, pcb, fab-package, bom, step, glb, mechanical, fi
 202 accepted/queued · 400 bad input (prompt length, file types) · 401 missing/invalid/revoked key (create needs read_write) · 402 plan gate (model/credits not allowed; upgrade or BYOK) · 403 run not owned by your key · 404 unknown run · 429 build queue full (5 pending).
 
 ## CLI
-npm install -g firstlight
+The CLI lives in the repo at software/firstlight-cli (not yet published to npm). Run it from a checkout with Node 18+:
+  node /path/to/EE-lab/software/firstlight-cli/bin/cli.mjs <command>
+or install the firstlight / firstlight-mcp binaries globally from the checkout:
+  npm i -g ./software/firstlight-cli
 export FIRSTLIGHT_API_KEY=flk_live_...
 firstlight build "USB-C ambient air quality tile with an SGP40 VOC sensor" --wait   # exits 0 only when every stage passes — gate CI on it
 firstlight status <runId> --watch
@@ -59,9 +62,10 @@ firstlight boards
 # Add --json to any command for machine output. Set FIRSTLIGHT_URL for self-hosted instances.
 
 ## MCP (for AI agents like Claude Code, Cursor)
-claude mcp add firstlight -e FIRSTLIGHT_API_KEY=flk_live_... -- npx firstlight-mcp
-Five tools, mapped one-to-one onto the API:
+claude mcp add firstlight -e FIRSTLIGHT_API_KEY=flk_live_... -- node /path/to/EE-lab/software/firstlight-cli/bin/mcp.mjs
+Six tools, mapped one-to-one onto the API:
 - create_board   start a build from a prompt, returns the runId
+- import_design  seed a product from an existing .kicad_pcb and/or .step on disk instead of a prompt
 - board_status   stage progress + the honest electronics verdict
 - list_artifacts what the run actually produced
 - get_artifact   download a file locally (or return small JSON/SVG inline)
