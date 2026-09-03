@@ -19,6 +19,7 @@ import { MODEL } from '@/lib/model-tiers'
 import type { ProductSpec } from '@/lib/product-spec'
 import { normalizeIdBrief } from '@/lib/id-brief'
 import { registryFootprint, registrySaveFootprint } from '@/lib/parts-registry'
+import { composeSubsystems, splitForGeneration } from '@/lib/subsystem-compose.mjs'
 
 export const dynamic = 'force-dynamic'
 // A realistic multi-sensor chip-scale board (~14 parts) takes ~3.5 min through the
@@ -132,6 +133,166 @@ async function emitPartsNets(userMsg: string, override?: LLMOverride, model: str
     } catch (e) { lastErr = e }
   }
   throw lastErr ?? new Error('parts model failed')
+}
+
+/* ---------------------------------------------------------------------------
+ * Hierarchical design.
+ *
+ * The flat path above asks ONE model call for the whole board — every part and
+ * every connection at once. That is why real complexity tops out around 25
+ * parts: nothing reliably emits 200 parts and 300 correct nets in one shot, and
+ * a missed connection is indistinguishable from a design choice.
+ *
+ * Here the board is planned as subsystems with an explicit interface contract,
+ * each subsystem is designed by its OWN call (in parallel, each only needing to
+ * be right about itself plus its edges), and lib/subsystem-compose.mjs joins
+ * them and PROVES every interface actually landed as a net.
+ *
+ * Deliberately conservative:
+ *  - off unless asked (FL_HIERARCHICAL, or `hierarchical` in the request body),
+ *    because it costs N+1 calls instead of 1 and the flat path is proven;
+ *  - 'auto' only escalates when the plan itself says the board is big enough
+ *    to be worth it;
+ *  - ANY failure — plan, a subsystem, or a composition error — falls back to
+ *    the flat call and says why, rather than failing the board.
+ * ------------------------------------------------------------------------- */
+
+const PLAN_SYSTEM = `detailed thinking off.
+You are a hardware architect. Split the requested product into board SUBSYSTEMS
+and define the signals that cross between them. Do NOT design any circuit here.
+
+Output ONLY one JSON object, no prose, no fences:
+{"subsystems":[
+  {"name":"power","purpose":"USB-C 5V in, 3V3 rail out","provides":["3V3"],"requires":[]},
+  {"name":"mcu","purpose":"RP2040 + decoupling + SWD header","provides":["I2C_SDA","I2C_SCL"],"requires":["3V3"]},
+  {"name":"sensing","purpose":"BME280 environmental sensor","provides":[],"requires":["3V3","I2C_SDA","I2C_SCL"]}],
+ "estimatedParts":34}
+
+RULES
+- 2 to 6 subsystems. Real functional blocks (power, mcu, sensing, connectivity,
+  actuation, hmi, storage), never arbitrary slices.
+- Every signal in a "requires" MUST appear in exactly one other subsystem's
+  "provides". Ground is implicit — never list it.
+- Signal names are SHOUTY_SNAKE and shared verbatim across subsystems.
+- estimatedParts is your honest total across all subsystems.`
+
+const subSystemPrompt = (brief: { name: string; purpose: string; contract: string }) => `detailed thinking off.
+You are the chip-scale electronics engineer designing ONE SUBSYSTEM of a larger board.
+
+${brief.contract}
+
+Output ONLY one JSON object, no prose, no fences:
+{"parts":[{"name":"U1","footprint":"qfn32","kind":"chip"},{"name":"C1","footprint":"0402","kind":"capacitor"}],
+ "nets":[["U1.1","C1.1"]],
+ "gnd":["U1.16","C1.2"],
+ "provides":[{"signal":"3V3","net":"U1.5"}],
+ "requires":[{"signal":"I2C_SDA","net":"U1.20"}]}
+
+RULES
+- Use LOCAL reference designators starting at U1/C1/R1. They are namespaced on
+  composition, so do NOT try to make them globally unique.
+- "provides"/"requires" map each contract signal to the exact local PIN that
+  carries it. Every signal you were told to expose must appear in "provides",
+  and every signal you were told you may assume must appear in "requires" if
+  this subsystem uses it.
+- Footprints: qfn4..qfn64, 0201..2512 passives, soic/tssop/msop N, sot23/-5/-6,
+  sot223, sod123, tqfp/lqfp N, header_RxC, screwterminal_N.
+- ONE 100nF (0402) per IC power pin, plus bulk where the subsystem needs it.
+- Design only this subsystem. Do not add parts belonging to another one.`
+
+type Brief = { name: string; purpose: string; contract: string }
+
+/** Ask for the subsystem split. Returns null when hierarchy isn't warranted. */
+async function planSubsystems(userMsg: string, opts: LLMOverride, minParts: number):
+  Promise<{ subsystems: any[]; estimatedParts: number } | null> {
+  const { text } = await callLLMText(PLAN_SYSTEM, userMsg, opts)
+  const o = JSON.parse(firstJson(text))
+  const subs = Array.isArray(o?.subsystems) ? o.subsystems : []
+  const estimatedParts = Number(o?.estimatedParts) || 0
+  if (subs.length < 2) return null
+  if (estimatedParts && estimatedParts < minParts) return null
+  return { subsystems: subs, estimatedParts }
+}
+
+/**
+ * Plan -> per-subsystem design -> compose -> verify. Returns null (never
+ * throws) when anything makes hierarchy unsafe, so the caller falls back.
+ */
+async function emitPartsNetsHierarchical(
+  userMsg: string,
+  opts: LLMOverride,
+  minParts: number,
+  log: (m: string) => void,
+): Promise<{ parts: any[]; nets: any[]; gnd: string[]; note?: string } | null> {
+  let plan: { subsystems: any[]; estimatedParts: number } | null = null
+  try {
+    plan = await planSubsystems(userMsg, opts, minParts)
+  } catch (e) {
+    log(`hierarchical: plan call failed (${String(e).slice(0, 120)}) — using the flat path`)
+    return null
+  }
+  if (!plan) {
+    log('hierarchical: plan says this board is small enough for a single pass')
+    return null
+  }
+
+  // The contract each call must satisfy, derived from the plan alone.
+  const briefs: Brief[] = splitForGeneration({
+    subsystems: plan.subsystems.map((s: any) => ({
+      name: s?.name,
+      purpose: s?.purpose,
+      provides: (Array.isArray(s?.provides) ? s.provides : []).map((sig: any) => ({ signal: String(sig), net: '' })),
+      requires: (Array.isArray(s?.requires) ? s.requires : []).map((sig: any) => ({ signal: String(sig), net: '' })),
+    })),
+  }) as Brief[]
+  log(`hierarchical: ${briefs.length} subsystems (${briefs.map((b) => b.name).join(', ')}), ~${plan.estimatedParts} parts`)
+
+  // Each subsystem only has to be right about itself, so these run together.
+  const designed = await Promise.all(briefs.map(async (brief) => {
+    try {
+      const { text } = await callLLMText(subSystemPrompt(brief), userMsg, opts)
+      const o = JSON.parse(firstJson(text))
+      if (!Array.isArray(o?.parts) || !o.parts.length) throw new Error('no parts')
+      return {
+        name: brief.name,
+        purpose: brief.purpose,
+        parts: o.parts,
+        nets: Array.isArray(o.nets) ? o.nets : [],
+        gnd: Array.isArray(o.gnd) ? o.gnd.map(String) : [],
+        provides: Array.isArray(o.provides) ? o.provides : [],
+        requires: Array.isArray(o.requires) ? o.requires : [],
+      }
+    } catch (e) {
+      log(`hierarchical: subsystem "${brief.name}" failed (${String(e).slice(0, 100)})`)
+      return null
+    }
+  }))
+  if (designed.some((d) => d === null)) {
+    log('hierarchical: a subsystem did not come back — using the flat path')
+    return null
+  }
+
+  const composed = composeSubsystems(designed as any[])
+  const errors = composed.problems.filter((p: any) => p.severity === 'error')
+  if (errors.length) {
+    // Honest: a composition error means the interfaces do NOT line up. Shipping
+    // it would be a board with silently missing connections, which is exactly
+    // what the flat path already risks — so fall back rather than paper over it.
+    log(`hierarchical: composition rejected (${errors.slice(0, 3).map((p: any) => p.code + ': ' + p.message).join(' | ')}) — using the flat path`)
+    return null
+  }
+  for (const w of composed.problems.filter((p: any) => p.severity === 'warning').slice(0, 4)) {
+    log(`hierarchical: ${w.code} — ${w.message}`)
+  }
+  log(`hierarchical: composed ${composed.stats.parts} parts, ${composed.stats.nets} nets, ${composed.stats.interfaces} interfaces verified`)
+
+  return {
+    // `subsystem` is composition bookkeeping, not part data the runner wants.
+    parts: composed.parts.map((p: any) => { const rest = { ...p }; delete rest.subsystem; return rest }),
+    nets: composed.nets,
+    gnd: composed.gnd,
+    note: `hierarchical: ${composed.stats.subsystems} subsystems, ${composed.stats.interfaces} interfaces verified`,
+  }
 }
 
 function firstJson(text: string): string {
@@ -345,12 +506,47 @@ type BoardOpts = {
   strictDrc?: boolean
 }
 
+/**
+ * Choose the design path.
+ *
+ * 'off'  (default) — one flat call, the long-proven behaviour.
+ * 'auto' — ask for a subsystem plan first and go hierarchical only if the plan
+ *          itself reports >= 2 subsystems and >= FL_HIERARCHICAL_MIN_PARTS.
+ * 'on'   — always attempt hierarchy (still falls back on any failure).
+ *
+ * Default is off because hierarchy costs N+1 model calls instead of 1, and the
+ * flat path is what every existing board was built with. Flip it per request
+ * with `hierarchical` in the body, or globally with FL_HIERARCHICAL.
+ */
+function hierarchyMode(bodyFlag: unknown): 'off' | 'auto' | 'on' {
+  if (bodyFlag === true) return 'on'
+  if (bodyFlag === false) return 'off'
+  const env = String(process.env.FL_HIERARCHICAL ?? '').toLowerCase()
+  if (env === '1' || env === 'on' || env === 'true') return 'on'
+  if (env === 'auto') return 'auto'
+  return 'off'
+}
+
 /** One full board candidate: part-set engine → real footprints → routed board. */
-async function buildCandidate(userMsg: string, req: Request, dir: string, svgName: string, timeoutMs: number, boardOpts: BoardOpts, model?: string) {
-  const { parts, nets, gnd, note, droppedCapabilities } = await emitPartsNets(userMsg, resolvePlanModel(req).override, model)
+async function buildCandidate(userMsg: string, req: Request, dir: string, svgName: string, timeoutMs: number, boardOpts: BoardOpts, model?: string, hierarchical?: unknown) {
+  const override = resolvePlanModel(req).override
+  const mode = hierarchyMode(hierarchical)
+  const designTrail: string[] = []
+  const log = (m: string) => { designTrail.push(m) }
+
+  let designed: { parts: any[]; nets: any[]; gnd: string[]; note?: string; droppedCapabilities?: string[] } | null = null
+  if (mode !== 'off') {
+    // 'on' still routes through the planner, but with no size floor, so a small
+    // board can be composed deliberately when the caller asks for it.
+    const minParts = mode === 'on' ? 0 : Number(process.env.FL_HIERARCHICAL_MIN_PARTS || 20)
+    designed = await emitPartsNetsHierarchical(userMsg, { ...override, model: model ?? DESIGN_MODEL }, minParts, log)
+  }
+  if (!designed) designed = await emitPartsNets(userMsg, override, model)
+
+  const { parts, nets, gnd, note, droppedCapabilities } = designed
   const realFootprints = await attachRealFootprints(parts)
   const result = await runBoard({ parts, nets, gnd, ...boardOpts }, path.join(dir, svgName), timeoutMs, req.signal ?? undefined)
-  return { parts, nets, gnd, note, droppedCapabilities, realFootprints, result, svgName }
+  return { parts, nets, gnd, note, droppedCapabilities, realFootprints, result, svgName, designTrail }
 }
 
 // ---- in-flight lock ----------------------------------------------------------
@@ -411,7 +607,7 @@ export async function POST(req: Request) {
     }
   }
 
-  const promise = buildChipScale(spec, runId, { keepCapabilities, plannerOnly }, req, routeStart)
+  const promise = buildChipScale(spec, runId, { keepCapabilities, plannerOnly, hierarchical: body?.hierarchical }, req, routeStart)
   const entry: CsInflight = { plannerOnly, promise }
   inflight.set(runId, entry)
   try {
@@ -429,11 +625,11 @@ export async function POST(req: Request) {
 async function buildChipScale(
   spec: ProductSpec,
   runId: string,
-  flags: { keepCapabilities: boolean; plannerOnly: boolean },
+  flags: { keepCapabilities: boolean; plannerOnly: boolean; hierarchical?: unknown },
   req: Request,
   routeStart: number,
 ): Promise<any> {
-  const { keepCapabilities, plannerOnly } = flags
+  const { keepCapabilities, plannerOnly, hierarchical } = flags
   {
     const b = spec.budgets ?? {}
     const elec = spec.disciplines?.electronics
@@ -520,7 +716,9 @@ async function buildChipScale(
         const realFootprints = process.env.FL_CS_REAL_FP === '1' ? await attachRealFootprints(nl.parts) : 0
         plannerHonest = nl.honest ?? null
         const result = await runBoard({ parts: nl.parts, nets: nl.nets, gnd: nl.gnd ?? [], ...boardOpts }, path.join(dir, 'chipscale.svg'), 285_000, req.signal ?? undefined)
-        cand = { parts: nl.parts, nets: nl.nets, gnd: nl.gnd ?? [], note: undefined, droppedCapabilities: undefined, realFootprints, result, svgName: 'chipscale.svg' }
+        // planner-spec path: the netlist came from the planner, not a design
+        // model call, so there is no design trail to report.
+        cand = { parts: nl.parts, nets: nl.nets, gnd: nl.gnd ?? [], note: undefined, droppedCapabilities: undefined, realFootprints, result, svgName: 'chipscale.svg', designTrail: [] }
         boardSource = src
       }
     }
@@ -532,7 +730,10 @@ async function buildChipScale(
       return { ok: false, error: 'planner netlist unavailable — early planner-only build skipped the LLM fallback', boardSource: 'llm' }
     }
     // FIRST PASS (fallback) — LLM part set, routed.
-    if (!cand) cand = await buildCandidate(baseMsg, req, dir, 'chipscale.svg', 285_000, boardOpts)
+    // Only the FIRST design goes hierarchical. The re-plan rungs exist to repair
+    // a specific routing failure quickly, and N+1 calls per rung would blow the
+    // budget for no design benefit — they inherit this board's part set anyway.
+    if (!cand) cand = await buildCandidate(baseMsg, req, dir, 'chipscale.svg', 285_000, boardOpts, undefined, hierarchical)
     let designConvergence: any = null
 
     // PLANNER density relief — GROW, don't cut. A planner netlist is a deliberate,
@@ -830,6 +1031,12 @@ async function buildChipScale(
       drcRepair: result.drcRepair ?? null,
       designConvergence,
       boardSource,
+      // How the netlist was designed: empty on the flat path, otherwise the
+      // subsystem plan, per-subsystem outcomes, and either the verified
+      // interface count or the exact reason composition was rejected and the
+      // flat path used instead. Surfaced so a hierarchical run is auditable
+      // rather than an invisible mode change.
+      designTrail: cand.designTrail ?? [],
       // honest report from the planner spec: parts that could NOT map to a
       // run_board footprint were dropped LOUDLY there, never silently faked.
       plannerHonest,
