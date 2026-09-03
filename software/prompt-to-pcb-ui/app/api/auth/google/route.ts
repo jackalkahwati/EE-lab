@@ -18,9 +18,14 @@ import { authSecret } from '@/lib/auth'
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
-  // Self-redirects use APP_URL (canonical https origin), not req.nextUrl —
-  // behind the tunnel req.nextUrl.origin is http://localhost:4500.
-  const origin = process.env.APP_URL || req.nextUrl.origin
+  // Behind the Cloudflare tunnel, req.nextUrl.origin is http://localhost:4500, so
+  // we must use the canonical https APP_URL there. But for DIRECT localhost access
+  // (no tunnel), APP_URL would send the OAuth callback to a different domain than
+  // where the state cookie was set → "session expired". Cloudflare stamps every
+  // tunnelled request with cf-ray; its absence means direct localhost, so keep the
+  // whole flow (redirect_uri + state cookie) on the origin the user is actually on.
+  const viaTunnel = !!req.headers.get('cf-ray')
+  const origin = viaTunnel ? (process.env.APP_URL || req.nextUrl.origin) : req.nextUrl.origin
   try {
     authSecret()
   } catch {
@@ -48,7 +53,9 @@ export async function GET(req: NextRequest) {
   const safeNext =
     nextParam.startsWith('/') && !nextParam.startsWith('//') ? nextParam : '/'
   const res = NextResponse.redirect(auth)
-  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : ''
+  // Secure only when the flow is actually on https — a Secure cookie is silently
+  // dropped over http://localhost, which would break the state round-trip there.
+  const secure = origin.startsWith('https://') ? '; Secure' : ''
   res.headers.append(
     'Set-Cookie',
     `fl_oauth_state=${state}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600${secure}`,

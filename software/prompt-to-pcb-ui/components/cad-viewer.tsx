@@ -8,13 +8,17 @@
  * tolerance gate stays the STEP + the honest fitCheck, not this view.
  */
 import { useEffect, useRef, useState } from 'react'
-import { Loader2, Plus, Minus, Maximize } from 'lucide-react'
+import { Loader2, Plus, Minus, Maximize, Scissors } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 export function CadViewer({ url }: { url: string }) {
   const mountRef = useRef<HTMLDivElement>(null)
   const [phase, setPhase] = useState<'loading' | 'ready' | 'error'>('loading')
   const [err, setErr] = useState('')
-  const apiRef = useRef<{ zoom: (f: number) => void; fit: () => void } | null>(null)
+  const apiRef = useRef<{ zoom: (f: number) => void; fit: () => void; setClip: (on: boolean, t: number, axis: number) => void } | null>(null)
+  const [clipOn, setClipOn] = useState(false)
+  const [clipT, setClipT] = useState(0.5)
+  const [clipAxis, setClipAxis] = useState(0) // 0=X 1=Y 2=Z
 
   useEffect(() => {
     let disposed = false
@@ -46,10 +50,20 @@ export function CadViewer({ url }: { url: string }) {
         // and no per-material normalization handled both (verified in a live
         // harness). One matte grey is deterministic and reads like a product.
         const neutral = new THREE.MeshStandardMaterial({ color: 0x9a9da3, roughness: 0.6, metalness: 0.05 })
+        // Respect CLEAN per-vertex colors when the model carries them (our FL-1
+        // assembly colours the machine steel-blue + the boards PCB-green so they
+        // read); fall back to one matte grey for Onshape-appearance models whose
+        // per-part colours arrive as blown-out whites.
+        const clipMaterials: any[] = []
         part.traverse((o: any) => {
           if (o.isMesh) {
             o.castShadow = true; o.receiveShadow = true
-            o.material = neutral
+            const hasVColor = !!o.geometry?.attributes?.color
+            o.material = hasVColor
+              ? new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.05 })
+              : neutral
+            o.material.clippingShadows = true
+            clipMaterials.push(o.material)
           }
         })
         scene.add(part)
@@ -61,6 +75,7 @@ export function CadViewer({ url }: { url: string }) {
 
         const camera = new THREE.PerspectiveCamera(40, mount.clientWidth / Math.max(1, mount.clientHeight), span / 100, span * 40)
         renderer = new THREE.WebGLRenderer({ antialias: true })
+        renderer.localClippingEnabled = true // cross-section support
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
         renderer.setSize(mount.clientWidth, mount.clientHeight)
         renderer.shadowMap.enabled = true
@@ -126,7 +141,17 @@ export function CadViewer({ url }: { url: string }) {
             camera.position.set(center.x + fit * 0.5, center.y + fit * 0.55, center.z + fit * 0.75)
             camera.lookAt(center); controls.update()
           },
+          // cross-section: slide a clip plane along an axis to cut into the model
+          setClip: (on: boolean, t: number, axis: number) => {
+            const n = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)][axis]
+            const lo = [box.min.x, box.min.y, box.min.z][axis]
+            const hi = [box.max.x, box.max.y, box.max.z][axis]
+            const cut = lo + (hi - lo) * t
+            clipPlane.set(n, -cut) // keep the half where axis >= cut
+            for (const m of clipMaterials) { m.clippingPlanes = on ? [clipPlane] : []; m.side = on ? THREE.DoubleSide : THREE.FrontSide; m.needsUpdate = true }
+          },
         }
+        const clipPlane = new THREE.Plane(new THREE.Vector3(1, 0, 0), -box.min.x)
 
         setPhase('ready')
         const loop = () => { if (disposed) return; controls.update(); renderer.render(scene, camera); raf = requestAnimationFrame(loop) }
@@ -155,6 +180,9 @@ export function CadViewer({ url }: { url: string }) {
     }
   }, [url])
 
+  // apply the cross-section whenever its controls change (and once the view is ready)
+  useEffect(() => { apiRef.current?.setClip(clipOn, clipT, clipAxis) }, [clipOn, clipT, clipAxis, phase])
+
   return (
     <div className="relative h-full w-full">
       <div ref={mountRef} className="h-full w-full" />
@@ -169,7 +197,27 @@ export function CadViewer({ url }: { url: string }) {
             <I className="size-3.5" />
           </button>
         ))}
+        <button type="button" onClick={() => setClipOn((v) => !v)} aria-label="cross-section" title="cross-section"
+          className={cn('rounded-sm border border-border p-1.5 hover:text-foreground',
+            clipOn ? 'bg-primary text-primary-foreground' : 'bg-secondary/80 text-muted-foreground')}>
+          <Scissors className="size-3.5" />
+        </button>
       </div>
+      {clipOn && (
+        <div className="absolute right-2 top-11 flex items-center gap-2 rounded-sm border border-border bg-secondary/90 px-2 py-1.5">
+          <div className="flex gap-0.5">
+            {['X', 'Y', 'Z'].map((ax, i) => (
+              <button key={ax} type="button" onClick={() => setClipAxis(i)}
+                className={cn('rounded-sm px-1.5 py-0.5 font-mono text-[10px]',
+                  clipAxis === i ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}>
+                {ax}
+              </button>
+            ))}
+          </div>
+          <input type="range" min={0} max={1} step={0.01} value={clipT}
+            onChange={(e) => setClipT(Number(e.target.value))} className="w-28 accent-primary" aria-label="section depth" />
+        </div>
+      )}
       <span className="pointer-events-none absolute bottom-1.5 left-2.5 font-mono text-[9px] text-muted-foreground">
         drag to rotate · click, then scroll to zoom
       </span>

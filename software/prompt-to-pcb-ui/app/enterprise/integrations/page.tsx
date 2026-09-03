@@ -214,7 +214,8 @@ export default function IntegrationsPage() {
             {!apiKeys.filter((k) => !k.revoked).length && <p className="px-3 py-2 text-muted-foreground">No active API keys.</p>}
           </div>
           <p className="border-t border-border px-3 py-1.5 font-mono text-[9px] text-muted-foreground">
-            authenticates GET /api/v1/boards (Authorization: Bearer …) · admin-only · audited
+            Authorization: Bearer flk_live_… · read_write to build · audited ·{' '}
+            <a href="/docs/api" className="underline underline-offset-2 hover:text-foreground">API reference →</a>
           </p>
         </div>
 

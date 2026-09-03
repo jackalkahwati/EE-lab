@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server.js'
 import fs from 'node:fs'
 import path from 'node:path'
+import { checkRateLimit, envInt, rateLimitDisabled } from './lib/rate-limit.ts'
 
 /**
  * Account gate: every page and API (and all run artifacts — they're user
@@ -14,6 +15,7 @@ const PUBLIC_PATTERNS = [
   /^\/login$/,
   /^\/pricing$/, // public pricing page — prospects see plans before signing up
   /^\/contact$/, // public "talk to us" form (Studio/Enterprise leads)
+  /^\/docs(\/|$)/, // public developer docs (API reference) — devs evaluate before signing up
   /^\/api\/contact$/, // its handler — unauthenticated lead capture
   /^\/api\/auth\//,
   /^\/api\/v1\//, // programmatic API — authenticated by API key in the route, not the session cookie
@@ -122,6 +124,79 @@ function hasEnterpriseMembership(email: string): boolean {
   }
 }
 
+/** Caller IP for anonymous rate-limit keying: first hop of x-forwarded-for
+ * (the real client when behind nginx/Caddy), then x-real-ip, then a shared
+ * fallback bucket. A spoofed XFF only lets an abuser throttle themselves. */
+function clientIp(req: NextRequest): string {
+  const xff = req.headers.get('x-forwarded-for')
+  if (xff) {
+    const first = xff.split(',')[0]?.trim()
+    if (first) return first
+  }
+  return req.headers.get('x-real-ip')?.trim() || 'unknown'
+}
+
+/** 429 with Retry-After and a small human-readable JSON body (never a stack). */
+function tooManyRequests(retryAfterSec: number): NextResponse {
+  return NextResponse.json(
+    {
+      error: `Rate limit reached. Please wait ${retryAfterSec}s and try again.`,
+      retryAfterSec,
+    },
+    { status: 429, headers: { 'Retry-After': String(retryAfterSec) } },
+  )
+}
+
+/**
+ * Edge rate limiting for the expensive + abuse-prone routes only. Everything
+ * else returns null (no limiting) so normal app traffic and static assets are
+ * untouched.
+ *
+ *  - /api/pipeline/run  the LLM/credit burner (any method — it's a GET
+ *    EventSource today). Keyed by authenticated user when a session exists,
+ *    else by IP. Two tiers: a tight per-minute burst + a looser per-hour cap.
+ *  - /api/auth/{login,signup,google}  stop signup/credential-stuffing farming.
+ *    Keyed by IP (no session yet). Per-minute + per-hour tiers.
+ */
+async function enforceRateLimit(req: NextRequest, pathname: string): Promise<NextResponse | null> {
+  if (rateLimitDisabled()) return null
+
+  const isPipeline = pathname === '/api/pipeline/run'
+  const isAuth = pathname === '/api/auth/login'
+    || pathname === '/api/auth/signup'
+    || pathname === '/api/auth/google'
+  if (!isPipeline && !isAuth) return null
+
+  const ip = clientIp(req)
+
+  if (isPipeline) {
+    // Prefer the authenticated identity so one user can't multiply their quota
+    // by rotating IPs; fall back to IP for the (rare) unauthenticated hit.
+    const email = await validSession(req.cookies.get('fl_session')?.value)
+    const id = email ? `u:${email}` : `ip:${ip}`
+    const tiers: Array<[string, number, number]> = [
+      [`rl:pipe:min:${id}`, envInt('FL_RL_PIPELINE_PER_MIN', 5), 60_000],
+      [`rl:pipe:hr:${id}`, envInt('FL_RL_PIPELINE_PER_HOUR', 60), 60 * 60_000],
+    ]
+    for (const [key, limit, windowMs] of tiers) {
+      const r = checkRateLimit(key, { limit, windowMs })
+      if (!r.ok) return tooManyRequests(r.retryAfterSec)
+    }
+    return null
+  }
+
+  // Auth routes: always keyed by IP (no trusted session before login/signup).
+  const tiers: Array<[string, number, number]> = [
+    [`rl:auth:min:${ip}`, envInt('FL_RL_AUTH_PER_MIN', 10), 60_000],
+    [`rl:auth:hr:${ip}`, envInt('FL_RL_AUTH_PER_HOUR', 60), 60 * 60_000],
+  ]
+  for (const [key, limit, windowMs] of tiers) {
+    const r = checkRateLimit(key, { limit, windowMs })
+    if (!r.ok) return tooManyRequests(r.retryAfterSec)
+  }
+  return null
+}
+
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl
   // /api/run-file is reachable ONLY via the internal /runs/* rewrite below
@@ -130,6 +205,12 @@ export async function proxy(req: NextRequest) {
   if (pathname.startsWith('/api/run-file/') || pathname === '/api/run-file') {
     return NextResponse.json({ error: 'not found' }, { status: 404 })
   }
+
+  // Rate-limit the expensive/abuse-prone routes BEFORE the public-pattern
+  // bypass below (the auth routes are public but must still be throttled).
+  const limited = await enforceRateLimit(req, pathname)
+  if (limited) return limited
+
   if (PUBLIC_PATTERNS.some((p) => p.test(pathname))) return NextResponse.next()
 
   const email = await validSession(req.cookies.get('fl_session')?.value)

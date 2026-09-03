@@ -24,6 +24,7 @@ import type { LLMOverride } from '@/lib/llm'
 import {
   defaultModelForPlan,
   findModel,
+  modelAllowed,
   type CatalogModel,
 } from '@/lib/model-catalog'
 
@@ -76,15 +77,32 @@ export function resolvePlanModel(req: Request, requestedId?: string | null): Res
     return { override: { model: m }, model, creditMult: 0, source: 'subscription' }
   }
 
-  // 3) Non-admin without a key — v3 has no platform-hosted model, so they must
-  // BYOK. The run route already refuses this before the pipeline; this is a
-  // safety net so the resolver never silently produces a keyless override.
+  // 3) Non-admin without a key — the PLATFORM-funded path. When a funded
+  // OpenRouter key is configured, free/Pro/Enterprise all run through it: the
+  // model runs on the platform's key (so a signed-up user can generate WITHOUT
+  // bringing their own key), gated by plan and billed via the model's creditMult
+  // so subscription revenue covers the API cost. A free user who requests a
+  // higher-tier model than their plan allows falls back to the plan default
+  // (defense in depth; the selector already hides locked models).
+  if (process.env.OPENROUTER_API_KEY) {
+    const picked = modelAllowed(plan, model) ? model : defaultModelForPlan(plan)
+    return {
+      override: { provider: 'openrouter', apiKey: process.env.OPENROUTER_API_KEY, model: picked.openrouterModel },
+      model: picked,
+      creditMult: picked.creditMult,
+      source: 'platform',
+    }
+  }
+
+  // 4) No platform key configured AND no BYOK — nothing to run inference on.
+  // The run route surfaces this as a 402 before the pipeline; this is the
+  // resolver's safety net so it never silently produces a keyless override.
   return {
     override: {},
     model,
     creditMult: 1,
     source: 'byok',
-    error: 'Add your own model API key in settings to run — the free tier runs on your key.',
+    error: 'Add your own model API key in settings to run, or subscribe once platform models are enabled.',
     status: 402,
   }
 }

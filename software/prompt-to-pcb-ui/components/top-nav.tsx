@@ -7,17 +7,37 @@
  */
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { ProfileMenu } from '@/components/profile-menu'
 
-const LINKS: { href: string; label: string; hint: string }[] = [
-  { href: '/', label: 'Programs', hint: 'board-program portfolio' },
+type NavLink = { href: string; label: string; hint: string; enterpriseOnly?: boolean }
+
+const LINKS: NavLink[] = [
+  // Programs is the ENTERPRISE board-program portfolio (the /enterprise console
+  // front door), so it only makes sense for enterprise customers — hidden for
+  // free/pro/studio, who just use Compose. Gated on the real plan from
+  // /api/auth/me, not merely hidden with CSS.
+  { href: '/', label: 'Programs', hint: 'board-program portfolio', enterpriseOnly: true },
   { href: '/compose', label: 'Compose', hint: 'design tool' },
 ]
 
 export function TopNav() {
   const pathname = usePathname()
+  const [isEnterprise, setIsEnterprise] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    fetch('/api/auth/me')
+      .then((r) => r.json())
+      .then((d) => { if (alive) setIsEnterprise(d?.user?.plan === 'enterprise') })
+      .catch(() => { /* signed out / offline — leave Programs hidden */ })
+    return () => { alive = false }
+  }, [])
+
   if (pathname === '/login') return null
+
+  const links = LINKS.filter((l) => !l.enterpriseOnly || isEnterprise)
 
   // Programs also lights up on the enterprise console ('/' redirects there) —
   // both are portfolio surfaces; /programs is the nav's canonical target.
@@ -35,7 +55,7 @@ export function TopNav() {
           <span className="text-[15px] font-semibold tracking-tight">Firstlight</span>
         </a>
         <nav className="flex h-full items-center" aria-label="Primary">
-          {LINKS.map((l) => (
+          {links.map((l) => (
             <Link
               key={l.href}
               href={l.href}

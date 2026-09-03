@@ -268,9 +268,17 @@ const DENSITY_REPLAN = process.env.FL_DENSITY_REPLAN !== '0'
 const REPLAN_MIN_ERRORS = 6
 
 /** A board that ROUTED but is well over the DRC budget — the design is too dense,
- *  not a routing nit. This is the signal to re-open the part set. */
+ *  not a routing nit. This is the signal to grow (planner boards) / re-open the
+ *  part set (LLM boards). Also fires on ANY UNROUTED net: a stranded connection
+ *  is a routing failure that more board area reliably fixes, and it can sit below
+ *  the error-count threshold (measured: a 6-part RS485 adapter shipped with 1
+ *  unconnected net at the tight default size but routed 0-clean one board-size up).
+ *  Without this a nearly-clean board with a single stranded net never grows. */
 function densityFailed(result: any): boolean {
-  return !!result?.boardMm && !result.ok && (result?.drc?.errors ?? 0) >= REPLAN_MIN_ERRORS
+  if (!result?.boardMm || result.ok) return false
+  const errs = result?.drc?.errors ?? 0
+  const unconnected = result?.drc?.errorTypes?.unconnected_items ?? 0
+  return errs >= REPLAN_MIN_ERRORS || unconnected > 0
 }
 
 /** Which board to keep: a clean route always wins; else fewer DRC errors; a tie
@@ -482,6 +490,60 @@ async function buildChipScale(
     // FIRST PASS (fallback) — LLM part set, routed.
     if (!cand) cand = await buildCandidate(baseMsg, req, dir, 'chipscale.svg', 285_000, boardOpts)
     let designConvergence: any = null
+
+    // PLANNER density relief — GROW, don't cut. A planner netlist is a deliberate,
+    // COMPLETE design (real instrumentation parts carrying LCSC ids). The LLM
+    // part-shedding re-plan below is gated OFF for it on purpose: dropping an ADC
+    // or a voltage reference to "fit" would silently break the product. So when a
+    // planner board is too dense to route clean, the honest relief is the one you'd
+    // expect by default — grow the board (wider channels + room for the
+    // mounting-hole keepout) and re-route, ESCALATING the size recursively until it
+    // converges or a sane ceiling says the density is a real design wall (→ the
+    // board should be split). Every part is kept. Bounded by the route wall so it
+    // can't run away. This is automatic: overcrowding → grow → retry, no human ask.
+    if (DENSITY_REPLAN && !keepCapabilities && boardSource !== 'llm' && densityFailed(cand.result)) {
+      const first = cand.result
+      const payload = { parts: cand.parts, nets: cand.nets, gnd: cand.gnd ?? [] }
+      // grow ladder: each rung is a wider board + roomier channels than the last.
+      // Stop at the FIRST clean route; otherwise keep the best board across rungs.
+      const GROW_RUNGS = [
+        { maxW: 24, gapLadder: [3.2, 4.6, 6.0] },
+        { maxW: 34, gapLadder: [4.6, 6.0, 7.5] },
+      ]
+      const growTrail: any[] = []
+      let best = cand
+      for (let i = 0; i < GROW_RUNGS.length; i++) {
+        const elapsed = Date.now() - routeStart
+        const budget = Math.min(285_000, 560_000 - elapsed)
+        if (budget < 120_000) { growTrail.push({ rung: i + 1, skipped: 'time budget', elapsedMs: elapsed }); break }
+        const rung = GROW_RUNGS[i]
+        const svgName = `chipscale-grow${i + 1}.svg`
+        let grown: any
+        try {
+          grown = await runBoard({ ...payload, ...boardOpts, maxW: rung.maxW, gapLadder: rung.gapLadder }, path.join(dir, svgName), budget, req.signal ?? undefined)
+        } catch (e) { growTrail.push({ rung: i + 1, error: String(e).slice(0, 160) }); continue }
+        growTrail.push({ rung: i + 1, maxW: rung.maxW, boardMm: grown?.boardMm ?? null, drc: grown?.drc?.errors ?? null, ok: !!grown?.ok })
+        if (betterResult(best.result, grown) === 'b') best = { ...cand, result: grown, svgName }
+        if (grown?.ok) break // clean route on a bigger board — done, all parts kept
+      }
+      if (best !== cand) {
+        // promote the winning (grown) board's SVGs to the canonical names the UI reads
+        for (const [from, to] of [[best.svgName, 'chipscale.svg'], [best.svgName.replace(/\.svg$/, '-schematic.svg'), 'chipscale-schematic.svg']]) {
+          try { await fs.copyFile(path.join(dir, from), path.join(dir, to)) } catch { /* UI falls back to the first-pass svg */ }
+        }
+      }
+      designConvergence = {
+        triggered: true, mode: 'planner-grow',
+        reason: `planner board too dense at ${first.boardMm?.w}×${first.boardMm?.h}mm (${first.drc?.errors} DRC error(s)) — ${best !== cand ? (best.result?.ok ? 'grew until it routed clean' : 'grew to the best routable size') : 'a larger board did not route cleaner'}, all parts kept`,
+        converged: !!best.result?.ok,
+        grownFrom: first.boardMm ?? null, grownTo: best.result?.boardMm ?? null,
+        iterations: growTrail,
+        before: { parts: cand.parts.length, drc: first.drc?.errors ?? null, ok: !!first.ok },
+        after: { parts: best.parts.length, drc: best.result?.drc?.errors ?? null, ok: !!best.result?.ok },
+        kept: best !== cand ? 'grown' : 'original',
+      }
+      cand = best
+    }
 
     // OUTER LOOP (design↔routing): the routing layer already loosens placement to
     // relieve density (run_board's gap ladder). When even that can't route clean

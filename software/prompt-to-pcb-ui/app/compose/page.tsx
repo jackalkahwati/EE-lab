@@ -59,7 +59,7 @@ import type { IdBrief } from '@/lib/id-brief'
 import type { ProductSpec } from '@/lib/product-spec'
 import {
   Activity, BookOpen, Box, ClipboardCheck, Code, Cpu, Eye, Factory, FolderTree, Gauge, History, LayoutDashboard, ListTree, Maximize2,
-  MessagesSquare, Package, Palette, Plus, Receipt, ScrollText, ShieldCheck, Sparkles, Truck, Upload, Wrench, X,
+  MessagesSquare, MoreHorizontal, Package, Palette, Plus, Receipt, ScrollText, ShieldCheck, Sparkles, Truck, Upload, Wrench, X,
 } from 'lucide-react'
 
 type Run = any
@@ -75,20 +75,56 @@ type DocTab = {
   panel?: Tab
 }
 
-// flat view list: one icon → one panel (Board lives in the center hero).
-// Two columns only — icons left, content right, no sub-tabs.
+// PRIMARY inspector destinations: the four surfaces that map to the user's
+// linear job — see it, fix what's flagged, order it, validate it. Each Review /
+// Order / Validate destination MERGES several underlying panels (rendered
+// stacked with section headers in panelBody). Everything else is demoted to
+// ADVANCED_VIEWS, reachable from the "More" affordance at the bottom of the rail
+// and from the center "+" add-panel menu — regrouped, never removed.
 const VIEWS: { tab: Tab; label: string; Icon: any }[] = [
   { tab: 'Overview', label: 'Overview', Icon: LayoutDashboard },
-  { tab: 'Objects', label: 'Objects', Icon: ListTree },
-  { tab: 'Checks', label: 'Checks', Icon: ClipboardCheck },
-  { tab: 'Review', label: 'Review', Icon: Eye },
-  { tab: 'Order', label: 'Quote', Icon: Receipt },
-  { tab: 'BOM', label: 'BOM', Icon: Package },
-  { tab: 'Assembly', label: 'Assembly', Icon: Wrench },
-  { tab: 'FL-1', label: 'FL-1', Icon: Activity },
-  { tab: 'FL-1 Ready', label: 'Ready', Icon: Gauge },
-  { tab: 'Artifacts', label: 'Files', Icon: ScrollText },
+  { tab: 'Review', label: 'Review', Icon: ClipboardCheck },
+  { tab: 'Order', label: 'Order', Icon: Package },
+  { tab: 'Validate', label: 'Validate', Icon: ShieldCheck },
 ]
+
+// Demoted-but-kept destinations. Every one of these is still a valid `tab`
+// value with its own panelBody case; they just live behind the rail's "More"
+// disclosure instead of cluttering the primary rail. The granular Checks / BOM /
+// Assembly / FL-1 / FL-1 Ready / Recovery panels also appear inside their merged
+// primary destination, so nothing is orphaned.
+const ADVANCED_VIEWS: { tab: Tab; label: string; Icon: any }[] = [
+  { tab: 'Objects', label: 'Objects', Icon: ListTree },
+  { tab: 'Artifacts', label: 'Files', Icon: ScrollText },
+  { tab: 'Constraints', label: 'Constraints', Icon: Box },
+  { tab: 'Pinout', label: 'Pinout', Icon: Cpu },
+  { tab: 'Advanced', label: 'Routing', Icon: Activity },
+  { tab: 'Patterns', label: 'Patterns', Icon: BookOpen },
+  { tab: 'Ingest', label: 'Import', Icon: Upload },
+  { tab: 'Code', label: 'Code', Icon: Code },
+  { tab: 'Checks', label: 'Checks', Icon: ClipboardCheck },
+  { tab: 'BOM', label: 'BOM', Icon: Receipt },
+  { tab: 'Assembly', label: 'Assembly', Icon: Wrench },
+  { tab: 'FL-1', label: 'FL-1', Icon: Gauge },
+  { tab: 'FL-1 Ready', label: 'Ready', Icon: Gauge },
+  { tab: 'Recovery', label: 'Recovery', Icon: Eye },
+]
+
+// combined lookup for header labels (primary + advanced)
+const ALL_VIEWS = [...VIEWS, ...ADVANCED_VIEWS]
+
+/** Section header + body for a merged inspector destination (Review / Order /
+ * Validate stack several panels under labelled sub-sections). */
+function PanelSection({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <section className="border-b border-border last:border-b-0">
+      <div className="border-b border-border bg-card/50 px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+        {label}
+      </div>
+      {children}
+    </section>
+  )
+}
 
 // Pipeline stages the middle+right panes follow. Electronics + Industrial Design
 // are live; Mechanical (CAD) and Simulation are declared honestly as not-yet-built.
@@ -345,6 +381,9 @@ export default function Compose2Page() {
   const [docTabs, setDocTabs] = useState<DocTab[]>([])
   const [activeDoc, setActiveDoc] = useState<string | null>(null)
   const [addOpen, setAddOpen] = useState(false)
+  // right-pane rail "More" (Advanced destinations) + center-strip "More" (advisory stages)
+  const [advOpen, setAdvOpen] = useState(false)
+  const [stagesMoreOpen, setStagesMoreOpen] = useState(false)
   // badge-don't-steal-focus: a stage finishing while not visible gets a dot
   const [badged, setBadged] = useState<Record<string, 'passed' | 'failed'>>({})
   const prevPipeRef = useRef<Record<string, string>>({})
@@ -610,6 +649,26 @@ export default function Compose2Page() {
   const real = realBoard && realBoard.base === (selectedRunDir ?? '') ? realBoard : null
   const isReal = selectedRun?.real === true && real !== null
 
+  // Single clear next step for the right-pane header. State-driven and honest:
+  // while a build runs → "Building…" (disabled). With a real board on screen we
+  // only promote "Order" when we have a positive pass signal and NO failed/
+  // blocked gate; otherwise the safe default is "Review & fix". No board → no
+  // action. Pass is derived from the pipeline status the workspace already reads
+  // (never fabricated) — if it's inconclusive we fall through to Review.
+  const boardExists = isReal && !!real
+  const pipeVals = Object.values(pipeStatus) as { status?: string }[]
+  const anyFailedGate = pipeVals.some((v) => v?.status === 'failed' || v?.status === 'blocked')
+  const anyPassedGate = pipeVals.some((v) => v?.status === 'passed')
+  const cleanPass = boardExists && anyPassedGate && !anyFailedGate
+  const primaryAction: { label: string; onClick: () => void; disabled?: boolean } | null =
+    pipeRunning
+      ? { label: 'Building…', onClick: () => {}, disabled: true }
+      : boardExists
+        ? (cleanPass
+            ? { label: 'Order / Get quote', onClick: () => setTab('Order') }
+            : { label: 'Review & fix', onClick: () => setTab('Review') })
+        : null
+
   // RIGHT — the active stage's detailed results. One shared block for BOTH
   // layout branches (blank slate + full workspace): resize handle + icon rail
   // (VIEWS) + detail area. Every panel is behind the newDesign/!selectedRun
@@ -659,7 +718,6 @@ export default function Compose2Page() {
                       {tb === 'FL-1 Ready' && <FL1ReadinessPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
                       {tb === 'Recovery' && <RecoveryPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
                       {tb === 'Assembly' && <AssemblyPanel runId={selectedRun.runDir ? selectedRun.id : null} fabZip={null} />}
-                      {tb === 'Review' && <ReviewPanel runId={selectedRun.runDir ? selectedRun.id : null} />}
                       {tb === 'FL-1' && (
                         <div className="flex h-full flex-col">
                           <FL1ValidationView runId={selectedRun.runDir ? selectedRun.id : null} />
@@ -671,7 +729,45 @@ export default function Compose2Page() {
                           </div>
                         </div>
                       )}
-                      {tb === 'Order' && <ProcurementPanel real={real} runDir={selectedRunDir ?? null} />}
+                      {/* MERGED "what needs my attention": DRC checks + review threads + recovery */}
+                      {tb === 'Review' && (
+                        <>
+                          <PanelSection label="Checks"><BoardChecks real={real} /></PanelSection>
+                          <PanelSection label="Review"><ReviewPanel runId={selectedRun.runDir ? selectedRun.id : null} /></PanelSection>
+                          <PanelSection label="Recovery"><RecoveryPanel runId={selectedRun.runDir ? selectedRun.id : null} /></PanelSection>
+                        </>
+                      )}
+                      {/* MERGED "order it": bill of materials + assembly + procurement / quote */}
+                      {tb === 'Order' && (
+                        <>
+                          <PanelSection label="BOM">
+                            <BomWorkspace
+                              lines={isReal ? real?.bom : null}
+                              runId={selectedRun.runDir ? selectedRun.id : undefined}
+                              onResolve={(prompt) => setRevisePrefill(prompt)}
+                            />
+                          </PanelSection>
+                          <PanelSection label="Assembly"><AssemblyPanel runId={selectedRun.runDir ? selectedRun.id : null} fabZip={null} /></PanelSection>
+                          <PanelSection label="Procurement · Quote"><ProcurementPanel real={real} runDir={selectedRunDir ?? null} /></PanelSection>
+                        </>
+                      )}
+                      {/* MERGED "validate it": FL-1 validation + loop + readiness */}
+                      {tb === 'Validate' && (
+                        <>
+                          <PanelSection label="FL-1 Validation">
+                            <div className="flex flex-col">
+                              <FL1ValidationView runId={selectedRun.runDir ? selectedRun.id : null} />
+                              <div className="border-t border-border">
+                                <FL1Loop
+                                  runId={selectedRun.runDir ? selectedRun.id : null}
+                                  onRevise={(eco) => setRevisePrefill(eco)}
+                                />
+                              </div>
+                            </div>
+                          </PanelSection>
+                          <PanelSection label="FL-1 Readiness"><FL1ReadinessPanel runId={selectedRun.runDir ? selectedRun.id : null} /></PanelSection>
+                        </>
+                      )}
                     </>
                   )}
 
@@ -686,24 +782,60 @@ export default function Compose2Page() {
       <section style={{ width: rightW }} className="flex shrink-0 border-l border-border">
         {stage === 'electronics' ? (
           <>
-            <nav className="flex w-12 shrink-0 flex-col overflow-y-auto border-r border-border bg-card/30 py-1">
-              {VIEWS.map((v) => {
-                const on = tab === v.tab
-                return (
-                  <button key={v.tab} type="button" onClick={() => setTab(v.tab)} title={v.label}
+            <div className="flex w-12 shrink-0 flex-col border-r border-border bg-card/30">
+              <nav className="flex min-h-0 flex-1 flex-col overflow-y-auto py-1">
+                {VIEWS.map((v) => {
+                  const on = tab === v.tab
+                  return (
+                    <button key={v.tab} type="button" onClick={() => setTab(v.tab)} title={v.label}
+                      className={cn('relative flex w-full flex-col items-center gap-0.5 px-0.5 py-2 text-[8px]',
+                        on ? 'text-foreground' : 'text-muted-foreground hover:text-foreground')}>
+                      {/* VS Code-style active indicator: 2px amber left edge, no pill */}
+                      {on && <span aria-hidden className="absolute inset-y-1 left-0 w-0.5 bg-primary" />}
+                      <v.Icon className={cn('size-4', on && 'text-primary')} />
+                      <span className="leading-none">{v.label}</span>
+                    </button>
+                  )
+                })}
+              </nav>
+              {/* Advanced disclosure: the demoted-but-kept destinations, reachable
+                  from a single "More" affordance at the bottom of the rail. */}
+              <div className="relative shrink-0 border-t border-border">
+                {(() => { const advOn = ADVANCED_VIEWS.some((v) => v.tab === tab); return (
+                  <button type="button" onClick={() => setAdvOpen((o) => !o)} title="Advanced panels"
                     className={cn('relative flex w-full flex-col items-center gap-0.5 px-0.5 py-2 text-[8px]',
-                      on ? 'text-foreground' : 'text-muted-foreground hover:text-foreground')}>
-                    {/* VS Code-style active indicator: 2px amber left edge, no pill */}
-                    {on && <span aria-hidden className="absolute inset-y-1 left-0 w-0.5 bg-primary" />}
-                    <v.Icon className={cn('size-4', on && 'text-primary')} />
-                    <span className="leading-none">{v.label}</span>
+                      advOn ? 'text-foreground' : 'text-muted-foreground hover:text-foreground')}>
+                    {advOn && <span aria-hidden className="absolute inset-y-1 left-0 w-0.5 bg-primary" />}
+                    <MoreHorizontal className={cn('size-4', advOn && 'text-primary')} />
+                    <span className="leading-none">More</span>
                   </button>
-                )
-              })}
-            </nav>
+                ) })()}
+                {advOpen && (
+                  <div className="absolute bottom-0 left-full z-30 ml-1 w-44 rounded-md border border-border bg-card py-1 shadow-lg">
+                    {ADVANCED_VIEWS.map((v) => (
+                      <button key={v.tab} type="button"
+                        onClick={() => { setTab(v.tab); setAdvOpen(false) }}
+                        className={cn('flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[11.5px]',
+                          tab === v.tab ? 'bg-accent/50 text-foreground' : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground')}>
+                        <v.Icon className="h-3.5 w-3.5" /> {v.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
             <div className="flex min-w-0 flex-1 flex-col">
-              <div className="flex h-7 shrink-0 items-center border-b border-border bg-card/50 px-2.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                {VIEWS.find((v) => v.tab === tab)?.label ?? tab}
+              <div className="flex h-7 shrink-0 items-center justify-between gap-2 border-b border-border bg-card/50 pl-2.5 pr-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                <span className="truncate">{ALL_VIEWS.find((v) => v.tab === tab)?.label ?? tab}</span>
+                {primaryAction && (
+                  <button type="button" onClick={primaryAction.onClick} disabled={primaryAction.disabled}
+                    className={cn('flex shrink-0 items-center rounded px-2 py-0.5 text-[10px] font-medium normal-case tracking-normal',
+                      primaryAction.disabled
+                        ? 'cursor-default bg-muted text-muted-foreground'
+                        : 'bg-primary text-primary-foreground hover:opacity-90')}>
+                    {primaryAction.label}
+                  </button>
+                )}
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto">
                 <ErrorBoundary>
@@ -876,6 +1008,23 @@ export default function Compose2Page() {
   const chipPcbSvg = selectedRun ? `/runs/${selectedRun.id}/electronics/chipscale.svg` : ''
   const chipSchemSvg = selectedRun ? `/runs/${selectedRun.id}/electronics/chipscale-schematic.svg` : ''
 
+  // Center strip: keep the stages that produce real primary output inline; demote
+  // the advisory-fidelity ones (mechanical CAD + simulation — honestly first-pass,
+  // not fit/tolerance-validated) into a "More" overflow so the default strip is the
+  // linear happy path. Every stage stays fully functional and switchable; the
+  // availability/lock logic is shared so both hosts behave identically.
+  const ADVISORY_STAGES: Stage[] = ['mechanical', 'simulation']
+  const primaryStages = STAGES.filter((s) => !ADVISORY_STAGES.includes(s.key))
+  const moreStages = STAGES.filter((s) => ADVISORY_STAGES.includes(s.key))
+  const stageMeta = (key: Stage) => {
+    const needsSpec = ['explore', 'firmware', 'manufacturing', 'supplyChain', 'validation'].includes(key)
+    const avail = needsSpec ? !!productSpec : key === 'electronics' ? (!!selectedRun || !!productSpec) : key === 'id' ? (!!productSpec || !!idBrief || !!selectedRun) : true
+    const locked = !avail && (needsSpec || key === 'electronics' || key === 'id')
+    return { needsSpec, avail, locked }
+  }
+  const clearBadge = (key: string) => setBadged((b) => { if (!(key in b)) return b; const n = { ...b }; delete n[key]; return n })
+  const moreActive = moreStages.some((s) => s.key === stage) && !activeDoc
+
   return (
     <main className="flex h-[calc(100dvh-2.25rem)] flex-col overflow-hidden bg-background text-foreground">
       <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -927,19 +1076,15 @@ export default function Compose2Page() {
             carries its own bottom border; the ACTIVE tab drops it (bg-background)
             so it reads connected to the content below, with a 1px amber top edge */}
         <div className="flex h-9 shrink-0 items-stretch overflow-x-auto bg-card/40">
-          {STAGES.map((s) => {
-            const needsSpec = ['explore', 'firmware', 'manufacturing', 'supplyChain', 'validation'].includes(s.key)
-            // Design (id) is now one-click like the other disciplines: reachable as
-            // soon as there's a product spec, so its Generate button is accessible.
-            const avail = needsSpec ? !!productSpec : s.key === 'electronics' ? (!!selectedRun || !!productSpec) : s.key === 'id' ? (!!productSpec || !!idBrief || !!selectedRun) : true
-            const locked = !avail && (needsSpec || s.key === 'electronics' || s.key === 'id')
+          {primaryStages.map((s) => {
+            const { locked } = stageMeta(s.key)
             // active ONLY when the stage view is actually showing — with a doc
             // tab focused the stage must read inactive (else the file looks
             // nested under it)
             const on = stage === s.key && !activeDoc
             return (
               <button key={s.key} type="button" disabled={locked}
-                onClick={() => { setStage(s.key); setActiveDoc(null); setBadged((b) => { if (!(s.key in b)) return b; const n = { ...b }; delete n[s.key]; return n }) }}
+                onClick={() => { setStage(s.key); setActiveDoc(null); clearBadge(s.key) }}
                 title={s.key === 'id' && !idBrief && !productSpec ? 'describe a product first' : s.key === 'explore' && !productSpec ? 'describe a product first' : s.label}
                 className={cn('relative flex shrink-0 items-center gap-1.5 border-b border-r border-border px-3 text-[11.5px]',
                   on ? 'border-b-transparent bg-background font-medium text-foreground'
@@ -953,6 +1098,36 @@ export default function Compose2Page() {
               </button>
             )
           })}
+          {/* advisory stages (mechanical + simulation) demoted behind a "More"
+              overflow — kept fully functional, just out of the default happy path */}
+          <div className="relative flex shrink-0 items-stretch border-b border-r border-border bg-card/40">
+            <button type="button" onClick={() => setStagesMoreOpen((o) => !o)} title="More stages (advisory fidelity)"
+              className={cn('relative flex items-center gap-1.5 px-3 text-[11.5px]',
+                moreActive ? 'font-medium text-foreground' : 'text-muted-foreground hover:text-foreground')}>
+              {moreStages.some((s) => badged[s.key]) && <span aria-hidden className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-primary" />}
+              <MoreHorizontal className={cn('size-3.5 shrink-0', moreActive && 'text-primary')} />
+              More
+            </button>
+            {stagesMoreOpen && (
+              <div className="absolute left-0 top-full z-30 mt-1 w-48 rounded-md border border-border bg-card py-1 shadow-lg">
+                {moreStages.map((s) => {
+                  const { locked } = stageMeta(s.key)
+                  const on = stage === s.key && !activeDoc
+                  return (
+                    <button key={s.key} type="button" disabled={locked}
+                      onClick={() => { setStage(s.key); setActiveDoc(null); clearBadge(s.key); setStagesMoreOpen(false) }}
+                      title={s.label}
+                      className={cn('flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[11.5px]',
+                        on ? 'bg-accent/50 text-foreground' : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+                        locked && 'cursor-not-allowed opacity-40')}>
+                      <s.Icon className={cn('h-3.5 w-3.5', on && 'text-primary')} /> {s.label}
+                      <span className="ml-auto bg-muted px-1 text-[8px] uppercase tracking-wide text-muted-foreground">advisory</span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
           {/* filler completes the tab strip's bottom border after the last tab */}
           {docTabs.map((d) => {
             const on = activeDoc === d.id
@@ -976,8 +1151,8 @@ export default function Compose2Page() {
               <Plus className="h-3.5 w-3.5" />
             </button>
             {addOpen && (
-              <div className="absolute left-0 top-full z-30 mt-1 w-40 rounded-md border border-border bg-card py-1 shadow-lg">
-                {VIEWS.map((v) => (
+              <div className="absolute left-0 top-full z-30 mt-1 max-h-80 w-40 overflow-y-auto rounded-md border border-border bg-card py-1 shadow-lg">
+                {ALL_VIEWS.map((v) => (
                   <button key={v.tab} type="button"
                     onClick={() => { openPanelTab(v.tab, v.label); setAddOpen(false) }}
                     className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[11.5px] text-muted-foreground hover:bg-accent/50 hover:text-foreground">

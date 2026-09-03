@@ -399,8 +399,11 @@ export function runAccessByEmail(email: string, runId: string): RunAccess {
   return 'forbidden'
 }
 
-export function sessionCookieHeader(token: string): string {
-  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : ''
+export function sessionCookieHeader(token: string, isSecure = process.env.NODE_ENV === 'production'): string {
+  // isSecure defaults to the prod flag so existing callers are unchanged, but an
+  // auth route serving http://localhost must pass false — a Secure cookie is
+  // silently dropped over http and the session would never stick.
+  const secure = isSecure ? '; Secure' : ''
   return `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_MS / 1000}${secure}`
 }
 

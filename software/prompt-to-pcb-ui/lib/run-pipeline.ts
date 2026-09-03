@@ -338,10 +338,16 @@ async function runPipelineStages(opts: RunOpts, timer: RunTimer): Promise<Pipeli
   // ---- 1. Electronics (chip-scale board) — MUST be first (grounding) ----
   if (applicable('electronics')) {
     set('electronics', 'running')
-    const prev = opts.reuseElectronics !== false ? await existingBoard(opts.runId, opts) : null
+    const prevRaw = opts.reuseElectronics !== false ? await existingBoard(opts.runId, opts) : null
+    // Reuse ONLY a CLEAN persisted board — that one is genuinely done, so the
+    // ~3-min re-route would be pure waste. A DIRTY persisted board must NOT short-
+    // circuit the stage: re-running electronics is exactly what gives the density-
+    // relief GROW (and any router improvement) a chance to fix it. Reusing a dirty
+    // board just re-reports the same failure every time, so a rebuild could never
+    // converge — overcrowding would never trigger the grow. A dirty board therefore
+    // falls through to a real re-route.
+    const prev = prevRaw && electronicsVerdict(prevRaw).clean ? prevRaw : null
     if (prev) {
-      // Reuse skips the ~3-min rebuild, but the verdict still comes from the
-      // persisted board's real DRC state — a dirty board reused is still dirty.
       const v = electronicsVerdict(prev)
       set('electronics', v.clean ? 'passed' : 'failed', `${v.detail} (reused)`)
     } else {
@@ -354,7 +360,28 @@ async function runPipelineStages(opts: RunOpts, timer: RunTimer): Promise<Pipeli
           // and viewable, downstream artifacts ground on it and are labeled with
           // its DRC state; only the green check is withheld.
           const v = electronicsVerdict(d)
-          set('electronics', v.clean ? 'passed' : 'failed', v.detail)
+          // AUTO-PARTITION: a board that grew + escalated layers and STILL can't
+          // route clean is too dense for one board. Compute the split — partition
+          // the netlist along the analog/digital seam, synthesize a board-to-board
+          // connector, and gate-verify each half — and surface it as an artifact +
+          // recommendation. (Building both halves end-to-end as a 2-board kit needs
+          // multi-board run support; this makes the verified split automatic.)
+          if (!v.clean) {
+            let partNote = ''
+            try {
+              const pp = await postJson('/api/partition', { runId: opts.runId }, opts) as { split?: string; flex?: { process?: string; rigidFlex?: { flexConductors?: number } } } | null
+              if (pp?.split) {
+                partNote = ` · auto-partition: split into ${pp.split}`
+                const fx = pp.flex?.process
+                if (fx === 'rigid_flex' || fx === 'flex') {
+                  partNote += ` · recommend RIGID-FLEX (one foldable part, ${pp.flex?.rigidFlex?.flexConductors ?? '?'}-conductor flex ribbon replaces the connectors+cable)`
+                }
+              }
+            } catch { /* partition unavailable — the single-board verdict stands */ }
+            set('electronics', 'failed', `${v.detail}${partNote}`)
+          } else {
+            set('electronics', 'passed', v.detail)
+          }
         } else {
           set('electronics', 'failed', String(d?.error || 'no board produced'))
           return { stages } // no board at all — downstream has nothing to ground on, stop honestly

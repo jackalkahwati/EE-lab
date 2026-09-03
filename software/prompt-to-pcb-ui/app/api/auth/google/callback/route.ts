@@ -8,11 +8,16 @@ import { authSecret, makeSession, sessionCookieHeader, upsertOAuthUser } from '@
 
 export const dynamic = 'force-dynamic'
 
+// Origin the whole OAuth flow must stay on: the canonical https APP_URL for real
+// tunnel traffic (Cloudflare stamps cf-ray), the actual request origin for direct
+// localhost — so the redirect_uri matches and cookies survive the round-trip.
+function flowOrigin(req: NextRequest): string {
+  const viaTunnel = !!req.headers.get('cf-ray')
+  return viaTunnel ? (process.env.APP_URL || req.nextUrl.origin) : req.nextUrl.origin
+}
+
 function fail(req: NextRequest, code: string) {
-  // Redirect off the canonical public origin (APP_URL), not req.nextUrl —
-  // behind the Cloudflare tunnel the request reaches Next as
-  // http://localhost:4500, which would bounce the user to a dead localhost URL.
-  const url = new URL('/login', process.env.APP_URL || req.nextUrl.origin)
+  const url = new URL('/login', flowOrigin(req))
   url.search = `?error=${code}`
   return NextResponse.redirect(url)
 }
@@ -34,7 +39,7 @@ export async function GET(req: NextRequest) {
     return fail(req, 'google-state-mismatch')
   }
 
-  const origin = process.env.APP_URL || req.nextUrl.origin
+  const origin = flowOrigin(req)
   const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -89,7 +94,7 @@ export async function GET(req: NextRequest) {
   url.pathname = qIdx >= 0 ? nextPath.slice(0, qIdx) : nextPath
   url.search = qIdx >= 0 ? nextPath.slice(qIdx) : ''
   const res = NextResponse.redirect(url)
-  res.headers.append('Set-Cookie', sessionCookieHeader(makeSession(rec.email)))
+  res.headers.append('Set-Cookie', sessionCookieHeader(makeSession(rec.email), origin.startsWith('https://')))
   res.headers.append('Set-Cookie', 'fl_oauth_state=; Path=/; HttpOnly; Max-Age=0')
   res.headers.append('Set-Cookie', 'fl_next=; Path=/; HttpOnly; Max-Age=0')
   return res

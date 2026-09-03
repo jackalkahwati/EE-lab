@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  com.firstlight.healthcheck — periodic end-to-end health probe.
+
+  Runs deploy/healthcheck.sh every 5 minutes (and once at load). Checks the
+  external drive, local app (:4500), public endpoint, cloudflared, and the
+  compose launchd job. On failure it POSTs to $FL_ALERT_WEBHOOK if set.
+
+  INSTALL (do NOT run as root; agents are per-GUI-session):
+    cp "/Volumes/T9 Backup/EE-lab/software/prompt-to-pcb-ui/deploy/com.firstlight.healthcheck.plist" \
+       "$HOME/Library/LaunchAgents/com.firstlight.healthcheck.plist"
+    launchctl bootstrap gui/$(id -u) "$HOME/Library/LaunchAgents/com.firstlight.healthcheck.plist"
+
+  To enable alerting, add an FL_ALERT_WEBHOOK entry to EnvironmentVariables
+  below (Slack/Discord/webhook URL), then re-bootstrap.
+
+  VERIFY:  launchctl list | grep com.firstlight.healthcheck
+  LOGS:    /tmp/firstlight-healthcheck.log  /tmp/firstlight-healthcheck.err
+  UNLOAD:  launchctl bootout gui/$(id -u)/com.firstlight.healthcheck
+-->
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.firstlight.healthcheck</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Volumes/T9 Backup/EE-lab/software/prompt-to-pcb-ui/deploy/healthcheck.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Volumes/T9 Backup/EE-lab/software/prompt-to-pcb-ui</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <!-- Optional: uncomment and set to receive failure alerts.
+    <key>FL_ALERT_WEBHOOK</key><string>https://hooks.example.com/your/webhook</string>
+    -->
+  </dict>
+
+  <!-- Every 5 minutes (300 s). Also runs immediately at load. -->
+  <key>StartInterval</key><integer>300</integer>
+  <key>RunAtLoad</key><true/>
+
+  <key>StandardOutPath</key><string>/tmp/firstlight-healthcheck.log</string>
+  <key>StandardErrorPath</key><string>/tmp/firstlight-healthcheck.err</string>
+</dict></plist>

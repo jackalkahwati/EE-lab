@@ -33,6 +33,7 @@ import {
   sessionEmail,
 } from '@/lib/auth'
 import { hasByok } from '@/lib/byok'
+import { runDesignGate, runFunctionalWire } from '@/lib/design-gate'
 import { resolvePlanModel } from '@/lib/plan-llm'
 import { kicadCli, kicadPython } from '@/lib/toolchain'
 
@@ -185,7 +186,29 @@ type PipelineEvent =
     }
   | { type: 'error'; message: string }
 
-const globalState = globalThis as unknown as { __pipelineRunning?: boolean }
+// Per-user run concurrency. The old single global boolean made the app
+// single-tenant (the 2nd concurrent user ANYWHERE got a 409). Instead track
+// running runs per account: different users run concurrently up to a global
+// capacity bound (the single machine's real limit), while one account can't
+// hold more than its per-user slot. Lives on globalThis so it survives HMR.
+const runReg = (globalThis as unknown as { __flRuns?: Map<string, number> })
+runReg.__flRuns ??= new Map<string, number>()
+const RUNS: Map<string, number> = runReg.__flRuns
+const MAX_CONCURRENT_RUNS = Number(process.env.FL_MAX_CONCURRENT_RUNS || 3)
+const MAX_RUNS_PER_USER = Number(process.env.FL_MAX_RUNS_PER_USER || 1)
+function totalRunning(): number {
+  let n = 0
+  for (const c of RUNS.values()) n += c
+  return n
+}
+function acquireRun(email: string): void {
+  RUNS.set(email, (RUNS.get(email) ?? 0) + 1)
+}
+function releaseRun(email: string): void {
+  const c = (RUNS.get(email) ?? 0) - 1
+  if (c > 0) RUNS.set(email, c)
+  else RUNS.delete(email)
+}
 
 export async function GET(req: Request) {
   // Live pipeline execution needs the lab workstation (KiCad CLI, flroute
@@ -205,12 +228,13 @@ export async function GET(req: Request) {
   const userRec = getUser(userEmail)
   if (!userRec) return new Response('unknown account', { status: 401 })
   const admin = isAdminRequest(req)
-  // v3 LLM source: admin runs on the Mac subscription; everyone else MUST bring
-  // their own key. On the free tier the model runs on the USER's key, so the
-  // platform never pays for inference.
-  if (!admin && !hasByok(req)) {
+  // LLM source: admin runs on the Mac subscription; a signed-up user runs on the
+  // platform-funded model when one is configured (OPENROUTER_API_KEY), else they
+  // must bring their own key. Only refuse when there is NO way to run inference
+  // for them — no platform key and no BYOK.
+  if (!admin && !hasByok(req) && !process.env.OPENROUTER_API_KEY) {
     return new Response(
-      'Add your own model API key in settings to run — on the free tier the model runs on your key. Subscribe later to unlock more runs.',
+      'Add your own model API key in settings to run, or subscribe once platform models are enabled.',
       { status: 402 },
     )
   }
@@ -229,8 +253,19 @@ export async function GET(req: Request) {
   if (resolvedModel.error) {
     return new Response(resolvedModel.error, { status: resolvedModel.status ?? 402 })
   }
-  if (globalState.__pipelineRunning) {
-    return new Response('a pipeline run is already in progress', { status: 409 })
+  // multi-tenant concurrency: one run per account, bounded total load. Admin is
+  // uncapped (Jack's own testing). A user who already has a run in flight gets a
+  // clear 409; when the machine is at capacity, a 503 with Retry-After.
+  if (!admin) {
+    if ((RUNS.get(userEmail) ?? 0) >= MAX_RUNS_PER_USER) {
+      return new Response('You already have a run in progress. Wait for it to finish before starting another.', { status: 409 })
+    }
+    if (totalRunning() >= MAX_CONCURRENT_RUNS) {
+      return new Response('The build queue is at capacity right now. Try again in a few minutes.', {
+        status: 503,
+        headers: { 'Retry-After': '120' },
+      })
+    }
   }
 
   const qp = new URL(req.url).searchParams
@@ -305,6 +340,15 @@ export async function GET(req: Request) {
   const encoder = new TextEncoder()
   let child: ChildProcess | null = null
   let cancelled = false
+  // release the per-user run slot exactly once — both the stream's finally and
+  // its cancel() can fire for one run, and with a COUNTER (not the old idempotent
+  // boolean) a double release would corrupt the concurrency accounting.
+  let runReleased = false
+  const releaseRunOnce = () => {
+    if (runReleased) return
+    runReleased = true
+    releaseRun(userEmail)
+  }
   // plan mode: the early chip-scale build running concurrently with the EDA
   // chain (see the kick after ucs_design.json lands). Abortable so a cancelled
   // or timed-out run can't leave an orphaned builder writing into the run dir.
@@ -378,7 +422,7 @@ export async function GET(req: Request) {
   // count the run + attach ownership up front (a crashed run still consumed
   // pipeline time; artifact filtering keys off this ownership record)
   recordRun(userEmail, runId)
-  globalState.__pipelineRunning = true
+  acquireRun(userEmail)
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -721,6 +765,37 @@ export async function GET(req: Request) {
             }
           } catch (e) {
             log('design', `chip-scale spec export failed: ${String(e).slice(0, 160)} — electronics stage falls back`, 'warn')
+          }
+
+          // ---- DESIGN-CORRECTNESS GATE (interactive pipeline) --------------
+          // The netlist bridge wires buses + power, but the per-IC synthesis
+          // omits the APPLICATION signal chains (mux->ADC, MCU drives the mux
+          // select, reference->channel, input/host connectors). Wire those in
+          // (functional_wire, mutates the spec in place) then VERIFY the design
+          // is actually wired to work (design_check) — the SAME gate the headless
+          // v1 path runs. This is what stops a DRC-clean but functionally hollow
+          // board from shipping out of the pipeline users actually click, and it
+          // enforces the supported-envelope beachhead: a product family we can't
+          // yet wire correctly fails HERE, honestly, instead of building hollow.
+          // Runs before the early chip-scale build so that build reads the WIRED
+          // spec. Fail-SAFE: if the gate itself can't run, don't block.
+          const csSpecPath = path.join(pubData, 'chipscale-spec.json')
+          if (fs.existsSync(csSpecPath)) {
+            const wired = await runFunctionalWire(csSpecPath, prompt)
+            if (wired > 0)
+              log('design', `functional wiring: added ${wired} application signal-chain connection(s) the bus synthesis omitted`, 'ok')
+            const gate = await runDesignGate(csSpecPath, prompt)
+            if (gate && !gate.pass) {
+              log('design', `GATE design-correctness: FAIL — ${gate.failCount} issue(s): ${gate.summary}`, 'err')
+              log('design', 'This design is not yet wired to work. Compose reliably builds measurement and sensor boards (an MCU with I2C / analog front ends) today; a design outside that supported envelope is blocked here rather than shipped hollow.', 'warn')
+              send({ type: 'stage', id: 'design', state: 'failed', failReason: `design-correctness gate: ${gate.failCount} issue(s)` })
+              for (const s of ['placement', 'routing', 'validation', 'erc', 'firmware'] as const)
+                send({ type: 'stage', id: s, state: 'blocked' })
+              send({ type: 'done', status: 'GATE FAILED', boardPath: variantBoard })
+              return
+            }
+            if (gate)
+              log('design', `GATE design-correctness: PASS${gate.warnCount ? ` (${gate.warnCount} advisory)` : ''}`, 'ok')
           }
 
           // ---- EARLY CHIP-SCALE BUILD (plan mode) ---------------------------
@@ -1738,7 +1813,7 @@ export async function GET(req: Request) {
         send({ type: 'error', message: String(err) })
       } finally {
         clearTimeout(killTimer)
-        globalState.__pipelineRunning = false
+        releaseRunOnce()
         // close out the EDA wall-clock record on EVERY exit path. Stages still
         // open never reported a terminal state (abort/throw mid-stage) — keep
         // their status and mark them unfinished rather than invent an outcome.
@@ -1800,7 +1875,7 @@ export async function GET(req: Request) {
       // orphaned builder keeps writing into this run's dir (same abort stance
       // as the child-process kill above; electronics-cs skips its persist).
       try { earlyCsAbort.abort() } catch { /* already settled */ }
-      globalState.__pipelineRunning = false
+      releaseRunOnce()
     },
   })
 

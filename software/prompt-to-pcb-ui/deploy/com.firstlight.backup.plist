@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  com.firstlight.backup — periodic FirstLight Compose data backup.
+
+  Runs deploy/backup-data.sh every 6 hours (and once at load) to snapshot
+  data/ and public/runs/ into ~/firstlight-backups (rotated, last 14 kept).
+
+  INSTALL (do NOT run as root; agents are per-GUI-session):
+    cp "/Volumes/T9 Backup/EE-lab/software/prompt-to-pcb-ui/deploy/com.firstlight.backup.plist" \
+       "$HOME/Library/LaunchAgents/com.firstlight.backup.plist"
+    launchctl bootstrap gui/$(id -u) "$HOME/Library/LaunchAgents/com.firstlight.backup.plist"
+
+  To set an off-machine mirror, add an FL_BACKUP_REMOTE entry to the
+  EnvironmentVariables dict below (rsync/scp destination), then re-bootstrap.
+
+  VERIFY:  launchctl list | grep com.firstlight.backup
+  LOGS:    /tmp/firstlight-backup.log  /tmp/firstlight-backup.err
+  UNLOAD:  launchctl bootout gui/$(id -u)/com.firstlight.backup
+-->
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.firstlight.backup</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Volumes/T9 Backup/EE-lab/software/prompt-to-pcb-ui/deploy/backup-data.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Volumes/T9 Backup/EE-lab/software/prompt-to-pcb-ui</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <!-- Optional: uncomment and set an off-drive/remote target for durability.
+    <key>FL_BACKUP_REMOTE</key><string>user@host:/path/firstlight-backups</string>
+    -->
+    <!-- Optional overrides:
+    <key>FL_BACKUP_DIR</key><string>/Users/YOU/firstlight-backups</string>
+    <key>FL_BACKUP_KEEP</key><string>14</string>
+    -->
+  </dict>
+
+  <!-- Every 6 hours (21600 s). Also runs immediately at load. -->
+  <key>StartInterval</key><integer>21600</integer>
+  <key>RunAtLoad</key><true/>
+
+  <key>StandardOutPath</key><string>/tmp/firstlight-backup.log</string>
+  <key>StandardErrorPath</key><string>/tmp/firstlight-backup.err</string>
+</dict></plist>
