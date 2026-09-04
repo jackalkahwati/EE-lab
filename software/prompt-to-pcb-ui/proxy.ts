@@ -218,12 +218,6 @@ async function enforceRateLimit(req: NextRequest, pathname: string): Promise<Nex
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl
-  // /api/run-file is reachable ONLY via the internal /runs/* rewrite below
-  // (rewrites don't re-enter the proxy). A direct external hit would bypass
-  // the run-ownership check, so it is unconditionally hidden.
-  if (pathname.startsWith('/api/run-file/') || pathname === '/api/run-file') {
-    return NextResponse.json({ error: 'not found' }, { status: 404 })
-  }
 
   // Rate-limit the expensive/abuse-prone routes BEFORE the public-pattern
   // bypass below (the auth routes are public but must still be throttled).
@@ -255,15 +249,14 @@ export async function proxy(req: NextRequest) {
     if (run && ownedByAnotherAccount(run, email)) {
       return NextResponse.json({ error: 'not your board' }, { status: 403 })
     }
-    if (run) {
-      // Serve run artifacts through the dynamic file route: `next start` only
-      // serves public/ paths that existed at build time, so artifacts written
-      // AFTER a deploy (renders, boards, CAD) 404'd in production until the
-      // next rebuild. The rewrite keeps /runs/... URLs while reading disk live.
-      const url = req.nextUrl.clone()
-      url.pathname = `/api/run-file${pathname}`
-      return NextResponse.rewrite(url)
-    }
+    // Run artifacts are served by app/runs/[...p]/route.ts, which reads disk
+    // at request time so files written after a deploy are visible. This used
+    // to be a rewrite to /api/run-file; behind the Cloudflare tunnel the
+    // rewrite target's origin (https://localhost) never matched the origin the
+    // server knows itself by (http://127.0.0.1), so Next proxied it EXTERNALLY
+    // over TLS to a plain-HTTP port and every artifact 500'd. Falling through
+    // to a real route keeps the ownership checks above and has no origin to
+    // mismatch.
     return NextResponse.next()
   }
 

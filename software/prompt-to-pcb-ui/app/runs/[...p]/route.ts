@@ -1,13 +1,23 @@
 /**
- * Dynamic run-artifact server. `next start` only serves public/ paths that
- * existed AT BUILD TIME — every artifact a run writes after a deploy (renders,
- * boards, CAD, reports) 404'd in production until the next rebuild. The proxy
- * now REWRITES authorized /runs/* requests here, and this route streams the
- * file from disk at request time.
+ * Dynamic run-artifact server for /runs/<runId>/<path>.
  *
- * Reached only via that internal rewrite: the proxy 404s direct external
- * requests to /api/run-file (rewrites don't re-enter the proxy), so the
- * session + run-ownership checks it performs are always upstream of this.
+ * `next start` only serves public/ paths that existed when the server booted,
+ * so every artifact a run writes afterwards (renders, boards, CAD, reports)
+ * 404'd in production until the next restart. This catch-all route sits at the
+ * real /runs URL and streams the file from disk at request time.
+ *
+ * It is a ROUTE, not a middleware rewrite, on purpose. The rewrite this
+ * replaced built its target from `req.nextUrl`, whose origin behind the
+ * Cloudflare tunnel (https://localhost) never matched the origin the server
+ * knows itself by (http://127.0.0.1). Next treats an origin-mismatched rewrite
+ * as an EXTERNAL proxy, so every run artifact was fetched over TLS from a
+ * plain-HTTP port and 500'd (EPROTO) — the whole dashboard read "not
+ * generated" in production from 2026-07-14 until this. A route has no origin
+ * to compare, so there is nothing left for a proxy header to break.
+ *
+ * proxy.ts still runs FIRST on this path (its matcher covers /runs/*): the
+ * session check, the run-id shape check and the run-ownership check are all
+ * upstream of this handler, exactly as before.
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
@@ -35,13 +45,12 @@ const MIME: Record<string, string> = {
 }
 
 export async function GET(_req: Request, ctx: { params: Promise<{ p: string[] }> }) {
-  const { p } = await ctx.params
-  // Path shape: ['runs', '<runId>', ...artifact segments]. Segments arrive
-  // URL-decoded from the router — reject anything that could escape the tree.
-  if (!Array.isArray(p) || p.length < 2 || p[0] !== 'runs') {
+  const { p: segs } = await ctx.params
+  // Path shape: ['<runId>', ...artifact segments]. Segments arrive URL-decoded
+  // from the router — reject anything that could escape the tree.
+  if (!Array.isArray(segs) || segs.length < 1) {
     return Response.json({ error: 'not found' }, { status: 404 })
   }
-  const segs = p.slice(1)
   if (segs.some((s) => !s || s === '.' || s === '..' || s.includes('/') || s.includes('\\') || s.includes('\0'))) {
     return Response.json({ error: 'invalid path' }, { status: 400 })
   }
