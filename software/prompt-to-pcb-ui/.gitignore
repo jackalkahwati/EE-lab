@@ -18,6 +18,8 @@ node_modules
 # build from clobbering a running dev server's .next. MUST stay ignored: the
 # Tailwind oxide scanner crashes on generated binaries in scanned paths.
 .next-build/
+# any scratch dist dir (NEXT_DIST_DIR=.next-<something>), same reason
+.next-*/
 .DS_Store
 # pipeline run download artifacts
 public/fab/
