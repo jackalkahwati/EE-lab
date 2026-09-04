@@ -34,6 +34,16 @@
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <!-- Email alerting. A log file nobody reads is not monitoring: on
+         2026-09-03 this check caught the data drive dropping off the bus and
+         the only record was a line in /tmp. Throttled — one mail on the state
+         flip, a reminder every FL_ALERT_REPEAT_MIN, one on recovery. -->
+    <!-- Must be the Resend account owner's address until a domain is verified
+         at resend.com/domains: an unverified account returns 403 for any other
+         recipient. Verify a domain to alert somewhere else. -->
+    <key>FL_ALERT_EMAIL</key><string>jack@thestardrive.com</string>
+    <key>FL_ALERT_REPEAT_MIN</key><string>60</string>
+    <key>HOME</key><string>/Users/jackal-kahwati</string>
     <!-- Optional: uncomment and set to receive failure alerts.
     <key>FL_ALERT_WEBHOOK</key><string>https://hooks.example.com/your/webhook</string>
     -->
