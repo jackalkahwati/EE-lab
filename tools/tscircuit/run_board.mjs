@@ -229,7 +229,61 @@ async function freeroute(cj, opts = {}) {
   return r
 }
 const FR_CACHE = new Map() // dsn text -> { wires: JSON string of routed traces+vias, unrouted }
-async function freerouteReal(cj, { layers = 2 } = {}) {
+/**
+ * Which DSN nets correspond to source traces the router failed to complete.
+ *
+ * A source trace names its endpoints as ".U1 > .pin39 to .C3 > .pin1"; a DSN
+ * net names its pins as "U1_source_component_0-39". Match on the (component
+ * ref, pin) pairs, which is the only thing both spellings agree on.
+ */
+function dsnNetsForUnrouted(dsnPcb, unroutedNets) {
+  const wanted = []
+  for (const n of unroutedNets || []) {
+    const pairs = [...String(n?.name || '').matchAll(/\.([A-Za-z]+\d+)\s*>\s*\.pin(\d+)/g)].map((m) => [m[1], m[2]])
+    if (pairs.length >= 2) wanted.push(pairs)
+  }
+  if (!wanted.length) return new Set()
+  const hit = (pin, ref, num) => {
+    const i = String(pin).lastIndexOf('-')
+    if (i < 0) return false
+    return String(pin).slice(i + 1) === num && String(pin).slice(0, i).startsWith(`${ref}_`)
+  }
+  const names = new Set()
+  for (const net of dsnPcb?.network?.nets || []) {
+    for (const pairs of wanted) {
+      if (pairs.every(([ref, num]) => (net.pins || []).some((p) => hit(p, ref, num)))) { names.add(net.name); break }
+    }
+  }
+  return names
+}
+
+/**
+ * Route the named nets FIRST.
+ *
+ * Net order is the single cheapest lever on an autorouter's result. The DSN
+ * comes out alphabetical, which is arbitrary with respect to difficulty: nets
+ * routed early get open space, nets routed last fight for whatever is left, and
+ * the ones that lose are exactly the ones reported unrouted. Re-presenting the
+ * board with those nets at the front is deterministic, costs one more pass, and
+ * is the standard fix for this failure. Both the net array and the class's
+ * net_names list are permuted so the file stays self-consistent.
+ */
+function reorderDsnNets(dsnPcb, firstNames) {
+  if (!firstNames?.size || !dsnPcb?.network?.nets) return false
+  const nets = dsnPcb.network.nets
+  const head = nets.filter((n) => firstNames.has(n.name))
+  if (!head.length || head.length === nets.length) return false
+  dsnPcb.network.nets = [...head, ...nets.filter((n) => !firstNames.has(n.name))]
+  const order = new Map(dsnPcb.network.nets.map((n, i) => [n.name, i]))
+  for (const cls of dsnPcb.network.classes || []) {
+    if (Array.isArray(cls.net_names)) {
+      cls.net_names = [...cls.net_names].sort((a, b) => (order.get(a) ?? 1e9) - (order.get(b) ?? 1e9))
+    }
+  }
+  return true
+}
+
+async function freerouteReal(cj, { layers = 2, routeFirst = null } = {}) {
   if (!JAVA || !FR_JAR) return null
   let dir
   try {
@@ -241,13 +295,19 @@ async function freerouteReal(cj, { layers = 2 } = {}) {
     // so 0.3mm holes clear the 0.5mm hole_clearance with margin (was the residual
     // fab-DRC error on dense boards). freerouting honours this from the DSN.
     setViaClearance(dsnPcb, 250)
+    // Retry ordering: put previously-unrouted nets at the front. Changing the
+    // net order changes the DSN text, so this also misses the route cache by
+    // construction — which is what makes the retry a genuinely different pass
+    // rather than a replay of the same deterministic result.
+    let reordered = false
+    if (routeFirst?.length) reordered = reorderDsnNets(dsnPcb, dsnNetsForUnrouted(dsnPcb, routeFirst))
     const dsnText = stringifyDsnJson(dsnPcb)
     // Identical DSN already routed this run? Reuse its copper — the second JVM
     // pass would route the exact same input (see wrapper docstring).
     const cached = OPT ? FR_CACHE.get(dsnText) : null
     if (cached) {
       TIMINGS.counters.freerouteCacheHits++
-      return { cj: [...unrouted, ...JSON.parse(cached.wires)], unrouted: cached.unrouted, layers, cached: true }
+      return { cj: [...unrouted, ...JSON.parse(cached.wires)], unrouted: cached.unrouted, unroutedNets: cached.unroutedNets ?? [], layers, cached: true }
     }
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fl-fr-'))
     const dsnPath = path.join(dir, 'b.dsn'), sesPath = path.join(dir, 'b.ses')
@@ -349,10 +409,20 @@ async function freerouteReal(cj, { layers = 2 } = {}) {
     const stdoutUnrouted = m.length ? Number(m[m.length - 1][1]) : null
     const idsMissing = routedIds.size === 0 && routedWires.some((e) => e.type === 'pcb_trace')
     const unroutedN = idsMissing ? (stdoutUnrouted ?? sourceTraces.length) : structuralUnrouted
+    // WHICH nets failed, not just how many. The count alone tells a user their
+    // board is incomplete but not what to fix, and rip-up-and-reroute needs the
+    // identities to re-present just those nets to the router.
+    const unroutedNets = idsMissing ? [] : sourceTraces
+      .filter((st) => !routedIds.has(st.source_trace_id))
+      .map((st) => ({
+        id: st.source_trace_id,
+        name: st.display_name ?? st.name ?? null,
+        pins: Array.isArray(st.connected_source_port_ids) ? st.connected_source_port_ids.length : null,
+      }))
     // Cache the routed copper as a STRING keyed by the exact DSN text; a hit
     // re-parses so callers can freely mutate their copy (no aliasing).
-    try { FR_CACHE.set(dsnText, { wires: JSON.stringify(routedWires), unrouted: unroutedN }) } catch { /* cache best-effort */ }
-    return { cj: [...unrouted, ...routedWires], unrouted: unroutedN, layers }
+    try { FR_CACHE.set(dsnText, { wires: JSON.stringify(routedWires), unrouted: unroutedN, unroutedNets }) } catch { /* cache best-effort */ }
+    return { cj: [...unrouted, ...routedWires], unrouted: unroutedN, unroutedNets, layers, reordered }
   } catch { return null } finally {
     if (dir) try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* best effort */ }
   }
@@ -428,8 +498,12 @@ function drcScore(drc, unrouted = 0) {
   let n = 0
   for (const [t, c] of Object.entries(types)) n += c * (DRC_SEVERITY[t] ?? DRC_SEVERITY_DEFAULT)
   // A net the router never completed is the same class of wrong as one it
-  // shorted — the netlist is not honoured either way.
-  return n + unrouted * DRC_SEVERITY.unconnected_items
+  // shorted — the netlist is not honoured either way. But once the count has
+  // been reconciled against KiCad it IS `unconnected_items`, already weighted
+  // in the loop above; adding it again would penalise the same fault twice.
+  const already = types.unconnected_items ?? 0
+  const extra = Math.max(0, (unrouted || 0) - already)
+  return n + extra * DRC_SEVERITY.unconnected_items
 }
 
 const RESIDUAL_NUDGE_TYPES = new Set(['hole_clearance', 'clearance'])
@@ -1708,11 +1782,26 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15 } = {}) {
       ? emitBoardCode(placed, nets, { clearance: s.router === 'tsci' ? s.place.clearance : null, routingDisabled: rd, numLayers: s.router === 'tsci' ? (s.layers ?? 2) : 2 })
       : buildCode(parts, nets, { ...s.place, routingDisabled: rd, numLayers: s.router === 'tsci' ? (s.layers ?? 2) : 2 })
     let cj = await buildCircuit(code, s.name)
-    let fixes = [], unrouted = 0
+    let fixes = [], unrouted = 0, unroutedNets = []
     if (s.router === 'fr') {
-      const fr = await freeroute(cj, { layers: s.layers })
+      let fr = await freeroute(cj, { layers: s.layers })
       if (!fr) continue // freerouting failed this pass; try the next strategy
-      cj = fr.cj; unrouted = fr.unrouted
+      // Rip-up-and-reorder: if the router left nets open, hand it the SAME board
+      // once more with those nets moved to the front of the net order. Nets
+      // routed first get open space; the ones that lost the race are precisely
+      // the ones reported unrouted, so putting them first is the standard lever.
+      // Keep the retry only if it completes MORE nets and does not add DRC
+      // errors — otherwise the original stands.
+      if (fr.unrouted > 0 && (fr.unroutedNets?.length ?? 0) > 0
+          && (Date.now() - tLadder) + 25_000 < LADDER_DEADLINE_MS) {
+        const retry = await freeroute(cj, { layers: s.layers, routeFirst: fr.unroutedNets })
+        if (retry?.reordered && retry.unrouted < fr.unrouted) {
+          const before = fr.unrouted
+          fr = retry
+          fixes.push(`re-routed with ${before - retry.unrouted} previously-open net(s) ordered first (${before} → ${retry.unrouted} unrouted)`)
+        }
+      }
+      cj = fr.cj; unrouted = fr.unrouted; unroutedNets = fr.unroutedNets ?? []
       // freerouting can route copper right to the outline; give the board the
       // same edge margin the built-in path gets so copper clears the edge.
       const board = cj.find((e) => e.type === 'pcb_board')
@@ -1734,6 +1823,25 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15 } = {}) {
     }
     const drc = await realDrc(cj, s.profile)
     if (!drc.available) return { available: false, drc, trail, best: null }
+    // Reconcile the open-net count against the REFEREE.
+    //
+    // The structural count (source traces whose id came back on no routed wire)
+    // over-reports whenever the DSN -> SES -> circuit-json round trip drops a
+    // source id from copper that WAS routed. Measured on the `residual` fixture:
+    // structural said 5, freerouting's own log said 1, and KiCad DRC — the same
+    // independent referee every other number here comes from — found exactly 1
+    // unconnected item. Four of those five nets were physically connected on the
+    // board while the product told the user to go route them by hand.
+    //
+    // KiCad wins. The structural number is kept as a diagnostic so a real
+    // divergence is still visible rather than silently smoothed over.
+    const unroutedStructural = unrouted
+    const kicadOpen = drc.errorTypes?.unconnected_items
+    if (Number.isFinite(kicadOpen)) unrouted = kicadOpen
+    else if (drc.available) unrouted = 0
+    if (unroutedStructural !== unrouted) {
+      fixes = [...fixes, `open-net count reconciled against KiCad DRC: ${unroutedStructural} structural → ${unrouted} actual`]
+    }
     // Severity-weighted score. Counting every error equally made the ladder
     // pick a BROKEN board over a manufacturable one: measured on the `dense`
     // fixture, it chose a 7-error board carrying a SHORT and 2 open nets over a
@@ -1743,7 +1851,7 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15 } = {}) {
     // not the same unit and must not be summed as if they were.
     const score = drcScore(drc, unrouted)
     trail.push({ iter: i + 1, strategy: s.name, profile: FAB_PROFILES[s.profile].label, errors: drc.errors, errorTypes: drc.errorTypes, unrouted })
-    if (!best || score < best.score) best = { cj, drc, fixes, unrouted, score, strategy: s.name, layers: s.layers ?? 2 }
+    if (!best || score < best.score) best = { cj, drc, fixes, unrouted, unroutedStructural, unroutedNets, score, strategy: s.name, layers: s.layers ?? 2 }
     if (drc.errors === 0 && unrouted === 0) break // fully routed AND fab-clean — done
   }
   if (!best) return { available: false, drc: { available: false, reason: 'all routing strategies failed' }, trail }
@@ -1885,6 +1993,13 @@ async function main() {
         errorsFirst: res.trail[0]?.errors ?? null,
         errorsBest: res.best.drc.errors,
         unrouted: res.best.unrouted,
+        // WHICH nets the router could not close. A bare count tells a user the
+        // board is incomplete but not what to look at; these are the nets that
+        // need a manual trace (or that rip-up-and-reroute must re-present).
+        unroutedNets: res.best.unroutedNets ?? [],
+        // What the id-linkage heuristic thought, kept beside the referee's
+        // number so a genuine divergence stays visible.
+        unroutedStructural: res.best.unroutedStructural ?? null,
         fixes: loosened
           ? [...res.best.fixes, `spread placement to ${usedGap}mm component gap so the router could close (design↔routing convergence)`]
           : res.best.fixes,
@@ -2065,7 +2180,21 @@ async function main() {
           const n = res.trail.length, sl = `iterated ${n} strateg${n === 1 ? 'y' : 'ies'} + legalization`
           if (convergedNow) drcRepair.verdict = null
           else if (unroutedNow > 0) {
-            drcRepair.verdict = `${sl}; best board has ${drc.errors} DRC error(s) and ${unroutedNow} net(s) the autorouter couldn't complete — needs manual routing or a simpler netlist.`
+            // Name nets only when the link heuristic AGREES with the referee.
+            // When they disagree the heuristic's list is a superset (it flags
+            // nets whose source id was lost in conversion but whose copper is
+            // really there), so presenting it as the answer would send someone
+            // to hand-route traces that already exist.
+            const all = (drcRepair.unroutedNets ?? []).map((n) => n?.name).filter(Boolean)
+            const trustworthy = drcRepair.unroutedStructural == null || drcRepair.unroutedStructural === unroutedNow
+            let which = ''
+            if (all.length && trustworthy) {
+              const shown = all.slice(0, 4)
+              which = ` (${shown.join(', ')}${all.length > shown.length ? ', …' : ''})`
+            } else if (all.length) {
+              which = ` (KiCad found ${unroutedNow}; link analysis flagged ${all.length} candidate(s) — open the board to see which)`
+            }
+            drcRepair.verdict = `${sl}; best board has ${drc.errors} DRC error(s) and ${unroutedNow} net(s) the autorouter couldn't complete${which} — needs manual routing or a simpler netlist.`
           } else {
             const top = Object.entries(drc?.errorTypes || {}).sort((a, b) => b[1] - a[1])[0]?.[0]
             drcRepair.verdict = `${sl}; best ${drc.errors} error(s) (${top || 'DRC'}) under ${drc.ruleProfile} — beyond the loop's current levers.`

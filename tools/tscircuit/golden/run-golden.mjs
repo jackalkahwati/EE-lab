@@ -103,8 +103,11 @@ for (const name of fixtures) {
   // accept MORE clearance nits to shed a short, and a bar on the total alone
   // would read that improvement as a regression.
   const types = drc.errorTypes ?? {}
+  // `unrouted` is now RECONCILED to KiCad's unconnected_items, so the two are
+  // the same fault seen twice — adding them counted every open net double.
+  const types_open = types.unconnected_items ?? 0
   const electrical = (types.shorting_items ?? 0) + (types.tracks_crossing ?? 0)
-    + (types.unconnected_items ?? 0) + (rep.unrouted ?? 0)
+    + Math.max(types_open, rep.unrouted ?? 0)
   const got = {
     errors: drc.errors ?? null,
     electrical,
