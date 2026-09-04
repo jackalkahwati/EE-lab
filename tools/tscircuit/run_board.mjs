@@ -141,13 +141,36 @@ async function applyGroundPlane(cj, gndPins, profileKey = 'standard') {
     let gp = {}; try { gp = JSON.parse((r.stdout || '').trim().split('\n').pop() || '{}') } catch { /* keep defaults */ }
     fs.writeFileSync(path.join(dir, 'g.kicad_dru'), (FAB_PROFILES[profileKey] || FAB_PROFILES.standard).rules)
     spawnSync(KICAD_CLI, ['pcb', 'drc', '--format', 'json', '--output', drcJson, outPcb], { encoding: 'utf8', timeout: 120000 })
-    let errors = null
-    // same electrical/non-electrical split as realDrc so gp.errors and drc.errors agree
-    if (fs.existsSync(drcJson)) { const rep = JSON.parse(fs.readFileSync(drcJson, 'utf8')); errors = classifyDrcErrors(rep.violations || []).errs.length }
     // return the grounded .kicad_pcb too (read before the temp dir is cleaned) so
     // the caller can persist it for the 3D render — the real chip-down board.
     const pcb = fs.readFileSync(outPcb, 'utf8')
-    return { available: true, assigned: gp.assigned ?? 0, unconnected: gp.unconnected ?? null, stitched: gp.stitched ?? 0, skipped: gp.skipped ?? 0, errors, pcb }
+    // The grounded board is the one that SHIPS, so its DRC has to be measured
+    // the same way realDrc measures the ungrounded one. It wasn't: this read
+    // only `rep.violations` and dropped `unconnected_items` — the open-net
+    // class — so the pour's own faults were both undercounted and reported
+    // separately from the verdict.
+    let drcAfter = null
+    if (fs.existsSync(drcJson)) {
+      const rep = JSON.parse(fs.readFileSync(drcJson, 'utf8'))
+      const all = [...(rep.violations || []), ...(rep.unconnected_items || []), ...(rep.schematic_parity || [])]
+      const { errs, nonElectrical } = classifyDrcErrors(all)
+      const byType = {}
+      for (const v of errs) byType[v.type] = (byType[v.type] || 0) + 1
+      const neTypes = {}
+      for (const v of nonElectrical) neTypes[v.type] = (neTypes[v.type] || 0) + 1
+      const pos = mapDrcPositions(pcb, cj, errs)
+      drcAfter = {
+        errors: errs.length,
+        errorsAll: errs.length + nonElectrical.length,
+        nonElectrical: { count: nonElectrical.length, types: neTypes, strict: STRICT_NON_ELECTRICAL },
+        warnings: all.filter((v) => v.severity === 'warning').length,
+        errorTypes: byType,
+        sample: errs.slice(0, 6).map((v) => `${v.type}: ${(v.description || '').slice(0, 90)}`),
+        positionsMapped: pos.mapped,
+        violations: pos.points.slice(0, 40),
+      }
+    }
+    return { available: true, assigned: gp.assigned ?? 0, unconnected: gp.unconnected ?? null, stitched: gp.stitched ?? 0, skipped: gp.skipped ?? 0, errors: drcAfter?.errors ?? null, drcAfter, pcb }
   } catch (e) {
     return { available: false, reason: String(e).slice(0, 160) }
   } finally {
@@ -2285,6 +2308,23 @@ async function main() {
         TIMINGS.counters.groundPlanePasses++
         const gp = await applyGroundPlane(cj, input.gnd, res.best.drc.profileKey || 'standard')
         tAdd('groundPlane', Date.now() - tGp, gp?.available ? `${gp.assigned} pins, ${gp.errors} errors` : 'unavailable')
+        // `input.gnd` reaches exactly ONE place in this file: the pass above.
+        // Ground pins are never emitted as nets, so freerouting never routes
+        // them and KiCad cannot report them as unconnected either — those pads
+        // carry no net, so there is nothing for DRC to call open. A board whose
+        // ground pass did not run therefore has EVERY ground pin electrically
+        // floating while every check says clean. That is the worst verdict this
+        // program can produce, so it is stated rather than inherited.
+        if (!gp?.available) {
+          drcRepair.groundPlane = {
+            available: false,
+            reason: gp?.reason ?? 'ground plane pass unavailable (needs kicad-cli + pcbnew python)',
+            unconnected: input.gnd.length,
+          }
+          drcRepair.unrouted = (drcRepair.unrouted ?? 0) + input.gnd.length
+          drcRepair.converged = false
+          drcRepair.verdict = `${drcRepair.verdict ? drcRepair.verdict + ' ' : ''}Ground plane did not run (${drcRepair.groundPlane.reason}) — all ${input.gnd.length} ground pin(s) are unconnected on the board this run produced.`
+        }
         if (gp?.available) {
           if (gp.pcb) kicadPcb = gp.pcb // grounded board (with the GND plane) for the 3D render
           drcRepair.groundPlane = { assigned: gp.assigned, unconnected: gp.unconnected, stitched: gp.stitched, skipped: gp.skipped, errors: gp.errors }
@@ -2293,11 +2333,35 @@ async function main() {
           // note (design↔routing convergence) and any via-legalization note
           // survive to the UI instead of being clobbered by the ground-plane pass.
           drcRepair.fixes = [...drcRepair.fixes, `ground plane: ${gp.assigned} pins on a DRC-verified GND zone${stitchNote}${gp.unconnected ? ` (${gp.unconnected} still unreached)` : ''}`]
-          // `converged` stays the SIGNAL verdict (routing clean). The ground plane
-          // is a best-effort overlay reported on its own. Tented via-in-pad now
-          // stitches stranded pads down to a reference plane; a via we must skip
-          // to protect the 0.5mm hole_clearance leaves its pad unreached, and we
-          // surface that honestly rather than fail the whole board over it.
+          // The board that SHIPS is the grounded one — `kicadPcb` above is
+          // gp.pcb, and that is what gets persisted, rendered and fabbed. So the
+          // verdict has to describe THAT board.
+          //
+          // It used to describe the board from before the pour: `drc` still held
+          // the pre-ground-plane run and `unrouted` ignored ground pins the pour
+          // could not reach, while the plane's own faults went only into a prose
+          // note. Of 49 boards on disk, 9 reported 0 DRC errors / 0 unrouted with
+          // up to 5 ground pins unreached and 22 zone errors on the board they
+          // actually shipped. An unreached ground pin IS an open net, and a zone
+          // clearance error IS a DRC error, so both now land in the numbers the
+          // verdict is computed from.
+          if (gp.drcAfter) {
+            drc = {
+              ...drc,
+              ...gp.drcAfter,
+              groundPlaneApplied: true,
+              // kept so a regression in the pour is still legible next to the
+              // signal-routing result it started from
+              preGroundPlane: { errors: drc?.errors ?? null, errorTypes: drc?.errorTypes ?? null },
+            }
+          } else {
+            // The pour changed the board but its referee run produced no report.
+            // The pre-plane numbers describe a board that no longer exists, so
+            // they cannot stand as the verdict for the one being shipped.
+            drc = { available: false, reason: 'ground plane applied but its DRC produced no report — the shipped board is unchecked', groundPlaneApplied: true }
+            drcRepair.converged = false
+          }
+          if (gp.unconnected) drcRepair.unrouted = (drcRepair.unrouted ?? 0) + gp.unconnected
           const planeClean = (gp.unconnected ?? 0) === 0 && (gp.errors ?? 0) === 0
           if (!planeClean) {
             const bits = []
@@ -2306,6 +2370,9 @@ async function main() {
             // build on the REFRESHED (post-legalization / post-nudge) verdict, not
             // the ladder's original res.verdict, so the detail never quotes a stale count
             drcRepair.verdict = `${drcRepair.verdict ? drcRepair.verdict + ' ' : ''}Ground plane: ${bits.join(' + ')} — a real chip-scale density limit, reported not hidden.`
+            // converged described the SIGNAL routing only, so a board shipping
+            // with unreached ground pins still claimed convergence.
+            drcRepair.converged = false
           }
         }
       }
