@@ -516,7 +516,11 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
             <Menu className="size-3.5 shrink-0 text-muted-foreground" />
             <span className={cn('min-w-0 flex-1 truncate font-mono text-[10px] uppercase tracking-wider',
               newDesign ? 'italic text-muted-foreground' : 'text-foreground')}>{activeLabel}</span>
-            <span className="shrink-0 font-mono text-[9px] text-muted-foreground">{threads.length}</span>
+            {/* bare count read like a token/version number — say what it counts */}
+            <span className="shrink-0 font-mono text-[9px] text-muted-foreground"
+              title={`${threads.length} saved design${threads.length === 1 ? '' : 's'}`}>
+              {threads.length} designs
+            </span>
           </button>
         )}
         {!editing && canRename && (

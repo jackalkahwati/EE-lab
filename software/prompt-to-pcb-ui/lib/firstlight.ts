@@ -451,6 +451,11 @@ export interface GateReport {
   file: string
   stage: StageId
   checks: GateCheck[]
+  /** Which board this report measures. A run carries TWO: the shipped
+   *  chip-down board and the parametric reference variant. Without this the
+   *  Checks panel said "drc.json PASS" for the variant while the Overview said
+   *  "DRC failed" for the shipped board — same word, opposite verdicts. */
+  board?: string
 }
 
 export const GATE_REPORTS_PASSED: GateReport[] = [

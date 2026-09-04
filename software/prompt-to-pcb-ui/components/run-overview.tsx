@@ -261,14 +261,22 @@ export function RunOverview({ runId, run }: { runId: string | null; run?: Run | 
         {rows.map(([label, s, detail]) => (
           <div
             key={label}
-            className="flex min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-1 rounded-md border border-border px-3 py-2"
+            className="flex min-w-0 flex-col gap-1 rounded-md border border-border px-3 py-2"
           >
-            <span className="min-w-0 truncate text-muted-foreground">{label}</span>
-            <span
-              className={`inline-flex shrink-0 items-center gap-1 rounded-sm border px-1.5 py-0.5 text-[10px] ${STYLE[s]}`}
-              title={detail}
-            >
-              <Icon s={s} /> {s.replace(/_/g, ' ')}
+            <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-1">
+              <span className="min-w-0 truncate text-muted-foreground">{label}</span>
+              <span
+                className={`inline-flex shrink-0 items-center gap-1 rounded-sm border px-1.5 py-0.5 text-[10px] ${STYLE[s]}`}
+              >
+                <Icon s={s} /> {s.replace(/_/g, ' ')}
+              </span>
+            </div>
+            {/* The measurement, not just the verdict. This used to live only in
+                a title tooltip, so the grid showed eight identical chips and
+                the one number that decides whether a board is fabbable —
+                "3 error(s)", "0 unrouted" — was invisible. */}
+            <span className="min-w-0 truncate font-mono text-[10px] text-muted-foreground/80" title={detail}>
+              {detail}
             </span>
           </div>
         ))}

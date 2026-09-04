@@ -141,6 +141,14 @@ const STAGES = [
 ] as const
 type Stage = (typeof STAGES)[number]['key']
 
+/** Thread-row state dot — the same colours the status bar uses. */
+function runDot(status: string | undefined): string {
+  if (status === 'PASSED') return 'bg-emerald-400'
+  if (status === 'GATE FAILED') return 'bg-red-400'
+  if (status === 'RUNNING') return 'bg-primary animate-pulse'
+  return 'bg-muted-foreground/40'
+}
+
 /** Honest placeholder for a stage whose specialist module isn't built yet. */
 function StagePlaceholder({ title, Icon }: { title: string; Icon: any }) {
   return (
@@ -318,6 +326,8 @@ export default function Compose2Page() {
   // "+New" clears the stage to a blank slate (no board) while the chat stays
   // active; the board reappears when the new design finishes building.
   const [newDesign, setNewDesign] = useState(false)
+  // true once /api/runs has answered — see the URL-sync effect below
+  const [runsLoaded, setRunsLoaded] = useState(false)
   // an FL-1 loop ECO gets dropped into the chat as a revision (single-pane flow)
   const [revisePrefill, setRevisePrefill] = useState('')
   const stageRef = useRef<HTMLDivElement>(null)
@@ -384,6 +394,30 @@ export default function Compose2Page() {
   // right-pane rail "More" (Advanced destinations) + center-strip "More" (advisory stages)
   const [advOpen, setAdvOpen] = useState(false)
   const [stagesMoreOpen, setStagesMoreOpen] = useState(false)
+  // The stage strip is a fixed-width pane, so at common window sizes its eight
+  // tabs needed ~736px inside ~392px: four of them (Mfg, Supply, Validation,
+  // More) sat past the edge with no arrow, fade or overflow menu to say so.
+  // When the labels no longer fit, every tab but the active one collapses to
+  // its icon (each already carries a title tooltip) — nothing goes off-screen.
+  const stageBarRef = useRef<HTMLDivElement>(null)
+  const [tabsTight, setTabsTight] = useState(false)
+  const naturalTabsW = useRef(0)
+  useEffect(() => {
+    const el = stageBarRef.current
+    if (!el) return
+    const measure = () => {
+      // Capture the width the strip WANTS while it is still showing labels;
+      // once collapsed its scrollWidth is the collapsed width, which would
+      // otherwise let it flip back and forth on every resize.
+      if (!tabsTight) naturalTabsW.current = Math.max(naturalTabsW.current, el.scrollWidth)
+      const want = naturalTabsW.current || el.scrollWidth
+      setTabsTight(want > el.clientWidth + 1)
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  })
   // badge-don't-steal-focus: a stage finishing while not visible gets a dot
   const [badged, setBadged] = useState<Record<string, 'passed' | 'failed'>>({})
   const prevPipeRef = useRef<Record<string, string>>({})
@@ -483,9 +517,33 @@ export default function Compose2Page() {
           // Do NOT auto-select the last run on load — a fresh page open starts on a
           // blank slate (the "describe a product" prompt), not the previous board.
           // Past runs stay available via the ☰ menu.
+          //
+          // ...UNLESS the URL names one. /compose?run=<id> was silently ignored,
+          // so a run's URL could not be bookmarked, shared or reloaded back into.
+          const want = new URLSearchParams(window.location.search).get('run')
+          if (want && disk.some((r: Run) => r.id === want)) {
+            setSelectedId(want)
+            setNewDesign(false)
+          }
         }
       }).catch(() => {})
+      .finally(() => setRunsLoaded(true))
   }, [])
+
+  // Keep the URL pointing at the visible run, so reload/back/bookmark all land
+  // where the user is. replaceState, not push: switching threads is not a
+  // navigation the back button should have to walk through.
+  //
+  // Gated on runsLoaded: on mount selectedId is still empty, so writing the URL
+  // then strips the ?run= we are about to read, and the deep link would
+  // erase itself before it could be applied.
+  useEffect(() => {
+    if (!runsLoaded) return
+    const url = new URL(window.location.href)
+    if (selectedId && !newDesign) url.searchParams.set('run', selectedId)
+    else url.searchParams.delete('run')
+    if (url.toString() !== window.location.href) window.history.replaceState(null, '', url)
+  }, [runsLoaded, selectedId, newDesign])
 
   // No runs[0] fallback: with no explicit selection (fresh load) selectedRun is
   // undefined → the stage renders its blank/new-design slate, not the last board.
@@ -930,17 +988,31 @@ export default function Compose2Page() {
       </button>
       <div className="min-h-0 flex-1 overflow-auto py-1.5">
         {runs.length === 0 && <div className="px-3 py-2 text-xs text-muted-foreground">No designs yet.</div>}
+        {/* Every row used to be one truncated title and nothing else, so twenty
+            designs read as twenty identical lines. status + timestamp already
+            ride along on the Run object — showing them is free. */}
         {runs.map((r: Run) => (
           <button
             key={r.id}
             onClick={() => selectThreadFromList(r.id)}
+            title={`${r.name || r.id}${r.status ? ` — ${r.status}` : ''}${r.timestamp ? ` · ${r.timestamp}` : ''}`}
             className={cn(
-              'relative flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-accent/50',
+              'relative flex w-full flex-col gap-0.5 px-3 py-1.5 text-left text-xs hover:bg-accent/50',
               r.id === selectedId && !newDesign ? 'bg-accent text-foreground' : 'text-muted-foreground',
             )}
           >
             {r.id === selectedId && !newDesign && <span aria-hidden className="absolute inset-y-1 left-0 w-0.5 bg-primary" />}
-            <span className="truncate">{r.name || r.id}</span>
+            <span className="flex w-full min-w-0 items-center gap-1.5">
+              <span aria-hidden className={cn('size-1.5 shrink-0 rounded-full', runDot(r.status))} />
+              <span className="min-w-0 flex-1 truncate">{r.name || r.id}</span>
+            </span>
+            {(r.status || r.timestamp) && (
+              <span className="flex w-full min-w-0 items-center gap-1.5 pl-3 font-mono text-[10px] text-muted-foreground/70">
+                {r.status && <span className="shrink-0 uppercase tracking-wide">{r.status}</span>}
+                {r.status && r.timestamp && <span aria-hidden>·</span>}
+                {r.timestamp && <span className="min-w-0 truncate">{r.timestamp}</span>}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -990,6 +1062,7 @@ export default function Compose2Page() {
         />
         <StatusBar
           runId={pipelineRunId ?? (selectedId || null)}
+          runName={selectedRun?.name ?? null}
           pipeline={pipelineRunId ? pipeStatusByRun[pipelineRunId] : pipeStatus}
           running={!!pipelineRunId}
           tiers={llmTiers}
@@ -1075,7 +1148,7 @@ export default function Compose2Page() {
         {/* stage bar — editor-style tab strip scoped to the middle pane: each tab
             carries its own bottom border; the ACTIVE tab drops it (bg-background)
             so it reads connected to the content below, with a 1px amber top edge */}
-        <div className="flex h-9 shrink-0 items-stretch overflow-x-auto bg-card/40">
+        <div ref={stageBarRef} className="flex h-9 shrink-0 items-stretch overflow-x-auto bg-card/40">
           {primaryStages.map((s) => {
             const { locked } = stageMeta(s.key)
             // active ONLY when the stage view is actually showing — with a doc
@@ -1085,16 +1158,17 @@ export default function Compose2Page() {
             return (
               <button key={s.key} type="button" disabled={locked}
                 onClick={() => { setStage(s.key); setActiveDoc(null); clearBadge(s.key) }}
-                title={s.key === 'id' && !idBrief && !productSpec ? 'describe a product first' : s.key === 'explore' && !productSpec ? 'describe a product first' : s.label}
-                className={cn('relative flex shrink-0 items-center gap-1.5 border-b border-r border-border px-3 text-[11.5px]',
+                title={s.key === 'id' && !idBrief && !productSpec ? `${s.label} — describe a product first` : s.key === 'explore' && !productSpec ? `${s.label} — describe a product first` : s.label}
+                className={cn('relative flex shrink-0 items-center gap-1.5 border-b border-r border-border text-[11.5px]',
+                  tabsTight ? 'px-2' : 'px-3',
                   on ? 'border-b-transparent bg-background font-medium text-foreground'
                     : 'bg-card/40 text-muted-foreground hover:text-foreground',
                   locked && 'cursor-not-allowed opacity-40 hover:text-muted-foreground')}>
                 {on && <span aria-hidden className="absolute inset-x-0 top-0 h-px bg-primary" />}
                 {badged[s.key] && <span aria-hidden className={cn('absolute right-1 top-1 h-1.5 w-1.5 rounded-full', badged[s.key] === 'failed' ? 'bg-red-500' : 'bg-primary')} />}
                 <s.Icon className={cn('size-3.5 shrink-0', on && 'text-primary')} />
-                {s.label}
-                {!s.built && <span className="bg-muted px-1 text-[8px] uppercase tracking-wide text-muted-foreground">soon</span>}
+                {(!tabsTight || on) && s.label}
+                {!s.built && (!tabsTight || on) && <span className="bg-muted px-1 text-[8px] uppercase tracking-wide text-muted-foreground">soon</span>}
               </button>
             )
           })}
@@ -1102,11 +1176,12 @@ export default function Compose2Page() {
               overflow — kept fully functional, just out of the default happy path */}
           <div className="relative flex shrink-0 items-stretch border-b border-r border-border bg-card/40">
             <button type="button" onClick={() => setStagesMoreOpen((o) => !o)} title="More stages (advisory fidelity)"
-              className={cn('relative flex items-center gap-1.5 px-3 text-[11.5px]',
+              className={cn('relative flex items-center gap-1.5 text-[11.5px]',
+                tabsTight ? 'px-2' : 'px-3',
                 moreActive ? 'font-medium text-foreground' : 'text-muted-foreground hover:text-foreground')}>
               {moreStages.some((s) => badged[s.key]) && <span aria-hidden className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-primary" />}
               <MoreHorizontal className={cn('size-3.5 shrink-0', moreActive && 'text-primary')} />
-              More
+              {(!tabsTight || moreActive) && 'More'}
             </button>
             {stagesMoreOpen && (
               <div className="absolute left-0 top-full z-30 mt-1 w-48 rounded-md border border-border bg-card py-1 shadow-lg">
@@ -1293,6 +1368,7 @@ export default function Compose2Page() {
       />
       <StatusBar
         runId={pipelineRunId ?? (selectedId || null)}
+        runName={selectedRun?.name ?? null}
         pipeline={pipelineRunId ? pipeStatusByRun[pipelineRunId] : pipeStatus}
         running={!!pipelineRunId}
         tiers={llmTiers}

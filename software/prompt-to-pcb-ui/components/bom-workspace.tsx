@@ -68,6 +68,18 @@ export function BomWorkspace({ lines, runId, onResolve }: {
       l.ref.toLowerCase().includes(q) || l.part.toLowerCase().includes(q) || l.lcsc.toLowerCase().includes(q))
   }, [query, data])
 
+  // Board cost. Priced lines only — an unpriced line must not silently read as
+  // $0.00, so the footer reports how many lines are missing a price.
+  const total = useMemo(() => filtered.reduce(
+    (acc, l) => {
+      const qty = Number(l.qty) || 0
+      acc.qty += qty
+      if (l.unitPrice) { acc.usd += l.unitPrice * qty; acc.priced += 1 } else acc.unpriced += 1
+      return acc
+    },
+    { qty: 0, usd: 0, priced: 0, unpriced: 0 },
+  ), [filtered])
+
   async function pinLine(l: BomLine) {
     if (!runId) return
     setPinBusy(l.ref)
@@ -137,14 +149,19 @@ export function BomWorkspace({ lines, runId, onResolve }: {
           return (
             <div key={l.ref + l.part} className={cn('group flex items-center gap-3 border-b border-border/60 px-3 py-1.5',
               unspec && l.lineType !== 'buyer-furnished' && 'bg-amber-500/5')}>
-              <span className="w-20 shrink-0 truncate font-mono text-[11px] text-muted-foreground">{l.ref}</span>
-              <span className="min-w-0 flex-1 truncate text-[12px] text-foreground">{l.part}</span>
+              {/* Ref and part both truncated to nothing while a fixed 80px
+                  action column sat empty beside them. The ref column now
+                  shrinks with the pane, the part gets the room, and both carry
+                  the full text as a tooltip. */}
+              <span className="w-14 shrink-0 truncate font-mono text-[11px] text-muted-foreground lg:w-20" title={l.ref}>{l.ref}</span>
+              <span className="min-w-0 flex-1 truncate text-[12px] text-foreground" title={l.part}>{l.part}</span>
               <span className="hidden shrink-0 sm:block">{quoteCell(l)}</span>
               <span className="w-8 shrink-0 text-right font-mono text-[11px] text-muted-foreground">×{l.qty}</span>
               <span className="w-14 shrink-0 text-right font-mono text-[11px] text-muted-foreground">
                 {l.unitPrice ? `$${l.unitPrice.toFixed(2)}` : '—'}
               </span>
-              <span className="flex w-20 shrink-0 items-center justify-end gap-1">
+              <span className={cn('flex shrink-0 items-center justify-end gap-1',
+                unspec && l.lineType !== 'buyer-furnished' ? 'w-20' : 'w-6')}>
                 {unspec && l.lineType !== 'buyer-furnished' ? (
                   onResolve && (
                     <button type="button" title="resolve in chat"
@@ -174,6 +191,22 @@ export function BomWorkspace({ lines, runId, onResolve }: {
           <div className="p-6 text-center text-sm text-muted-foreground">no BOM lines{query ? ' match' : ' yet — build a board first'}</div>
         )}
       </div>
+
+      {/* The one number a BOM exists to produce, and the panel never showed it. */}
+      {!!filtered.length && (
+        <div className="flex shrink-0 items-center gap-2 border-t border-border px-3 py-2 text-[11px]">
+          <span className="min-w-0 truncate text-muted-foreground">
+            {total.priced} of {filtered.length} line{filtered.length === 1 ? '' : 's'} priced
+            {total.unpriced > 0 && (
+              <span className="text-amber-600 dark:text-amber-400"> · {total.unpriced} unpriced</span>
+            )}
+          </span>
+          <span className="ml-auto shrink-0 font-mono text-foreground">
+            {total.qty} pcs · ${total.usd.toFixed(2)}
+            <span className="ml-1 text-[10px] text-muted-foreground">/ board</span>
+          </span>
+        </div>
+      )}
     </div>
   )
 }

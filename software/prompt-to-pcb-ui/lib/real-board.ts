@@ -40,6 +40,18 @@ export interface RealBoardJson {
   }
 }
 
+/** The bespoke chip-down board artifact (tools/tscircuit run_board.mjs output). */
+export interface ChipScaleJson {
+  boardMm?: { w: number; h: number }
+  components?: number
+  drc?: {
+    available?: boolean
+    errors?: number
+    ruleProfile?: string
+    errorTypes?: Record<string, number>
+  }
+}
+
 export interface RealBoard {
   /** the snapshot this board was loaded from ('' = shared latest, '/runs/<id>'
    * = a run's own snapshot). Used to guard against rendering one run's board
@@ -147,11 +159,58 @@ function buildRun(b: RealBoardJson): Run {
   }
 }
 
+/** The two boards a run carries. Every gate report names the one it measures. */
+export const REFERENCE_BOARD = 'reference variant (parametric floorplan)'
+export const SHIPPED_BOARD = 'shipped board (chip-down)'
+
+/**
+ * The shipped chip-down board's own KiCad DRC, as a gate report.
+ *
+ * buildReports() below only ever described the reference variant, so the
+ * Checks panel reported a clean board while the Overview — which reads the
+ * chip-scale artifact — reported failures on the board that actually ships.
+ * This puts the shipped board's referee result in the same list, first.
+ */
+function chipReport(chip: ChipScaleJson | null): GateReport | null {
+  if (!chip?.drc?.available) return null
+  const errors = chip.drc.errors ?? 0
+  const types = chip.drc.errorTypes ?? {}
+  const electrical =
+    (types.shorting_items ?? 0) + (types.tracks_crossing ?? 0) + (types.unconnected_items ?? 0)
+  const named = Object.entries(types)
+    .sort((a, b) => b[1] - a[1])
+    .map(([k, n]) => `${k.replace(/_/g, ' ')} ${n}`)
+    .join(', ')
+  return {
+    file: 'kicad DRC (shipped board)',
+    stage: 'validation',
+    board: SHIPPED_BOARD,
+    checks: [
+      {
+        rule: 'electrical faults = 0',
+        measured: electrical === 0 ? '0 shorts / crossings / open nets' : `${electrical} electrical`,
+        pass: electrical === 0,
+      },
+      {
+        rule: 'DRC errors = 0',
+        measured: errors === 0 ? '0 errors' : `${errors}: ${named}`,
+        pass: errors === 0,
+      },
+      {
+        rule: 'fab rule profile',
+        measured: chip.drc.ruleProfile ?? 'unknown',
+        pass: true,
+      },
+    ],
+  }
+}
+
 function buildReports(b: RealBoardJson): GateReport[] {
   return [
     {
       file: 'placement_score.json',
       stage: 'placement',
+      board: REFERENCE_BOARD,
       checks: [
         {
           rule: 'courtyard overlaps = 0',
@@ -176,6 +235,7 @@ function buildReports(b: RealBoardJson): GateReport[] {
     {
       file: 'routing (flroute emission)',
       stage: 'routing',
+      board: REFERENCE_BOARD,
       checks: [
         {
           rule: 'dirty nets emitted = 0',
@@ -197,6 +257,7 @@ function buildReports(b: RealBoardJson): GateReport[] {
     {
       file: 'drc.json',
       stage: 'validation',
+      board: REFERENCE_BOARD,
       checks: [
         {
           rule: 'DRC violations = 0',
@@ -227,7 +288,7 @@ export async function loadRealBoard(base = ''): Promise<RealBoard | null> {
     fetchJson<BomLine[]>(`${base}/data/bom.json`),
     fetchJson<AtoFile[]>(`${base}/data/ato.json`),
     // the bespoke chip-scale board (the real chip-down design)
-    base ? fetchJson<{ boardMm?: { w: number; h: number }; components?: number }>(`${base}/electronics/chipscale-board.json`) : Promise.resolve(null),
+    base ? fetchJson<ChipScaleJson>(`${base}/electronics/chipscale-board.json`) : Promise.resolve(null),
   ])
   // When the chip-scale board exists, the headline size + part count should be
   // ITS numbers (the small chip-down board that goes in the enclosure and now
@@ -238,7 +299,11 @@ export async function loadRealBoard(base = ''): Promise<RealBoard | null> {
     if (chip.components) board.components = chip.components
     board.source = 'chip-scale chip-down board'
   }
-  return { base, board, run: buildRun(board), reports: buildReports(board), bom, ato }
+  // The shipped board's referee result leads; the reference variant's reports
+  // follow, each labelled with the board it measures.
+  const shipped = chipReport(chip)
+  const reports = shipped ? [shipped, ...buildReports(board)] : buildReports(board)
+  return { base, board, run: buildRun(board), reports, bom, ato }
 }
 
 /**

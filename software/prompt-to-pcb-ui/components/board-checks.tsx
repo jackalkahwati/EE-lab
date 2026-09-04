@@ -21,7 +21,15 @@ export function BoardChecks({ real }: { real: RealBoard | null }) {
         return (
           <div key={i} className="rounded-md border border-border">
             <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-              <span className="min-w-0 flex-1 truncate font-mono text-[11px]">{r.file}</span>
+              <span className="min-w-0 flex-1 truncate font-mono text-[11px]">
+                {r.file}
+                {/* A run carries two boards. Naming the one each report
+                    measures is what stops this panel and the Overview from
+                    printing opposite DRC verdicts with no explanation. */}
+                {r.board && (
+                  <span className="ml-1.5 font-sans text-[10px] font-normal text-muted-foreground">{r.board}</span>
+                )}
+              </span>
               <span className={cn('rounded-sm border px-1.5 py-0.5 font-mono text-[9px]',
                 pass ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500'
                   : 'border-destructive/40 bg-destructive/10 text-destructive')}>

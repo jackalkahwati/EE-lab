@@ -32,9 +32,12 @@ function fmtElapsed(ms: number): string {
   return h > 0 ? `${h}:${p(m)}:${p(sec)}` : `${m}:${p(sec)}`
 }
 
-export function StatusBar({ runId, pipeline, running, tiers, problemCount, onProblemsClick, startedAt }: {
+export function StatusBar({ runId, runName, pipeline, running, tiers, problemCount, onProblemsClick, startedAt }: {
   /** the run on screen (or in flight) — shown shortened */
   runId?: string | null
+  /** the board's name, so the bar reads "Desk Air Quality Monitor · dc5d77ab"
+   *  rather than an eight-character id nobody can place */
+  runName?: string | null
   /** the selected run's per-stage pipeline status map (pipeStatusByRun entry) */
   pipeline?: StageMap | null
   /** true while the full pipeline is in flight for this run */
@@ -88,7 +91,12 @@ export function StatusBar({ runId, pipeline, running, tiers, problemCount, onPro
       <div className="flex min-w-0 items-center gap-3">
         <span className="flex items-center gap-1.5">
           <Dot className={dot} />
-          {runId ? <span className="text-foreground/80">{shortRunId(runId)}</span> : <span>no run</span>}
+          {runId ? (
+            <span className="flex min-w-0 items-center gap-1.5" title={runName ? `${runName} · ${runId}` : runId}>
+              {runName && <span className="max-w-[22ch] truncate font-sans text-foreground/90">{runName}</span>}
+              <span className="text-foreground/60">{shortRunId(runId)}</span>
+            </span>
+          ) : <span>no run</span>}
         </span>
         {counts.total > 0 && (
           <span className="flex items-center gap-2 tabular-nums">
