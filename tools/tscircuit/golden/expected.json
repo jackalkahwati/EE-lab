@@ -1,30 +1,34 @@
 {
-  "_note": "Bars record what the router ACTUALLY does today, not what we want it to do. A regression is MORE errors or LOST convergence. Lowering a bar is a deliberate act: do it in the same commit that improves the router, never to make a red suite go green.",
+  "_note": "Bars record what the router ACTUALLY does today, not what we want it to do. maxElectrical (shorts, crossings, open nets) is the bar that matters: it decides whether the board WORKS. maxErrors is mostly fab nits and may legitimately RISE when the ladder buys electrical correctness with clearance violations \u2014 that is an improvement, not a regression. Lowering a bar is a deliberate act: do it in the same commit that improves the router, never to make a red suite go green.",
   "tiny": {
     "maxErrors": 1,
+    "maxElectrical": 1,
     "maxUnrouted": 0,
     "mustConverge": false
   },
   "baseline": {
     "maxErrors": 0,
+    "maxElectrical": 0,
     "maxUnrouted": 0,
     "mustConverge": true
   },
   "residual": {
-    "_was": "Rejected outright before synthetic footprints existed (header_1x17). Now BUILDS and routes; still short of clean, which is a density/routing problem, not a footprint one.",
     "maxErrors": 10,
+    "maxElectrical": 6,
     "maxUnrouted": 5,
     "mustConverge": false
   },
   "short": {
-    "_was": "6 before the residual-repair fixes (bbox parse, targeting, step sizing)",
     "maxErrors": 5,
+    "maxElectrical": 1,
     "maxUnrouted": 0,
     "mustConverge": false
   },
   "dense": {
-    "maxErrors": 7,
+    "maxErrors": 11,
+    "maxElectrical": 1,
     "maxUnrouted": 0,
-    "mustConverge": false
+    "mustConverge": false,
+    "_was": "7 errors INCLUDING a short (electrical 3) before severity-weighted ranking; now 11 errors with zero shorts (electrical 1). Higher number, working board."
   }
 }
