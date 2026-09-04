@@ -60,57 +60,53 @@ Same pattern for `build.firstlight.cloudflared` and `build.firstlight.llmproxy`
 
 ---
 
+## Where production actually runs (changed 2026-09-04)
+
+The app runs from the **internal disk** at `~/firstlight-prod`, NOT from the
+external drive. On 2026-09-03 the T9 volume dropped off the USB bus and took the
+whole product down, because the app directory, its build and its `.env.local`
+all lived on it. Only the bulky run store is still external:
+
+    ~/firstlight-prod/software/prompt-to-pcb-ui/          <- app, build, .env.local, data/
+    ~/firstlight-prod/software/prompt-to-pcb-ui/public/runs -> /Volumes/T9 Backup/... (symlink)
+
+So losing the drive is now a degraded state (existing boards unreadable, new
+runs fail) rather than an outage (login and the app itself keep working).
+
+`~/EE-lab` is the DEV checkout and must never serve production — that is how a
+stray edit becomes a live change.
+
+**The symlink must not exist while building.** Turbopack refuses a symlink that
+points outside the project root ("points out of the filesystem root") and the
+build dies. The build does not need the run store; only the runtime does. So the
+ship procedure below removes it, builds, and puts it back.
+
 ## Ship new code
 
-Production serves the checkout on the `T9 Backup` drive, so shipping is:
-sync that checkout to `origin/main`, rebuild, and reload the launchd job.
-`next start` serves the last `pnpm build` output, so a rebuild is mandatory —
-restarting the job without one keeps serving the old bundle.
-
 ```bash
-cd "/Volumes/T9 Backup/EE-lab" \
-  && git fetch \
-  && git checkout -f -B main origin/main \
-  && cd software/prompt-to-pcb-ui \
-  && pnpm install --frozen-lockfile \
-  && pnpm build \
-  && launchctl bootout gui/$UID/build.firstlight.compose; \
-launchctl bootstrap gui/$UID ~/Library/LaunchAgents/build.firstlight.compose.plist \
-  && curl -sI localhost:4500 | head -1
+PROD=~/firstlight-prod/software/prompt-to-pcb-ui
+launchctl bootout gui/$UID/build.firstlight.compose        # STOP FIRST: a build
+                                                           # rewrites .next under
+                                                           # a live next start
+cd ~/firstlight-prod && git fetch && git checkout -f -B main origin/main
+cd "$PROD"
+pnpm install --frozen-lockfile        # only when package.json/lockfile changed
+rm -f public/runs && mkdir -p public/runs   # symlink breaks the build
+pnpm build                                  # FOREGROUND. A killed background
+                                            # build caused a 13-min outage.
+rmdir public/runs && ln -s "/Volumes/T9 Backup/EE-lab/software/prompt-to-pcb-ui/public/runs" public/runs
+launchctl bootstrap gui/$UID ~/Library/LaunchAgents/build.firstlight.compose.plist
+curl -sI localhost:4500 | head -1                          # expect 307
 ```
 
-Expect `HTTP/1.1 200 OK` (or a 3xx redirect to sign-in) from the final `curl`.
-Then run `./deploy/healthcheck.sh` to confirm the public host is back.
-
-When anything under `tools/` changed (tscircuit routing, KiCad helpers), also
-refresh the tscircuit toolchain the pipeline shells out to:
+When tools/ changed, also refresh the pipeline toolchain:
 
 ```bash
-cd ../../tools/tscircuit && npm install
+cd ~/firstlight-prod/tools/tscircuit && npm install   # postinstall re-patches dsn-converter
 ```
 
-### Environment for the compose launchd job
-
-The plist for `build.firstlight.compose` carries the app's environment
-(`EnvironmentVariables` dict). Two rules:
-
-- **`FL_TERMINAL` must NOT be set** in the compose plist. `FL_TERMINAL=1`
-  enables the in-product Shell tab (`/api/admin/me` → `terminalEnabled`), which
-  gives admins a shell on the production Mac. Leave it unset in production.
-- `deploy/env.example` documents the full variable set. The ones below are not
-  obvious from the code paths but matter operationally:
-
-| Variable | Why it matters |
-|----------|----------------|
-| `FL_PYTHON` | Interpreter for every planner/sim subprocess (`lib/v1-jobs.ts`, `lib/design-gate.ts`, `app/api/*`). Point it at the python that has `jsonschema`, `easyeda2kicad`, and the sim deps; default `python3`. |
-| `FL_ADMIN_EMAILS` | Comma list of admin accounts (`lib/auth.ts`). Gates admin routes; `FL_ADMIN_EMAILS[0]` is also the default `CONTACT_NOTIFY_EMAIL` for `/api/contact`. |
-| `FL_SELF_URL` | Public origin used to build absolute `statusUrl`/`artifactsUrl` in the v1 API (`app/api/v1/boards`, `app/api/runs/targeted`). Behind the Cloudflare tunnel the request origin is `localhost:4500`, so set this to `https://app.firstlight.build`. |
-| `FL_KICAD_CLI` / `FL_KICAD_PYTHON` | Paths to `kicad-cli` and KiCad's bundled python (`lib/toolchain.ts`). Needed for DRC, exports, and 3D renders; the homebrew fallback is a guess. |
-| `OPENROUTER_API_KEY` | Platform-funded model for users with no BYOK key. Without it free/Pro users get a 402 on every run. |
-| `STRIPE_WEBHOOK_SECRET` | Billing webhook returns 503 until set; async payment/cancellation events are dropped without it. |
-| `FL_BACKUP_DIR` / `FL_BACKUP_REMOTE` | Where `deploy/backup-data.sh` writes snapshots and the off-machine mirror target. Set the remote; the default keeps backups on the same drive as the live data. |
-
----
+Skip the rebuild entirely when only non-app files changed. Normal downtime is
+under 30 seconds.
 
 ## Where data lives (and what is NOT redundant)
 

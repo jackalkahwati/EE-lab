@@ -42,7 +42,7 @@
   <dict>
     <key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     <!-- The script is installed at ~/bin, so tell it where the app lives. -->
-    <key>FL_APP_DIR</key><string>/Volumes/T9 Backup/EE-lab/software/prompt-to-pcb-ui</string>
+    <key>FL_APP_DIR</key><string>/Users/jackal-kahwati/firstlight-prod/software/prompt-to-pcb-ui</string>
     <!-- Internal disk: off the USB drive the live data sits on. -->
     <key>FL_BACKUP_DIR</key><string>/Users/jackal-kahwati/firstlight-backups</string>
     <key>FL_BACKUP_KEEP</key><string>14</string>
