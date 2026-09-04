@@ -227,3 +227,24 @@ Logs: `/tmp/firstlight-healthcheck.log` / `.err`.
 (persistent disk, systemd services that survive reboot without a GUI login,
 reverse proxy with auto-TLS). This runbook keeps the current Mac deployment
 survivable in the interim; it does not make it highly available.
+
+### Onshape credentials (the mechanical stage depends on them)
+
+`ONSHAPE_ACCESS_KEY` / `ONSHAPE_SECRET_KEY` must be present or the enclosure CAD
+step produces nothing — the app spawns `tools/onshape/render_plan.py`, which
+builds the enclosure in a real Onshape document and exports STEP. They live in
+TWO places on purpose:
+
+    software/prompt-to-pcb-ui/.env.local   # the app passes them to the spawn
+    tools/onshape/.env                     # so the script also works run by hand
+
+Both are gitignored; the source of truth is the work-hub vault. `render_plan.py`
+uses `setdefault`, so the environment wins over the file.
+
+Verify with a read-only call:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -u "$ONSHAPE_ACCESS_KEY:$ONSHAPE_SECRET_KEY" \
+  https://cad.onshape.com/api/documents?limit=1     # expect 200
+```
+
