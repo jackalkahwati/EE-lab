@@ -712,7 +712,20 @@ async function realDrcInner(cj, profileKey = 'standard') {
     fs.writeFileSync(pcbPath, decorateMountingHoles(conv.getOutputString(), profile.holeClearance ?? 0.5))
     fs.writeFileSync(path.join(dir, 'board.kicad_dru'), profile.rules)
     const r = spawnSync(KICAD_CLI, ['pcb', 'drc', '--format', 'json', '--output', drcPath, pcbPath], { encoding: 'utf8', timeout: 120000 })
-    if (!fs.existsSync(drcPath)) return { available: false, reason: 'drc produced no report', stderr: (r.stderr || '').slice(0, 200) }
+    if (!fs.existsSync(drcPath)) {
+      // Keep the board that KiCad REFUSED. A failed DRC is exactly when the
+      // artifact is worth having, and dumping only on success meant every
+      // "Failed to load board" was undiagnosable after the temp dir was wiped.
+      if (process.env.FL_FR_DEBUG) {
+        try {
+          const dbg = path.join(process.env.FL_FR_DEBUG, `drc-FAILED-${TIMINGS.counters.kicadDrcRuns}`)
+          fs.mkdirSync(dbg, { recursive: true })
+          fs.copyFileSync(pcbPath, path.join(dbg, 'board.kicad_pcb'))
+          fs.writeFileSync(path.join(dbg, 'stderr.txt'), r.stderr || '')
+        } catch { /* debug only */ }
+      }
+      return { available: false, reason: 'drc produced no report', stderr: (r.stderr || '').slice(0, 200) }
+    }
     const rep = JSON.parse(fs.readFileSync(drcPath, 'utf8'))
     // FL_FR_DEBUG: keep each DRC run's board + report (numbered in call order,
     // correlate with the [t] realDrc stderr lines) for offline diagnosis of WHY
@@ -1254,9 +1267,44 @@ async function netAwarePlace(parts, nets, { maxW = 15, gap = 2.1 } = {}) {
  *  copper clears the outline. Mutates cj in place; returns the list of fixes.
  *  What it can't fix (e.g. vias the router packs too close) stays in the re-run
  *  DRC and is reported honestly, never hidden. */
+/**
+ * Force every via to span the OUTER layers, and drop degenerate one-layer vias.
+ *
+ * freerouting emits blind/buried vias on multi-layer boards (F.Cu->In2.Cu,
+ * In1.Cu->B.Cu, and on one real board a single-layer "via"). KiCad REFUSES to
+ * load a board carrying untyped blind vias — `kicad-cli pcb drc` answers
+ * "Failed to load board" — so those rungs were unusable. Measured on a 41-part
+ * 6-layer board: 25 of 27 vias were blind, every freerouting rung failed DRC,
+ * and the ladder fell through to the built-in router.
+ *
+ * Normalising is also the right FAB answer: both profiles here (JLCPCB
+ * standard and HDI) are through-via processes, so a blind via is a stackup the
+ * board could never actually buy.
+ */
+function normalizeViaSpans(cj) {
+  let n = 0
+  const fix = (v) => {
+    const had = (v.layers?.length ?? 0) > 0 || v.from_layer || v.to_layer
+    if (!had) return
+    if (v.from_layer === 'top' && v.to_layer === 'bottom' && !v.layers?.length) return
+    delete v.layers
+    v.from_layer = 'top'
+    v.to_layer = 'bottom'
+    n++
+  }
+  for (const e of cj) {
+    if (e.type === 'pcb_via') fix(e)
+    else if (e.type === 'pcb_trace' && Array.isArray(e.route)) {
+      for (const p of e.route) if (p.route_type === 'via') fix(p)
+    }
+  }
+  return n
+}
+
 function fabRepair(cj, { pad = 0.5, hole = 0.2 } = {}) {
   const fixes = []
   let vias = 0
+  const spans = normalizeViaSpans(cj)
   const allVias = cj.filter((e) => e.type === 'pcb_via')
   if (process.env.FL_FR_DEBUG) process.stderr.write(`[fabRepair] ${allVias.length} pcb_via in cj; sizes: ${JSON.stringify(allVias.map((v) => v.outer_diameter))}\n`)
   for (const e of cj) {
@@ -1278,6 +1326,7 @@ function fabRepair(cj, { pad = 0.5, hole = 0.2 } = {}) {
     }
   }
   if (vias) fixes.push(`enlarged ${vias} via${vias === 1 ? '' : 's'} to ${pad}mm pad / ${hole}mm hole`)
+  if (spans) fixes.push(`converted ${spans} blind/buried via${spans === 1 ? '' : 's'} to through-vias (the fab profile is a through-via process, and KiCad rejects untyped blind vias outright)`)
   const board = cj.find((e) => e.type === 'pcb_board')
   if (board) {
     board.width += 1.2; board.height += 1.2; fixes.push('added 0.6mm board-edge copper margin')
@@ -1812,17 +1861,37 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15 } = {}) {
         // route would be checked against a 2-layer stackup and mis-flag inner traces.
         if (s.layers > 2) board.num_layers = s.layers
       }
+      // Freerouting's own vias need the same normalisation the built-in path
+      // gets from fabRepair; without it KiCad refuses the board and the whole
+      // rung is thrown away (see normalizeViaSpans).
+      const spanFixed = normalizeViaSpans(cj)
       fixes = [
         netAwarePlaced ? 'net-aware placement (min pin-to-pin wirelength)' : 'connectivity placement',
         `routed with freerouting (push & shove, ${s.layers}-layer)`,
         'added 0.6mm board-edge copper margin',
       ]
+      if (spanFixed) fixes.push(`converted ${spanFixed} blind/buried via${spanFixed === 1 ? '' : 's'} to through-vias (the fab profile is a through-via process; KiCad rejects untyped blind vias)`)
       if (unrouted) fixes.push(`${unrouted} net(s) left unrouted`)
     } else {
       fixes = fabRepair(cj, FAB_PROFILES[s.profile].via)
     }
     const drc = await realDrc(cj, s.profile)
-    if (!drc.available) return { available: false, drc, trail, best: null }
+    if (!drc.available) {
+      // A DRC run that fails is a problem with THAT rung, not a verdict on the
+      // whole board. Aborting here threw away every good candidate the ladder
+      // had already found: measured on a 41-part hierarchical board, five rungs
+      // had routed it to 9 unrouted nets when one DRC came back unavailable —
+      // the ladder returned nothing, the caller fell through to the unrouted
+      // fallback build, and a board with 27 of 36 nets routed was reported with
+      // ZERO traces. Skip the rung, keep what we have, and only give up if no
+      // rung ever produced a usable result.
+      // Keep the underlying stderr: "drc produced no report" alone says the
+      // tool failed but not why, and this is the line someone will be reading
+      // when a whole class of boards silently loses its best rungs.
+      const why = [drc.reason, drc.stderr].filter(Boolean).join(' — ').slice(0, 200)
+      trail.push({ iter: i + 1, strategy: s.name, skipped: `DRC unavailable (${why})` })
+      continue
+    }
     // Reconcile the open-net count against the REFEREE.
     //
     // The structural count (source traces whose id came back on no routed wire)
@@ -1876,6 +1945,9 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15 } = {}) {
       }
     }
   }
+  // Every rung failed to produce a usable DRC result. Say so honestly rather
+  // than dereferencing a null best; the caller falls back to its own build.
+  if (!best) return { available: false, drc: { available: false, reason: 'no strategy produced a DRC-checkable board' }, trail, best: null }
   const converged = best.drc.errors === 0 && best.unrouted === 0
   let verdict = null
   if (!converged) {
