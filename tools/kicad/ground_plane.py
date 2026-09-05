@@ -74,6 +74,19 @@ corners = [
 
 
 def add_zone(layer_id):
+    # IDEMPOTENT. The board handed to us may ALREADY carry a GND zone on this
+    # layer -- the router's own output does, and a re-pour would too. Adding a
+    # second one on the same layer, same net, same default priority is what
+    # KiCad reports as "Copper zones intersect (intersecting zones must have
+    # distinct priorities)", and the duplicate also strands a pad on the wrong
+    # island: 2 zones_intersect plus 1 unconnected on the first board where
+    # stitching actually worked, all at one point. Reuse the zone instead.
+    for z in board.Zones():
+        if (not z.GetIsRuleArea() and z.GetLayer() == layer_id
+                and z.GetNetCode() == gnd.GetNetCode()):
+            z.SetPadConnection(pcbnew.ZONE_CONNECTION_FULL)
+            z.SetLocalClearance(pcbnew.FromMM(max(0.2, hole_clearance)))
+            return z
     z = pcbnew.ZONE(board)
     z.SetLayer(layer_id)
     z.SetNet(gnd)
