@@ -837,8 +837,13 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
         </div>
       )}
 
-      {/* input */}
-      <div className="border-t border-border p-2">
+      {/* input — shrink-0 is load-bearing. Without it the composer is a
+          shrinkable flex child, so a tall thread body (product card +
+          disciplines) squeezed it until the Send button was clipped under the
+          terminal panel and unclickable: the textarea still accepted text and
+          Enter still submitted, so it read as "the button does nothing". The
+          scrollable thread body above absorbs the squeeze instead. */}
+      <div className="shrink-0 border-t border-border p-2">
         <div className="flex flex-col gap-1.5 border border-border bg-background p-2 focus-within:border-primary/50">
           <textarea
             ref={taRef}

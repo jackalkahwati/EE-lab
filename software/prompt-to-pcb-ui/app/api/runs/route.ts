@@ -23,7 +23,7 @@ const STAGE_IDS: StageId[] = ['design', 'placement', 'routing', 'validation', 'f
 
 // Bump when buildRun's output shape changes — it's baked into every cache key,
 // so a bump invalidates all persisted entries and forces a clean rebuild.
-const CACHE_VERSION = 'v1'
+const CACHE_VERSION = 'v2' // v2: chip-scale-only runs are listed too
 
 function readJson(p: string): Record<string, unknown> | unknown[] | null {
   try {
@@ -47,7 +47,17 @@ function signatureFor(runsDir: string, id: string): string | null {
   try {
     b = fs.statSync(path.join(dataDir, 'board.json')).mtimeMs
   } catch {
-    return null
+    // No variant board.json. That used to end the run's existence as far as
+    // the UI was concerned — but board.json is the LEGACY variant board, and a
+    // run whose only board is the chip-scale one (the board that actually
+    // ships) has no board.json at all. Ten of the owner's own runs were
+    // invisible in the run list for exactly this reason, including every run
+    // built through the current pipeline. The chip-scale artifact counts.
+    try {
+      b = fs.statSync(path.join(dir, 'electronics', 'chipscale-board.json')).mtimeMs
+    } catch {
+      return null
+    }
   }
   let l = 0
   try { l = fs.statSync(path.join(dataDir, 'last-run.json')).mtimeMs } catch { /* board-only run */ }
@@ -59,10 +69,34 @@ function signatureFor(runsDir: string, id: string): string | null {
 /** Build one run's Run entry from its own data files. null if it never built. */
 function buildRun(runsDir: string, id: string): Run | null {
   const dataDir = path.join(runsDir, id, 'data')
-  const board = readJson(path.join(dataDir, 'board.json')) as Record<string, any> | null
-  // a run that never produced a board.json never built a board, skip it rather
-  // than show a phantom entry with no board behind it.
-  if (!board) return null
+  let board = readJson(path.join(dataDir, 'board.json')) as Record<string, any> | null
+  if (!board) {
+    // Chip-scale-only run: describe it from the board it actually built.
+    // run_board's shape differs from the variant board.json, so map the fields
+    // the list needs and leave the rest at their honest zero — this entry is a
+    // row in a list, not a substitute for the artifact.
+    const chip = readJson(path.join(runsDir, id, 'electronics', 'chipscale-board.json')) as Record<string, any> | null
+    if (!chip) return null
+    const cdrc = (chip.drc ?? {}) as Record<string, any>
+    const crep = (chip.drcRepair ?? {}) as Record<string, any>
+    board = {
+      source: 'chip-scale chip-down board',
+      components: chip.components ?? 0,
+      netsTotal: chip.routedTraces ?? 0,
+      netsRouted: (chip.routedTraces ?? 0) - (crep.unrouted ?? 0),
+      layers: crep.layers ?? null,
+      boardSize: chip.boardMm ? { wMm: chip.boardMm.w, hMm: chip.boardMm.h } : null,
+      hpwlMm: 0,
+      // The SHIPPED board's referee numbers, so the list's PASSED/GATE FAILED
+      // means the same thing here as the Overview panel's verdict.
+      drc: {
+        violations: cdrc.available === true ? (cdrc.errors ?? 0) : 1,
+        unconnectedItems: crep.unrouted ?? 0,
+        date: '',
+      },
+      placement: { overlaps: 0, offBoard: [] },
+    }
+  }
   const lr = (readJson(path.join(dataDir, 'last-run.json')) as Record<string, any>) ?? {}
   const bom = readJson(path.join(dataDir, 'bom.json'))
   const bomLines = Array.isArray(bom) ? bom.length : 0
@@ -178,7 +212,7 @@ export async function GET(req: Request) {
   let changed = false
   for (const id of ids) {
     const key = signatureFor(runsDir, id)
-    if (!key) continue // no board.json → never built a board
+    if (!key) continue // neither a variant board.json nor a chip-scale board
     let run = cachedRun(id, key)
     if (!run) {
       run = buildRun(runsDir, id)

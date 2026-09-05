@@ -851,6 +851,31 @@ def netlist_from_design(design, chip_scale=True, real_geometry=False):
         #  - run_board accepts qfn4..qfn64 only; a part with more wired pads than
         #    qfn64 has no honest generic mapping.
         nonnum = sorted(p for p in nm if not str(p).isdigit())
+        if nonnum and kind == "connector":
+            # A connector's pads are NAMED, not numbered — A1/B4/SHIELD on a
+            # USB-C receptacle. The strip below therefore removed every pad and
+            # then the part itself, so a board asked for a USB-C connector
+            # shipped without one, and design_check.py failed it for having no
+            # connector at all.
+            #
+            # But a connector's value IS its net connections, and those are all
+            # known; what is not known is its real land pattern. So put them on
+            # a header stand-in with the same pad COUNT in a stable order and
+            # record the mapping pad by pad. That is the same approximation
+            # already made for every IC (an LQFP48 routed as qfn48) — the
+            # netlist stays exact, the geometry is a placeholder, and the note
+            # says so. Dropping the part silently loses the connection; this
+            # keeps it and shows its work.
+            order = sorted(nm, key=lambda q: (not str(q).isdigit(), str(q)))
+            padmap = {q: i + 1 for i, q in enumerate(order)}
+            shown = ", ".join("%s->%d" % (q, padmap[q]) for q in order[:6])
+            notes.append("%s%s: %d connector pad(s) remapped onto a %d-pin header "
+                         "stand-in (%s%s) — every net preserved, land pattern "
+                         "approximate until a real footprint is used"
+                         % (ref, " (%s)" % mpn if mpn else "", len(nonnum),
+                            len(order), shown, ", …" if len(order) > 6 else ""))
+            nm = {str(padmap[q]): v for q, v in nm.items()}
+            nonnum = []
         if nonnum:
             # qfnN pins are strictly numeric, so these pads (A4/B9/SHIELD on
             # connectors, EP names) cannot exist on the fallback footprint.
