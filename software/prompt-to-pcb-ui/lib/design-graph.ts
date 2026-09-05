@@ -12,7 +12,9 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
-import { productForRun, type Pin } from '@/lib/design-state'
+// relative + explicit extension so `node --test` can load this module
+// directly; the @/ alias is a bundler feature and tests/ has no resolver for it
+import { productForRun, type Pin } from './design-state.ts'
 
 export type PipeStageName =
   | 'electronics' | 'mechanical' | 'simulation'
@@ -36,6 +38,15 @@ function readJson(runId: string, rel: string): any | null {
 
 function sha(v: unknown): string {
   return createHash('sha256').update(JSON.stringify(v ?? null)).digest('hex').slice(0, 24)
+}
+
+/** Content hash of a file, or null when it does not exist. */
+function shaFile(p: string): string | null {
+  try {
+    return createHash('sha256').update(fs.readFileSync(p)).digest('hex').slice(0, 24)
+  } catch {
+    return null
+  }
 }
 
 /** Engineer change-request text, an input to exactly the stages it targets
@@ -62,9 +73,23 @@ function pinsFor(runId: string, areas: Pin['area'][]): unknown {
 function boardIdentity(runId: string): unknown {
   const b = readJson(runId, 'electronics/chipscale-board.json')
   if (!b) return null
+  // The part key carries the MPN. Keyed on name:footprint alone, swapping an
+  // STM32F103 for an STM32L071 — same qfn48 footprint, entirely different
+  // chip — produced an identical identity, so every downstream stage stayed
+  // "current" against a board that had changed underneath it.
+  const parts = (b.parts ?? []).map((p: any) => `${p.name}:${p.footprint}:${p.mpn ?? ''}`).sort()
+  // And the CONNECTIONS. A board can keep every part and be rewired into a
+  // different circuit; without the netlist in the identity that reads as no
+  // change at all. The spec is where the nets live.
+  const spec = readJson(runId, 'data/chipscale-spec.json')
+  const nets = Array.isArray(spec?.nets)
+    ? (spec.nets as unknown[]).map((n) => (Array.isArray(n) ? [...n].sort().join('-') : String(n))).sort()
+    : null
   return {
     boardMm: b.boardMm, shape: b.boardShape, layers: b.layers,
-    parts: (b.parts ?? []).map((p: any) => `${p.name}:${p.footprint}`).sort(),
+    parts,
+    nets,
+    gnd: Array.isArray(spec?.gnd) ? [...(spec.gnd as string[])].sort() : null,
     holes: b.mountingHoles ?? [],
     drcErrors: b.drc?.errors ?? null,
     unrouted: b.drcRepair?.unrouted ?? null,
@@ -100,9 +125,12 @@ export function stageInputsHash(stage: PipeStageName, runId: string): string {
         power: spec?.budgets?.power ?? null,
         mass: spec?.budgets?.massG ?? null,
         size: spec?.budgets?.sizeMm ?? null,
-        enclosure: fs.existsSync(runPath(runId, 'mechanical/enclosure.step'))
-          ? sha(fs.readFileSync(runPath(runId, 'mechanical/enclosure.step')).length)
-          : null,
+        // Hash the enclosure's CONTENT. This used to read the whole file and
+        // then hash its LENGTH, so two different enclosures that happened to
+        // serialize to the same byte count were indistinguishable — and a
+        // redesigned enclosure read as unchanged, leaving the thermal result
+        // that depends on it marked current.
+        enclosure: shaFile(runPath(runId, 'mechanical/enclosure.step')),
         change: changeRequestFor(runId, 'simulation'),
       })
     case 'firmware':
