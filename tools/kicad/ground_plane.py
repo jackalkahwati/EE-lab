@@ -23,6 +23,7 @@ Usage: <kicad-python> ground_plane.py <in.kicad_pcb> <out.kicad_pcb> <gnd.json> 
   hole_clearance_mm = the fab's hole-to-copper rule (default 0.5; HDI 0.4)
 Prints one JSON line: {"assigned","unconnected","zones","stitched","skipped"}
 """
+import math
 import sys
 import json
 import pcbnew
@@ -122,50 +123,162 @@ for t in board.GetTracks():
 
 # Other-net pad copper (bounding boxes) the via hole must clear. Same-net (GND)
 # copper is fine to touch.
+#
+# Compare NET CODES, not NETINFO_ITEM objects. `pad.GetNet() == gnd` compares two
+# SWIG proxy objects and is ALWAYS False, so every ground pad fell through to
+# other_pads -- and clears_copper() then measured each pad against ITS OWN
+# bounding box at distance zero and skipped it. Guaranteed, on every pad, on
+# every board: 39 boards on disk, 421 ground pads, `stitched: 0` every time.
+# Via-in-pad stitching never once ran, and 108 of those pads were left
+# unreached as a result.
+GND_CODE = gnd.GetNetCode()
 other_pads = []
 for fp in board.GetFootprints():
     for pad in fp.Pads():
-        if pad.GetNet() == gnd:
+        if pad.GetNetCode() == GND_CODE:
             continue
         other_pads.append(pad.GetBoundingBox())
 
+# The router's TRACKS are copper too. Checking only pads was enough while no via
+# was ever placed; the moment stitching started working, vias landed on traces --
+# 4 new hole_clearance violations and a new short on the first fixed board.
+# Segments are kept as endpoints so the distance is point-to-SEGMENT, not to a
+# bounding box: a diagonal trace's box is mostly empty and would reject legal
+# spots while accepting illegal ones.
+other_tracks = []
+for t in board.GetTracks():
+    if isinstance(t, pcbnew.PCB_VIA) or t.GetNetCode() == GND_CODE:
+        continue
+    other_tracks.append((t.GetStart(), t.GetEnd(), t.GetWidth()))
+
+
+def seg_dist2(px, py, a, b):
+    ax, ay, bx, by = a.x, a.y, b.x, b.y
+    dx, dy = bx - ax, by - ay
+    L2 = dx * dx + dy * dy
+    if L2 == 0:
+        return (px - ax) ** 2 + (py - ay) ** 2
+    t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / float(L2)))
+    cx, cy = ax + t * dx, ay + t * dy
+    return (px - cx) ** 2 + (py - cy) ** 2
+
+
+def clears_tracks(x, y, keep):
+    for a, b, w in other_tracks:
+        need = keep + w // 2
+        if seg_dist2(x, y, a, b) < need * need:
+            return False
+    return True
+
 
 def clears_copper(pos):
-    # nearest distance from the via centre to any other-net pad's bounding box,
-    # compared against the hole-to-copper keep-out.
+    # nearest distance from the via centre to any other-net PAD's bounding box
+    # AND to any other-net TRACK, compared against the hole-to-copper keep-out.
     for bb2 in other_pads:
         dx = max(bb2.GetLeft() - pos.x, 0, pos.x - bb2.GetRight())
         dy = max(bb2.GetTop() - pos.y, 0, pos.y - bb2.GetBottom())
         if dx * dx + dy * dy < COPPER_KEEP * COPPER_KEEP:
             return False
-    return True
+    return clears_tracks(pos.x, pos.y, COPPER_KEEP)
 
 
 stitched = 0
 skipped = 0
 min2 = MIN_CENTER * MIN_CENTER
-for pos in gnd_pads:
-    too_close = False
+
+
+def hole_ok(x, y):
     for h in hole_pts:
-        dx = pos.x - h.x
-        dy = pos.y - h.y
+        dx = x - h.x
+        dy = y - h.y
         if dx * dx + dy * dy < min2:
-            too_close = True
+            return False
+    return True
+
+
+# A short GND track from the pad to an offset via must itself clear other-net
+# copper, or the dog-bone trades an open net for a short. Sample along it.
+# A TRACK obeys the CLEARANCE rule, not hole_clearance -- hole_clearance is a
+# drill-to-copper rule and applies to the via, not to the copper leading to it.
+# Using it here made the keep-out ~7x too big and every fanout candidate failed
+# (`fanned: 0` on a board where 6 pads had legal spots 0.3-0.8mm away).
+# HDI is 0.0635mm, standard 0.09mm; hole_clearance tells us which profile.
+CLEARANCE = 0.0635 if hole_clearance <= 0.45 else 0.09
+TRACK_W = pcbnew.FromMM(0.15)
+TRACK_KEEP = pcbnew.FromMM(CLEARANCE) + TRACK_W // 2
+
+
+def track_clears(a, b):
+    steps = 8
+    for i in range(steps + 1):
+        x = a.x + (b.x - a.x) * i // steps
+        y = a.y + (b.y - a.y) * i // steps
+        for bb in other_pads:
+            dx = max(bb.GetLeft() - x, 0, x - bb.GetRight())
+            dy = max(bb.GetTop() - y, 0, y - bb.GetBottom())
+            if dx * dx + dy * dy < TRACK_KEEP * TRACK_KEEP:
+                return False
+        # the dog-bone must not cross or crowd another net's trace either --
+        # that trades an open net for a short, which is a worse fault
+        if not clears_tracks(x, y, TRACK_KEEP):
+            return False
+    return True
+
+
+# Where the via may sit relative to the pad. 0 is via-in-pad; the rest is a
+# DOG-BONE FANOUT -- the standard way to get a fine-pitch pad down to a plane
+# when the pad itself cannot take a drill. Measured on a real failing board:
+# 8 of 14 ground pads accept a via at their centre, and ALL 14 accept one
+# within 0.8mm. Without the offsets those last 6 are simply left open.
+OFFSETS_MM = [0.0, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0]
+DIRS = 16
+fanned = 0
+for pos in gnd_pads:
+    placed = None
+    for r_mm in OFFSETS_MM:
+        if r_mm == 0.0:
+            cands = [pos]
+        else:
+            r = pcbnew.FromMM(r_mm)
+            cands = []
+            for k in range(DIRS):
+                a = 2.0 * math.pi * k / DIRS
+                cands.append(pcbnew.VECTOR2I(int(pos.x + r * math.cos(a)),
+                                             int(pos.y + r * math.sin(a))))
+        for c in cands:
+            if not hole_ok(c.x, c.y) or not clears_copper(c):
+                continue
+            if r_mm > 0.0 and not track_clears(pos, c):
+                continue
+            placed = (c, r_mm)
             break
-    if too_close or not clears_copper(pos):
+        if placed:
+            break
+    if not placed:
         skipped += 1
         continue
+    at, r_mm = placed
     via = pcbnew.PCB_VIA(board)
     via.SetViaType(pcbnew.VIATYPE_THROUGH)
-    via.SetPosition(pos)
+    via.SetPosition(at)
     via.SetWidth(VIA_PAD)
     via.SetDrill(VIA_HOLE)
     via.SetNet(gnd)
     via.SetFrontTentingMode(pcbnew.TENTING_MODE_TENTED)
     via.SetBackTentingMode(pcbnew.TENTING_MODE_TENTED)
     board.Add(via)
-    hole_pts.append(pos)
+    hole_pts.append(at)
     stitched += 1
+    if r_mm > 0.0:
+        # the dog-bone itself: pad -> via, on the pad's own layer, on GND
+        t = pcbnew.PCB_TRACK(board)
+        t.SetStart(pos)
+        t.SetEnd(at)
+        t.SetWidth(TRACK_W)
+        t.SetLayer(pcbnew.F_Cu)
+        t.SetNet(gnd)
+        board.Add(t)
+        fanned += 1
 
 # Mounting-hole pour keepout. The zones use a 0.2mm local clearance for good
 # ground coverage between traces, but that let the GND pour come within 0.2mm of
@@ -197,7 +310,7 @@ print(json.dumps({
     "assigned": assigned,
     "unconnected": unconnected,
     "zones": board.GetAreaCount(),
-    "stitched": stitched,
+    "stitched": stitched, "fanned": fanned,
     "skipped": skipped,
     "mhKeepout": mh_set,
 }))
