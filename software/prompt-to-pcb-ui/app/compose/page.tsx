@@ -85,8 +85,7 @@ type DocTab = {
 const VIEWS: { tab: Tab; label: string; Icon: any }[] = [
   { tab: 'Overview', label: 'Overview', Icon: LayoutDashboard },
   { tab: 'Review', label: 'Review', Icon: ClipboardCheck },
-  { tab: 'Order', label: 'Order', Icon: Package },
-  { tab: 'Validate', label: 'Validate', Icon: ShieldCheck },
+  { tab: 'Order', label: 'Ship', Icon: Package },
 ]
 
 // Demoted-but-kept destinations. Every one of these is still a valid `tab`
@@ -95,6 +94,9 @@ const VIEWS: { tab: Tab; label: string; Icon: any }[] = [
 // Assembly / FL-1 / FL-1 Ready / Recovery panels also appear inside their merged
 // primary destination, so nothing is orphaned.
 const ADVANCED_VIEWS: { tab: Tab; label: string; Icon: any }[] = [
+  // 'Validate' merged INTO Ship (its panels render there); the value stays
+  // valid so old deep links and the "+" menu keep resolving.
+  { tab: 'Validate', label: 'Validation only', Icon: ShieldCheck },
   { tab: 'Objects', label: 'Objects', Icon: ListTree },
   { tab: 'Artifacts', label: 'Files', Icon: ScrollText },
   { tab: 'Constraints', label: 'Constraints', Icon: Box },
@@ -862,7 +864,13 @@ export default function Compose2Page() {
                           <PanelSection label="Recovery"><RecoveryPanel runId={selectedRun.runDir ? selectedRun.id : null} /></PanelSection>
                         </>
                       )}
-                      {/* MERGED "order it": bill of materials + assembly + procurement / quote */}
+                      {/* SHIP — everything between "the board is done" and "it
+                          is on its way": what it costs, who assembles it, and
+                          how you prove it works. Order and Validate were two
+                          rail destinations answering one question, so they are
+                          one destination. 'Validate' remains a valid tab (old
+                          deep links, the "+" menu) and renders the FL-1 half
+                          alone. */}
                       {tb === 'Order' && (
                         <>
                           <PanelSection label="BOM">
@@ -876,8 +884,7 @@ export default function Compose2Page() {
                           <PanelSection label="Procurement · Quote"><ProcurementPanel real={real} runDir={selectedRunDir ?? null} /></PanelSection>
                         </>
                       )}
-                      {/* MERGED "validate it": FL-1 validation + loop + readiness */}
-                      {tb === 'Validate' && (
+                      {(tb === 'Order' || tb === 'Validate') && (
                         <>
                           <PanelSection label="FL-1 Validation">
                             <div className="flex flex-col">
