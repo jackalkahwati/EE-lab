@@ -56,7 +56,7 @@ function b64(json: string) {
     String.fromCharCode(parseInt(h, 16))))
 }
 
-export function ComposeChat({ threads, activeId, activeRunId, activeName, newDesign, revisePrefill, onSelectThread, onNew, onRunComplete, onRunStart, onRename, onPrefillConsumed, onIdBrief, onProductSpec, productSpec: productSpecProp, builtDisciplines, pipelineStatus, pipelineRunning, pipelineFeedback, onRunPipeline, onStopPipeline, onProductBuilt }: {
+export function ComposeChat({ threads, activeId, activeRunId, activeName, newDesign, revisePrefill, onSelectThread, onNew, onRunComplete, onRunStart, onRunFailed, onRename, onPrefillConsumed, onIdBrief, onProductSpec, productSpec: productSpecProp, builtDisciplines, pipelineStatus, pipelineRunning, pipelineFeedback, onRunPipeline, onStopPipeline, onProductBuilt }: {
   threads: { id: string; label: string }[]
   activeId: string
   activeRunId?: string   // the real run currently on screen (revisable)
@@ -71,6 +71,9 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
    *  failed left the page believing no run existed at all — and it rendered the
    *  fresh-install blank slate over a design that had just failed. */
   onRunStart?: (runId: string) => void
+  /** A started run has ended badly. The page keeps the run — with its error —
+   *  instead of letting it evaporate back into the blank slate. */
+  onRunFailed?: (runId: string, detail: string) => void
   onRename?: (id: string, name: string) => void
   onPrefillConsumed?: () => void
   onIdBrief?: (brief: IdBrief | null) => void // lift the ID brief to the workspace panes
@@ -265,9 +268,9 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
         setLogs((l) => [...l.slice(-60), { stage: ev.stage!, text: ev.text!, level: ev.level }])
       }
       else if (ev.type === 'done') { es.close(); esRef.current = null; setPhase('done'); if (ev.runDir) onRunComplete(ev.runDir, id) }
-      else if (ev.type === 'error') { es.close(); esRef.current = null; setErr(ev.text ?? 'pipeline error'); setPhase('error') }
+      else if (ev.type === 'error') { es.close(); esRef.current = null; const t = ev.text ?? 'pipeline error'; setErr(t); setPhase('error'); onRunFailed?.(id, t) }
     }
-    es.onerror = () => { es.close(); esRef.current = null; setErr('connection lost'); setPhase('error') }
+    es.onerror = () => { es.close(); esRef.current = null; setErr('connection lost'); setPhase('error'); onRunFailed?.(id, 'connection lost before the build finished') }
   }
 
   /** Launch the real board pipeline for a finalized board spec + prompt. Used by
@@ -307,7 +310,7 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
         if (opts?.thenId && ev.runDir) { startIdFromBoard(ev.runDir, id); onProductBuilt?.(id) }
       } else if (ev.type === 'error') { es.close(); esRef.current = null; setErr(ev.text ?? 'pipeline error'); setPhase('error') }
     }
-    es.onerror = () => { es.close(); esRef.current = null; setErr('connection lost'); setPhase('error') }
+    es.onerror = () => { es.close(); esRef.current = null; setErr('connection lost'); setPhase('error'); onRunFailed?.(id, 'connection lost before the build finished') }
   }
 
   function start() {

@@ -331,6 +331,9 @@ export default function Compose2Page() {
   // "+New" clears the stage to a blank slate (no board) while the chat stays
   // active; the board reappears when the new design finishes building.
   const [newDesign, setNewDesign] = useState(false)
+  // ids this session started. They may not exist on disk (a build that failed
+  // before writing a board), and must not be dropped by a runs refresh.
+  const localRunsRef = useRef<Set<string>>(new Set())
   // true once /api/runs has answered — see the URL-sync effect below
   const [runsLoaded, setRunsLoaded] = useState(false)
   // an FL-1 loop ECO gets dropped into the chat as a revision (single-pane flow)
@@ -343,9 +346,23 @@ export default function Compose2Page() {
     else el.requestFullscreen?.()
   }
 
+  /**
+   * Runs this session STARTED are kept even when /api/runs cannot see them.
+   *
+   * A failed build writes no board, so the disk listing omits it — and a plain
+   * setRuns(disk) deleted the entry, taking `selectedRun` with it and dropping
+   * the page back to the blank slate a moment after the failure was reported.
+   * Local entries merge over the disk listing until the disk has a real one.
+   */
+  const mergeRuns = (disk: Run[]) =>
+    setRuns((prev: Run[]) => {
+      const onDisk = new Set(disk.map((r) => r.id))
+      const localOnly = prev.filter((r) => localRunsRef.current.has(r.id) && !onDisk.has(r.id))
+      return [...localOnly, ...disk]
+    })
   const refreshRuns = () =>
     fetch('/api/runs').then((r) => (r.ok ? r.json() : { runs: [] }))
-      .then(({ runs: disk }: { runs: Run[] }) => { if (Array.isArray(disk)) setRuns(disk); return disk })
+      .then(({ runs: disk }: { runs: Run[] }) => { if (Array.isArray(disk)) mergeRuns(disk); return disk })
       .catch(() => [])
   const onRunComplete = async (runDir: string, id: string) => {
     const disk = await refreshRuns()
@@ -518,7 +535,7 @@ export default function Compose2Page() {
     fetch('/api/runs').then((r) => (r.ok ? r.json() : { runs: [] }))
       .then(({ runs: disk }: { runs: Run[] }) => {
         if (Array.isArray(disk) && disk.length) {
-          setRuns(disk)
+          mergeRuns(disk)
           // Do NOT auto-select the last run on load — a fresh page open starts on a
           // blank slate (the "describe a product" prompt), not the previous board.
           // Past runs stay available via the ☰ menu.
@@ -554,6 +571,12 @@ export default function Compose2Page() {
   // undefined → the stage renders its blank/new-design slate, not the last board.
   const selectedRun = useMemo(
     () => runs.find((r) => r.id === selectedId), [runs, selectedId])
+  /** The selected run, when it exists ONLY because we started it and it failed
+   *  (nothing on disk). Drives the failure state the panels show. */
+  const failedRun = useMemo(() => {
+    const r = runs.find((x) => x.id === selectedId) as (Run & { failure?: string }) | undefined
+    return r?.failure ? r : null
+  }, [runs, selectedId])
   const selectedRunDir = selectedRun?.runDir
   const selectedReal = selectedRun?.real
 
@@ -638,6 +661,7 @@ export default function Compose2Page() {
    * thread was never registered, so it did not appear in the run list either.
    */
   const onRunStart = (runId: string) => {
+    localRunsRef.current.add(runId)
     setSelectedId(runId)
     setNewDesign(false)
     setRuns((prev: Run[]) => (prev.some((r) => r.id === runId) ? prev : [
@@ -655,6 +679,15 @@ export default function Compose2Page() {
       } as unknown as Run,
       ...prev,
     ]))
+  }
+
+  /** A started run ended badly. Keep it, and record WHY on the run itself. */
+  const onRunFailed = (runId: string, detail: string) => {
+    localRunsRef.current.add(runId)
+    setRuns((prev: Run[]) => prev.map((r) => (r.id === runId
+      ? ({ ...r, status: 'GATE FAILED', failure: detail } as unknown as Run)
+      : r)))
+    logLine({ source: 'pipeline', level: 'error', text: `run failed — ${detail}`, runId })
   }
 
   const runPipeline = async (runIdArg?: string) => {
@@ -775,11 +808,30 @@ export default function Compose2Page() {
   const panelBody = (tb: Tab) => (
     <>
                   {(newDesign || !selectedRun) ? (
+                    /* A run that FAILED is not an absence of a run. It used to
+                       land here and read "No run yet" — the same words a user
+                       sees before they have ever pressed anything — while the
+                       left panel showed the failure. Say what happened. */
+                    failedRun ? (
+                      <div className="flex h-full flex-col items-start gap-2 p-5 text-xs">
+                        <span className="inline-flex items-center gap-1.5 rounded-sm border border-destructive/40 bg-destructive/10 px-2 py-0.5 font-mono text-[11px] font-semibold uppercase tracking-wide text-destructive">
+                          run failed
+                        </span>
+                        <p className="text-[13px] leading-relaxed text-foreground">{failedRun.failure}</p>
+                        <p className="text-muted-foreground">
+                          Nothing was written for this run, so there are no artifacts to show. The
+                          Terminal below has the full log. Revise the description on the left, or
+                          start a new design.
+                        </p>
+                        <span className="font-mono text-[10px] text-muted-foreground/70">{failedRun.id}</span>
+                      </div>
+                    ) : (
                     <div className="flex h-full items-center justify-center p-6 text-center text-xs text-muted-foreground">
                       {!selectedRun
                         ? 'No run yet — panels populate as the build runs.'
                         : 'No board yet — the overview appears once your new design builds.'}
                     </div>
+                    )
                   ) : (
                     <>
                       {tb === 'Overview' && (
@@ -1065,6 +1117,11 @@ export default function Compose2Page() {
 
   // the ☰ menu (real threads + select handler), so this is a clean start, not a
   // dead end.
+  // The blank slate is for a session that has not started anything. Once a run
+  // exists — including one that failed and wrote nothing — the page renders the
+  // run, never the fresh-install screen. `selectedRun` resolves for a failed run
+  // because onRunStart registers it and mergeRuns keeps it, so this branch is
+  // now only reachable with genuinely no run selected.
   if (!selectedRun) {
     return (
       <main className="flex h-[calc(100dvh-2.25rem)] flex-col overflow-hidden bg-background text-foreground">
@@ -1081,6 +1138,7 @@ export default function Compose2Page() {
               onNew={() => {}}
               onRunComplete={onRunComplete}
           onRunStart={onRunStart}
+          onRunFailed={onRunFailed}
               onIdBrief={onIdBrief}
               onProductSpec={setProductSpec}
               productSpec={productSpec}
@@ -1165,6 +1223,7 @@ export default function Compose2Page() {
           onProductBuilt={onProductBuilt}
           onRunComplete={onRunComplete}
               onRunStart={onRunStart}
+              onRunFailed={onRunFailed}
           onIdBrief={onIdBrief}
           onProductSpec={setProductSpec}
           productSpec={productSpec}
