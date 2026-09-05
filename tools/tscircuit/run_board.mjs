@@ -2052,7 +2052,13 @@ async function main() {
     const T_START = Date.now()
     const BUDGET_MS = 255_000 // under the electronics-cs runner's 285s hard wall, leaving margin for post-processing
     let res = null, gapTrail = [], usedGap = GAP_LADDER[0], lastMs = 0
-    const scoreOf = (a) => a?.available ? (a.best.drc.errors + a.best.unrouted * 5) : Infinity
+    // Score with drcScore, the same severity model the inner ladder uses.
+    // This was `errors + unrouted * 5`, which weights a SHORT and a silkscreen
+    // nit identically — so a spacing that traded one short for two clearance
+    // nits looked worse here and was discarded, while the ladder that produced
+    // it had (correctly) called it a large improvement. Two selectors ranking
+    // the same candidates in opposite orders is how a real fix loses.
+    const scoreOf = (a) => a?.available ? drcScore(a.best.drc, a.best.unrouted) : Infinity
     for (const g of GAP_LADDER) {
       if (g !== GAP_LADDER[0]) {
         const elapsed = Date.now() - T_START
@@ -2451,6 +2457,11 @@ async function main() {
   process.stderr.write(`[t] total: ${(totalMs / 1000).toFixed(1)}s (${TIMINGS.counters.freeroutingPasses} freerouting passes, ${TIMINGS.counters.jvmStarts} jvm starts, ${TIMINGS.counters.kicadDrcRuns} kicad drc runs, ${TIMINGS.counters.tscircuitBuilds} tscircuit builds)\n`)
   process.stdout.write(JSON.stringify({
     ok: !!board && (!needsTraces || traces.length > 0) && drcClean && unroutedNets === 0,
+    // Severity-weighted badness of the board that shipped (lower is better).
+    // Published so anything choosing BETWEEN boards -- the API's re-plan
+    // comparison, a future fleet ranker -- ranks them the way the router does,
+    // instead of on a raw error count that cannot tell a short from a nit.
+    drcScore: drc?.available === true ? drcScore(drc, unroutedNets) : null,
     layers: drcRepair?.layers ?? board?.num_layers ?? null,
     kicadPcb,
     boardMm: board ? { w: Math.round(board.width * 10) / 10, h: Math.round(board.height * 10) / 10 } : null,
