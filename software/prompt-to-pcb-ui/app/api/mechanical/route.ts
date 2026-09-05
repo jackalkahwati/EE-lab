@@ -26,6 +26,7 @@ import { normalizeIdBrief, idBriefSummary, type IdBrief } from '@/lib/id-brief'
 import { FIDELITY_ENABLED, FIDELITY_ROUNDS, FIDELITY_THRESHOLD, critiqueBlock, judgeSystem, judgeUser, normalizeVerdict, type FidelityReport } from '@/lib/mech-fidelity'
 import { pinsPromptFor } from '@/lib/design-state'
 import type { ProductSpec } from '@/lib/product-spec'
+import { withKeepalive } from '@/lib/keepalive'
 
 export const dynamic = 'force-dynamic'
 // Budget arithmetic — the outer wall must COMPOSE with the inner walls, worst case:
@@ -235,7 +236,16 @@ function runJudge(images: string[], system: string, user: string): Promise<{ ok:
   })
 }
 
-export async function POST(req: Request) {
+/**
+ * Long POSTs die at Cloudflare's ~100s no-bytes limit; this route can run for
+ * minutes. withKeepalive returns fast responses untouched and only streams
+ * filler when the handler is still working. See lib/keepalive.ts.
+ */
+export async function POST(req: Request): Promise<Response> {
+  return withKeepalive(handlePost(req))
+}
+
+async function handlePost(req: Request) {
   try {
     const body = await req.json()
     const spec = body.spec as ProductSpec | undefined

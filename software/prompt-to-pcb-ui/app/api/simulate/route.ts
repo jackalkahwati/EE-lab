@@ -29,6 +29,7 @@ import { loadGroundBoard } from '@/lib/ground-board'
 import { isAdminRequest, runAccess } from '@/lib/auth'
 import type { ProductSpec } from '@/lib/product-spec'
 import { planSimulations, judge } from '@/lib/sim-router'
+import { withKeepalive } from '@/lib/keepalive'
 
 export const dynamic = 'force-dynamic'
 // High-fidelity solvers (OpenFOAM CFD, docker-hosted Elmer/openEMS) run
@@ -54,7 +55,16 @@ function runSim(req: Record<string, unknown>): Promise<any> {
   })
 }
 
-export async function POST(req: Request) {
+/**
+ * Long POSTs die at Cloudflare's ~100s no-bytes limit; this route can run for
+ * minutes. withKeepalive returns fast responses untouched and only streams
+ * filler when the handler is still working. See lib/keepalive.ts.
+ */
+export async function POST(req: Request): Promise<Response> {
+  return withKeepalive(handlePost(req))
+}
+
+async function handlePost(req: Request) {
   try {
     const body = await req.json()
     const spec = body.spec as ProductSpec | undefined

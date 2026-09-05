@@ -21,6 +21,7 @@ import { MODEL } from '@/lib/model-tiers'
 import type { ProductSpec } from '@/lib/product-spec'
 import { planSimulations, judge, isRequiredFail, thermalEnvFromPlan, type SimPlan } from '@/lib/sim-router'
 import { judgeThermal, MIN_MARGIN_C } from '@/lib/sim-judge'
+import { withKeepalive } from '@/lib/keepalive'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 200
@@ -246,7 +247,16 @@ function firstJson(text: string): any {
   throw new Error('unbalanced json')
 }
 
-export async function POST(req: Request) {
+/**
+ * Long POSTs die at Cloudflare's ~100s no-bytes limit; this route can run for
+ * minutes. withKeepalive returns fast responses untouched and only streams
+ * filler when the handler is still working. See lib/keepalive.ts.
+ */
+export async function POST(req: Request): Promise<Response> {
+  return withKeepalive(handlePost(req))
+}
+
+async function handlePost(req: Request) {
   try {
     const body = await req.json()
     const spec = body.spec as ProductSpec | undefined

@@ -20,6 +20,7 @@ import type { ProductSpec } from '@/lib/product-spec'
 import { normalizeIdBrief } from '@/lib/id-brief'
 import { registryFootprint, registrySaveFootprint } from '@/lib/parts-registry'
 import { composeSubsystems, splitForGeneration } from '@/lib/subsystem-compose.mjs'
+import { withKeepalive } from '@/lib/keepalive'
 
 export const dynamic = 'force-dynamic'
 // A realistic multi-sensor chip-scale board (~14 parts) takes ~3.5 min through the
@@ -575,7 +576,16 @@ async function buildCandidate(userMsg: string, req: Request, dir: string, svgNam
 type CsInflight = { plannerOnly: boolean; promise: Promise<any> }
 const csGlobal = globalThis as unknown as { __csInflight?: Map<string, CsInflight> }
 
-export async function POST(req: Request) {
+/**
+ * Long POSTs die at Cloudflare's ~100s no-bytes limit; this route can run for
+ * minutes. withKeepalive returns fast responses untouched and only streams
+ * filler when the handler is still working. See lib/keepalive.ts.
+ */
+export async function POST(req: Request): Promise<Response> {
+  return withKeepalive(handlePost(req))
+}
+
+async function handlePost(req: Request) {
   // Time origin for ALL budget accounting in this route — set at ENTRY so the
   // first candidate build (LLM + up to 285s route) counts against the budget
   // too, not just the re-plan loop. maxDuration=600 covers the whole route.

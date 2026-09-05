@@ -17,6 +17,7 @@ import { MODEL } from '@/lib/model-tiers'
 import { DISCIPLINE_MODULES, DISCIPLINE_ARTIFACT_SCHEMA, normalizeDisciplineArtifact } from '@/lib/discipline-artifact'
 import { loadGroundBoard } from '@/lib/ground-board'
 import type { ProductSpec } from '@/lib/product-spec'
+import { withKeepalive } from '@/lib/keepalive'
 
 export const dynamic = 'force-dynamic'
 
@@ -95,7 +96,16 @@ function firstJson(text: string): string {
   throw new Error('unbalanced json')
 }
 
-export async function POST(req: Request) {
+/**
+ * Long POSTs die at Cloudflare's ~100s no-bytes limit; this route can run for
+ * minutes. withKeepalive returns fast responses untouched and only streams
+ * filler when the handler is still working. See lib/keepalive.ts.
+ */
+export async function POST(req: Request): Promise<Response> {
+  return withKeepalive(handlePost(req))
+}
+
+async function handlePost(req: Request) {
   try {
     const body = await req.json()
     const spec = body.spec as ProductSpec | undefined
