@@ -21,7 +21,10 @@
  * so nothing is duplicated — the orchestrator only sequences + wires feedback.
  */
 import type { ProductSpec } from '@/lib/product-spec'
-import { isRequiredFail } from '@/lib/sim-router'
+// relative + explicit extension so `node --test` can load this module directly
+// (the @/ alias is a bundler feature; tests/ has no resolver for it). Type-only
+// imports are erased before resolution, so those may keep the alias.
+import { isRequiredFail } from './sim-router.ts'
 
 export type PipeStage =
   | 'electronics' | 'mechanical' | 'simulation'
@@ -108,6 +111,36 @@ async function existingBoard(runId: string, opts: RunOpts): Promise<any | null> 
     const d = await r.json()
     return d?.boardMm?.w && d?.boardMm?.h ? d : null
   } catch { return null }
+}
+
+/**
+ * Is this board too DENSE for one PCB?
+ *
+ * The only question auto-partition answers. It splits a netlist along the
+ * analog/digital seam and synthesizes a board-to-board connector, which is a
+ * real answer to overcrowding and a nonsense answer to anything else.
+ *
+ * The gate used to be "not clean", which was survivable only while nearly every
+ * board read clean. Once the verdict started describing the board that actually
+ * ships (ground pour included), a 6-part board with ONE stranded ground pad
+ * became "not clean" — and would have been told to split itself in two. A pad
+ * the pour could not reach is still unreachable on both halves.
+ *
+ * So: signal nets the autorouter could not complete, or DRC faults that mean
+ * copper and courtyards are fighting for room. Ground-pour faults, pin
+ * violations and a missing DRC report are all real failures, and none of them
+ * are answered by a second board.
+ */
+export function densityFailure(d: any): boolean {
+  const t = d?.drc?.errorTypes ?? {}
+  // unrouted now includes ground pins the pour stranded; unroutedSignal is the
+  // router's own count, recorded before they were added (run_board.mjs).
+  const signalUnrouted = typeof d?.drcRepair?.unroutedSignal === 'number'
+    ? d.drcRepair.unroutedSignal
+    : Math.max(0, (d?.drcRepair?.unrouted ?? 0) - (d?.drcRepair?.groundPlane?.unconnected ?? 0))
+  const crowding = (t.shorting_items ?? 0) + (t.tracks_crossing ?? 0)
+    + (t.clearance ?? 0) + (t.courtyards_overlap ?? 0)
+  return signalUnrouted > 0 || crowding > 0
 }
 
 /**
@@ -412,7 +445,7 @@ async function runPipelineStages(opts: RunOpts, timer: RunTimer): Promise<Pipeli
           // connector, and gate-verify each half — and surface it as an artifact +
           // recommendation. (Building both halves end-to-end as a 2-board kit needs
           // multi-board run support; this makes the verified split automatic.)
-          if (!v.clean) {
+          if (!v.clean && densityFailure(d)) {
             let partNote = ''
             try {
               const pp = await postJson('/api/partition', { runId: opts.runId }, opts) as { split?: string; flex?: { process?: string; rigidFlex?: { flexConductors?: number } } } | null
@@ -425,6 +458,8 @@ async function runPipelineStages(opts: RunOpts, timer: RunTimer): Promise<Pipeli
               }
             } catch { /* partition unavailable — the single-board verdict stands */ }
             set('electronics', 'failed', `${v.detail}${partNote}`)
+          } else if (!v.clean) {
+            set('electronics', 'failed', v.detail)
           } else {
             set('electronics', 'passed', v.detail)
           }

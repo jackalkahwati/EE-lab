@@ -2321,6 +2321,7 @@ async function main() {
             reason: gp?.reason ?? 'ground plane pass unavailable (needs kicad-cli + pcbnew python)',
             unconnected: input.gnd.length,
           }
+          drcRepair.unroutedSignal = drcRepair.unrouted ?? 0
           drcRepair.unrouted = (drcRepair.unrouted ?? 0) + input.gnd.length
           drcRepair.converged = false
           drcRepair.verdict = `${drcRepair.verdict ? drcRepair.verdict + ' ' : ''}Ground plane did not run (${drcRepair.groundPlane.reason}) — all ${input.gnd.length} ground pin(s) are unconnected on the board this run produced.`
@@ -2361,7 +2362,14 @@ async function main() {
             drc = { available: false, reason: 'ground plane applied but its DRC produced no report — the shipped board is unchecked', groundPlaneApplied: true }
             drcRepair.converged = false
           }
-          if (gp.unconnected) drcRepair.unrouted = (drcRepair.unrouted ?? 0) + gp.unconnected
+          if (gp.unconnected) {
+            // Keep the SIGNAL-only count. Callers that ask "is this board too
+            // dense for one PCB?" must not read a stranded ground pad as a net
+            // the autorouter could not complete — splitting a board in two does
+            // nothing about a pad the pour could not reach.
+            drcRepair.unroutedSignal = drcRepair.unrouted ?? 0
+            drcRepair.unrouted = (drcRepair.unrouted ?? 0) + gp.unconnected
+          }
           const planeClean = (gp.unconnected ?? 0) === 0 && (gp.errors ?? 0) === 0
           if (!planeClean) {
             const bits = []
