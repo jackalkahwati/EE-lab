@@ -1303,8 +1303,12 @@ export async function GET(req: Request) {
 
         // Verification ladder: a board that ROUTED CLEAN and passed real DRC
         // promotes every catalog-sourced binding it carries in the shared
-        // registry (double-extracted -> build-proven). Fleet learning: each
-        // clean build permanently de-risks those parts for every later run.
+        // registry (double-extracted -> routed-clean). Fleet learning: each
+        // clean build permanently de-risks those parts for every later run,
+        // so the level must claim exactly what was observed and no more —
+        // routing clean says the copper is manufacturable, NOT that the pin
+        // binding is right. A wrong pinout routes just as cleanly. Only
+        // hardware-verified means someone measured the physical board.
         if (drcPass) {
           try {
             const devManifest = variantBoard.replace(/\.kicad_pcb$/, '.devices.json')
@@ -1314,9 +1318,9 @@ export async function GET(req: Request) {
               if (typeof d.lcsc === 'string' && typeof d.interface === 'string') {
                 const evidence = JSON.stringify({ runId, drc: 'clean', mpn: d.mpn ?? null })
                 spawn(process.env.FL_PYTHON || 'python3',
-                  [registryCli, 'promote-binding', d.lcsc, d.interface, 'build-proven', evidence],
+                  [registryCli, 'promote-binding', d.lcsc, d.interface, 'routed-clean', evidence],
                   { stdio: 'ignore' }).on('error', () => {})
-                log('validation', `verification ladder: ${d.mpn ?? d.lcsc} (${d.interface}) promoted to build-proven`)
+                log('validation', `verification ladder: ${d.mpn ?? d.lcsc} (${d.interface}) promoted to routed-clean`)
               }
             }
           } catch { /* no catalog-sourced devices on this board */ }

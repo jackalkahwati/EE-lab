@@ -269,25 +269,44 @@ def save_binding(part_id, interface, binding, provenance=None):
 
 
 # Verification ladder for LLM pin bindings — a binding can only move UP:
-#   review-required < double-extracted < build-proven < hardware-verified
-# (double-extracted: two independent model extractions agreed; build-proven:
-# shipped on a board that routed clean + passed real DRC; hardware-verified:
-# FL-1 physically validated a board carrying it.)
-BINDING_LEVELS = ["review-required", "double-extracted", "build-proven",
+#   review-required < double-extracted < routed-clean < hardware-verified
+#
+#   double-extracted  two independent model extractions agreed
+#   routed-clean      shipped on a board that routed clean and passed real DRC
+#   hardware-verified FL-1 physically validated a board carrying it
+#
+# This level was called "build-proven", which claimed more than its evidence
+# can carry. A binding says which PIN DOES WHAT — pin 4 is SDA, pin 8 is VDD.
+# Routing clean proves the geometry is manufacturable and the copper reaches
+# where the netlist said; it proves NOTHING about whether the netlist named the
+# right pins. A board built on a completely wrong pinout routes just as cleanly
+# and passes DRC just as happily, which is exactly how a fabricated adapter
+# board can come back dead with a latching switch whose pins were never
+# connected in either state.
+#
+# The distinction matters because this is fleet learning: a promotion here
+# permanently de-risks that part for every later run. "routed-clean" is what
+# was actually observed. Only hardware-verified means someone measured it.
+BINDING_LEVELS = ["review-required", "double-extracted", "routed-clean",
                   "hardware-verified"]
+
+# Accepted on input and mapped forward, so an existing registry and any caller
+# still passing the old name keep working.
+_LEVEL_ALIASES = {"build-proven": "routed-clean"}
 
 
 def promote_binding(part_id, interface, level, evidence=None):
     """Raise a binding's verification level (never lowers). Appends evidence
     (e.g. runId, DRC result) to the provenance trail. Returns the new level
     or None when the binding doesn't exist."""
+    level = _LEVEL_ALIASES.get(level, level)
     if level not in BINDING_LEVELS:
         raise ValueError("unknown level %r" % level)
     cur = get_binding(part_id, interface)
     if not cur:
         return None
     prov = cur.get("provenance") or {}
-    old = prov.get("level", "review-required")
+    old = _LEVEL_ALIASES.get(prov.get("level", "review-required"), prov.get("level", "review-required"))
     if old in BINDING_LEVELS and BINDING_LEVELS.index(level) <= BINDING_LEVELS.index(old):
         return old  # never downgrade
     prov["level"] = level

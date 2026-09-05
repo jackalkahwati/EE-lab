@@ -1002,27 +1002,6 @@ async function buildChipScale(
       }
     }
 
-    if (result.boardMm && !req.signal?.aborted) {
-      // (Persist is skipped on an aborted request — a cancelled run must not get
-      // a board written under it after the caller walked away.)
-      // Persist the part set too, so downstream disciplines (supply chain BOM,
-      // manufacturing, validation) can ground on the REAL chip-scale parts (the
-      // BLE SoC + mics + PMIC), not the flroute reference board's placeholder BOM.
-      const partList = parts.map((p: any) => ({ name: p.name, footprint: p.footprint, kind: p.kind, mpn: p.mpn ?? null, lcsc: p.lcsc ?? null }))
-      // CONTRACT with the MECHANICAL stage (read from chipscale-board.json):
-      //   boardShape: {type:'rect'} | {type:'circle', diameterMm, boltCircleDiaMm?}
-      //     — the REAL as-built outline the runner exported to Edge.Cuts (for a
-      //     circle, boardMm.w = boardMm.h = the real diameter, grown if needed
-      //     to clear all courtyards; never the requested nominal).
-      //   mountingHoles: [{x, y, diaMm}] — non-plated screw holes actually
-      //     drilled in the .kicad_pcb, in BOARD-CENTERED mm (+x right, +y up).
-      //     The enclosure should put its bosses/standoffs exactly there.
-      await fs.writeFile(path.join(dir, 'chipscale-board.json'),
-        JSON.stringify({ boardMm: result.boardMm, areaMm2: result.areaMm2, components: result.components, routedTraces: result.routedTraces, realFootprints, parts: partList, boardShape: result.boardShape ?? null, mountingHoles: result.mountingHoles ?? [], drc: result.drc ?? null, drcRepair: result.drcRepair ?? null, designConvergence, boardSource, plannerHonest }))
-      // the routed .kicad_pcb for the 3D render (the real chip-down board)
-      if (result.kicadPcb) await fs.writeFile(path.join(dir, 'chipscale.kicad_pcb'), result.kicadPcb)
-    }
-
     // Phase 2 pin verification: a pinned part must actually appear in the
     // built design's artifacts (planner design / part list / netlist text) —
     // injection is prompt-level and therefore NEVER trusted. A violated pin
@@ -1041,6 +1020,38 @@ async function buildChipScale(
         }
       }
     } catch { /* verification is best-effort; absence of proof reports below */ }
+
+    // PERSIST LAST, and persist the VERDICT INPUTS.
+    //
+    // This used to run BEFORE pin verification, and wrote neither `ok` nor
+    // `pinViolations`. So a design rejected for a missing pinned part was
+    // rejected only in the HTTP response: the artifact left on disk carried a
+    // clean-looking DRC and nothing else, and run-pipeline's reuse path — which
+    // reads that artifact and asks lib/verdict whether the board is clean —
+    // happily reused it. The rejection evaporated the moment the response was
+    // discarded.
+    //
+    // (Persist is still skipped on an aborted request: a cancelled run must not
+    // get a board written under it after the caller walked away.)
+    if (result.boardMm && !req.signal?.aborted) {
+      // Persist the part set too, so downstream disciplines (supply chain BOM,
+      // manufacturing, validation) can ground on the REAL chip-scale parts (the
+      // BLE SoC + mics + PMIC), not the flroute reference board's placeholder BOM.
+      const partList = parts.map((p: any) => ({ name: p.name, footprint: p.footprint, kind: p.kind, mpn: p.mpn ?? null, lcsc: p.lcsc ?? null }))
+      // CONTRACT with the MECHANICAL stage (read from chipscale-board.json):
+      //   boardShape: {type:'rect'} | {type:'circle', diameterMm, boltCircleDiaMm?}
+      //     — the REAL as-built outline the runner exported to Edge.Cuts (for a
+      //     circle, boardMm.w = boardMm.h = the real diameter, grown if needed
+      //     to clear all courtyards; never the requested nominal).
+      //   mountingHoles: [{x, y, diaMm}] — non-plated screw holes actually
+      //     drilled in the .kicad_pcb, in BOARD-CENTERED mm (+x right, +y up).
+      //     The enclosure should put its bosses/standoffs exactly there.
+      await fs.writeFile(path.join(dir, 'chipscale-board.json'),
+        JSON.stringify({ ok: !!result.ok && pinViolations.length === 0, pinViolations, boardMm: result.boardMm, areaMm2: result.areaMm2, components: result.components, routedTraces: result.routedTraces, realFootprints, parts: partList, boardShape: result.boardShape ?? null, mountingHoles: result.mountingHoles ?? [], drc: result.drc ?? null, drcRepair: result.drcRepair ?? null, designConvergence, boardSource, plannerHonest }))
+      // the routed .kicad_pcb for the 3D render (the real chip-down board)
+      if (result.kicadPcb) await fs.writeFile(path.join(dir, 'chipscale.kicad_pcb'), result.kicadPcb)
+    }
+
 
     return {
       ok: !!result.ok && pinViolations.length === 0,
