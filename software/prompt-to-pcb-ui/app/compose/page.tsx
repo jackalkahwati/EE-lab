@@ -34,6 +34,7 @@ import { FL1Loop } from '@/components/fl1-loop'
 import { ErrorBoundary } from '@/components/error-boundary'
 import { ReviewPanel } from '@/components/review-panel'
 import { RunOverview } from '@/components/run-overview'
+import { RunTimeline } from '@/components/run-timeline'
 import { RevisionRail } from '@/components/revision-rail'
 import { WorkQueue } from '@/components/work-queue'
 import { CommentsPanel } from '@/components/comments-panel'
@@ -415,31 +416,6 @@ export default function Compose2Page() {
   const [addOpen, setAddOpen] = useState(false)
   // right-pane rail "More" (Advanced destinations) + center-strip "More" (advisory stages)
   const [advOpen, setAdvOpen] = useState(false)
-  const [stagesMoreOpen, setStagesMoreOpen] = useState(false)
-  // The stage strip is a fixed-width pane, so at common window sizes its eight
-  // tabs needed ~736px inside ~392px: four of them (Mfg, Supply, Validation,
-  // More) sat past the edge with no arrow, fade or overflow menu to say so.
-  // When the labels no longer fit, every tab but the active one collapses to
-  // its icon (each already carries a title tooltip) — nothing goes off-screen.
-  const stageBarRef = useRef<HTMLDivElement>(null)
-  const [tabsTight, setTabsTight] = useState(false)
-  const naturalTabsW = useRef(0)
-  useEffect(() => {
-    const el = stageBarRef.current
-    if (!el) return
-    const measure = () => {
-      // Capture the width the strip WANTS while it is still showing labels;
-      // once collapsed its scrollWidth is the collapsed width, which would
-      // otherwise let it flip back and forth on every resize.
-      if (!tabsTight) naturalTabsW.current = Math.max(naturalTabsW.current, el.scrollWidth)
-      const want = naturalTabsW.current || el.scrollWidth
-      setTabsTight(want > el.clientWidth + 1)
-    }
-    measure()
-    const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    return () => ro.disconnect()
-  })
   // badge-don't-steal-focus: a stage finishing while not visible gets a dot
   const [badged, setBadged] = useState<Record<string, 'passed' | 'failed'>>({})
   const prevPipeRef = useRef<Record<string, string>>({})
@@ -1185,8 +1161,6 @@ export default function Compose2Page() {
   // linear happy path. Every stage stays fully functional and switchable; the
   // availability/lock logic is shared so both hosts behave identically.
   const ADVISORY_STAGES: Stage[] = ['mechanical', 'simulation']
-  const primaryStages = STAGES.filter((s) => !ADVISORY_STAGES.includes(s.key))
-  const moreStages = STAGES.filter((s) => ADVISORY_STAGES.includes(s.key))
   const stageMeta = (key: Stage) => {
     const needsSpec = ['explore', 'firmware', 'manufacturing', 'supplyChain', 'validation'].includes(key)
     const avail = needsSpec ? !!productSpec : key === 'electronics' ? (!!selectedRun || !!productSpec) : key === 'id' ? (!!productSpec || !!idBrief || !!selectedRun) : true
@@ -1194,7 +1168,6 @@ export default function Compose2Page() {
     return { needsSpec, avail, locked }
   }
   const clearBadge = (key: string) => setBadged((b) => { if (!(key in b)) return b; const n = { ...b }; delete n[key]; return n })
-  const moreActive = moreStages.some((s) => s.key === stage) && !activeDoc
 
   return (
     <main className="flex h-[calc(100dvh-2.25rem)] flex-col overflow-hidden bg-background text-foreground">
@@ -1243,66 +1216,37 @@ export default function Compose2Page() {
           visualization. The right pane is a full-height sibling (like the left).
           A file opened from the left Files tree takes over this pane (IDE
           editor style) until closed. */}
-      <section className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+      <section className="relative flex min-w-0 flex-1 overflow-hidden">
 
-        {/* stage bar — editor-style tab strip scoped to the middle pane: each tab
-            carries its own bottom border; the ACTIVE tab drops it (bg-background)
-            so it reads connected to the content below, with a 1px amber top edge */}
-        <div ref={stageBarRef} className="flex h-9 shrink-0 items-stretch overflow-x-auto bg-card/40">
-          {primaryStages.map((s) => {
-            const { locked } = stageMeta(s.key)
-            // active ONLY when the stage view is actually showing — with a doc
-            // tab focused the stage must read inactive (else the file looks
-            // nested under it)
-            const on = stage === s.key && !activeDoc
-            return (
-              <button key={s.key} type="button" disabled={locked}
-                onClick={() => { setStage(s.key); setActiveDoc(null); clearBadge(s.key) }}
-                title={s.key === 'id' && !idBrief && !productSpec ? `${s.label} — describe a product first` : s.key === 'explore' && !productSpec ? `${s.label} — describe a product first` : s.label}
-                className={cn('relative flex shrink-0 items-center gap-1.5 border-b border-r border-border text-[11.5px]',
-                  tabsTight ? 'px-2' : 'px-3',
-                  on ? 'border-b-transparent bg-background font-medium text-foreground'
-                    : 'bg-card/40 text-muted-foreground hover:text-foreground',
-                  locked && 'cursor-not-allowed opacity-40 hover:text-muted-foreground')}>
-                {on && <span aria-hidden className="absolute inset-x-0 top-0 h-px bg-primary" />}
-                {badged[s.key] && <span aria-hidden className={cn('absolute right-1 top-1 h-1.5 w-1.5 rounded-full', badged[s.key] === 'failed' ? 'bg-red-500' : 'bg-primary')} />}
-                <s.Icon className={cn('size-3.5 shrink-0', on && 'text-primary')} />
-                {(!tabsTight || on) && s.label}
-                {!s.built && (!tabsTight || on) && <span className="bg-muted px-1 text-[8px] uppercase tracking-wide text-muted-foreground">soon</span>}
-              </button>
-            )
+        {/* The pipeline IS the navigation. This replaced a horizontal strip of
+            nine stage tabs plus an overflow menu — a set of unrelated places,
+            for something that is an ordered sequence with a state per step. The
+            strip also needed 736px inside 392px, so a third of it sat off-screen
+            behind an invisible scroll. See components/run-timeline.tsx. */}
+        <RunTimeline
+          className="w-[10.25rem]"
+          active={activeDoc ? '' : stage}
+          onSelect={(k) => { setStage(k as Stage); setActiveDoc(null); clearBadge(k) }}
+          stages={STAGES.map((st) => {
+            const ps = (pipeStatus as Record<string, { status?: string; detail?: string }>)?.[st.key]
+            return {
+              key: st.key,
+              label: st.label,
+              Icon: st.Icon,
+              state: ps?.status as any,
+              detail: ps?.detail,
+              badged: badged[st.key],
+              locked: stageMeta(st.key).locked,
+              advisory: ADVISORY_STAGES.includes(st.key as Stage),
+            }
           })}
-          {/* advisory stages (mechanical + simulation) demoted behind a "More"
-              overflow — kept fully functional, just out of the default happy path */}
-          <div className="relative flex shrink-0 items-stretch border-b border-r border-border bg-card/40">
-            <button type="button" onClick={() => setStagesMoreOpen((o) => !o)} title="More stages (advisory fidelity)"
-              className={cn('relative flex items-center gap-1.5 text-[11.5px]',
-                tabsTight ? 'px-2' : 'px-3',
-                moreActive ? 'font-medium text-foreground' : 'text-muted-foreground hover:text-foreground')}>
-              {moreStages.some((s) => badged[s.key]) && <span aria-hidden className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-primary" />}
-              <MoreHorizontal className={cn('size-3.5 shrink-0', moreActive && 'text-primary')} />
-              {(!tabsTight || moreActive) && 'More'}
-            </button>
-            {stagesMoreOpen && (
-              <div className="absolute left-0 top-full z-30 mt-1 w-48 rounded-md border border-border bg-card py-1 shadow-lg">
-                {moreStages.map((s) => {
-                  const { locked } = stageMeta(s.key)
-                  const on = stage === s.key && !activeDoc
-                  return (
-                    <button key={s.key} type="button" disabled={locked}
-                      onClick={() => { setStage(s.key); setActiveDoc(null); clearBadge(s.key); setStagesMoreOpen(false) }}
-                      title={s.label}
-                      className={cn('flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[11.5px]',
-                        on ? 'bg-accent/50 text-foreground' : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
-                        locked && 'cursor-not-allowed opacity-40')}>
-                      <s.Icon className={cn('h-3.5 w-3.5', on && 'text-primary')} /> {s.label}
-                      <span className="ml-auto bg-muted px-1 text-[8px] uppercase tracking-wide text-muted-foreground">advisory</span>
-                    </button>
-                  )
-                })}
-              </div>
-            )}
-          </div>
+        />
+
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        {/* Editor tabs for files opened from the Files tree. These ARE a tab
+            strip in the real sense — arbitrary documents, no order — so they
+            stayed one. */}
+        <div className="flex h-9 shrink-0 items-stretch overflow-x-auto bg-card/40">
           {/* filler completes the tab strip's bottom border after the last tab */}
           {docTabs.map((d) => {
             const on = activeDoc === d.id
@@ -1454,6 +1398,7 @@ export default function Compose2Page() {
             )}
         </>
         )}
+      </div>
           </section>
 
           {rightPane}
