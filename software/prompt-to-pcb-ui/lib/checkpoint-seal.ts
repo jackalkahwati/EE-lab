@@ -23,6 +23,7 @@ import fsSync from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { productForRun, updateProduct, type Product } from '@/lib/design-state'
+import { boardVerdict } from './verdict.ts'
 
 const CK = process.env.CHECKPOINT_CORE || '/opt/homebrew/bin/checkpoint-core'
 const STORES = path.join(process.cwd(), 'data', 'checkpoint')
@@ -86,14 +87,20 @@ function gatesSummary(runDir: string): { summary: string; detail: Record<string,
   const board = readJson('electronics/chipscale-board.json')
   const mech = readJson('mechanical/mechanical.json')
   const sim = readJson('disciplines/simulation.json')
-  const drc = board?.drc?.errors ?? null
-  const unrouted = board?.drcRepair?.unrouted ?? null
+  // The seal is the durable evidence record, so it must not seal a claim any
+  // other surface would contradict — lib/verdict is the one decider.
+  const bv = boardVerdict(board)
+  const drc = bv.drcErrors
+  const unrouted = bv.unrouted
   const fits = mech?.fitCheck?.fits ?? null
   const simResults = (sim?.results ?? []).filter((r: any) => !r.error)
   const simFails = simResults.filter((r: any) => r.pass === false).length
   const parts = [
-    drc == null ? 'DRC unknown' : `DRC ${drc} error(s)`,
+    bv.state === 'unverified' ? 'board UNVERIFIED (no DRC ran)'
+      : drc == null ? 'DRC unknown' : `DRC ${drc} error(s)`,
     unrouted == null ? '' : `${unrouted} unrouted`,
+    // fits: null is 'unknown' — the cavity was never identified, so the fit was
+    // never checked. Never seal that as a verified fit.
     fits == null ? 'fit unverified' : fits ? 'fit true' : 'fit FALSE',
     simResults.length ? `sim ${simResults.length - simFails}/${simResults.length} pass` : 'sim not run',
   ].filter(Boolean)

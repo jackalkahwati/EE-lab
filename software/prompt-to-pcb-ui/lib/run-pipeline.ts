@@ -25,6 +25,7 @@ import type { ProductSpec } from '@/lib/product-spec'
 // (the @/ alias is a bundler feature; tests/ has no resolver for it). Type-only
 // imports are erased before resolution, so those may keep the alias.
 import { isRequiredFail } from './sim-router.ts'
+import { boardVerdict } from './verdict.ts'
 
 export type PipeStage =
   | 'electronics' | 'mechanical' | 'simulation'
@@ -152,23 +153,16 @@ export function densityFailure(d: any): boolean {
  * (no `ok` field — derived from drc + drcRepair).
  */
 export function electronicsVerdict(d: any): { clean: boolean; detail: string } {
-  const w = Math.round(d.boardMm.w), h = Math.round(d.boardMm.h)
-  const errs = typeof d?.drc?.errors === 'number' ? d.drc.errors : null
-  const unrouted = typeof d?.drcRepair?.unrouted === 'number' ? d.drcRepair.unrouted : 0
-  const okKnown = typeof d?.ok === 'boolean'
-  const clean = (okKnown ? d.ok === true : d?.drc?.available === true)
-    && (errs ?? 1) === 0 && unrouted === 0
-  if (clean) return { clean, detail: `chip-scale board ${w}×${h}mm · routed clean, 0 DRC errors` }
-  const bits: string[] = []
-  if (errs != null && errs > 0) {
-    const shorts = d?.drc?.errorTypes?.shorting_items
-    bits.push(`${errs} DRC error(s)${shorts ? ` incl. ${shorts} short(s)` : ''}`)
-  }
-  if (unrouted > 0) bits.push(`${unrouted} net(s) unrouted`)
-  if (d?.drcRepair?.converged === false) bits.push('not converged')
-  for (const v of d?.pinViolations ?? []) bits.push(String(v)) // Phase 2: violated pins fail loudly
-  if (!bits.length) bits.push(errs == null ? 'no real DRC report' : 'runner reported not ok')
-  return { clean, detail: `board ${w}×${h}mm built but NOT clean: ${bits.join(', ')} — see Electronics tab` }
+  // Delegates to lib/verdict — the ONE function that decides whether a board is
+  // good. Four surfaces used to decide independently and disagreed in public.
+  const v = boardVerdict(d)
+  const w = Math.round(d?.boardMm?.w ?? 0), h = Math.round(d?.boardMm?.h ?? 0)
+  const size = d?.boardMm ? `${w}×${h}mm` : 'board'
+  if (v.state === 'passed') return { clean: true, detail: `chip-scale board ${size} · ${v.detail}` }
+  if (v.state === 'unverified') return { clean: false, detail: `board ${size} built but UNVERIFIED: ${v.detail}` }
+  if (v.state === 'not_built') return { clean: false, detail: v.detail }
+  const conv = d?.drcRepair?.converged === false ? ['not converged'] : []
+  return { clean: false, detail: `board ${size} built but NOT clean: ${[...v.reasons, ...conv].join(', ')} — see Electronics tab` }
 }
 
 /**

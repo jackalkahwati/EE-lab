@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import type { Run } from '@/lib/firstlight'
 import { describeBoard } from '@/lib/describe-board'
+import { boardVerdict } from '@/lib/verdict'
 
 type S =
   | 'passed' | 'failed' | 'recovered' | 'needs_review'
@@ -87,27 +88,37 @@ export function RunOverview({ runId, run }: { runId: string | null; run?: Run | 
   const rec = a['recovery-loop']
   const adv = a['advanced-routing-report']
 
-  // consolidated verdict
-  let verdict: S = 'not_generated'
-  if (rec?.final_status === 'recovered_and_passed') verdict = 'recovered'
-  else if (status === 'PASSED') verdict = 'passed'
-  else if (status === 'GATE FAILED') verdict = 'failed'
-  else if (status) verdict = 'needs_review'
+  // The verdict is NOT decided here. lib/verdict owns it, from the board that
+  // actually ships; this panel only chooses how to draw it. Deciding locally is
+  // how this panel came to say "DRC failed" while the Review panel one click
+  // away said "PASS" about a different board.
+  const bv = boardVerdict(a['chipscale'])
+  let verdict: S =
+    bv.state === 'passed' ? 'passed'
+      : bv.state === 'failed' ? 'failed'
+        : bv.state === 'unverified' ? 'needs_review'
+          : 'not_generated'
+  // Recovery is the one thing that can lift a failed build: a board the loop
+  // repaired and re-verified reads as recovered, never as a plain pass.
+  if (verdict === 'passed' && rec?.final_status === 'recovered_and_passed') verdict = 'recovered'
+  // Runs with no chip-scale artifact at all still fall back to the recorded
+  // last-run status so old boards keep their row.
+  if (bv.state === 'not_built') {
+    if (rec?.final_status === 'recovered_and_passed') verdict = 'recovered'
+    else if (status === 'PASSED') verdict = 'passed'
+    else if (status === 'GATE FAILED') verdict = 'failed'
+    else if (status) verdict = 'needs_review'
+  }
 
-  // DRC + Routing tiles must reflect the SHIPPED board. In plan mode the
-  // chip-scale board is what ships; showing the vestigial variant board's DRC
-  // here painted a red "DRC: failed" chip next to a genuinely clean shipped
-  // board (and vice versa could paint false green). When a chip-scale board
-  // exists its real KiCad DRC + structural unrouted count win; the variant
-  // numbers remain the labeled fallback for runs without one.
-  const chipDoc = a['chipscale']
-  const chipDrcErrors: number | null =
-    chipDoc?.drc?.available ? (chipDoc.drc.errors ?? null) : null
-  const chipUnrouted: number | null =
-    typeof chipDoc?.drcRepair?.unrouted === 'number' ? chipDoc.drcRepair.unrouted : null
+  // DRC + Routing tiles read the SHIPPED board's numbers straight off the same
+  // verdict, so a tile can never disagree with the headline above it. The
+  // variant board.json remains the labelled fallback for runs that predate the
+  // chip-scale path. null means NOT MEASURED, which is not 0.
+  const chipDrcErrors = bv.drcErrors
+  const chipUnrouted = bv.unrouted
 
   const rows: [string, S, string][] = [
-    ['Final verdict', verdict, status ?? '—'],
+    ['Final verdict', verdict, bv.state === 'not_built' ? (status ?? '—') : bv.detail],
     [
       'Routing',
       chipUnrouted !== null

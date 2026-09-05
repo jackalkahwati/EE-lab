@@ -101,6 +101,9 @@ function buildRun(runsDir: string, id: string): Run | null {
   const bom = readJson(path.join(dataDir, 'bom.json'))
   const bomLines = Array.isArray(bom) ? bom.length : 0
 
+  // For a chip-scale-only run the board object above was synthesized from the
+  // shipped board's own referee result, so this agrees with lib/verdict by
+  // construction. Kept as-is for the legacy variant board.json path.
   const drcPass = (board.drc?.violations ?? 0) === 0
   // unconnected pads (missing connections) make a board not fabricable, they
   // fail the gate even when a zone "serves" the net (see extract_stats.py).
