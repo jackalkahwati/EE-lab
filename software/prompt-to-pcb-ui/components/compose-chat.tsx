@@ -56,7 +56,7 @@ function b64(json: string) {
     String.fromCharCode(parseInt(h, 16))))
 }
 
-export function ComposeChat({ threads, activeId, activeRunId, activeName, newDesign, revisePrefill, onSelectThread, onNew, onRunComplete, onRename, onPrefillConsumed, onIdBrief, onProductSpec, productSpec: productSpecProp, builtDisciplines, pipelineStatus, pipelineRunning, pipelineFeedback, onRunPipeline, onStopPipeline, onProductBuilt }: {
+export function ComposeChat({ threads, activeId, activeRunId, activeName, newDesign, revisePrefill, onSelectThread, onNew, onRunComplete, onRunStart, onRename, onPrefillConsumed, onIdBrief, onProductSpec, productSpec: productSpecProp, builtDisciplines, pipelineStatus, pipelineRunning, pipelineFeedback, onRunPipeline, onStopPipeline, onProductBuilt }: {
   threads: { id: string; label: string }[]
   activeId: string
   activeRunId?: string   // the real run currently on screen (revisable)
@@ -66,6 +66,11 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
   onSelectThread: (id: string) => void
   onNew: () => void
   onRunComplete: (runDir: string, id: string) => void
+  /** Fired the moment a build BEGINS, before anything exists on disk. The page
+   *  only ever heard about a run when it COMPLETED, so a build that started and
+   *  failed left the page believing no run existed at all — and it rendered the
+   *  fresh-install blank slate over a design that had just failed. */
+  onRunStart?: (runId: string) => void
   onRename?: (id: string, name: string) => void
   onPrefillConsumed?: () => void
   onIdBrief?: (brief: IdBrief | null) => void // lift the ID brief to the workspace panes
@@ -247,6 +252,9 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
     const url = `/api/pipeline/run?prompt=${encodeURIComponent(revSpec.request)}`
       + `&runId=${encodeURIComponent(id)}&compose=1&spec=${encodeURIComponent(payload)}`
       + `&parent=${encodeURIComponent(activeRunId)}&revNote=${encodeURIComponent(revSpec.note || revSpec.request)}${mdl}`
+    // Tell the page the run EXISTS now, not when it finishes. A failure after
+    // this point must render as a failed run, never as "describe a board".
+    onRunStart?.(id)
     const es = new EventSource(url); esRef.current = es
     es.onmessage = (e) => {
       const ev = JSON.parse(e.data) as Ev

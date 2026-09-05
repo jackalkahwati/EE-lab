@@ -623,6 +623,40 @@ export default function Compose2Page() {
   // each discipline's real API (the same the manual buttons call); the sequencer
   // just orders them so each grounds on the real board, and wires the feedback
   // loop. Live status streams into the disciplines panel via pipeStatus.
+  /**
+   * A build has BEGUN. Register the run immediately, with a placeholder entry if
+   * /api/runs cannot see it yet (it cannot — nothing is on disk).
+   *
+   * Without this the page learned about a run only when it COMPLETED, so a run
+   * that started and failed left `selectedRun` undefined and the whole page fell
+   * through to `if (!selectedRun)` — the fresh-install slate. The result was
+   * three contradictory empty states at once over a design that had just failed:
+   * "Describe a board on the left to design your first one" in the centre,
+   * "No run yet — panels populate as the build runs" in the right rail, and
+   * "no run" in the status bar, while the left panel showed the product and
+   * "Electronics FAILED". The failure was also unreachable afterwards: the
+   * thread was never registered, so it did not appear in the run list either.
+   */
+  const onRunStart = (runId: string) => {
+    setSelectedId(runId)
+    setNewDesign(false)
+    setRuns((prev: Run[]) => (prev.some((r) => r.id === runId) ? prev : [
+      {
+        id: runId,
+        name: productSpecRef.current?.product || 'building…',
+        timestamp: new Date().toISOString().replace('T', ' ').slice(0, 16),
+        status: 'RUNNING',
+        prompt: productSpecRef.current?.product || '',
+        real: false,
+        runDir: `/runs/${runId}`,
+        stages: [],
+        metrics: {},
+        logs: [],
+      } as unknown as Run,
+      ...prev,
+    ]))
+  }
+
   const runPipeline = async (runIdArg?: string) => {
     const runId = runIdArg || selectedRun?.id
     const spec = productSpecRef.current
@@ -1046,6 +1080,7 @@ export default function Compose2Page() {
               onSelectThread={(id) => { setSelectedId(id); setNewDesign(false); setIdBrief(null); setProductSpec(null); setStage('electronics'); setBuiltDisc({}) }}
               onNew={() => {}}
               onRunComplete={onRunComplete}
+          onRunStart={onRunStart}
               onIdBrief={onIdBrief}
               onProductSpec={setProductSpec}
               productSpec={productSpec}
@@ -1129,6 +1164,7 @@ export default function Compose2Page() {
           onStopPipeline={stopPipeline}
           onProductBuilt={onProductBuilt}
           onRunComplete={onRunComplete}
+              onRunStart={onRunStart}
           onIdBrief={onIdBrief}
           onProductSpec={setProductSpec}
           productSpec={productSpec}
