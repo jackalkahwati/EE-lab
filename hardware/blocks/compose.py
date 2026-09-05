@@ -482,6 +482,87 @@ def label(text, x, y, size=1.0):
     _SILK.append((text, round(x, 2), round(y, 2), size))
 
 
+_POLARITY_RX = re.compile(r"(?<![A-Za-z0-9])([+\-])(?![A-Za-z0-9])")
+# Net names that ARE a positive supply, and names that are a return.
+_POS_NET_RX = re.compile(r"^(?:\+?\d*V\d*|VBAT|BAT\+?|VBUS|VIN|VCC|VDD|\+?5V|\+?3V3)$", re.I)
+_NEG_NET_RX = re.compile(r"^(?:GND|AGND|DGND|VSS|BAT-)$", re.I)
+
+
+def check_silk_polarity(silk=None, netlist=None, placed=None):
+    """Does a '+ -' silkscreen marking agree with the netlist underneath it?
+
+    Nothing in any toolchain checks this. ERC sees a schematic, DRC sees copper;
+    silkscreen text is decoration to both. So a '+' printed beside the NEGATIVE
+    terminal passes every check, gets fabricated, and tells whoever wires the
+    battery to reverse the polarity. That exact fault shipped on a real
+    AI-designed adapter board (the '+' silkscreen on its XIAO connector sat next
+    to the negative terminal) and was only caught by a multimeter.
+
+    This board carries 47 hardcoded label() calls, several of them polarity
+    markings like "BAT + -", placed at fixed offsets that were never related to
+    which pad is actually on the positive net.
+
+    The check: for each label containing polarity signs, find the nearest placed
+    part, and compare the ORDER of the signs in the text against the polarity of
+    that part's pads in ascending pad order. "BAT + -" over a part whose pad 1 is
+    GND and pad 2 is VBAT is backwards, and says so.
+
+    Returns a list of human-readable problems; empty means nothing to say.
+    Geometry-free by design so it is unit-testable: order in, order out.
+    """
+    silk = _SILK if silk is None else silk
+    netlist = _NETLIST if netlist is None else netlist
+    placed = _PLACED if placed is None else placed
+    problems = []
+    boxes = {}
+    for e in placed:
+        b = e.get("box")
+        if not b:
+            continue
+        # box is (x0, y0, x1, y1)
+        try:
+            x0, y0, x1, y1 = b
+        except Exception:
+            continue
+        boxes[e["ref"]] = ((x0 + x1) / 2.0, (y0 + y1) / 2.0)
+    nets_by_ref = {}
+    for e in netlist:
+        nets_by_ref.setdefault(e["ref"], {}).update(e.get("netmap") or {})
+
+    for text, lx, ly, _size in silk:
+        signs = _POLARITY_RX.findall(text)
+        if len(signs) < 2 or "+" not in signs or "-" not in signs:
+            continue  # not a polarity marking
+        near = sorted(
+            ((abs(cx - lx) + abs(cy - ly), ref) for ref, (cx, cy) in boxes.items()
+             if ref in nets_by_ref),
+            key=lambda t: t[0],
+        )
+        if not near:
+            continue
+        ref = near[0][1]
+        nm = nets_by_ref[ref]
+        pads = sorted((p for p in nm if str(p).isdigit()), key=lambda p: int(p))
+        actual = []
+        for pad in pads:
+            net = str(nm[pad])
+            if _POS_NET_RX.match(net):
+                actual.append("+")
+            elif _NEG_NET_RX.match(net):
+                actual.append("-")
+        if len(actual) < 2:
+            continue  # the nearest part is not a two-terminal power interface
+        want = signs[:len(actual)]
+        if want != actual[:len(want)]:
+            problems.append(
+                'silkscreen "%s" at (%s, %s) reads %s but %s\'s pads run %s '
+                "(pad %s = %s) — the marking is reversed and would have someone "
+                "wire the supply backwards"
+                % (text, lx, ly, " ".join(want), ref, " ".join(actual),
+                   pads[0], nm[pads[0]]))
+    return problems
+
+
 def _silk_text(text, x, y, size):
     return ('  (gr_text "{}" (at {} {}) (layer "F.SilkS") (uuid "{}")\n'
             '    (effects (font (size {} {}) (thickness 0.15))))\n').format(
@@ -2352,6 +2433,11 @@ def compose(spec, blocks, out_path):
     # board name + revision on silk (functional labels, not just refs)
     board_name = str((spec or {}).get("boardClass") or "FL-1 board")[:40]
     label("%s  rev A" % board_name, X0 + BW / 2, Y0 + 3)
+    # A reversed polarity marking is invisible to ERC and DRC and ships. Check
+    # it against the netlist here, where both the labels and the placements are
+    # known, and surface it rather than printing it silently.
+    for problem in check_silk_polarity():
+        print("SILK POLARITY: %s" % problem, file=sys.stderr)
     for text, lx, ly, size in _SILK:
         body += _silk_text(text, lx, ly, size)
 

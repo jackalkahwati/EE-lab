@@ -769,7 +769,13 @@ def _qfn_for(netmap):
 # rule was severe: the planner deleted every connector while design_check.py
 # required one, so any product needing a connector — nearly all of them — was
 # blocked before it was ever routed. A board's connectors are part of the board.
-_CHIP_SCALE_DROP_LIBS = {"TestPoint",
+# TestPoint was dropped here too. A board nobody can put a probe on cannot be
+# brought up: the FL-1 test plan tells a human to measure the input rail BEFORE
+# applying power, and that is only possible if the net has a pad a probe can
+# land on. Dropping the pads while still shipping the procedure that needs them
+# is the worst of both. design_check.py now warns when a board has no probeable
+# pad at all; a placed test point is kept.
+_CHIP_SCALE_DROP_LIBS = {
                          # bench-board mechanicals: run_board drills its OWN
                          # collision-checked NPTH mounting holes, and a fiducial
                          # is not a part — exporting these as phantom 0402 chips
@@ -780,7 +786,8 @@ _CHIP_SCALE_DROP_LIBS = {"TestPoint",
 def _is_chip_scale_extra(ref, lib):
     if lib in _CHIP_SCALE_DROP_LIBS:
         return True
-    return ref.startswith("TP") or ref.startswith("RCAL")
+    # TP refs are no longer dropped — see _CHIP_SCALE_DROP_LIBS above.
+    return ref.startswith("RCAL")
 
 
 def netlist_from_design(design, chip_scale=True, real_geometry=False):

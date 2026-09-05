@@ -183,6 +183,41 @@ def check(spec, rules, intent_text=None):
             if not reaches:
                 report(sc["severity"], f"{mux_ref}->{adc_ref}", sc["msg"])
 
+    # ---- datasheet evidence (advisory) ---------------------------------------
+    # The planner has ingested per-part datasheet requirements for years
+    # (datasheet_db_v2.json: operating voltage, address straps, decoupling,
+    # pull-ups, boot straps, power sequencing, crystal load caps) and the
+    # correctness gate never once read them. That knowledge existed and was
+    # invisible to the only thing that could act on it.
+    #
+    # These are ADVISORY, never fail-severity, and deliberately so: every
+    # record in that store carries extraction_method "model_recall" and
+    # datasheet_revision "unverified". An unverified source must not block a
+    # board — but it must not be silent either, because this is exactly the
+    # class of fact that ERC and DRC cannot see and that decides whether a
+    # manufacturable board actually works.
+    for ref, reqs in _datasheet_requirements(parts, ref_mpn).items():
+        shown = "; ".join(reqs[:4])
+        more = f" (+{len(reqs) - 4} more)" if len(reqs) > 4 else ""
+        report("warn", ref,
+               f"[{ref_mpn.get(ref, '?')}] datasheet requirements NOT verified by this gate: "
+               f"{shown}{more} — provenance: model recall, datasheet revision unverified")
+
+    # ---- probeable pad on the power input ------------------------------------
+    # A board nobody can put a probe on cannot be brought up. The FL-1 test plan
+    # tells a human to measure the input rail before applying power; that is
+    # only possible if some pad on that net belongs to a part with pads a probe
+    # can actually land on. Fine-pitch chip pads under a QFN are not that.
+    probeable = {p["name"] for p in parts
+                 if re.search(r"header|socket|screwterminal|terminal|testpoint|conn",
+                              str(p.get("footprint", "")) + " " + str(p.get("kind", "")), re.I)
+                 or re.match(r"^(0805|1206|1210|1812|2010|2512)$", str(p.get("footprint", "")))}
+    if parts and not probeable:
+        report("warn", "-",
+               "no probeable pad anywhere on this board (no connector, terminal, test point "
+               "or >=0805 pad) — the bring-up procedure cannot be carried out on the physical "
+               "board, and a fault could not be localized")
+
     # ---- connector-required --------------------------------------------------
     cr = _req(generic, "connector_required_if_intent", "generic")
     if re.search(cr["detect_intent"], intent_text, re.I):
@@ -196,6 +231,46 @@ def check(spec, rules, intent_text=None):
         "parts": len(parts),
         "nets": len(nets),
     }
+
+
+_DATASHEET_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "datasheet_db_v2.json")
+
+
+def _datasheet_requirements(parts, ref_mpn):
+    """ref -> [normalized requirement, ...] from the ingested datasheet store.
+
+    Matched on MPN, case-insensitively, and on a prefix so an ADS1115IDGS in the
+    design finds the ADS1115 records. Returns {} on any failure to read the
+    store: a missing advisory source is not a gate error.
+    """
+    try:
+        with open(_DATASHEET_DB) as f:
+            records = json.load(f).get("records") or []
+    except Exception:
+        return {}
+    by_mpn = {}
+    for r in records:
+        key = str(r.get("mpn") or r.get("component") or "").strip().upper()
+        if not key:
+            continue
+        text = str(r.get("normalized_requirement") or r.get("evidence_type") or "").strip()
+        if text:
+            by_mpn.setdefault(key, []).append("%s: %s" % (r.get("evidence_type", "requirement"), text))
+    out = {}
+    for p in parts:
+        mpn = str(ref_mpn.get(p["name"], "") or "").strip().upper()
+        if not mpn:
+            continue
+        hit = by_mpn.get(mpn)
+        if not hit:
+            # ADS1115IDGS -> ADS1115
+            for key, reqs in by_mpn.items():
+                if mpn.startswith(key) and len(key) >= 5:
+                    hit = reqs
+                    break
+        if hit:
+            out[p["name"]] = hit
+    return out
 
 
 def _one_line(e):
