@@ -8,7 +8,10 @@ import pytest
 
 
 HERE = Path(__file__).resolve().parent
-NATIVE_TESTS = {"test_core_regressions.py", "test_legacy_regressions.py", "test_design_gate.py"}
+# MUST match conftest._NATIVE_PYTEST_FILES. Two hand-maintained copies of
+# the same set is how a pytest-style file ends up ALSO run as a script:
+# harmless here (it does nothing and exits 0) but it hides the mismatch.
+from conftest import _NATIVE_PYTEST_FILES as NATIVE_TESTS
 LEGACY_SCRIPTS = sorted(
     path for path in HERE.glob("test_*.py") if path.name not in NATIVE_TESTS
 )
