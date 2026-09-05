@@ -255,10 +255,7 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
     const url = `/api/pipeline/run?prompt=${encodeURIComponent(revSpec.request)}`
       + `&runId=${encodeURIComponent(id)}&compose=1&spec=${encodeURIComponent(payload)}`
       + `&parent=${encodeURIComponent(activeRunId)}&revNote=${encodeURIComponent(revSpec.note || revSpec.request)}${mdl}`
-    // Tell the page the run EXISTS now, not when it finishes. A failure after
-    // this point must render as a failed run, never as "describe a board".
-    onRunStart?.(id)
-    const es = new EventSource(url); esRef.current = es
+    const es = openBuildStream(url, id); esRef.current = es
     es.onmessage = (e) => {
       const ev = JSON.parse(e.data) as Ev
       if (ev.type === 'stage' && ev.id) setStages((s) => ({ ...s, [ev.id!]: ev.state as StageState }))
@@ -291,7 +288,7 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
     const url = opts?.plan
       ? `${base}&plan=1`
       : `${base}&compose=1&spec=${encodeURIComponent(payload)}`
-    const es = new EventSource(url); esRef.current = es
+    const es = openBuildStream(url, id); esRef.current = es
     es.onmessage = (e) => {
       const ev = JSON.parse(e.data) as Ev
       if (ev.type === 'stage' && ev.id) setStages((s) => ({ ...s, [ev.id!]: ev.state as StageState }))
@@ -485,6 +482,25 @@ export function ComposeChat({ threads, activeId, activeRunId, activeName, newDes
       `\n\nRequested change: ${req}`
     setAnswers([]); setCurrent(null)
     askArchitect(combined, [])
+  }
+
+  /**
+   * Open a build stream, and tell the page the run EXISTS before it does.
+   *
+   * There are two build paths and only one of them reported. The plan-mode
+   * path — what a NEW design actually uses — opened its EventSource directly,
+   * so the page never learned the run existed and rendered the fresh-install
+   * slate over a design showing "Electronics FAILED": "No run yet" in the
+   * rail, "Describe a board on the left" in the centre, "no run" in the status
+   * bar. That is the precise bug step 2 was meant to fix, still reachable
+   * through the path step 2 missed.
+   *
+   * Never call `new EventSource` for a build directly. Both paths go through
+   * here so they cannot diverge again.
+   */
+  function openBuildStream(url: string, id: string): EventSource {
+    onRunStart?.(id)
+    return new EventSource(url)
   }
 
   function stop() { esRef.current?.close(); esRef.current = null; setPhase('done') }
