@@ -463,8 +463,34 @@ export async function GET(req: Request) {
   recordRun(userEmail, runId)
   acquireRun(userEmail)
 
+  // Handle lives out here: start() arms it, and BOTH start()'s finally and
+  // cancel() must be able to clear it. Declared inside start(), cancel() could
+  // not see it and a client walking away left the interval running.
+  let heartbeat: ReturnType<typeof setInterval> | undefined
   const stream = new ReadableStream({
     async start(controller) {
+      /**
+       * SSE heartbeat.
+       *
+       * Cloudflare drops a connection that has been SILENT for ~100s, and that
+       * applies to a stream as much as to a POST. This stream only emits on a
+       * stage transition, and a single stage can be a multi-minute model call
+       * (firmware composing a BSP + peripheral HAL). So the tunnel killed the
+       * build mid-stage, the browser reported "connection lost", and the run
+       * died at whatever stage happened to be slow — repeatedly, at firmware.
+       *
+       * A comment line is invisible to EventSource (no `data:`, so no message
+       * event) but it is bytes on the wire, which is all the idle timer wants.
+       */
+      const HEARTBEAT_MS = 15_000
+      heartbeat = setInterval(() => {
+        try {
+          controller.enqueue(encoder.encode(`: keepalive ${Date.now()}\n\n`))
+        } catch {
+          clearInterval(heartbeat)
+        }
+      }, HEARTBEAT_MS)
+
       const send = (ev: PipelineEvent) => {
         // this run's artifacts were written straight into public/runs/<id>, point
         // the client at that snapshot. No copy needed; the dir already holds only
@@ -1867,6 +1893,7 @@ export async function GET(req: Request) {
         send({ type: 'error', message: String(err) })
       } finally {
         clearTimeout(killTimer)
+        clearInterval(heartbeat)
         releaseRunOnce()
         // close out the EDA wall-clock record on EVERY exit path. Stages still
         // open never reported a terminal state (abort/throw mid-stage) — keep
@@ -1929,6 +1956,7 @@ export async function GET(req: Request) {
       // orphaned builder keeps writing into this run's dir (same abort stance
       // as the child-process kill above; electronics-cs skips its persist).
       try { earlyCsAbort.abort() } catch { /* already settled */ }
+      clearInterval(heartbeat)
       releaseRunOnce()
     },
   })
