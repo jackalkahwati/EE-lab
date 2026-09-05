@@ -482,11 +482,26 @@ function densityFailed(result: any): boolean {
   return errs >= REPLAN_MIN_ERRORS || unconnected > 0
 }
 
-/** Which board to keep: a clean route always wins; else fewer DRC errors; a tie
- *  keeps the original (`a`) so a re-plan must be strictly better to be adopted. */
+/**
+ * Which board to keep: a clean route always wins; else the lower SEVERITY-
+ * WEIGHTED score; a tie keeps the original (`a`) so a re-plan must be strictly
+ * better to be adopted.
+ *
+ * This compared raw `drc.errors`, which cannot tell a short from a silkscreen
+ * nit and ignores unrouted nets entirely. A re-plan that removed a short and
+ * added two clearance nits went from 1 error to 2 and was REJECTED — while the
+ * router that produced it had scored the trade as a large improvement, because
+ * drcScore weights an electrical fault at 25 and a fab nit at 1. The runner now
+ * publishes that score; ranking here on anything else re-introduces the
+ * disagreement. Falls back to the error count for boards built before the score
+ * existed.
+ */
 function betterResult(a: any, b: any): 'a' | 'b' {
   if (a?.ok && !b?.ok) return 'a'
   if (b?.ok && !a?.ok) return 'b'
+  const sa = typeof a?.drcScore === 'number' ? a.drcScore : null
+  const sb = typeof b?.drcScore === 'number' ? b.drcScore : null
+  if (sa !== null && sb !== null) return sb < sa ? 'b' : 'a'
   const ea = a?.drc?.errors ?? Infinity, eb = b?.drc?.errors ?? Infinity
   return eb < ea ? 'b' : 'a'
 }
@@ -1047,7 +1062,7 @@ async function buildChipScale(
       //     drilled in the .kicad_pcb, in BOARD-CENTERED mm (+x right, +y up).
       //     The enclosure should put its bosses/standoffs exactly there.
       await fs.writeFile(path.join(dir, 'chipscale-board.json'),
-        JSON.stringify({ ok: !!result.ok && pinViolations.length === 0, pinViolations, boardMm: result.boardMm, areaMm2: result.areaMm2, components: result.components, routedTraces: result.routedTraces, realFootprints, parts: partList, boardShape: result.boardShape ?? null, mountingHoles: result.mountingHoles ?? [], drc: result.drc ?? null, drcRepair: result.drcRepair ?? null, designConvergence, boardSource, plannerHonest }))
+        JSON.stringify({ ok: !!result.ok && pinViolations.length === 0, pinViolations, drcScore: result.drcScore ?? null, boardMm: result.boardMm, areaMm2: result.areaMm2, components: result.components, routedTraces: result.routedTraces, realFootprints, parts: partList, boardShape: result.boardShape ?? null, mountingHoles: result.mountingHoles ?? [], drc: result.drc ?? null, drcRepair: result.drcRepair ?? null, designConvergence, boardSource, plannerHonest }))
       // the routed .kicad_pcb for the 3D render (the real chip-down board)
       if (result.kicadPcb) await fs.writeFile(path.join(dir, 'chipscale.kicad_pcb'), result.kicadPcb)
     }
@@ -1056,6 +1071,7 @@ async function buildChipScale(
     return {
       ok: !!result.ok && pinViolations.length === 0,
       pinViolations,
+      drcScore: result.drcScore ?? null,
       boardMm: result.boardMm,
       areaMm2: result.areaMm2,
       boardShape: result.boardShape ?? null,

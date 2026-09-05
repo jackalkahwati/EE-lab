@@ -17,6 +17,7 @@ import { forkRun } from '@/lib/run-fork'
 import { recordRun } from '@/lib/auth'
 import { trackRun } from '@/lib/design-state'
 import { enqueueBuild, queueDepth } from '@/lib/v1-jobs'
+import { withKeepalive } from '@/lib/keepalive'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,7 +31,16 @@ function deepMerge(dst: any, src: any) {
   }
 }
 
-export async function POST(req: Request) {
+/**
+ * Model-backed and slow, so Cloudflare's ~100s no-bytes cap kills it over the
+ * tunnel — /api/interview died there and took a whole build with it.
+ * withKeepalive returns fast responses untouched. See lib/keepalive.ts.
+ */
+export async function POST(req: Request): Promise<Response> {
+  return withKeepalive(handlePost(req))
+}
+
+async function handlePost(req: Request) {
   try {
     const body = await req.json().catch(() => ({}))
     const runId = typeof body?.runId === 'string' ? body.runId : ''

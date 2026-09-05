@@ -40,3 +40,20 @@ test('a fast rejection still throws, so the route can 500 as before', async () =
     /bad json body/,
   )
 })
+
+test('every route the client can wait minutes on is wrapped', async () => {
+  // /api/interview was NOT wrapped and Cloudflare killed it at ~100s, taking a
+  // whole build with it. The pipeline routes were wrapped; the chat routes the
+  // FIRST interaction hits were not. This asserts the list stays complete.
+  const fs = await import('node:fs')
+  const path = await import('node:path')
+  const mustWrap = [
+    'electronics-cs', 'mechanical', 'discipline', 'redesign', 'simulate',
+    'architect', 'interview', 'industrial-design', 'revise', 'runs/targeted',
+  ]
+  const missing = mustWrap.filter((r) => {
+    const p = path.join(process.cwd(), 'app', 'api', r, 'route.ts')
+    return !fs.readFileSync(p, 'utf8').includes('withKeepalive')
+  })
+  assert.deepEqual(missing, [], `unwrapped long routes will die at the tunnel's 100s cap: ${missing.join(', ')}`)
+})

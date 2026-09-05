@@ -20,6 +20,7 @@ import { assertCanSpend } from '@/lib/spend-gate'
 import { MODEL } from '@/lib/model-tiers'
 import { ID_BRIEF_SCHEMA, normalizeIdBrief } from '@/lib/id-brief'
 import { loadGroundBoard } from '@/lib/ground-board'
+import { withKeepalive } from '@/lib/keepalive'
 
 export const dynamic = 'force-dynamic'
 
@@ -163,7 +164,16 @@ function firstJsonObject(text: string): string {
   throw new Error('no valid industrial-design JSON in model reply')
 }
 
-export async function POST(req: Request) {
+/**
+ * Model-backed and slow, so Cloudflare's ~100s no-bytes cap kills it over the
+ * tunnel — /api/interview died there and took a whole build with it.
+ * withKeepalive returns fast responses untouched. See lib/keepalive.ts.
+ */
+export async function POST(req: Request): Promise<Response> {
+  return withKeepalive(handlePost(req))
+}
+
+async function handlePost(req: Request) {
   try {
     const body = await req.json()
     const request: string = body.request ?? ''

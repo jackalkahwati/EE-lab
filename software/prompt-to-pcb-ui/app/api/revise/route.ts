@@ -17,6 +17,7 @@ import { callLLMText } from '@/lib/llm'
 import { overrideForRequest } from '@/lib/byok'
 import { assertCanSpend } from '@/lib/spend-gate'
 import { isValidRunId, runAccess } from '@/lib/auth'
+import { withKeepalive } from '@/lib/keepalive'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120
@@ -70,7 +71,16 @@ function extractJson(raw: string): string {
   throw new Error('no valid revision JSON in model reply')
 }
 
-export async function POST(req: Request) {
+/**
+ * Model-backed and slow, so Cloudflare's ~100s no-bytes cap kills it over the
+ * tunnel — /api/interview died there and took a whole build with it.
+ * withKeepalive returns fast responses untouched. See lib/keepalive.ts.
+ */
+export async function POST(req: Request): Promise<Response> {
+  return withKeepalive(handlePost(req))
+}
+
+async function handlePost(req: Request) {
   let body: { runId?: string; request?: string }
   try {
     body = await req.json()
