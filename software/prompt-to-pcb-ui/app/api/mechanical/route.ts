@@ -505,15 +505,16 @@ async function handlePost(req: Request) {
     }
     /** fitCheck contract (persisted in mechanical.json, consumed by run-pipeline,
      *  work-items, redesign, checkpoint-seal):
-     *  - fits: false ONLY when verdict === 'does_not_fit'; true for 'fits' AND
-     *    for 'unknown' (true-with-warning — an unidentified cavity is not a fail)
+     *  - fits: true ONLY for 'fits', false ONLY for 'does_not_fit', NULL for
+     *    'unknown' (the cavity could not be identified, so the fit was never
+     *    checked — not a fail, and not a pass either)
      *  - verdict: 'fits' | 'does_not_fit' | 'unknown'
      *  - cavityMm: the SELECTED cavity pocket {w,h,d?} or null; enclosureMm stays
      *    the OUTER body (compat — never print it as the cavity)
      *  - cavitySource: how the cavity was chosen; cavityOp: its pocket op name
      *  - problems: human-readable, incl. the 'unknown' warning and mounting misfit */
     let fitCheck: {
-      fits: boolean
+      fits: boolean | null
       verdict: FitVerdict
       boardShape: 'circle' | 'rect'
       enclosureMm: { w: number; h: number }

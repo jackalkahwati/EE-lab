@@ -184,16 +184,28 @@ async function runDiscipline(stage: PipeStage, spec: ProductSpec, opts: RunOpts)
 }
 
 /**
- * Simulation stage verdict from a /api/simulate payload. ONE rule, used for the
- * first pass and the post-redesign re-check alike:
- *   - the stage FAILS only when a REQUIRED analysis's judged verdict is 'fail'
- *     (lib/sim-router.ts judge → lib/sim-judge.ts for thermal);
+ * Simulation stage verdict from a /api/simulate payload. Used for the first
+ * pass and the post-redesign re-check alike:
+ *   - the stage FAILS when a REQUIRED analysis is judged 'fail'
+ *     (lib/sim-router.ts judge → lib/sim-judge.ts for thermal), or when a
+ *     REQUIRED analysis COULD NOT RUN (a "gap");
  *   - recommended/optional fails, 'model_invalid' (physically absurd solver
- *     output — a modelling problem, not a design fail), 'unknown', required gaps
- *     and raw solver pass=false flags on analyses the plan does not cover are all
- *     surfaced as WARNINGS in the detail and never fail the stage.
+ *     output — a modelling problem, not a design fail), 'unknown', and raw
+ *     solver pass=false flags on analyses the plan does not cover are surfaced
+ *     as WARNINGS and do not fail the stage.
+ *
+ * Gaps used to be warnings, so a run where every required analysis failed to
+ * execute reported PASSED with the headline "all required sims meet
+ * application requirements" — asserting the opposite of what happened.
+ * sim-router's judge() is explicit that a required analysis with no solver
+ * result is "a gap (no_data), never a silent pass"; this is the caller that
+ * was silently passing it.
+ *
+ * `fails` stays ACTIONABLE failures only — the redesign controller can move a
+ * budget to clear a thermal fail, but no budget change makes an absent solver
+ * run — so gaps are returned separately and never fire the feedback loop.
  */
-export function simStageVerdict(d: any): { status: 'passed' | 'failed'; detail: string; fails: string[]; warnings: string[] } {
+export function simStageVerdict(d: any): { status: 'passed' | 'failed'; detail: string; fails: string[]; warnings: string[]; gaps: string[] } {
   const assessments = (d?.assessment?.assessments ?? []) as any[]
   const results = (d?.results ?? []) as any[]
   const planned = new Set(assessments.map((a) => a.kind))
@@ -208,11 +220,14 @@ export function simStageVerdict(d: any): { status: 'passed' | 'failed'; detail: 
     if (r && typeof r.sim === 'string' && !planned.has(r.sim) && r.pass === false)
       warnings.push(`${r.sim} ${r.value}${r.unit ?? ''} vs ${r.limit} (solver limit; no application requirement planned)`)
   const gaps = (d?.assessment?.gaps ?? []) as string[]
-  if (gaps.length) warnings.push(`${gaps.length} required check(s) could not run: ${gaps.join('; ')}`)
   const warn = warnings.length ? ` — warnings: ${warnings.join('; ')}` : ''
-  return fails.length
-    ? { status: 'failed', detail: `${fails.length} required sim(s) fail the application requirement: ${fails.join('; ')}${warn}`, fails, warnings }
-    : { status: 'passed', detail: `all required sims meet application requirements${warn}`, fails, warnings }
+  const parts: string[] = []
+  if (fails.length) parts.push(`${fails.length} required sim(s) fail the application requirement: ${fails.join('; ')}`)
+  // A check that did not run is not a check that passed.
+  if (gaps.length) parts.push(`${gaps.length} required sim(s) could not run — UNVERIFIED, not passed: ${gaps.join('; ')}`)
+  return parts.length
+    ? { status: 'failed', detail: `${parts.join('. ')}${warn}`, fails, warnings, gaps }
+    : { status: 'passed', detail: `all required sims meet application requirements${warn}`, fails, warnings, gaps }
 }
 
 /** Mechanical stage detail from a /api/mechanical payload's fitCheck. Prints the
@@ -224,6 +239,9 @@ export function mechFitDetail(d: any): string {
   const cav = fc.cavityMm ?? fc.enclosureMm
   const probs: string[] = Array.isArray(fc.problems) ? fc.problems.filter((p: unknown) => typeof p === 'string') : []
   const tail = probs.length ? ` — ${probs.join('; ')}` : ''
+  // fits == null → 'unknown': the cavity was never identified, so never print
+  // this as a fit. It used to say "fits the cavity" for a check that never ran.
+  if (fc.fits == null) return `PCB ${fc.pcbMm?.w}×${fc.pcbMm?.h}mm — fit NOT verified${tail}`
   if (fc.fits) return `PCB ${fc.pcbMm?.w}×${fc.pcbMm?.h}mm fits the cavity ${cav?.w}×${cav?.h}mm${tail}`
   return `PCB ${fc.pcbMm?.w}×${fc.pcbMm?.h}mm does NOT fit cavity ${cav?.w}×${cav?.h}mm${tail}`
 }

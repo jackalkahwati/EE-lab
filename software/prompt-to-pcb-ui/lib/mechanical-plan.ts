@@ -387,8 +387,12 @@ export function selectCavity(plan: MechPlan, pcb: FitShape | null, margin = 1.0)
 
 export interface FitEvaluation {
   verdict: FitVerdict
-  /** false ONLY on 'does_not_fit'; true for 'fits' and (with a warning) 'unknown' */
-  fits: boolean
+  /** true ONLY on 'fits', false ONLY on 'does_not_fit', NULL on 'unknown'.
+   *  'unknown' used to report true, so an enclosure whose board cavity could
+   *  not be identified sealed a VERIFIED fit into the evidence record and
+   *  printed "PCB 24x24mm fits the cavity" in the pipeline detail. The fit was
+   *  never checked. Null is the third state that was missing. */
+  fits: boolean | null
   problems: string[]
 }
 
@@ -413,9 +417,10 @@ function shortfall(cavity: FitShape, pcb: FitShape, slack: number): string {
 }
 
 /**
- * Honest fit verdict. `cavity` null ⇒ 'unknown' (fit NOT verified — never a
- * failure on its own); the outer-body checks still run and can fail
- * independently (board + 2 walls > outer ⇒ 'does_not_fit').
+ * Honest fit verdict. `cavity` null ⇒ 'unknown' with `fits: null` — the fit was
+ * NOT verified, which is neither a pass nor a failure; the outer-body checks
+ * still run and can fail independently (board + 2 walls > outer ⇒
+ * 'does_not_fit').
  */
 export function evaluateFit(args: {
   pcb: FitShape
@@ -452,7 +457,8 @@ export function evaluateFit(args: {
     problems.push(
       `no board cavity identified in the plan (${n} pocket${n === 1 ? '' : 's'} examined${why ? ' — ' + why : ''}) — PCB fit NOT verified`,
     )
-    return { verdict: 'unknown', fits: true, problems }
+    // NOT true: nothing verified this fit. See the FitEvaluation doc above.
+    return { verdict: 'unknown', fits: null, problems }
   }
   return { verdict: 'fits', fits: true, problems }
 }
