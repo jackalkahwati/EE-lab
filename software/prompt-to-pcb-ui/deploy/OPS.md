@@ -127,6 +127,38 @@ export RUSTUP_HOME=~/.rustup   # see the note below before using a /Volumes path
 cd ~/firstlight-prod/hardware/pcba-rev-a/tools/flroute && cargo build --release
 ```
 
+### The firmware stage needs a Rust toolchain AND the embedded targets
+
+The firmware discipline runs `cargo build --target thumbv6m-none-eabi` (RP2040;
+thumbv7em/thumbv7m for STM32 parts). With no default toolchain it fails with:
+
+```
+error: rustup could not choose a version of cargo to run, because one wasn't
+       specified explicitly, and no default is configured
+```
+
+That is a HOST setup gap, not a design fault, and it fails late — after design,
+placement, routing, validation and ERC have all passed — so it reads like a
+pipeline bug. Check it before blaming a board:
+
+```bash
+rustup toolchain list          # must not say "no installed toolchains"
+rustup target list --installed # must include thumbv6m-none-eabi
+```
+
+Repair (minimal profile keeps it near 1 GB and skips the component that fails
+on the T9-backed rustup home):
+
+```bash
+rustup set profile minimal
+rustup default stable
+rustup target add thumbv6m-none-eabi thumbv7em-none-eabihf thumbv7m-none-eabi
+```
+
+Verified working by compiling a `no_std` crate for thumbv6m — a toolchain that
+answers `rustc --version` can still be missing the embedded target, and the
+error for that looks nothing like the error for a missing default.
+
 Two traps, both hit on 2026-09-04:
 
 * **Do not copy the binary from another checkout without checking its date.**
