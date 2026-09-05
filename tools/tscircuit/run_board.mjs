@@ -405,7 +405,13 @@ async function freerouteReal(cj, { layers = 2, routeFirst = null } = {}) {
     const unrouted = cj.filter((e) => e.type !== 'pcb_trace' && e.type !== 'pcb_via')
     let dsnPcb = convertCircuitJsonToDsnJson(unrouted)
     // BEFORE dsnToNLayer, which copies shapes[0].diameter onto every layer.
-    setViaPadstack(dsnPcb, viaPadstackUm(dsnPcb))
+    // Inflated via padstack for freerouting: OPT-IN (FL_VIA_PADSTACK=1). Correct by
+    // derivation and unit-tested, but measured worse where freerouting wins: golden
+    // tiny went 4 DRC / 4 electrical / 3 unrouted with it (twice, identical) against
+    // <=1 / 2 / 2 without, same machine, same hour — a 0.95mm keep-out closes the
+    // channels a tight 2-layer board needs. The hole_clearance faults it targeted
+    // came from the built-in router anyway (see routerViaPadMm/mergeStackedVias).
+    if (process.env.FL_VIA_PADSTACK === '1') setViaPadstack(dsnPcb, viaPadstackUm(dsnPcb))
     if (layers > 2) dsnPcb = dsnToNLayer(dsnPcb, layers)
     // Via copper spacing derived from the fab rules the board will be graded
     // on -- see viaClearanceUm. (The old comment here described 0.6mm pads and
