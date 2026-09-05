@@ -708,6 +708,39 @@ def _lcsc_for(mpn, spec=None):
     return None
 
 
+_CONNECTOR_RX = re.compile(r"connector|pinheader|header|terminalblock|socket", re.I)
+_TERMINAL_RX = re.compile(r"terminalblock|screw", re.I)
+_RXC_RX = re.compile(r"(\d+)x(\d+)")
+
+
+def _footprint_for(lib, name, netmap):
+    """The real package family for a part, falling back to qfnN by pad count.
+
+    A connector is not a chip. _qfn_for below picks purely by highest numeric
+    pad, so a 2-position 5.0mm screw terminal (pads 1 and 2) came out as an
+    "0402" — a 1.0 x 0.5 mm chip pad for a part with screw heads on it. Every
+    board then failed design_check.py's connector_required_if_intent rule,
+    which looked for a connector-shaped footprint and correctly found none.
+
+    run_board synthesizes header_RxC and screwterminal_N land patterns
+    (tools/tscircuit/footprints.mjs), so these names are routable, not
+    aspirational.
+    """
+    blob = "%s %s" % (lib or "", name or "")
+    if _CONNECTOR_RX.search(blob):
+        pads = [int(p) for p in netmap if str(p).isdigit()]
+        n = max(pads) if pads else len(netmap)
+        if n >= 1:
+            if _TERMINAL_RX.search(blob):
+                return "screwterminal_%d" % n
+            # KiCad names carry the real geometry: PinHeader_2x04_P2.54mm... .
+            m = _RXC_RX.search(name or "")
+            if m and int(m.group(1)) * int(m.group(2)) >= n:
+                return "header_%dx%d" % (int(m.group(1)), int(m.group(2)))
+            return "header_1x%d" % n
+    return _qfn_for(netmap)
+
+
 def _qfn_for(netmap):
     """qfnN fallback footprint — used ONLY if the real .kicad_mod has no SMD pads
     run_board can parse (e.g. a THT header). Big enough to cover the highest
@@ -729,7 +762,14 @@ def _qfn_for(netmap):
 # header + FL-1 instrument-bus header (both THT pin headers), dedicated test-point
 # pads, and the calibration divider resistors. The functional design — MCU,
 # peripherals, decoupling, bus pull-ups, the USB/power connector — stays.
-_CHIP_SCALE_DROP_LIBS = {"TestPoint", "Connector_PinHeader_2.54mm",
+# Pin headers used to be dropped here too, on the grounds that they "route as
+# THT headers/test points and balloon the board". That was true when run_board
+# had no header land pattern and a header could only be faked as chip pads. It
+# is not true now (footprints.mjs synthesizes header_RxC), and the cost of the
+# rule was severe: the planner deleted every connector while design_check.py
+# required one, so any product needing a connector — nearly all of them — was
+# blocked before it was ever routed. A board's connectors are part of the board.
+_CHIP_SCALE_DROP_LIBS = {"TestPoint",
                          # bench-board mechanicals: run_board drills its OWN
                          # collision-checked NPTH mounting holes, and a fiducial
                          # is not a part — exporting these as phantom 0402 chips
@@ -797,7 +837,9 @@ def netlist_from_design(design, chip_scale=True, real_geometry=False):
         nm = c["netmap"]
         name = c["name"]
         kind = ("capacitor" if name.startswith("C_")
-                else "resistor" if name.startswith("R_") else "chip")
+                else "resistor" if name.startswith("R_")
+                else "connector" if _CONNECTOR_RX.search("%s %s" % (c["lib"], name))
+                else "chip")
         mpn = mpn_of.get(ref)
         # module blocks (e.g. the Pico) are wired by MODULE pin numbers; the bare
         # chip's LCSC footprint would land those nets on the WRONG pads, so a
@@ -825,7 +867,7 @@ def netlist_from_design(design, chip_scale=True, real_geometry=False):
                                 "all wired pads are non-numeric (%s) — no honest qfn mapping"
                                 % ",".join(nonnum[:8])})
                 continue
-        fp = _qfn_for(nm)
+        fp = _footprint_for(c["lib"], name, nm)
         mq = re.match(r"qfn(\d+)$", fp)
         if mq and int(mq.group(1)) > 64:
             dropped.append({"ref": ref, "mpn": mpn, "reason":
