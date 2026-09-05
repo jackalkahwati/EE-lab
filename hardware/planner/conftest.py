@@ -9,7 +9,7 @@ from pathlib import Path
 
 _NATIVE_PYTEST_FILES = {"test_core_regressions.py", "test_legacy_regressions.py",
                         "test_design_gate.py", "test_silk_polarity.py",
-                        "test_footprint_family.py"}
+                        "test_footprint_family.py", "test_requested_parts.py"}
 collect_ignore = [
     str(path)
     for path in Path(__file__).parent.glob("test_*.py")

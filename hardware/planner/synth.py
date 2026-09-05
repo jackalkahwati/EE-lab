@@ -371,6 +371,11 @@ def synth(design, out_path):
         if mcu_recovery:
             mcu_decision = mcu_selector.select_mcu({**mcu_req, "requested_mcu":
                                                     mcu_recovery["substituted_mcu"]})
+    if mcu_decision.get("substituted_for"):
+        print("MCU_SUBSTITUTED:" + json.dumps({
+            "requested": mcu_decision["substituted_for"],
+            "built_with": mcu_decision.get("selected"),
+            "why": mcu_decision.get("why")}))
     mcu_alloc = None
     x = X0 + MARGIN
     ytop = Y0 + MARGIN
@@ -496,6 +501,39 @@ def synth(design, out_path):
         if net in nets.order:
             body += compose.tp("TP%d" % (i + 1), px + i * 5, py, net, nets)
             note_extent(px + i * 5, py, 4, 6)
+    # Connectors the user asked for BY NAME (intent["connectors"]) -- placed as
+    # real parts on real KiCad footprints, wired to nets the board actually has,
+    # and skipped LOUDLY when a net they need does not exist. This slot was
+    # parsed by nobody and consumed by nobody, so "a 2-position screw terminal
+    # and a 2x4 pin header" produced a board with neither.
+    jn = 20
+    for c in intent.get("connectors") or []:
+        if c.get("kind") == "screwterminal":
+            n = max(2, int(c.get("pins") or 2))
+            vin = "+5V" if "+5V" in nets.order else rail
+            fpname = ("TerminalBlock_MaiXu_MX126-5.0-02P_1x02_P5.00mm" if n == 2
+                      else "TerminalBlock_bornier-%d_P5.08mm" % n)
+            body += compose.place("TerminalBlock", fpname, "J%d" % jn, px, py, 0,
+                                  {"1": vin, "2": "GND"}, nets)
+            compose._DEVICES.append({"ref": "J%d" % jn, "type": "connector",
+                                     "name": "Power input screw terminal (%s/GND)" % vin})
+            note_extent(px, py, 10 + 5 * (n - 2), 10)
+            px += 14 + 5 * (n - 2); jn += 1
+        elif c.get("kind") == "header":
+            r, cols = int(c.get("rows") or 1), int(c.get("cols") or 4)
+            want = [rail, "GND", "MCU_SWDIO", "MCU_SWCLK", "I2C_SDA", "I2C_SCL", "MCU_RESET", "+5V"]
+            have = [w for w in want if w in nets.order][: r * cols]
+            if len(have) < 2:
+                print("CONNECTOR_SKIPPED: %dx%d header -- fewer than two of its nets exist on this board" % (r, cols))
+                continue
+            hm = {str(i + 1): net for i, net in enumerate(have)}
+            body += compose.place("Connector_PinHeader_2.54mm",
+                                  "PinHeader_%dx%02d_P2.54mm_Vertical" % (r, cols),
+                                  "J%d" % jn, px, py, 0, hm, nets)
+            compose._DEVICES.append({"ref": "J%d" % jn, "type": "connector",
+                                     "name": "%dx%d breakout header (%s)" % (r, cols, ",".join(have))})
+            note_extent(px, py, 3 + 2.54 * cols, 3 + 2.54 * r)
+            px += 6 + 2.54 * cols; jn += 1
 
     # ---- calibration divider + reference/measurement node test points -------
     # REF_OUT -> RCAL1 -> REF_DIV -> RCAL2 -> GND gives a known divided node; both

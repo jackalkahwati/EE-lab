@@ -108,7 +108,11 @@ def _blank_intent():
         "exact_part_requests": [],       # [{mpn, must_substitute, intended_capabilities}]
         "acceptable_substitutions": True,
         "selected_architecture": None,
-        "mcu": {"family": None, "programming": [], "requirements": []},
+        # `requested` is the exact token the user typed (STM32L071KBU6); `family`
+        # is the coarse bucket (STM32). Only the family used to survive parsing,
+        # so "STM32L071" was silently built as the catalogue's STM32F103 and
+        # reported as "the requested MCU".
+        "mcu": {"family": None, "requested": None, "programming": [], "requirements": []},
         "power": {"source": None, "rails": [], "requirements": []},
         "battery": {"required": False},
         "sensors": [], "radios": [], "buses": [], "connectors": [],
@@ -138,6 +142,21 @@ def parse_intent(prompt):
         if fam in p:
             di["mcu"]["family"] = fam.upper()
             break
+    # the exact part, when one was named -- so a substitution can be REPORTED
+    mm = re.search(r"\b(stm32[a-z]\d{3}[a-z0-9]*|rp2040|esp32[-\s]?[a-z]\d?|nrf52\d{3}|samd21[a-z0-9]*|atmega\d{3}[a-z]*)\b", p)
+    if mm:
+        di["mcu"]["requested"] = mm.group(1).upper().replace(" ", "-")
+
+    # connectors the user asked for BY NAME. This slot existed and nothing ever
+    # filled it, so "a 2-position screw terminal and a 2x4 pin header" produced a
+    # board with neither -- and the design gate then correctly refused a board
+    # whose intent mentions a connector but carries none.
+    for mm in re.finditer(r"(\d+)\s*[- ]?\s*(?:pos(?:ition)?|pin|way)?\s*(?:screw[- ]?terminal|terminal[- ]?block)", p):
+        di["connectors"].append({"kind": "screwterminal", "pins": int(mm.group(1))})
+    if not any(c["kind"] == "screwterminal" for c in di["connectors"]) and re.search(r"screw[- ]?terminal|terminal[- ]?block", p):
+        di["connectors"].append({"kind": "screwterminal", "pins": 2})
+    for mm in re.finditer(r"(\d)\s*[x×]\s*(\d{1,2})\s*(?:pin\s*)?(?:header|pin[- ]?header)", p):
+        di["connectors"].append({"kind": "header", "rows": int(mm.group(1)), "cols": int(mm.group(2))})
 
     # exact part requests (skip ones that appear inside an "unsupported ..." clause,
     # handled below)

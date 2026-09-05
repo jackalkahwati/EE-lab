@@ -114,9 +114,15 @@ def requirements_from_design(intent, specs):
         "low_power": low_power,
         "usb": need_usb,
         "can": need_can,
-        "requested_mcu": ((intent.get("mcu") or {}).get("family")
+        # the exact part first (STM32L071KBU6), the family only as a fallback --
+        # only the family used to survive, so a specific part was silently built
+        # as its catalogue neighbour and reported as "the requested MCU"
+        "requested_mcu": (((intent.get("mcu") or {}).get("requested")
+                           or (intent.get("mcu") or {}).get("family"))
                           if isinstance(intent.get("mcu"), dict)
                           else intent.get("mcu")),
+        "requested_family": ((intent.get("mcu") or {}).get("family")
+                             if isinstance(intent.get("mcu"), dict) else None),
     }
 
 
@@ -218,6 +224,7 @@ def select_mcu(req):
 
     requested = req.get("requested_mcu")
     requested_key = None
+    substituted_for = None   # the exact part asked for, when what we build is not it
     if requested:
         # Match how users name a family ("STM32", "ESP32", "nRF52") against the
         # seed's more specific key/family ("STM32F103"/"STM32F1", "ESP32-S3",
@@ -230,18 +237,46 @@ def select_mcu(req):
         best = None
         for key in MCU_SEEDS:
             kk, fam = _norm(key), _norm(MCU_SEEDS[key]["family"])
-            if kk == rq or fam == rq:
-                best = key; break  # exact wins outright
+            if kk == rq or fam == rq or _norm(MCU_SEEDS[key].get("mpn")) == rq:
+                best = key; break  # exact wins outright (key, family, or the seed's MPN)
             if best is None and (kk.startswith(rq) or fam.startswith(rq) or rq.startswith(fam)):
                 best = key  # first prefix match; keep scanning for an exact one
+        # the exact part is not stocked: fall back to its FAMILY so we build the
+        # nearest relative, not whatever scores best across every vendor
+        if best is None and req.get("requested_family"):
+            rf = _norm(req["requested_family"])
+            for key in MCU_SEEDS:
+                kk, fam = _norm(key), _norm(MCU_SEEDS[key]["family"])
+                if kk.startswith(rf) or fam.startswith(rf) or rf.startswith(fam):
+                    best = key; break
         requested_key = best
+        # An EXACT match honours the request. A family/prefix match is a
+        # SUBSTITUTION -- STM32L071 landing on the catalogue's STM32F103 -- and
+        # it used to be reported as "requested MCU STM32F103", which is not what
+        # anyone requested.
+        # a request for a FAMILY ("an STM32") is honoured by any member of it;
+        # only a request for a specific PART that we then approximate is a
+        # substitution worth shouting about
+        fam_req = req.get("requested_family") and _norm(req["requested_family"]) == rq
+        exact = best is not None and (_norm(best) == rq or _norm(MCU_SEEDS[best]["family"]) == rq
+                                      or _norm(MCU_SEEDS[best].get("mpn")) == rq
+                                      or (fam_req and _norm(MCU_SEEDS[best]["family"]).startswith(rq)))
+        if best is not None and not exact:
+            substituted_for = requested
+        elif best is None:
+            substituted_for = requested   # nothing close; the soft-score winner is built instead
 
     # honour a requested MCU only if it qualifies
     if requested_key:
         q = next((x for x in qualifying if x[0] == requested_key), None)
         if q:
             chosen = q
-            why = "requested MCU %s and it meets every hard requirement" % requested_key
+            if substituted_for:
+                why = ("requested %s is NOT in the seed library; nearest family match %s "
+                       "substituted -- verify pinout, package and peripherals before trusting it"
+                       % (substituted_for, requested_key))
+            else:
+                why = "requested MCU %s and it meets every hard requirement" % requested_key
         else:
             short = next((r["reasons"] for r in rejected if r["mcu"] == requested_key),
                          ["not in seed library"])
@@ -267,8 +302,12 @@ def select_mcu(req):
         }
 
     key, spec, _sc = chosen
+    if substituted_for and key != requested_key:
+        why = ("requested %s is NOT in the seed library and has no stocked relative; "
+               "best fit %s built instead -- %s" % (substituted_for, key, why))
     return {
         "selected": key,
+        "substituted_for": substituted_for,
         "mpn": spec["mpn"], "family": spec["family"], "package": spec["package"],
         "status": spec["status"], "confidence": spec["confidence"],
         "why": why,
