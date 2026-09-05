@@ -52,7 +52,8 @@ METHOD — build the real functional set (10-16 parts) for THIS product:
 2. Peripherals the product genuinely requires — sensors, a wireless radio,
    mic/speaker, motor/LED driver, power converter, memory, connector, etc. Add
    ONLY the ones this product needs; a wired sensor board and a wireless wearable
-   have very different part sets. Use qfn6/qfn8/qfn16 for small ICs.
+   have very different part sets. Use qfn6/qfn8/qfn16 for small ICs, and the
+   real family (soic/sot23/tssop/...) when you know the part's actual package.
 3. Decoupling: ONE 100nF (0402) capacitor per IC power pin/rail, plus one bulk
    1uF/10uF. Each cap sits on its own power net.
 4. If (and only if) the product is WIRELESS: an ANT1 chip antenna (footprint
@@ -68,13 +69,27 @@ NETS — every real signal + power connection (12-22 nets) as ["COMP.PIN","COMP.
 - Control: reset, enables, charge sense, indicator, as the design needs.
 
 RULES:
-- footprints: qfn6/qfn8/qfn16/qfn24/qfn32/qfn48 for ICs; 0402 for passives.
-- kind is "chip" | "capacitor" | "resistor".
+- footprints — use the REAL package family for each part, not the nearest chip pad:
+  * ICs: qfn4..qfn64, soic/sop/ssop/tssop/msop/qsop N, dfn/son N,
+    qfp/tqfp/lqfp/mqfp N, sot23, sot23-3/-5/-6, sot223, sot89, dpak
+  * passives: 0201/0402/0603/0805/1206/1210/1812/2010/2512
+  * diodes: sod123/sod323/sod523, sma/smb/smc
+  * CONNECTORS — a connector is a real part with a real body. Pin headers and
+    sockets are header_RxC (e.g. header_1x4, header_2x4, socket_1x8); screw and
+    barrier terminals are screwterminal_N (e.g. screwterminal_3). A USB, JST,
+    board-to-board or ribbon connector that has no closer family is the header
+    with its true pin count. NEVER give a connector a chip footprint: a 5 mm
+    screw terminal is not an 0402, and a board whose only connector is an 0402
+    is rejected by the design gate as having no connector at all.
+- If the product must plug into, mate with, or be programmed by anything
+  external, PUT THAT CONNECTOR ON THE BOARD as a part. A board that needs a
+  connector and has none is blocked before it is ever routed.
+- kind is "chip" | "capacitor" | "resistor" | "connector".
 - OPTIONAL "lcsc": a REAL LCSC part number for a component if you know one
   (e.g. "C1525" = 100nF 0402, "C25804" = 10k 0402). OMIT if unsure. Do NOT invent ids.
 - nets connect pins as "COMPONENT.PIN"; pin numbers MUST exist (qfnN -> 1..N,
-  passive -> 1 and 2). Two-point nets only (["A.p","B.p"]); split a shared rail into
-  multiple two-point nets.
+  header_RxC -> 1..R*C, screwterminal_N -> 1..N, passive -> 1 and 2). Two-point
+  nets only (["A.p","B.p"]); split a shared rail into multiple two-point nets.
 - "gnd": list EVERY ground pin as "COMPONENT.PIN" (IC GND/VSS pins, each
   peripheral's ground, the ground side of every decoupling cap, antenna ground if
   present). These are NOT in "nets" — the platform lays a real ground PLANE and
