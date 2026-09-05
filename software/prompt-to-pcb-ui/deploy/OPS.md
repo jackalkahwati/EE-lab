@@ -318,3 +318,21 @@ curl -s -o /dev/null -w '%{http_code}\n' -u "$ONSHAPE_ACCESS_KEY:$ONSHAPE_SECRET
   https://cad.onshape.com/api/documents?limit=1     # expect 200
 ```
 
+
+## Router runner env knobs (`tools/tscircuit/run_board.mjs`)
+
+Measuring a routing change through the full strategy ladder takes 20–50 min and the
+earlier rungs are wall-clock budgeted, so under machine load the ladder can time out
+before the rung you changed even runs (it did: a via-geometry change was "measured"
+three times against copper the target rung never produced). Use these:
+
+- `FL_ONLY_RUNG="<substring of rung name>"` — run just the matching rung(s), e.g.
+  `FL_ONLY_RUNG="built-in router, 4-layer HDI"`. The log prints how many rungs it kept.
+- `FL_LADDER_BUDGET_MS=3600000` — lift the 240 s ladder deadline. Skipped rungs are now
+  logged as `[t] ladder: skipped '<rung>' — budget spent`.
+- `FL_FR_DEBUG=1` — dump freerouting DSN passes and the via sizes fabRepair saw.
+- `FL_DUMP_CJ=<path>` — write the winning circuit-json.
+- `FL_BASELINE=1` — disable every cache/skip optimisation (identical results, slower).
+
+Compare rung-to-rung using `drcRepair.iterations[]` in the output JSON, not the final
+winner: the winner changes with whichever rungs the deadline let run.

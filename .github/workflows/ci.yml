@@ -87,3 +87,5 @@ jobs:
       # land patterns can be checked on every push while the full golden board
       # suite stays opt-in.
       - run: node tools/tscircuit/test-footprints.mjs
+      - run: node tools/tscircuit/test-via-padstack.mjs
+      - run: python3 tools/kicad/test_ground_plane_geom.py

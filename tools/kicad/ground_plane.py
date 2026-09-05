@@ -24,6 +24,7 @@ Usage: <kicad-python> ground_plane.py <in.kicad_pcb> <out.kicad_pcb> <gnd.json> 
 Prints one JSON line: {"assigned","unconnected","zones","stitched","skipped"}
 """
 import math
+import os
 import sys
 import json
 import pcbnew
@@ -46,6 +47,8 @@ def norm_ref(ref):
 # 1. Assign GND to the ground pads and remember their centres for stitching.
 assigned = 0
 gnd_pads = []
+gnd_pad_objs = []
+unreached = []  # (pos, pad) no via spot was found for; the zone-track fallback gets them
 for fp in board.GetFootprints():
     ref = fp.GetReference()
     nref = norm_ref(ref)
@@ -55,6 +58,7 @@ for fp in board.GetFootprints():
             pad.SetNet(gnd)
             assigned += 1
             gnd_pads.append(pad.GetPosition())
+            gnd_pad_objs.append(pad)
 
 # 2. Pick the reference plane layer: a dedicated inner layer on a 4-layer board,
 #    else the back copper. The top pour bonds top-side ground pads directly; the
@@ -221,19 +225,64 @@ TRACK_W = pcbnew.FromMM(0.15)
 TRACK_KEEP = pcbnew.FromMM(CLEARANCE) + TRACK_W // 2
 
 
+def _pt_seg_d2(px, py, ax, ay, bx, by):
+    dx, dy = bx - ax, by - ay
+    L = dx * dx + dy * dy
+    t = 0.0 if L == 0 else max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / L))
+    ex, ey = px - (ax + t * dx), py - (ay + t * dy)
+    return ex * ex + ey * ey
+
+
+def _segs_cross(ax, ay, bx, by, cx, cy, dx, dy):
+    def orient(px, py, qx, qy, rx, ry):
+        v = (qx - px) * (ry - py) - (qy - py) * (rx - px)
+        return (v > 0) - (v < 0)
+    o1, o2 = orient(ax, ay, bx, by, cx, cy), orient(ax, ay, bx, by, dx, dy)
+    o3, o4 = orient(cx, cy, dx, dy, ax, ay), orient(cx, cy, dx, dy, bx, by)
+    return o1 != o2 and o3 != o4
+
+
+def seg_seg_d2(a, b, c, d):
+    """Exact squared distance between segments ab and cd."""
+    if _segs_cross(a.x, a.y, b.x, b.y, c.x, c.y, d.x, d.y):
+        return 0
+    return min(_pt_seg_d2(a.x, a.y, c.x, c.y, d.x, d.y), _pt_seg_d2(b.x, b.y, c.x, c.y, d.x, d.y),
+               _pt_seg_d2(c.x, c.y, a.x, a.y, b.x, b.y), _pt_seg_d2(d.x, d.y, a.x, a.y, b.x, b.y))
+
+
+def seg_rect_d2(a, b, bb):
+    """Exact squared distance between segment ab and an axis-aligned box. Both are
+    convex, so the closest pair involves a vertex of one of them, or they meet."""
+    l, r, t, bt = bb.GetLeft(), bb.GetRight(), bb.GetTop(), bb.GetBottom()
+    if (l <= a.x <= r and t <= a.y <= bt) or (l <= b.x <= r and t <= b.y <= bt):
+        return 0
+    corners = ((l, t), (r, t), (r, bt), (l, bt))
+    best = None
+    for i in range(4):
+        (cx, cy), (dx, dy) = corners[i], corners[(i + 1) % 4]
+        if _segs_cross(a.x, a.y, b.x, b.y, cx, cy, dx, dy):
+            return 0
+        d2 = _pt_seg_d2(cx, cy, a.x, a.y, b.x, b.y)
+        best = d2 if best is None else min(best, d2)
+    for px, py in ((a.x, a.y), (b.x, b.y)):
+        ex = max(l - px, 0, px - r)
+        ey = max(t - py, 0, py - bt)
+        best = min(best, ex * ex + ey * ey)
+    return best
+
+
 def track_clears(a, b):
-    steps = 8
-    for i in range(steps + 1):
-        x = a.x + (b.x - a.x) * i // steps
-        y = a.y + (b.y - a.y) * i // steps
-        for bb in other_pads:
-            dx = max(bb.GetLeft() - x, 0, x - bb.GetRight())
-            dy = max(bb.GetTop() - y, 0, y - bb.GetBottom())
-            if dx * dx + dy * dy < TRACK_KEEP * TRACK_KEEP:
-                return False
-        # the dog-bone must not cross or crowd another net's trace either --
-        # that trades an open net for a short, which is a worse fault
-        if not clears_tracks(x, y, TRACK_KEEP):
+    # The dog-bone is a SEGMENT and is checked exactly. It used to be 8 sample
+    # points: 0.225mm apart on a 1.8mm track, so a 0.25mm-wide QFN pad beside the
+    # track sat between two samples and passed at 0.031mm actual clearance
+    # (measured: 2 violations on the first board the longer reach produced).
+    keep2 = TRACK_KEEP * TRACK_KEEP
+    for bb in other_pads:
+        if seg_rect_d2(a, b, bb) < keep2:
+            return False
+    for c, d, w in other_tracks:
+        need = TRACK_KEEP + w // 2
+        if seg_seg_d2(a, b, c, d) < need * need:
             return False
     return True
 
@@ -243,11 +292,17 @@ def track_clears(a, b):
 # when the pad itself cannot take a drill. Measured on a real failing board:
 # 8 of 14 ground pads accept a via at their centre, and ALL 14 accept one
 # within 0.8mm. Without the offsets those last 6 are simply left open.
-OFFSETS_MM = [0.0, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0]
-DIRS = 16
+# Reach. A GND pad on a fine-pitch QFN ring has other-net copper (neighbour pads,
+# fan-out tracks) within hole_clearance of EVERY spot inside 1.0mm — measured on a
+# 4-layer HDI board: 97/97 candidates rejected by the copper rule for two such
+# pads, zero by the track rule. The dog-bone track is what reaches past the ring,
+# and it is clearance-checked along its whole length, so let it go further.
+OFFSETS_MM = [0.0, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0, 1.2, 1.5, 1.8, 2.2, 2.6]
+DIRS = 24
 fanned = 0
-for pos in gnd_pads:
+for pad_i, pos in enumerate(gnd_pads):
     placed = None
+    rej = {'hole': 0, 'copper': 0, 'track': 0}
     for r_mm in OFFSETS_MM:
         if r_mm == 0.0:
             cands = [pos]
@@ -259,9 +314,14 @@ for pos in gnd_pads:
                 cands.append(pcbnew.VECTOR2I(int(pos.x + r * math.cos(a)),
                                              int(pos.y + r * math.sin(a))))
         for c in cands:
-            if not hole_ok(c.x, c.y) or not clears_copper(c):
+            if not hole_ok(c.x, c.y):
+                rej['hole'] += 1
+                continue
+            if not clears_copper(c):
+                rej['copper'] += 1
                 continue
             if r_mm > 0.0 and not track_clears(pos, c):
+                rej['track'] += 1
                 continue
             placed = (c, r_mm)
             break
@@ -269,6 +329,10 @@ for pos in gnd_pads:
             break
     if not placed:
         skipped += 1
+        unreached.append((pos, gnd_pad_objs[pad_i]))
+        if os.environ.get('FL_GP_DEBUG'):
+            sys.stderr.write('[gp] no via spot for GND pad at (%.2f, %.2f) mm; candidates rejected by %s\n'
+                             % (pcbnew.ToMM(pos.x), pcbnew.ToMM(pos.y), rej))
         continue
     at, r_mm = placed
     via = pcbnew.PCB_VIA(board)
@@ -315,6 +379,75 @@ except Exception as _e:
     mh_set = -1  # surfaced in the JSON; pour proceeds with the default clearance
 
 pcbnew.ZONE_FILLER(board).Fill(board.Zones())
+
+# 5. Zone-track fallback for pads no through-via can reach. A GND pin on a
+# fine-pitch QFN with an inner-layer trace running under it has other-net copper
+# within hole_clearance of EVERY via spot for millimetres (measured: 212/212
+# candidates rejected by the copper rule) — a through-hole must clear all four
+# layers. The pad only needs the pour on ITS OWN layer, which usually sits a few
+# tenths of a millimetre away behind the pin ring, so run a short same-layer
+# GND track from the pad to a point well inside the filled zone, clearance-
+# checked exactly against same-layer copper only. Filled first, so the fill
+# polygon is real; filled again after, so the pour meets the new track.
+zone_tracks = 0
+def _zone_polys(layer):
+    for z in board.Zones():
+        if z.GetNetCode() == GND_CODE and z.IsOnLayer(layer) and z.HasFilledPolysForLayer(layer):
+            return z.GetFilledPolysList(layer)
+    return None
+for pos, pad in unreached:
+    layer = pcbnew.F_Cu if pad.IsOnLayer(pcbnew.F_Cu) else (pcbnew.B_Cu if pad.IsOnLayer(pcbnew.B_Cu) else None)
+    if layer is None:
+        continue
+    polys = _zone_polys(layer)
+    if polys is None:
+        continue
+    pads_l = [p.GetBoundingBox() for fp in board.GetFootprints() for p in fp.Pads()
+              if p.GetNetCode() != GND_CODE and p.IsOnLayer(layer)]
+    tracks_l = [(t.GetStart(), t.GetEnd(), t.GetWidth()) for t in board.GetTracks()
+                if not isinstance(t, pcbnew.PCB_VIA) and t.GetNetCode() != GND_CODE and t.GetLayer() == layer]
+    inset = TRACK_W // 2 + pcbnew.FromMM(CLEARANCE) + pcbnew.FromMM(0.05)
+    def _inside(c):
+        for dx, dy in ((0, 0), (inset, 0), (-inset, 0), (0, inset), (0, -inset)):
+            if not polys.Contains(pcbnew.VECTOR2I(c.x + dx, c.y + dy)):
+                return False
+        return True
+    def _clears(a, b):
+        keep2 = TRACK_KEEP * TRACK_KEEP
+        for bb in pads_l:
+            if seg_rect_d2(a, b, bb) < keep2:
+                return False
+        for c, d, w in tracks_l:
+            need = TRACK_KEEP + w // 2
+            if seg_seg_d2(a, b, c, d) < need * need:
+                return False
+        return True
+    hit = None
+    for r_mm in OFFSETS_MM[1:]:
+        r = pcbnew.FromMM(r_mm)
+        for k in range(DIRS):
+            ang = 2.0 * math.pi * k / DIRS
+            c = pcbnew.VECTOR2I(int(pos.x + r * math.cos(ang)), int(pos.y + r * math.sin(ang)))
+            if _inside(c) and _clears(pos, c):
+                hit = c
+                break
+        if hit:
+            break
+    if hit is None:
+        if os.environ.get('FL_GP_DEBUG'):
+            sys.stderr.write('[gp] zone-track fallback: nothing reaches the pour from GND pad at (%.2f, %.2f) mm\n'
+                             % (pcbnew.ToMM(pos.x), pcbnew.ToMM(pos.y)))
+        continue
+    t = pcbnew.PCB_TRACK(board)
+    t.SetStart(pos)
+    t.SetEnd(hit)
+    t.SetWidth(TRACK_W)
+    t.SetLayer(layer)
+    t.SetNet(gnd)
+    board.Add(t)
+    zone_tracks += 1
+if zone_tracks:
+    pcbnew.ZONE_FILLER(board).Fill(board.Zones())
 board.BuildConnectivity()
 unconnected = board.GetConnectivity().GetUnconnectedCount(False)
 
@@ -324,6 +457,6 @@ print(json.dumps({
     "unconnected": unconnected,
     "zones": board.GetAreaCount(),
     "stitched": stitched, "fanned": fanned,
-    "skipped": skipped,
+    "skipped": skipped, "zoneTracks": zone_tracks,
     "mhKeepout": mh_set,
 }))

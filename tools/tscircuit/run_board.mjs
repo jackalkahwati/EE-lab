@@ -228,14 +228,105 @@ function setViaClearance(dsnPcb, um) {
   const rule = dsnPcb.structure && dsnPcb.structure.rule
   if (!rule) return
   const cl = (rule.clearances = rule.clearances || [])
-  // via_via / via_pin: hole-to-hole spacing. via_smd: push vias off SMD pad
-  // copper so the drilled hole clears the fab's hole-to-copper rule (a via
-  // dropped beside a 0.5mm-pitch QFN pin otherwise trips hole_clearance to the
-  // neighbour's copper — the dominant residual on dense boards).
   const set = (type, val) => { const ex = cl.find((c) => c.type === type); if (ex) ex.value = val; else cl.push({ value: val, type }) }
+  // Via-to-via / -pin / -smd copper spacing, sized from the fab rules (see
+  // viaClearanceUm). Track-to-via is deliberately NOT here -- see below.
   set('via_via', um)
   set('via_pin', um)
-  set('via_smd', Math.round(um * 1.4))
+  set('via_smd', um)
+  // NOT via_wire / wire_via: freerouting emits nothing for them and measurably
+  // ignores them -- with both set to 400um a track still landed 0.27mm from a
+  // via hole. Track-to-via distance is governed by the via PADSTACK diameter
+  // instead (setViaPadstack), which the router cannot ignore. Do not re-add
+  // these believing they work.
+}
+
+/**
+ * Via copper spacing that makes KiCad's hole_clearance pass BY CONSTRUCTION.
+ *
+ * hole_clearance is hole EDGE to copper. freerouting only spaces copper to
+ * copper. For a via of pad radius r_p and hole radius r_h, a copper gap S gives
+ * a hole-edge gap of S + (r_p - r_h), so S must be >= H - (r_p - r_h):
+ *
+ *   standard  H 0.5, pad 0.5/hole 0.2 -> S >= 0.35mm
+ *   hdi       H 0.4, pad 0.4/hole 0.2 -> S >= 0.30mm
+ *
+ * This was a hardcoded 250um -- below BOTH -- so the router placed vias that
+ * could not pass the rule it was about to be graded on, and the residual nudge
+ * then spent its budget trying to move them.
+ *
+ * ONE value, the strictest profile plus margin, rather than per-profile: the
+ * ladder deliberately routes once and DRCs the same copper under both rule
+ * sets ("the DSN handed to freerouting is byte-identical"), and that identity
+ * is what the route cache keys on. A per-profile clearance would change the
+ * DSN text and silently double the freerouting passes.
+ */
+/**
+ * Via COPPER diameter to tell freerouting, so KiCad's hole_clearance passes on
+ * every layer by construction.
+ *
+ * dsn-converter hardcodes the via as 0.6mm copper / 0.3mm hole ("TODO look up
+ * via size") and freerouting keeps wires the default trace clearance (150um)
+ * from that copper. The real via after fabRepair is a 0.4-0.5mm pad with a
+ * 0.2mm hole, so hole-EDGE to wire came out at (0.3 - 0.1) + 0.15 = 0.35mm
+ * against a 0.4-0.5mm rule. Every one of the 7 hole_clearance faults on the
+ * first board with connected ground was exactly this: a track from another
+ * net 0.26-0.33mm from a via hole, two of them on an INNER layer where a
+ * typed via_wire clearance -- which measured as ignored -- could never reach.
+ *
+ * A padstack is geometry, not a rule keyword: the router respects it on every
+ * layer with whatever clearance it uses. Solve (D/2 - r_hole) + C >= H for the
+ * strictest profile. fabRepair then normalises the SHIPPED via back to the
+ * profile's own pad/hole, so this number never reaches the board.
+ */
+function viaPadstackUm(dsnPcb) {
+  const cls = dsnPcb.structure?.rule?.clearances || []
+  const cDefault = (cls.find((c) => !c.type)?.value) ?? 150       // um, whatever the DSN actually says
+  let need = 0
+  for (const p of Object.values(FAB_PROFILES)) {
+    const rHole = ((p.via?.hole ?? 0.2) / 2) * 1000
+    need = Math.max(need, 2 * ((p.holeClearance ?? 0.5) * 1000 + rHole - cDefault))
+  }
+  return Math.round(need + 50)                                     // +50um margin
+}
+function setViaPadstack(dsnPcb, um) {
+  for (const ps of (dsnPcb.library?.padstacks || [])) {
+    if (!/via/i.test(ps.name)) continue
+    // The hole is NOT a shape here -- it lives only in the padstack NAME
+    // ("Via[0-1]_600:300_um"); every shape is copper and they are all the same
+    // diameter. An earlier guard that skipped "the smallest shape" therefore
+    // skipped every shape, and the DSN went out unchanged at 600 -- measured:
+    // byte-identical copper. Parse the hole from the name and inflate the rest.
+    const m = /_(\d+):(\d+)_um/.exec(ps.name || '')
+    const hole = m ? Number(m[2]) : 0
+    for (const sh of (ps.shapes || [])) {
+      if (sh.diameter == null || sh.diameter === hole) continue
+      sh.diameter = um
+    }
+  }
+}
+
+/** The via pad the BUILT-IN router is told about (board minViaPadDiameter). The
+ *  autorouter keeps a trace edge only its own trace margin (~0.2mm measured, take
+ *  0.1 as the floor) outside the via obstacle; the min*Clearance board props reach
+ *  via↔pad and hole↔hole, not trace↔via. Measured: 7 Track↔Via hole_clearance
+ *  faults at 0.26–0.33mm against a 0.4mm rule while the router used core's default
+ *  0.3mm pad. fabRepair ships the profile's via regardless of what the router saw,
+ *  so the pad here is a keep-out, not copper: inflate it until pad/2 + 0.1 ≥
+ *  hole/2 + holeClearance, hole being the SHIPPED drill. hdi: 2·(0.1+0.4−0.1) = 0.8. */
+function routerViaPadMm(profileKey) {
+  const p = FAB_PROFILES[profileKey] || {}
+  const hole = p.via?.hole ?? 0.2, hc = p.holeClearance ?? 0.5
+  return Math.max(0.5, Math.round(2 * (hole / 2 + hc - 0.1) * 100) / 100)
+}
+
+function viaClearanceUm() {
+  let need = 0
+  for (const p of Object.values(FAB_PROFILES)) {
+    const rp = (p.via?.pad ?? 0.5) / 2, rh = (p.via?.hole ?? 0.2) / 2
+    need = Math.max(need, (p.holeClearance ?? 0.5) - (rp - rh))
+  }
+  return Math.round((need + 0.05) * 1000) // +50um margin, in DSN um
 }
 
 /** Timing + dedupe wrapper around the real freerouting pass. The redesign ladder
@@ -313,11 +404,14 @@ async function freerouteReal(cj, { layers = 2, routeFirst = null } = {}) {
     const { convertCircuitJsonToDsnJson, stringifyDsnJson, parseDsnToDsnJson, convertDsnSessionToCircuitJson } = await import('dsn-converter')
     const unrouted = cj.filter((e) => e.type !== 'pcb_trace' && e.type !== 'pcb_via')
     let dsnPcb = convertCircuitJsonToDsnJson(unrouted)
+    // BEFORE dsnToNLayer, which copies shapes[0].diameter onto every layer.
+    setViaPadstack(dsnPcb, viaPadstackUm(dsnPcb))
     if (layers > 2) dsnPcb = dsnToNLayer(dsnPcb, layers)
-    // 0.25mm via_via clearance -> 0.6mm via pads stay >=0.85mm center-to-center,
-    // so 0.3mm holes clear the 0.5mm hole_clearance with margin (was the residual
-    // fab-DRC error on dense boards). freerouting honours this from the DSN.
-    setViaClearance(dsnPcb, 250)
+    // Via copper spacing derived from the fab rules the board will be graded
+    // on -- see viaClearanceUm. (The old comment here described 0.6mm pads and
+    // 0.3mm holes; the profiles use 0.5/0.4mm pads and 0.2mm holes, and the
+    // hardcoded 250um it justified was below what either profile needs.)
+    setViaClearance(dsnPcb, viaClearanceUm())
     // Retry ordering: put previously-unrouted nets at the front. Changing the
     // net order changes the DSN text, so this also misses the route cache by
     // construction — which is what makes the retry a genuinely different pass
@@ -887,7 +981,7 @@ function place(parts, maxW = 15, gap = 2.1, singleSided = false, nets = null) {
  *  KiCad board that DRC checks. So emit capacitors as <chip> — same 2-pad
  *  geometry/footprint, but it actually lands in the board so DRC/nets/planes
  *  see it. (The cap's electrical role lives in the netlist/BOM, not here.) */
-function emitBoardCode(placed, nets, { clearance = null, routingDisabled = false, numLayers = 2 } = {}) {
+function emitBoardCode(placed, nets, { clearance = null, routingDisabled = false, numLayers = 2, viaPad = 0.5, viaHole = 0.25 } = {}) {
   const comps = placed.map((p) => {
     const kind = p.kind === 'resistor' ? 'resistor' : 'chip'
     const val = kind === 'resistor' ? ' resistance="10k"' : ''
@@ -918,22 +1012,25 @@ function emitBoardCode(placed, nets, { clearance = null, routingDisabled = false
   // via-to-track congestion that leaves a dense 2-layer board with residual
   // hole_clearance nits it can't nudge away. Only emitted when >2 so 2-layer
   // boards are byte-identical to before.
-  // Multi-layer via geometry. tscircuit's default multi-layer via shrinks its
-  // INNER-layer pads (measured: 0.4mm outer / 0.3mm inner over a 0.2mm drill =
-  // 0.05mm inner annular, under the 0.075mm rule → annular_width errors). Pin the
-  // via pad at 0.5mm / drill 0.25mm so every layer's annular is (0.5-0.25)/2 =
-  // 0.125mm, clear by construction. Bigger PAD doesn't worsen hole_clearance
-  // (that's drill-to-copper). Only for >2 layers so 2-layer boards are unchanged.
-  const via = numLayers > 2 ? ' viaPadDiameter="0.5mm" viaHoleDiameter="0.25mm"' : ''
+  // Multi-layer via geometry, as the BUILT-IN router sees it. These must be the
+  // min* board props: core copies board.min_via_pad_diameter/min_via_hole_diameter
+  // into the autorouter's route json (its via obstacle size) AND sizes the routed
+  // vias from them. The plain viaPadDiameter/viaHoleDiameter props this used to
+  // emit are read only from pcbStyle — they never reached the router, which routed
+  // around core's default 0.3mm pad the whole time (why hole_clearance faults sat
+  // at 0.26–0.33mm against a 0.4mm rule). viaPad is derived per fab profile by
+  // routerViaPadMm; fabRepair ships the profile via regardless. >2 layers only, so
+  // 2-layer boards are byte-identical.
+  const via = numLayers > 2 ? ` minViaPadDiameter="${viaPad}mm" minViaHoleDiameter="${viaHole}mm"` : ''
   const lyr = numLayers > 2 ? ` layers={${numLayers}}` : ''
   return `export default () => (\n  <board autorouter="auto"${lyr}${via}${tol}${rd}>\n${comps.join('\n')}\n${traces.join('\n')}\n  </board>\n)`
 }
 
 /** parts + nets -> tscircuit code (positions computed here, not by the LLM). */
-function buildCode(parts, nets, { maxW = 15, gap = 2.1, singleSided = false, clearance = null, routingDisabled = false, numLayers = 2 } = {}) {
+function buildCode(parts, nets, { maxW = 15, gap = 2.1, singleSided = false, clearance = null, routingDisabled = false, numLayers = 2, viaPad = 0.5, viaHole = 0.25 } = {}) {
   // resolve real LCSC footprints (from part.kicadMod) before placement/sizing
   for (const p of parts) p._fp = p.kicadMod ? kicadModToFootprint(p.kicadMod) : null
-  return emitBoardCode(place(parts, maxW, gap, singleSided, nets), nets, { clearance, routingDisabled, numLayers })
+  return emitBoardCode(place(parts, maxW, gap, singleSided, nets), nets, { clearance, routingDisabled, numLayers, viaPad, viaHole })
 }
 
 /** Read each part's pin -> [dx,dy] offset (pad position relative to its
@@ -1324,6 +1421,50 @@ function normalizeViaSpans(cj) {
   return n
 }
 
+/** Collapse same-net vias stacked within a pad+hole of each other into ONE
+ *  through-via. The built-in router changes layers in two steps (top→In1 at one
+ *  point, In1→bottom 0.2–0.3mm away): legal as a blind+buried pair, but this is a
+ *  through-via process, so normalizeViaSpans makes both through-holes — two drills
+ *  nearly touching (a fab reject) and a second hole the router never modelled on
+ *  the outer layers, so a track it routed at legal clearance from the FIRST via now
+ *  violates hole_clearance against the SECOND. Measured: the last 4 hole_clearance
+ *  faults on a 4-layer HDI board were one F.Cu track against one such twin, its
+ *  partner 0.241mm away. Routes are re-pointed onto the kept via; the stub between
+ *  the pair and the doubled via point collapse. Same net only — different-net
+ *  holes that close are a real violation and stay reported. Returns vias removed. */
+function mergeStackedVias(cj, { maxDist = 0.6 } = {}) {
+  const netOf = (v) => v.subcircuit_connectivity_map_key || v.pcb_trace_id || ''
+  const near = (p, q) => Math.hypot(p.x - q.x, p.y - q.y) < 1e-4
+  const kept = [], dropped = []
+  for (const v of cj) {
+    if (v.type !== 'pcb_via') continue
+    const twin = kept.find((k) => netOf(k) === netOf(v) && Math.hypot(k.x - v.x, k.y - v.y) < maxDist)
+    if (twin) dropped.push({ id: v.pcb_via_id, from: { x: v.x, y: v.y }, to: { x: twin.x, y: twin.y } })
+    else kept.push(v)
+  }
+  if (!dropped.length) return 0
+  const dropIds = new Set(dropped.map((d) => d.id))
+  for (let i = cj.length - 1; i >= 0; i--) if (cj[i].type === 'pcb_via' && dropIds.has(cj[i].pcb_via_id)) cj.splice(i, 1)
+  const mergedAt = dropped.map((d) => d.to)
+  for (const t of cj) {
+    if (t.type !== 'pcb_trace' || !Array.isArray(t.route)) continue
+    for (const p of t.route) { const d = dropped.find((d) => near(p, d.from)); if (d) { p.x = d.to.x; p.y = d.to.y } }
+    const out = []
+    for (let i = 0; i < t.route.length; i++) {
+      const p = t.route[i]
+      if (mergedAt.some((m) => near(p, m))) {
+        const prev = out[out.length - 1], next = t.route[i + 1]
+        if (p.route_type === 'via' && out.some((q) => q.route_type === 'via' && near(q, p))) continue // doubled via
+        if (p.route_type === 'wire' && prev && near(prev, p) && next && near(next, p)) continue // stub inside the stack
+        if (p.route_type === 'wire' && prev && near(prev, p) && prev.route_type === 'wire' && prev.layer === p.layer) continue // zero-length
+      }
+      out.push(p)
+    }
+    t.route = out
+  }
+  return dropped.length
+}
+
 function fabRepair(cj, { pad = 0.5, hole = 0.2 } = {}) {
   const fixes = []
   let vias = 0
@@ -1332,8 +1473,11 @@ function fabRepair(cj, { pad = 0.5, hole = 0.2 } = {}) {
   if (process.env.FL_FR_DEBUG) process.stderr.write(`[fabRepair] ${allVias.length} pcb_via in cj; sizes: ${JSON.stringify(allVias.map((v) => v.outer_diameter))}\n`)
   for (const e of cj) {
     if (e.type === 'pcb_via') {
-      if ((e.outer_diameter ?? 0) < pad) { e.outer_diameter = pad; vias++ }
-      if ((e.hole_diameter ?? 1) > hole) e.hole_diameter = hole
+      // Normalise, not merely enlarge: the DSN now deliberately over-states the
+      // via copper so the router keeps drills clear (see viaPadstackUm), and
+      // that belief must not become the shipped via.
+      if ((e.outer_diameter ?? 0) !== pad) { e.outer_diameter = pad; vias++ }
+      if ((e.hole_diameter ?? 1) !== hole) e.hole_diameter = hole
     }
     // Multi-layer transition vias live INSIDE the trace route as route_type:'via'
     // points (circuit-json-to-kicad exports these separately from standalone
@@ -1343,13 +1487,15 @@ function fabRepair(cj, { pad = 0.5, hole = 0.2 } = {}) {
     else if (e.type === 'pcb_trace' && Array.isArray(e.route)) {
       for (const p of e.route) {
         if (p.route_type !== 'via') continue
-        if ((p.outer_diameter ?? 0) < pad) { p.outer_diameter = pad; vias++ }
-        if ((p.hole_diameter ?? 1) > hole) p.hole_diameter = hole
+        if ((p.outer_diameter ?? 0) !== pad) { p.outer_diameter = pad; vias++ }
+        if ((p.hole_diameter ?? 1) !== hole) p.hole_diameter = hole
       }
     }
   }
-  if (vias) fixes.push(`enlarged ${vias} via${vias === 1 ? '' : 's'} to ${pad}mm pad / ${hole}mm hole`)
+  if (vias) fixes.push(`normalised ${vias} via${vias === 1 ? '' : 's'} to ${pad}mm pad / ${hole}mm hole`)
   if (spans) fixes.push(`converted ${spans} blind/buried via${spans === 1 ? '' : 's'} to through-vias (the fab profile is a through-via process, and KiCad rejects untyped blind vias outright)`)
+  const stacked = mergeStackedVias(cj, { maxDist: pad + hole })
+  if (stacked) fixes.push(`merged ${stacked} stacked same-net via${stacked === 1 ? '' : 's'} into one through-via (a blind+buried pair became two touching drills)`)
   const board = cj.find((e) => e.type === 'pcb_board')
   if (board) {
     board.width += 1.2; board.height += 1.2; fixes.push('added 0.6mm board-edge copper margin')
@@ -1826,11 +1972,20 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15 } = {}) {
   // Wall for the whole ladder. Leaves room for ground-plane + DRC afterwards.
   const LADDER_DEADLINE_MS = Number(process.env.FL_LADDER_BUDGET_MS || 240_000)
   const tLadder = Date.now()
+  // FL_ONLY_RUNG=<substring>: run just the matching rung(s). A geometry change
+  // to ONE router is otherwise measured through a 20-50 min ladder whose earlier
+  // rungs are wall-clock budgeted (so machine load changes which rungs even run).
+  if (process.env.FL_ONLY_RUNG) {
+    const keep = ladder.filter((s) => s.name.includes(process.env.FL_ONLY_RUNG))
+    process.stderr.write(`[t] ladder: FL_ONLY_RUNG="${process.env.FL_ONLY_RUNG}" keeps ${keep.length}/${ladder.length} rungs\n`)
+    ladder.length = 0; ladder.push(...keep)
+  }
   for (let i = 0; i < ladder.length; i++) {
     const s = ladder[i]
     const elapsedLadder = Date.now() - tLadder
     if (best && elapsedLadder > LADDER_DEADLINE_MS) {
       trail.push({ strategy: s.name, skipped: `ladder budget spent (${Math.round(elapsedLadder / 1000)}s)` })
+      process.stderr.write(`[t] ladder: skipped '${s.name}' — budget spent (${Math.round(elapsedLadder / 1000)}s of ${Math.round(LADDER_DEADLINE_MS / 1000)}s)\n`)
       continue
     }
     if (s.router === 'tsci' && frAvailable && parts.length > TSCI_MAX_PARTS) {
@@ -1852,7 +2007,7 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15 } = {}) {
       : netAwarePlaced
     const code = placed
       ? emitBoardCode(placed, nets, { clearance: s.router === 'tsci' ? s.place.clearance : null, routingDisabled: rd, numLayers: s.router === 'tsci' ? (s.layers ?? 2) : 2 })
-      : buildCode(parts, nets, { ...s.place, routingDisabled: rd, numLayers: s.router === 'tsci' ? (s.layers ?? 2) : 2 })
+      : buildCode(parts, nets, { ...s.place, routingDisabled: rd, numLayers: s.router === 'tsci' ? (s.layers ?? 2) : 2, viaPad: s.router === 'tsci' ? routerViaPadMm(s.profile) : undefined })
     let cj = await buildCircuit(code, s.name)
     let fixes = [], unrouted = 0, unroutedNets = []
     if (s.router === 'fr') {
@@ -1894,6 +2049,8 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15 } = {}) {
         'added 0.6mm board-edge copper margin',
       ]
       if (spanFixed) fixes.push(`converted ${spanFixed} blind/buried via${spanFixed === 1 ? '' : 's'} to through-vias (the fab profile is a through-via process; KiCad rejects untyped blind vias)`)
+      const stackedFr = mergeStackedVias(cj, { maxDist: (FAB_PROFILES[s.profile]?.via?.pad ?? 0.5) + (FAB_PROFILES[s.profile]?.via?.hole ?? 0.2) })
+      if (stackedFr) fixes.push(`merged ${stackedFr} stacked same-net via${stackedFr === 1 ? '' : 's'} into one through-via`)
       if (unrouted) fixes.push(`${unrouted} net(s) left unrouted`)
     } else {
       fixes = fabRepair(cj, FAB_PROFILES[s.profile].via)
@@ -2050,7 +2207,7 @@ async function main() {
       ? input.gapLadder.map(Number).filter((g) => g >= 1.5 && g <= 8).slice(0, 4)
       : [2.1, 3.2, 4.6]
     const T_START = Date.now()
-    const BUDGET_MS = 255_000 // under the electronics-cs runner's 285s hard wall, leaving margin for post-processing
+    const BUDGET_MS = Number(process.env.FL_BUDGET_MS || 255_000) // under the electronics-cs runner's 285s hard wall, leaving margin for post-processing
     let res = null, gapTrail = [], usedGap = GAP_LADDER[0], lastMs = 0
     // Score with drcScore, the same severity model the inner ladder uses.
     // This was `errors + unrouted * 5`, which weights a SHORT and a silkscreen
@@ -2205,6 +2362,9 @@ async function main() {
       // raises the total or strands a net, so this can only help.
       const errTypes = Object.keys(drc?.errorTypes || {})
       const nudgeableCount = errTypes.reduce((n, t) => n + (RESIDUAL_NUDGE_TYPES.has(t) ? (drc.errorTypes[t] || 0) : 0), 0)
+      if (drc?.available && nudgeableCount > 0 && nudgeableCount <= nudgeMax && (res.best.unrouted ?? 0) === 0 && (Date.now() - T_START) + 20_000 >= BUDGET_MS) {
+        process.stderr.write(`[t] residualNudge: skipped ${nudgeableCount} nudgeable error(s) — run budget spent (${Math.round((Date.now() - T_START) / 1000)}s of ${Math.round(BUDGET_MS / 1000)}s)\n`)
+      }
       if (drc?.available && drc.errors > 0 && nudgeableCount > 0 && nudgeableCount <= nudgeMax && (res.best.unrouted ?? 0) === 0
           && (Date.now() - T_START) + 20_000 < BUDGET_MS) {
         const targets = (drc.violations || []).filter((v) => RESIDUAL_NUDGE_TYPES.has(v.type)).map((v) => ({ x: v.x, y: v.y }))
