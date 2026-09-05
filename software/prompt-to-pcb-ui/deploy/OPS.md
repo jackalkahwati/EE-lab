@@ -105,6 +105,44 @@ When tools/ changed, also refresh the pipeline toolchain:
 cd ~/firstlight-prod/tools/tscircuit && npm install   # postinstall re-patches dsn-converter
 ```
 
+### flroute — a BUILT binary that git does not carry
+
+`/api/pipeline/run` routes the variant board by spawning
+`hardware/pcba-rev-a/tools/flroute/target/release/flroute`. That is a Rust
+binary under a gitignored `target/`, so a fresh checkout — or a move to a new
+prod directory — arrives WITHOUT it and every routing stage dies with
+`spawn ... ENOENT`. That is what happened in the 2026-09-04 move to
+`~/firstlight-prod`, and it silently broke board builds until it was noticed.
+
+Check it before believing a deploy is good:
+
+```bash
+ls -l ~/firstlight-prod/hardware/pcba-rev-a/tools/flroute/target/release/flroute
+```
+
+Missing, or older than the newest commit touching `flroute/src/`? Rebuild it:
+
+```bash
+export RUSTUP_HOME=~/.rustup   # see the note below before using a /Volumes path
+cd ~/firstlight-prod/hardware/pcba-rev-a/tools/flroute && cargo build --release
+```
+
+Two traps, both hit on 2026-09-04:
+
+* **Do not copy the binary from another checkout without checking its date.**
+  The one in `~/EE-lab` was built at 17:07 on 2026-07-09 while
+  `flroute/src/` last changed at 17:19 the same day — it predated
+  `95c9a8e` "don't route signals on plane layers (chip-down fix)". Stale by
+  twelve minutes, wrong for exactly the path being debugged. Sizes differ
+  (746,768 stale vs 802,576 current), which is the quickest tell.
+* **`~/.rustup` is a symlink to `/Volumes/T9 Backup/offload/.rustup`.**
+  rustup works through the symlink but is denied when `RUSTUP_HOME` is set to
+  the literal `/Volumes/...` path (macOS TCC on removable volumes — the same
+  denial that broke the backup job). If the toolchain is missing, install a
+  minimal one to a LOCAL `RUSTUP_HOME`, build, and delete it again:
+  `rustup set profile minimal` keeps it near 1 GB, and the boot volume runs
+  with about 5 GB free.
+
 Skip the rebuild entirely when only non-app files changed. Normal downtime is
 under 30 seconds.
 
