@@ -286,6 +286,11 @@ export default function Compose2Page() {
   // pipeline runs (board builds -> Electronics; ID finishes -> Industrial Design)
   const [stage, setStage] = useState<Stage>('electronics')
   const [idBrief, setIdBrief] = useState<IdBrief | null>(null)
+  // MUST be cleared by every path that starts a fresh design. The pipeline
+  // reads productSpecRef, not the prompt, so a stale spec silently rebuilds the
+  // PREVIOUS product: asking for a TMP102 breakout after an RS485 board built
+  // the RS485 board again. selectThreadFromList always cleared it; the two
+  // "New design" handlers did not.
   const [productSpec, setProductSpec] = useState<ProductSpec | null>(null)
   // Which discipline modules have been built this session (their tab produced a
   // real artifact). Drives the left-panel checkboxes so a built discipline shows
@@ -981,7 +986,7 @@ export default function Compose2Page() {
   const threadsPane = (
     <div className="flex min-h-0 flex-1 flex-col">
       <button
-        onClick={() => { setNewDesign(true); setBuiltDisc({}); setLeftView('chat') }}
+        onClick={() => { setNewDesign(true); setBuiltDisc({}); setLeftView('chat'); setProductSpec(null); setIdBrief(null) }}
         className="mx-2 mt-2 flex items-center gap-1.5 rounded border border-border px-2 py-1.5 text-xs text-muted-foreground hover:bg-accent/50"
       >
         <Plus className="h-3.5 w-3.5" /> New design
@@ -1115,7 +1120,7 @@ export default function Compose2Page() {
           revisePrefill={revisePrefill}
           onPrefillConsumed={() => setRevisePrefill('')}
           onSelectThread={(id) => { setSelectedId(id); setNewDesign(false); setIdBrief(null); setProductSpec(null); setStage('electronics'); setBuiltDisc({}) }}
-          onNew={() => { setNewDesign(true); setBuiltDisc({}) }}
+          onNew={() => { setNewDesign(true); setBuiltDisc({}); setProductSpec(null); setIdBrief(null) }}
           builtDisciplines={builtDisc}
           pipelineStatus={pipeStatus}
           pipelineRunning={pipeRunning}
