@@ -59,6 +59,9 @@ def _periph_for_name(name):
     return None
 
 
+SEEN = {"pico": False}   # set by load(): the board carries a Pico/RP2040 footprint
+
+
 def load_assignments():
     """The planner's MCU pin allocation for this board (role -> pad, with the
     capability each pad was chosen for) and the family tag it was made for."""
@@ -81,6 +84,7 @@ def load():
                 nets_on_board.add(nn)
         nm = str(fp.GetFPID().GetLibItemName())
         if "Pico" in nm or "RP2040" in nm:
+            SEEN["pico"] = True
             for p in fp.Pads():
                 try:
                     pin = int(re.sub(r"[^0-9]", "", p.GetNumber()) or 0)
@@ -1157,22 +1161,25 @@ def _mcu_family():
     try:
         for d in json.load(open(manifest)):
             if d.get("type") == "mcu":
-                return d.get("family", "rp2040")
+                return d.get("family")
     except Exception:
         pass
-    return "rp2040"
+    return None
 
 
 def main():
     assignments, pa_family, mcu = load_assignments()
-    family = fam.resolve_family(pa_family or _mcu_family())
+    pins, peripherals, motors = load()
+    tag = pa_family or _mcu_family()
+    if tag is None and SEEN["pico"]:
+        tag = "rp2040"   # legacy boards: the Pico footprint is the only family tag
+    family = fam.resolve_family(tag)
     if family is None:
         # honest gate: no firmware image is better than the WRONG image
         print("FIRMWARE: SKIPPED — MCU family '%s' has no adapter in fw_families.py "
               "(families: %s). No image was produced."
-              % (pa_family or _mcu_family(), ", ".join(sorted(fam.FAMILIES))))
+              % (tag or "unknown", ", ".join(sorted(fam.FAMILIES))))
         return
-    pins, peripherals, motors = load()
     try:
         named = fam.name_pins(family, assignments)
         plan = fam.plan_buses(family, named)
@@ -1186,6 +1193,18 @@ def main():
             if n["role"] in SIGNALS:
                 pins[n["role"]] = int(n["name"][2:])
     wired, unwired = wire(family, peripherals, plan, roles)
+    if peripherals and not assignments:
+        print("FIRMWARE: SKIPPED — %s board has peripherals %s but no planner pin "
+              "allocation (%s.pin-assignment.json); an image with no buses is not "
+              "firmware for this board. No image was produced."
+              % (family, peripherals, os.path.splitext(os.path.basename(BOARD))[0]))
+        return
+    if peripherals and not wired:
+        # every device the board carries would be left undriven: that is a
+        # template, not this board's firmware — refuse rather than pass green
+        print("FIRMWARE: SKIPPED — %s adapter could wire none of %s: %s. No image was produced."
+              % (family, peripherals, "; ".join("%s (%s)" % u for u in unwired)))
+        return
     # motors need PWM bring-up the adapters do not have yet: report, don't drop silently
     motor_ch = motors if "motors" in wired else []
     emit(pins, peripherals, motor_ch, family=family, mcu=mcu or family, plan=plan,
