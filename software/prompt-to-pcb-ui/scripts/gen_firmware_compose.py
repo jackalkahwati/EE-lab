@@ -21,6 +21,9 @@ import sys
 
 import pcbnew
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fw_families as fam  # noqa: E402  (family table + board.rs emitters)
+
 BOARD = sys.argv[1]
 OUT = sys.argv[2]
 
@@ -54,6 +57,17 @@ def _periph_for_name(name):
         if re.search(rx, name, re.I):
             return periph
     return None
+
+
+def load_assignments():
+    """The planner's MCU pin allocation for this board (role -> pad, with the
+    capability each pad was chosen for) and the family tag it was made for."""
+    pa = os.path.splitext(BOARD)[0] + ".pin-assignment.json"
+    try:
+        d = json.load(open(pa))
+    except Exception:
+        return [], None, None
+    return list(d.get("assignments") or []), d.get("family"), d.get("mcu")
 
 
 def load():
@@ -856,17 +870,12 @@ def emit_selftest(peripherals):
     return header + body + "\n"
 
 
-def emit_app(peripherals, motors):
-    """Deterministic Controller SCAFFOLD, generated from the peripheral set the
-    same way the BSP/HAL is. The struct, generic bounds, new(), init(), and the
-    control_step() SIGNATURE are correct-by-construction and always compile;
-    ONLY the body between the FL_APP_FILL markers is meant to be rewritten
-    (scaffold-fill: the pipeline lets the frontier model replace just that body,
-    so it can never break the generics/imports/bounds). Left as generated, the
-    body is a working per-peripheral control loop, so a board always ships a
-    compiling app layer even if no model runs."""
+def plan_controller(peripherals, motors):
+    """The Controller's generic params, fields (with the peripheral each field
+    holds), init and step statements — shared by app.rs and main.rs so the
+    constructor call always matches the struct."""
     tparams = []   # (name, bound), ordered + unique
-    fields = []    # (field_name, field_type)
+    fields = []    # (field_name, field_type, periph)
     init_stmts = []
     step_stmts = []
 
@@ -877,30 +886,30 @@ def emit_app(peripherals, motors):
     if "radio" in peripherals:
         add_tp("SPr", "embedded_hal::spi::SpiDevice")
         add_tp("RSr", "embedded_hal::digital::OutputPin")
-        fields.append(("radio", "crate::radio::Lora<SPr, RSr>"))
+        fields.append(("radio", "crate::radio::Lora<SPr, RSr>", "radio"))
         init_stmts += ["self.radio.reset(&mut self.delay);",
                        "let _ = self.radio.probe().map_err(|_| ())?;",
                        "let _ = self.radio.set_lora_mode().map_err(|_| ())?;"]
         step_stmts.append("let _ = self.radio.probe().map_err(|_| ())?;")
     if "imu" in peripherals:
         add_tp("I2Ci", "embedded_hal::i2c::I2c")
-        fields.append(("imu", "crate::imu::Imu<I2Ci>"))
+        fields.append(("imu", "crate::imu::Imu<I2Ci>", "imu"))
         init_stmts += ["let _ = self.imu.probe().map_err(|_| ())?;",
                        "let _ = self.imu.wake().map_err(|_| ())?;"]
         step_stmts.append("let _ = self.imu.read_accel().map_err(|_| ())?;")
     if "tempsensor" in peripherals:
         add_tp("I2Ct", "embedded_hal::i2c::I2c")
-        fields.append(("temp", "crate::tempsensor::TempSensor<I2Ct>"))
+        fields.append(("temp", "crate::tempsensor::TempSensor<I2Ct>", "tempsensor"))
         init_stmts.append("let _ = self.temp.probe().map_err(|_| ())?;")
         step_stmts.append("let _ = self.temp.read_milli_c().map_err(|_| ())?;")
     if "gnss" in peripherals:
         add_tp("Rg", "embedded_io::Read")
-        fields.append(("gnss", "crate::gnss::Gnss<Rg>"))
+        fields.append(("gnss", "crate::gnss::Gnss<Rg>", "gnss"))
         step_stmts += ["let mut nmea = [0u8; 96];",
                        "let _ = self.gnss.read_sentence(&mut nmea).map_err(|_| ())?;"]
     if "cellular" in peripherals:
         add_tp("Sc", "embedded_io::Read + embedded_io::Write")
-        fields.append(("modem", "crate::cellular::Modem<Sc>"))
+        fields.append(("modem", "crate::cellular::Modem<Sc>", "cellular"))
         init_stmts += ["let _ = self.modem.probe().map_err(|_| ())?;",
                        "let _ = self.modem.network_attach().map_err(|_| ())?;"]
         step_stmts.append('let _ = self.modem.send_at("AT").map_err(|_| ())?;')
@@ -909,20 +918,33 @@ def emit_app(peripherals, motors):
             continue
         tp = ftype[ftype.index("<") + 1:-1]
         add_tp(tp, "embedded_hal::spi::SpiDevice" if bus == "spi" else "embedded_hal::i2c::I2c")
-        fields.append((mod, ftype))
+        fields.append((mod, ftype, periph))
         init_stmts.append("let _ = self.%s.probe().map_err(|_| ())?;" % mod)
         if periph in ("bme280", "ssd1306", "lis3dh"):
             init_stmts.append("let _ = self.%s.init().map_err(|_| ())?;" % mod)
         step_stmts.append(step)
     if motors:
         add_tp("Pm", "embedded_hal::pwm::SetDutyCycle")
-        fields.append(("pwm", "Pm"))
+        fields.append(("pwm", "Pm", "motors"))
         init_stmts.append("let _ = crate::motors::disarm(&mut self.pwm, 20000).map_err(|_| ())?;")
         step_stmts.append("let _ = crate::motors::disarm(&mut self.pwm, 20000).map_err(|_| ())?;")
     if "radio" in peripherals:  # radio.reset() needs a delay; own one
         add_tp("Dd", "embedded_hal::delay::DelayNs")
-        fields.append(("delay", "Dd"))
+        fields.append(("delay", "Dd", "delay"))
 
+    return tparams, fields, init_stmts, step_stmts, add_tp
+
+
+def emit_app(peripherals, motors):
+    """Deterministic Controller SCAFFOLD, generated from the peripheral set the
+    same way the BSP/HAL is. The struct, generic bounds, new(), init(), and the
+    control_step() SIGNATURE are correct-by-construction and always compile;
+    ONLY the body between the FL_APP_FILL markers is meant to be rewritten
+    (scaffold-fill: the pipeline lets the frontier model replace just that body,
+    so it can never break the generics/imports/bounds). Left as generated, the
+    body is a working per-peripheral control loop, so a board always ships a
+    compiling app layer even if no model runs."""
+    tparams, fields, init_stmts, step_stmts, add_tp = plan_controller(peripherals, motors)
     L = ["//! Application control-loop SCAFFOLD, generated from the board's peripheral",
          "//! set. The struct, generic bounds, new(), init(), and the control_step()",
          "//! SIGNATURE are correct-by-construction; only the body between the",
@@ -948,12 +970,12 @@ def emit_app(peripherals, motors):
     tp_names = ", ".join(n for n, _ in tparams)
     tp_bounds = ", ".join("{}: {}".format(n, b) for n, b in tparams)
     L.append("pub struct Controller<" + tp_names + "> {")
-    for fn, ft in fields:
+    for fn, ft, _p in fields:
         L.append("    " + fn + ": " + ft + ",")
     L += ["}", ""]
     L.append("impl<" + tp_bounds + "> Controller<" + tp_names + "> {")
-    L.append("    pub fn new(" + ", ".join(fn + ": " + ft for fn, ft in fields) + ") -> Self {")
-    L.append("        Self { " + ", ".join(fn for fn, _ in fields) + " }")
+    L.append("    pub fn new(" + ", ".join(fn + ": " + ft for fn, ft, _p in fields) + ") -> Self {")
+    L.append("        Self { " + ", ".join(fn for fn, _t, _p in fields) + " }")
     L += ["    }", ""]
     L.append("    /// Bring up every peripheral once. Err(()) if one does not answer.")
     L.append("    pub fn init(&mut self) -> Result<(), ()> {")
@@ -970,18 +992,121 @@ def emit_app(peripherals, motors):
     return "\n".join(L) + "\n"
 
 
-def emit(pins, peripherals, motors):
+# what each Controller peripheral needs from the board, and how to build it
+_BUS_OF = {"radio": "spi", "imu": "i2c", "tempsensor": "i2c", "gnss": "uart", "cellular": "uart",
+           "motors": "pwm", "bme280": "i2c", "ssd1306": "i2c", "mcp23017": "i2c", "ina219": "i2c",
+           "ds3231": "i2c", "lis3dh": "i2c", "spi_flash": "spi"}
+_CS_ROLE = {"spi_flash": "W25Q_CS", "radio": "LORA_NSS"}
+_CTOR = {"imu": "firmware::imu::Imu::new({i2c})",
+         "tempsensor": "firmware::tempsensor::TempSensor::new({i2c})",
+         "bme280": "firmware::bme280::Bme280::new({i2c})",
+         "ssd1306": "firmware::ssd1306::Ssd1306::new({i2c})",
+         "mcp23017": "firmware::mcp23017::Mcp23017::new({i2c})",
+         "ina219": "firmware::ina219::Ina219::new({i2c}, 100_000)",
+         "ds3231": "firmware::ds3231::Ds3231::new({i2c})",
+         "lis3dh": "firmware::lis3dh::Lis3dh::new({i2c})",
+         "spi_flash": "firmware::spi_flash::SpiFlash::new({spi})",
+         "radio": "firmware::radio::Lora::new({spi}, {rst})"}
+
+
+def wire(family, peripherals, plan, roles):
+    """Split the peripheral set into what THIS board can drive from board.rs
+    (bus present, chip-select allocated) and what it cannot — the latter is
+    reported, never silently dropped."""
+    wired, unwired = [], []
+    for p in peripherals:
+        bus = _BUS_OF.get(p)
+        why = None
+        if bus == "i2c" and not plan["i2c"]:
+            why = "no I2C bus allocated"
+        elif bus == "spi":
+            if not plan["spi"]:
+                why = "no SPI bus allocated"
+            elif _CS_ROLE.get(p) not in roles:
+                why = "no %s chip-select allocated" % _CS_ROLE.get(p)
+            elif p == "radio" and "LORA_RST" not in roles:
+                why = "no LORA_RST allocated"
+        elif bus in ("uart", "pwm"):
+            why = "%s bring-up not in the %s adapter yet" % (bus, family)
+        elif bus is None:
+            why = "unknown peripheral"
+        (unwired if why else wired).append((p, why) if why else p)
+    return wired, unwired
+
+
+def emit_main(family, wired, motors, plan, roles):
+    """src/main.rs: the runnable image. Family-independent except for the
+    entry/boot statics the adapter supplies; every bus comes from board::init()."""
+    tparams, fields, _i, _s, _a = plan_controller(wired, motors)
+    i2c_users = [f for f in fields if _BUS_OF.get(f[2]) == "i2c"]
+    spi_users = [f for f in fields if _BUS_OF.get(f[2]) == "spi"]
+    share_i2c = len(i2c_users) > 1
+    share_spi = len(spi_users) > 1
+    L = ["//! Firmware image entry: bring the board up, construct the Controller",
+         "//! over the real buses, run the control loop. Generated — do not edit.",
+         "#![no_std]", "#![no_main]", "",
+         "use panic_halt as _;", "use cortex_m_rt::entry;",
+         "use embedded_hal::delay::DelayNs;",
+         "use firmware::{app::Controller, board};", ""]
+    if fam.FAMILIES[family]["main_extra"]:
+        L += [fam.FAMILIES[family]["main_extra"]]
+    L += ["#[entry]", "fn main() -> ! {"]
+    take = ["mut loop_delay"]
+    if i2c_users:
+        take.append("i2c")
+    if spi_users:
+        take.append("spi")
+    if any(f[2] == "delay" for f in fields):
+        take.append("delay")
+    outs = {o["role"]: o["field"] for o in plan["outs"]}
+    used_outs = []
+    for f in fields:
+        cs = _CS_ROLE.get(f[2])
+        if cs and cs in outs:
+            used_outs.append(outs[cs])
+        if f[2] == "radio" and "LORA_RST" in outs:
+            used_outs.append(outs["LORA_RST"])
+    take += used_outs
+    L.append("    let board::Board { " + ", ".join(take) + ", .. } = board::init();")
+    if share_i2c:
+        L.append("    let i2c_bus = core::cell::RefCell::new(i2c);")
+    if share_spi:
+        L.append("    let spi_bus = core::cell::RefCell::new(spi);")
+    args = []
+    for name, _t, periph in fields:
+        if periph == "delay":
+            args.append("delay")
+            continue
+        i2c = "embedded_hal_bus::i2c::RefCellDevice::new(&i2c_bus)" if share_i2c else "i2c"
+        cs = outs.get(_CS_ROLE.get(periph, ""), "")
+        spi = ("embedded_hal_bus::spi::RefCellDevice::new_no_delay(&spi_bus, %s).unwrap()" % cs
+               if share_spi else
+               "embedded_hal_bus::spi::ExclusiveDevice::new_no_delay(spi, %s).unwrap()" % cs)
+        args.append(_CTOR[periph].format(i2c=i2c, spi=spi, rst=outs.get("LORA_RST", "")))
+    if fields:
+        L.append("    let mut ctl = Controller::new(")
+        for a in args:
+            L.append("        " + a + ",")
+        L.append("    );")
+    else:
+        L.append("    let mut ctl = Controller::new();")
+    L += ["    // one failed bring-up must not wedge the loop: the step re-probes",
+          "    let _ = ctl.init();",
+          "    loop {",
+          "        let _ = ctl.control_step();",
+          "        loop_delay.delay_ms(1000);",
+          "    }",
+          "}", ""]
+    return "\n".join(L)
+
+
+def emit(pins, peripherals, motors, family=None, mcu=None, plan=None, roles=(), wired=None):
     os.makedirs(os.path.join(OUT, "src"), exist_ok=True)
     os.makedirs(os.path.join(OUT, ".cargo"), exist_ok=True)
 
-    deps = '[dependencies]\nembedded-hal = "1.0"\n'
-    if "gnss" in peripherals or "cellular" in peripherals:
-        deps += 'embedded-io = "0.6"\n'
-    open(os.path.join(OUT, "Cargo.toml"), "w").write(
-        '[package]\nname = "firmware"\nversion = "0.1.0"\nedition = "2021"\n\n'
-        + deps + '\n[profile.release]\nopt-level = "z"\n')
-    open(os.path.join(OUT, ".cargo", "config.toml"), "w").write(
-        '[build]\ntarget = "thumbv6m-none-eabi"\n')
+    extra = 'embedded-io = "0.6"\n' if ("gnss" in peripherals or "cellular" in peripherals) else ""
+    for rel, content in fam.crate_files(family, extra).items():
+        open(os.path.join(OUT, rel), "w").write(content)
 
     open(os.path.join(OUT, "src", "bsp.rs"), "w").write(emit_bsp(pins))
 
@@ -1012,8 +1137,11 @@ def emit(pins, peripherals, motors):
     mods.append("selftest")
     # deterministic application control loop (always compiles + ships; the
     # frontier model enhances it best-effort in the pipeline)
-    open(os.path.join(OUT, "src", "app.rs"), "w").write(emit_app(peripherals, motors))
+    open(os.path.join(OUT, "src", "app.rs"), "w").write(emit_app(wired, motors))
     mods.append("app")
+    open(os.path.join(OUT, "src", "board.rs"), "w").write(fam.emit_board(family, mcu, plan))
+    mods.append("board")
+    open(os.path.join(OUT, "src", "main.rs"), "w").write(emit_main(family, wired, motors, plan, roles))
 
     lib = ["//! Composed-board firmware support crate (no_std). BSP + per-peripheral",
            "//! HAL + bring-up self-test, generated from the routed board netlist by",
@@ -1024,9 +1152,7 @@ def emit(pins, peripherals, motors):
 
 
 def _mcu_family():
-    """The composed board's MCU family, from the device manifest. This
-    generator emits RP2040/Pico firmware ONLY — for any other family it must
-    say so instead of shipping a Pico image for a non-Pico board."""
+    """The composed board's MCU family tag, from the device manifest."""
     manifest = os.path.splitext(BOARD)[0] + ".devices.json"
     try:
         for d in json.load(open(manifest)):
@@ -1038,24 +1164,45 @@ def _mcu_family():
 
 
 def main():
-    fam = _mcu_family()
-    if fam != "rp2040":
+    assignments, pa_family, mcu = load_assignments()
+    family = fam.resolve_family(pa_family or _mcu_family())
+    if family is None:
         # honest gate: no firmware image is better than the WRONG image
-        print("FIRMWARE: SKIPPED — board MCU family '%s' is not supported by "
-              "the RP2040 generator; the %s firmware target is pending. No "
-              "image was produced (never a Pico image for a non-Pico board)."
-              % (fam, fam))
+        print("FIRMWARE: SKIPPED — MCU family '%s' has no adapter in fw_families.py "
+              "(families: %s). No image was produced."
+              % (pa_family or _mcu_family(), ", ".join(sorted(fam.FAMILIES))))
         return
     pins, peripherals, motors = load()
-    # A bare MCU + power board has no peripheral nets, so `pins` is empty — that
-    # is valid hardware, not an error. Emit a minimal BSP crate that still
-    # compiles (no pin constants / no probeable peripherals) rather than failing.
-    emit(pins, peripherals, motors)
+    try:
+        named = fam.name_pins(family, assignments)
+        plan = fam.plan_buses(family, named)
+    except fam.FamilyError as e:
+        print("FIRMWARE: SKIPPED — %s: %s. No image was produced." % (family, e))
+        return
+    roles = {n["role"] for n in named}
+    if family == "rp2040" and not pins:
+        # legacy RP2040 boards carry the allocation only on the Pico footprint
+        for n in named:
+            if n["role"] in SIGNALS:
+                pins[n["role"]] = int(n["name"][2:])
+    wired, unwired = wire(family, peripherals, plan, roles)
+    # motors need PWM bring-up the adapters do not have yet: report, don't drop silently
+    motor_ch = motors if "motors" in wired else []
+    emit(pins, peripherals, motor_ch, family=family, mcu=mcu or family, plan=plan,
+         roles=roles, wired=wired)
+    f = fam.FAMILIES[family]
+    print("FIRMWARE: family=%s target=%s hal=%s@%s mcu=%s" % (family, f["target"], f["hal"],
+                                                            f["hal_version"], mcu or "?"))
     print("FIRMWARE: peripherals [{}]{}".format(
         ", ".join(peripherals) or "none",
         ", {} motor channels".format(len(motors)) if motors else ""))
-    print("FIRMWARE: pins " + ", ".join(
-        "{}=GP{}".format(s, pins[s]) for s in SIGNALS if s in pins))
+    print("FIRMWARE: pins " + ", ".join("%s=%s" % (n["role"], n["name"]) for n in named))
+    if plan["i2c"]:
+        print("FIRMWARE: i2c %s (SDA %s, SCL %s)" % (plan["i2c"]["inst"], plan["i2c"]["sda"], plan["i2c"]["scl"]))
+    if plan["spi"]:
+        print("FIRMWARE: spi %s" % plan["spi"]["inst"])
+    if unwired:
+        print("FIRMWARE: NOT WIRED on %s: %s" % (family, "; ".join("%s (%s)" % u for u in unwired)))
     print("FIRMWARE: wrote crate -> {}".format(OUT))
 
 

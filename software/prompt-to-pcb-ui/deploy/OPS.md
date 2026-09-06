@@ -129,8 +129,9 @@ cd ~/firstlight-prod/hardware/pcba-rev-a/tools/flroute && cargo build --release
 
 ### The firmware stage needs a Rust toolchain AND the embedded targets
 
-The firmware discipline runs `cargo build --target thumbv6m-none-eabi` (RP2040;
-thumbv7em/thumbv7m for STM32 parts). With no default toolchain it fails with:
+The firmware discipline runs `cargo build --release` in a crate whose target
+is chosen per MCU family (thumbv6m-none-eabi for RP2040, thumbv7m-none-eabi for
+STM32F1; `rustup target add` both). With no default toolchain it fails with:
 
 ```
 error: rustup could not choose a version of cargo to run, because one wasn't
@@ -177,6 +178,37 @@ Two traps, both hit on 2026-09-04:
 
 Skip the rebuild entirely when only non-app files changed. Normal downtime is
 under 30 seconds.
+
+### Firmware is generated per MCU family (2026-09-06)
+
+`scripts/gen_firmware_compose.py` is family-independent. It reads the planner's
+pin allocation (`<board>.pin-assignment.json`: role → MCU pad, family, MCU) and
+the device manifest, and emits one crate layout for every family:
+
+- `src/lib.rs` + drivers + `selftest.rs` + `app.rs` — embedded-hal 1.0 traits
+  only, identical on every family.
+- `src/board.rs` — THIS family's bring-up (clocks, I2C/SPI instances, GPIO
+  outputs, delays) from `scripts/fw_families.py`.
+- `src/main.rs` — `#[entry]`: `board::init()` → `Controller::new(...)` over the
+  real buses (shared I2C via `embedded-hal-bus` when several devices sit on
+  it) → control loop.
+- `Cargo.toml`, `.cargo/config.toml`, `memory.x`, `build.rs` from the family row.
+
+The generator prints `FIRMWARE: family=<f> target=<triple> hal=<crate>@<ver>`;
+the pipeline takes the target label from that line, builds with
+`CARGO_TARGET_DIR=~/.cache/firstlight/cargo-target/<family>` (shared across
+runs, so a HAL build is cold once and incremental afterwards), and PASSES only
+if a linked ELF ≥ 1 KB exists at `<target>/release/firmware`; that ELF ships in
+`firmware.zip` as `firmware.elf`. A peripheral the adapter cannot drive yet
+(UART drivers, PWM motors) is reported as `FIRMWARE: NOT WIRED on <family>: …`
+(log warning + `FIRMWARE-TARGET.md`), never silently dropped.
+
+Adding a family: one row in `FAMILIES` (target, HAL crate/features, memory.x,
+`main_extra`, bus-instance rules, a `board.rs` emitter) and a `pad_names` table
+on the MCU seed in `hardware/planner/mcu_specs.py` (validated: every capable
+pad must be named). Families today: `rp2040` (Pico module), `stm32f1`
+(STM32F103C8T6). ESP32-C3 still uses `gen_firmware_esp32c3.py`; any other
+family gets an honest `FIRMWARE: SKIPPED` and a failed stage.
 
 ## Where data lives (and what is NOT redundant)
 
@@ -349,7 +381,7 @@ three times against copper the target rung never produced). Use these:
 - `FL_POUR_SELECT=0` opts out of post-pour rung selection (default on): the top 3 rungs by pre-pour score are each poured and the one whose GROUNDED board scores best ships (`drcRepair.pourSelection` records the candidates). The pour merges stub/chain nets into GND by NAME (a net between two ground pins), never by geometry.
 
 - Budgets (2026-09-06): electronics-cs `FIRST_BUILD_WALL_MS` is 600 s (runner `FL_WALL_MS`); the runner's ladder deadline is wall − 150 s with rung ADMISSION by projected time (elapsed + last rung), its inner budget (gap ladder / legalizers / residual nudge) is wall − 60 s unless `FL_BUDGET_MS` is set, the ground retry is admitted on measured cost (winning rung time + pour), pour-selection on 12 s per candidate. The pipeline's fab/firmware wait is 780 s.
-- Verdicts (2026-09-06): in plan mode the fabrication package is cut from the SHIPPED chip-scale board whatever the intermediate variant's DRC says, and the run status (last-run.md) is the shipped board's. A firmware generator refusal (`FIRMWARE: SKIPPED`, e.g. an STM32 board — the generator only has RP2040 and ESP32-C3 targets) fails the EDA firmware stage, and the product job's firmware discipline stage follows that build (no image → failed). The planner's device manifest carries `family` (stm32f1 / rp2040 / esp32c3); the prompt's "N-layer" request is parsed (intent `layer_count` → spec `maxLayers`) and reported against what shipped.
+- Verdicts (2026-09-06): in plan mode the fabrication package is cut from the SHIPPED chip-scale board whatever the intermediate variant's DRC says, and the run status (last-run.md) is the shipped board's. A firmware generator refusal (`FIRMWARE: SKIPPED`: a family with no adapter in `scripts/fw_families.py`) fails the EDA firmware stage, and the product job's firmware discipline stage follows that build (no image → failed). The planner's device manifest carries `family` (stm32f1 / rp2040 / esp32c3); the prompt's "N-layer" request is parsed (intent `layer_count` → spec `maxLayers`) and reported against what shipped.
 
 Compare rung-to-rung using `drcRepair.iterations[]` in the output JSON, not the final
 winner: the winner changes with whichever rungs the deadline let run.

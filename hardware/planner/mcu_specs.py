@@ -54,6 +54,14 @@ def validate_mcu(spec):
         dup = reserved.intersection(map(str, pads))
         if dup:
             errs.append("capability %s uses reserved pad(s) %s" % (c, sorted(dup)))
+    # pad_names (when present) must name every allocatable pad: the firmware
+    # generator refuses to guess a pin name, so a hole here is a lost pin
+    names = spec.get("pad_names")
+    if names:
+        for c, pads in cap.items():
+            miss = [p for p in map(str, pads) if p not in names]
+            if miss:
+                errs.append("capability %s has unnamed pad(s) %s" % (c, miss))
     return (len(errs) == 0, errs)
 
 
@@ -88,6 +96,13 @@ _RP2040 = _spec(
     debug_pins=["SWCLK", "SWDIO"],    # module debug pads
     clock_pins=[],                    # internal ROSC/XOSC on module
     usb_pins=[],                      # USB on the module's micro-USB
+    pad_names={  # Pico module pin -> GPIO name (control pins)
+        "1": "GP0", "2": "GP1", "4": "GP2", "5": "GP3", "6": "GP4", "7": "GP5", "9": "GP6",
+        "10": "GP7", "11": "GP8", "12": "GP9", "14": "GP10", "15": "GP11", "16": "GP12",
+        "17": "GP13", "19": "GP14", "20": "GP15", "21": "GP16", "22": "GP17", "24": "GP18",
+        "25": "GP19", "26": "GP20", "27": "GP21", "29": "GP22", "31": "GP26", "32": "GP27",
+        "34": "GP28",
+    },
     capable={
         "gpio": ["1", "2", "4", "5", "6", "7", "9", "10", "11", "12", "14", "15",
                  "16", "17", "19", "20", "21", "22", "24", "25", "26", "27", "29",
@@ -202,6 +217,15 @@ _STM32F103 = _spec(
     debug_pins=["34", "37"],              # SWDIO(PA13)/SWCLK(PA14)
     clock_pins=["5", "6"],                # OSC_IN/OSC_OUT
     usb_pins=["32", "33"],                # PA11(D-)/PA12(D+)
+    pad_names={  # LQFP-48 pad -> port pin (STM32F103x8 datasheet table 5)
+        "2": "PC13", "3": "PC14", "4": "PC15", "5": "PD0", "6": "PD1",
+        "10": "PA0", "11": "PA1", "12": "PA2", "13": "PA3", "14": "PA4", "15": "PA5",
+        "16": "PA6", "17": "PA7", "18": "PB0", "19": "PB1", "20": "PB2", "21": "PB10",
+        "22": "PB11", "25": "PB12", "26": "PB13", "27": "PB14", "28": "PB15", "29": "PA8",
+        "30": "PA9", "31": "PA10", "32": "PA11", "33": "PA12", "34": "PA13", "37": "PA14",
+        "38": "PA15", "39": "PB3", "40": "PB4", "41": "PB5", "42": "PB6", "43": "PB7",
+        "45": "PB8", "46": "PB9",
+    },
     capable={
         # LQFP-48: PA0..7=10..17, PB0..1=18..19, PB10..11=21..22, PB12..15=25..28,
         # PA8..10=29..31, PA15=38, PB3..9=39..46

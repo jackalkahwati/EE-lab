@@ -199,3 +199,27 @@ def test_layer_count_and_mcu_family_reach_the_router_and_the_firmware_manifest()
     assert _synth._mcu_family_tag("STM32F103C8T6") == "stm32f1"
     assert _synth._mcu_family_tag("RP2040") == "rp2040"
     assert _synth._mcu_family_tag("ESP32-C3-MINI-1") == "esp32c3"
+
+
+def test_mcu_seeds_name_every_allocatable_pad_for_firmware():
+    """The firmware generator resolves the planner's pad numbers to pin names
+    through mcu_specs.pad_names — a pad without a name is a lost pin, so the
+    seeds that have firmware adapters must name every capable pad, and the
+    names must agree with the capability table (the datasheet cross-check)."""
+    import mcu_specs
+    for key, checks in {
+        "STM32F103": {"i2c_sda": ["PB7", "PB11"], "i2c_scl": ["PB6", "PB10"],
+                      "uart_tx": ["PA9", "PA2"], "spi_sck": ["PA5", "PB13"]},
+        "RP2040": {"i2c_sda": None, "spi_sck": None},
+    }.items():
+        spec = mcu_specs.get_mcu(key)
+        ok, errs = mcu_specs.validate_mcu(spec)
+        assert ok, errs
+        names = spec["pad_names"]
+        for cap, pads in spec["capable"].items():
+            assert all(str(p) in names for p in pads), (key, cap)
+        for cap, want in checks.items():
+            if want:
+                assert [names[p] for p in spec["capable"][cap]] == want
+            else:
+                assert all(names[p].startswith("GP") for p in spec["capable"][cap])

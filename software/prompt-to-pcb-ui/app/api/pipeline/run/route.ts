@@ -1717,9 +1717,16 @@ export async function GET(req: Request) {
         // Relay boards get the crosspoint/coil HAL; composed boards get a generic
         // BSP + per-peripheral HAL (LoRa/IMU/motors) traced from the netlist.
         // Either way the hard gate is the same: `cargo build` for the board's
-        // MCU family — thumbv6m for RP2040, riscv32imc (esp-hal) for ESP32-C3.
+        // MCU family. gen_firmware_compose is family-independent: it reads the
+        // planner's pin allocation + family, picks the adapter (scripts/
+        // fw_families.py: target triple, HAL, memory map, board.rs) and reports
+        // `FIRMWARE: family=… target=… hal=…` — the label and the ELF gate
+        // below come from THAT line, never from a hardcoded default. ESP32-C3
+        // still has its own esp-hal generator; unknown families SKIP loudly.
         let fwGen = boardMode ? 'scripts/gen_firmware_compose.py' : 'scripts/gen_firmware.py'
-        let fwTargetLabel = 'thumbv6m-none-eabi (RP2040)'
+        let fwTargetLabel = 'MCU family from the generator'
+        let fwFamily: string | null = null
+        let fwTarget: string | null = null
         try {
           const devs = JSON.parse(
             fs.readFileSync(path.join(pubData, 'devices.json'), 'utf8'),
@@ -1728,13 +1735,9 @@ export async function GET(req: Request) {
           if (mcu?.family === 'esp32c3') {
             fwGen = 'scripts/gen_firmware_esp32c3.py'
             fwTargetLabel = 'riscv32imc-unknown-none-elf (ESP32-C3, esp-hal)'
-          } else if (mcu?.family === 'cm4') {
-            // SoM carrier: the compute runs Linux off the module — an OS
-            // image is a future target; gen_firmware_compose SKIPs loudly
-            // for non-RP2040 families rather than shipping a wrong image.
-            fwTargetLabel = 'CM4 SoM (Linux) — no firmware target yet, skipped honestly'
+            fwFamily = 'esp32c3'
           }
-        } catch { /* no manifest -> RP2040 default */ }
+        } catch { /* no manifest -> the generator decides from pin-assignment.json */ }
 
         // ---- plan mode: firmware targets the SHIPPED board ------------------
         // In plan mode the variant board here is an INTERMEDIATE design view (see
@@ -1833,6 +1836,25 @@ export async function GET(req: Request) {
         } else if (!gen.out.includes('FIRMWARE:') || gen.out.includes('ERROR')) {
           send({ type: 'stage', id: 'firmware', state: 'failed', failReason: 'firmware generation failed' })
         } else {
+          const fwLine = gen.out.match(/^FIRMWARE: family=(\S+) target=(\S+) hal=(\S+)/m)
+          if (fwLine) {
+            fwFamily = fwLine[1]
+            fwTarget = fwLine[2]
+            fwTargetLabel = `${fwLine[2]} (${fwLine[1]}, ${fwLine[3]})`
+          }
+          const notWired = gen.out.match(/^FIRMWARE: NOT WIRED[^\n]*/m)?.[0]
+          if (notWired) {
+            // the image compiles and runs, but a peripheral the board carries is
+            // not driven by it — say so in the log and in the crate, never hide it
+            log('firmware', notWired.replace(/^FIRMWARE: /, ''), 'warn')
+            fwTargetNote = `${fwTargetNote ? fwTargetNote + '\n\n' : ''}${notWired.replace(/^FIRMWARE: /, '')}`
+          }
+          // one cargo target dir per family, OUTSIDE the run workspace: a HAL
+          // build is hundreds of MB and minutes cold; sharing it makes every
+          // later run's build incremental (seconds) and keeps target/ out of
+          // the run directory and the zip.
+          const fwTargetDir = path.join(os.homedir(), '.cache', 'firstlight', 'cargo-target', fwFamily ?? 'default')
+          const fwEnv = { CARGO_TARGET_DIR: fwTargetDir }
           // plan mode: stamp the crate with WHICH board it targets (shipped
           // chip-scale vs intermediate view — set above), and carry the planner's
           // real MCU pin allocation along, so the downloaded artifact is
@@ -1848,11 +1870,22 @@ export async function GET(req: Request) {
           }
           log('firmware', `cargo build --target ${fwTargetLabel}…`)
           const fwBuild = await exec('firmware', CARGO, ['build', '--release'], {
-            cwd: fwDir,
+            cwd: fwDir, env: fwEnv,
           })
-          const fwOk = fwBuild.code === 0 || fwBuild.out.includes('Finished')
+          let fwOk = fwBuild.code === 0 || fwBuild.out.includes('Finished')
+          // "Finished" is not an image: the compose generator names a target,
+          // and the gate is a linked ELF for it of non-trivial size.
+          const fwElf = fwTarget ? path.join(fwTargetDir, fwTarget, 'release', 'firmware') : null
+          let fwElfSize = 0
+          if (fwOk && fwElf) {
+            try { fwElfSize = fs.statSync(fwElf).size } catch { fwElfSize = 0 }
+            if (fwElfSize < 1024) {
+              fwOk = false
+              log('firmware', `cargo reported Finished but no firmware ELF at ${fwElf}`, 'warn')
+            }
+          }
           if (fwOk) {
-            log('firmware', 'GATE firmware: cargo build GREEN, PASS', 'ok')
+            log('firmware', `GATE firmware: cargo build GREEN for ${fwTargetLabel}${fwElfSize ? `, ELF ${(fwElfSize / 1024).toFixed(0)} KB` : ''}, PASS`, 'ok')
 
             // ---- application firmware: frontier model writes the control loop --
             // The deterministic crate above is the correct-by-construction BSP +
@@ -1912,7 +1945,7 @@ export async function GET(req: Request) {
                   const body = normalizeFillBody(extractRust(llm.text), FILL_BEGIN, FILL_END)
                   const filled = spliceFillBody(scaffold, body, FILL_BEGIN, FILL_END)
                   fs.writeFileSync(appPath, filled ?? scaffold)
-                  const ab = await exec('firmware', CARGO, ['build', '--release'], { cwd: fwDir })
+                  const ab = await exec('firmware', CARGO, ['build', '--release'], { cwd: fwDir, env: fwEnv })
                   appOk = ab.code === 0 || ab.out.includes('Finished')
                   lastErr = ab.out
                   if (appOk)
@@ -1923,7 +1956,7 @@ export async function GET(req: Request) {
                 if (!appOk) {
                   // restore the scaffold's own body — still a real, compiling loop
                   fs.writeFileSync(appPath, scaffold)
-                  await exec('firmware', CARGO, ['build', '--release'], { cwd: fwDir })
+                  await exec('firmware', CARGO, ['build', '--release'], { cwd: fwDir, env: fwEnv })
                   log('firmware', 'app firmware: kept the deterministic control loop (model fill did not compile)', 'ok')
                 }
               }
@@ -1935,6 +1968,16 @@ export async function GET(req: Request) {
               log('firmware', `app firmware: kept the deterministic control loop (${String(e).slice(0, 80)})`, 'ok')
             }
 
+            // ship the linked image with the source: the download is flashable,
+            // not just compilable (the rebuild after app-fill wrote the same path)
+            if (fwElf) {
+              try {
+                fs.copyFileSync(fwElf, path.join(fwDir, 'firmware.elf'))
+                log('firmware', `firmware.elf (${fwTargetLabel}) added to the crate`, 'ok')
+              } catch (e) {
+                log('firmware', `could not copy the ELF into the crate: ${String(e).slice(0, 80)}`, 'warn')
+              }
+            }
             // zip the crate (exclude target/) for download
             const zipRes = await exec('firmware', 'bash', [
               '-c',
