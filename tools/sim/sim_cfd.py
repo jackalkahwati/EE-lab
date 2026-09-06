@@ -69,6 +69,18 @@ def _gen_case(case, dev, power_w):
     nx = max(6, int((x1 - x0) / cell))
     ny = max(6, int((y1 - y0) / cell))
     nz = max(8, int((z1 - z0) / cell))
+    # locationInMesh: the CENTRE of the background cell containing the desired
+    # fluid point (beside the device, mid-height). A raw point sat exactly on a
+    # cell face whenever a count was even (y=0 with ny even) and snappyHexMesh's
+    # findCells found no cell: the CFD row came back empty on a 78x48x22mm
+    # enclosure. A cell centre cannot lie on a face.
+    def _centre(lo, hi, n, want):
+        d = (hi - lo) / n
+        k = min(n - 1, max(0, int((want - lo) / d)))
+        return lo + (k + 0.5) * d
+    locx = _centre(x0, x1, nx, lx / 2 + m / 2)
+    locy = _centre(y0, y1, ny, 0.0)
+    locz = _centre(z0, z1, nz, lz / 2)
 
     area = 2 * (lx * ly + ly * lz + lx * lz)   # device surface, m^2
     flux = power_w / area                      # W/m^2
@@ -125,7 +137,7 @@ castellatedMeshControls
     refinementSurfaces { device { level (2 2); } }
     resolveFeatureAngle 30;
     refinementRegions {}
-    locationInMesh (%(locx)g 0 %(locz)g);
+    locationInMesh (%(locx)g %(locy)g %(locz)g);
     allowFreeStandingZoneFaces true;
 }
 snapControls
@@ -155,7 +167,12 @@ meshQualityControls
 }
 mergeTolerance 1e-6;
 """ % dict(dx0=-lx / 2, dy0=-ly / 2, dx1=lx / 2, dy1=ly / 2, lz=lz,
-           locx=(lx / 2 + m / 2), locz=lz / 2)))
+           # Off the background grid on every axis: at y=0 the point sat exactly on a
+           # cell face whenever ny was even, and snappyHexMesh's findCells then
+           # reported no cell (measured: the CFD row came back 'no device-temperature
+           # series' on a 78x48x22mm enclosure whose ny was 18; a 26x29mm board with
+           # an odd count sailed through). Fractional-cell offsets keep it interior.
+           locx=locx, locy=locy, locz=locz)))
 
     _write(case, "system/controlDict", _dict("dictionary", "controlDict", """
 application     buoyantBoussinesqSimpleFoam;

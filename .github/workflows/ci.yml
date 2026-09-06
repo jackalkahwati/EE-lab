@@ -90,3 +90,4 @@ jobs:
       - run: node tools/tscircuit/test-via-padstack.mjs
       - run: node tools/tscircuit/test-dsn-patch.mjs
       - run: python3 tools/kicad/test_ground_plane_geom.py
+      - run: python3 -m pytest -q tools/sim/test_cfd_location.py
