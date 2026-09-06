@@ -161,4 +161,12 @@ t('groundChainNets: the ground pins become one connected chain of 2-pin traces; 
   assert.match(src, /input\.nets = \[\.\.\.input\.nets, \.\.\.chain\]/, 'main() must actually append the chain to the nets the router sees')
 })
 
+t('a wall kill ships the best rung so far: SIGTERM is handled, the ladder registers its best, the flush carries a board and says so', () => {
+  assert.match(src, /process\.on\('SIGTERM', \(\) => \{ flushCheckpoint\(/)
+  assert.match(src, /if \(best\) CHECKPOINT = \(\) => \(\{ best, trail \}\)/, 'the ladder must register every new best rung')
+  const flush = cut('async function flushCheckpoint', '\n}\n')
+  for (const must of ['wallHit: true', 'kicadPcb', 'drcScore(best.drc, unrouted)', "verdict: 'wall hit", 'process.exit(0)']) assert.ok(flush.includes(must), `flush must carry ${must}`)
+  assert.match(src, /WALL_MS - 150_000/, 'the ladder must leave 150s of the wall for post-processing')
+})
+
 console.log(`${pass} passed`)

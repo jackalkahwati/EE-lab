@@ -2030,7 +2030,7 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15 } = {}) {
   // 22-part relay board — the ladder was still running when the wall hit).
   const WALL_MS = Number(process.env.FL_WALL_MS) || 0
   const LADDER_DEADLINE_MS = Number(process.env.FL_LADDER_BUDGET_MS)
-    || (WALL_MS ? Math.max(90_000, WALL_MS - 90_000) : 240_000)
+    || (WALL_MS ? Math.max(90_000, WALL_MS - 150_000) : 240_000)  // 150s: a rung can overrun the deadline by its own route+DRC, then pour/DRC/nudge follow
   if (WALL_MS) process.stderr.write(`[t] ladder: budget ${Math.round(LADDER_DEADLINE_MS / 1000)}s inside a ${Math.round(WALL_MS / 1000)}s wall\n`)
   const tLadder = Date.now()
   // FL_ONLY_RUNG=<substring>: run just the matching rung(s). A geometry change
@@ -2162,6 +2162,7 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15 } = {}) {
     const score = drcScore(drc, unrouted)
     trail.push({ iter: i + 1, strategy: s.name, profile: FAB_PROFILES[s.profile].label, errors: drc.errors, errorTypes: drc.errorTypes, unrouted })
     if (!best || score < best.score) best = { cj, drc, fixes, unrouted, unroutedStructural, unroutedNets, score, strategy: s.name, layers: s.layers ?? 2 }
+    if (best) CHECKPOINT = () => ({ best, trail })
     if (drc.errors === 0 && unrouted === 0) break // fully routed AND fab-clean — done
   }
   if (!best) return { available: false, drc: { available: false, reason: 'all routing strategies failed' }, trail }
@@ -2201,6 +2202,47 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15 } = {}) {
   }
   return { available: true, converged, best, trail, verdict }
 }
+
+/** Best-so-far checkpoint. Every rung ends with an exported, KiCad-DRC'd board,
+ *  but the runner only ever wrote its result at the very end — so when the
+ *  caller's wall killed it (electronics-cs, 285s) a board it already had was
+ *  thrown away and the run shipped nothing (measured twice on a 21-part relay
+ *  board: "chipscale-early failed at 285,196ms, no board"). The ladder registers
+ *  its best rung here; SIGTERM (what a spawn timeout sends) flushes it as the
+ *  result, labelled: no ground pour, no residual repair, wallHit: true. */
+let CHECKPOINT = null // () => ({ best, trail })
+let FLUSHING = false
+async function flushCheckpoint(reason) {
+  if (FLUSHING) return
+  FLUSHING = true
+  if (!CHECKPOINT) {
+    process.stdout.write(JSON.stringify({ ok: false, wallHit: true, error: `${reason}: no routed rung yet` }) + '\n')
+    process.exit(0)
+  }
+  const { best, trail } = CHECKPOINT()
+  let kicadPcb = null
+  try {
+    const { CircuitJsonToKicadPcbConverter } = await import('circuit-json-to-kicad')
+    const conv = new CircuitJsonToKicadPcbConverter(best.cj); conv.runUntilFinished()
+    kicadPcb = conv.getOutputString()
+  } catch (e) { process.stderr.write(`[t] checkpoint: kicad export failed: ${String(e).slice(0, 120)}\n`) }
+  const board = best.cj.find((e) => e.type === 'pcb_board')
+  const traces = best.cj.filter((e) => e.type === 'pcb_trace')
+  const unrouted = best.unrouted ?? 0
+  process.stderr.write(`[t] checkpoint: ${reason} — shipping best rung so far (${best.strategy})\n`)
+  process.stdout.write(JSON.stringify({
+    ok: false, wallHit: true,
+    error: `${reason}: shipped the best routed rung so far (${best.strategy}); the ground pour and residual repair did not run`,
+    drc: best.drc, drcScore: best.drc?.available === true ? drcScore(best.drc, unrouted) : null,
+    layers: best.layers ?? null, kicadPcb,
+    boardMm: board ? { w: Math.round(board.width * 10) / 10, h: Math.round(board.height * 10) / 10 } : null,
+    components: best.cj.filter((e) => e.type === 'pcb_component').length, routedTraces: traces.length,
+    drcRepair: { winningStrategy: best.strategy, iterations: trail, unrouted, fixes: best.fixes ?? [], verdict: 'wall hit: best rung shipped without pour/repair', checkpoint: true },
+    timings: { totalMs: Date.now() - T_RUN0, phases: TIMINGS.phases, counters: TIMINGS.counters },
+  }) + '\n')
+  process.exit(0)
+}
+process.on('SIGTERM', () => { flushCheckpoint('runner wall hit (SIGTERM)') })
 
 /** GND as a ROUTED net: a chain of 2-pin traces over the ground pins, so the
  *  router (freerouting groups them into one net by connectivity) connects every
