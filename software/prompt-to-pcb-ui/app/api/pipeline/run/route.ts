@@ -1978,12 +1978,20 @@ export async function GET(req: Request) {
                 log('firmware', `could not copy the ELF into the crate: ${String(e).slice(0, 80)}`, 'warn')
               }
             }
-            // zip the crate (exclude target/) for download
-            const zipRes = await exec('firmware', 'bash', [
-              '-c',
-              `cd ${JSON.stringify(fwDir)} && zip -qr firmware.zip . -x 'target/*' && echo FW_ZIP:${fwDir}/firmware.zip`,
-            ])
-            const fwm = zipRes.out.match(/^FW_ZIP:(.+)$/m)
+            // zip the crate (exclude target/) for download. A spawn that dies
+            // under memory pressure used to leave the stage "passed" with no
+            // package (run 0b84f5be, 2026-09-06): say what happened, retry once,
+            // and without a package the stage is NOT passed.
+            let fwm: RegExpMatchArray | null = null
+            for (let attempt = 0; attempt < 2 && !fwm; attempt++) {
+              const zipRes = await exec('firmware', 'bash', [
+                '-c',
+                `cd ${JSON.stringify(fwDir)} && rm -f firmware.zip && zip -qr firmware.zip . -x 'target/*' && echo FW_ZIP:${fwDir}/firmware.zip`,
+              ])
+              fwm = zipRes.out.match(/^FW_ZIP:(.+)$/m)
+              if (!fwm)
+                log('firmware', `packaging the crate failed (exit ${zipRes.code}${zipRes.out.trim() ? ': ' + zipRes.out.trim().slice(-160) : ''})${attempt === 0 ? ', retrying…' : ''}`, 'warn')
+            }
             if (fwm && fs.existsSync(fwm[1].trim())) {
               // RUN-SCOPED (public/runs/<runId>/firmware) — the old fixed
               // public/firmware/firmware.zip was clobbered by every run, so old
@@ -1994,7 +2002,8 @@ export async function GET(req: Request) {
               fwZip = `/runs/${runId}/firmware/firmware.zip`
               log('firmware', `firmware crate ready → ${fwZip}`, 'ok')
             }
-            send({ type: 'stage', id: 'firmware', state: 'passed' })
+            if (fwZip) send({ type: 'stage', id: 'firmware', state: 'passed' })
+            else send({ type: 'stage', id: 'firmware', state: 'failed', failReason: 'firmware built (ELF linked) but the crate could not be packaged for download' })
           } else {
             send({ type: 'stage', id: 'firmware', state: 'failed', failReason: 'cargo build failed' })
           }
