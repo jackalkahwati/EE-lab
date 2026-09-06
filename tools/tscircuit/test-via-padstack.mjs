@@ -250,4 +250,18 @@ t('a TO-92 with `(drill 0.75 (offset …))` and rectangular THT pads parses: thr
   assert.equal(fp.h, 3.07, 'height spans the rect pads, not a circle of the narrow side')
 })
 
+t('a pin-1-origin footprint (2x3 header) is re-centred so its copper sits inside the box the placer keeps clear', () => {
+  const mod = `(footprint "PinHeader_2x03" (layer "F.Cu")
+  (fp_line (start -1.27 -1.27) (end 3.81 -1.27) (stroke (width 0.05) (type solid)) (layer "F.CrtYd"))
+  (fp_line (start 3.81 6.35) (end -1.27 6.35) (stroke (width 0.05) (type solid)) (layer "F.CrtYd"))
+  (pad "1" thru_hole rect (at 0 0) (size 1.7 1.7) (drill 1))
+  (pad "2" thru_hole oval (at 2.54 0) (size 1.7 1.7) (drill 1))
+  (pad "5" thru_hole oval (at 0 5.08) (size 1.7 1.7) (drill 1))
+  (pad "6" thru_hole oval (at 2.54 5.08) (size 1.7 1.7) (drill 1)))`
+  const fp = ns.kicadModToFootprint(mod)
+  assert.equal(fp.w, 5.08); assert.equal(fp.h, 7.62)
+  const xs = [...fp.jsx.matchAll(/pcbX="(-?[\d.]+)mm" pcbY="(-?[\d.]+)mm"/g)].map((m) => [+m[1], +m[2]])
+  assert.deepEqual(xs, [[-1.27, 2.54], [1.27, 2.54], [-1.27, -2.54], [1.27, -2.54]], 'pads symmetric about the box centre (y flipped)')
+})
+
 console.log(`${pass} passed`)

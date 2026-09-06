@@ -1044,6 +1044,14 @@ function kicadModToFootprint(mod) {
     if (c[5] !== 'F.CrtYd' && c[5] !== 'B.CrtYd') continue
     for (const [x, y] of [[+c[1], -+c[2]], [+c[3], -+c[4]]]) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y) }
   }
+  // Re-centre on the box. KiCad library footprints put the origin at PIN 1 for
+  // headers and terminal blocks (pads run 0..2.54 x 0..5.08), while the placer
+  // treats (pcbX, pcbY) as the box CENTRE — so half the part's copper hung out
+  // of the box the placer kept clear and landed on the neighbour (RP board:
+  // "PTH pad 5 of J21 <-> Pad 34/35/36 of U1", pth_inside_courtyard x2).
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2
+  for (const p of pads) { p.x -= cx; p.y -= cy }
+  for (const h of holes) { h.x -= cx; h.y -= cy }
   const jsx = '<footprint>'
     + pads.map((p) =>
       `<smtpad portHints={["${p.n}","pin${p.n}"]} pcbX="${p.x.toFixed(3)}mm" pcbY="${p.y.toFixed(3)}mm" width="${p.w}mm" height="${p.h}mm" shape="rect" />`).join('')
