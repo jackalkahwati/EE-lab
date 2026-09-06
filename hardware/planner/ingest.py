@@ -237,6 +237,18 @@ def from_kicad_symbol(symbol_query, mpn=None, category="", manufacturer="",
 
     if overrides:
         _deep_merge(spec, overrides)
+        # A seed's override is a curated fact, not an inference: when it supplies
+        # the power/ground pins the symbol did not mark (ULN2803A's COM is
+        # "passive" in the library symbol), the field is present AND confident.
+        # Before this the override merged the pins but left the symbol-derived
+        # "missing"/0.3-confidence verdict in place, so the part stayed
+        # unsupported: "missing power pins power".
+        ov_pins = ((overrides.get("power") or {}).get("pins") or {})
+        for key, field in (("power", "power.pins.power"), ("ground", "power.pins.ground")):
+            if ov_pins.get(key):
+                spec["missing_fields"] = [f for f in spec.get("missing_fields", []) if f != field]
+                spec.setdefault("confidence", {})[field] = 0.9
+                spec.setdefault("provenance", {})[field] = "user"
     return finalize(spec)
 
 

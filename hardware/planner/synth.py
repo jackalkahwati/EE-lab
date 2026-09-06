@@ -66,6 +66,22 @@ def _pin_number(spec, name):
     return None
 
 
+# The board's INPUT rail: what the power connector delivers and what a regulator
+# eats. synth() sets it from the design intent (dc input voltage); default +5V.
+INPUT_RAIL = "+5V"
+
+
+def _regulator_out_rail(spec):
+    """Rail a regulator produces: regulator_out, else an MPN suffix like -3.3 /
+    -5.0, else +3V3 (every seed regulator here is a 3.3V part)."""
+    v = spec.get("regulator_out")
+    if not v:
+        m = re.search(r"-(\d(?:\.\d)?)\s*$", str(spec.get("mpn", "")))
+        v = float(m.group(1)) if m else 3.3
+    v = float(v)
+    return "+5V" if abs(v - 5.0) < 0.2 else ("+3V3" if abs(v - 3.3) < 0.2 else "+%gV" % v)
+
+
 def _rail_for(spec):
     """Which rail a component's power pins go to. Most digital parts are +3V3;
     a part that only tolerates >=4.5V (or is the USB inlet) takes +5V."""
@@ -104,10 +120,26 @@ def _netmap_for(spec, cs_net):
         return nm, ["usb_power"], [], pulls
 
     pw = (spec.get("power") or {}).get("pins", {})
+    is_reg = str(spec.get("category", "")).startswith(("power.ldo_regulator", "power.buck_regulator"))
     for num in pw.get("power", []):
-        nm[num] = rail
+        # A regulator's power pins are its INPUT: it feeds from the board's input
+        # rail, not from the rail it produces.
+        nm[num] = INPUT_RAIL if is_reg else rail
     for num in pw.get("ground", []):
         nm[num] = "GND"
+    if is_reg:
+        # The regulator's OUTPUT. Every board with an LDO shipped with VOUT unwired
+        # (measured on the STM32 sensor node: U2 pins 1, 2, 3 on nets, pin 5 VOUT on
+        # nothing — the +3V3 rail had no source). power_out pins, or pins named
+        # VOUT/OUT, go to the rail the part produces; EN ties to the input so the
+        # part is on.
+        vout = _regulator_out_rail(spec)
+        for p in spec.get("pins", []):
+            n = resolve_part._norm(p.get("name", ""))
+            if p.get("etype") == "power_out" or n in ("VOUT", "OUT", "VO"):
+                nm[p["number"]] = vout
+            elif n in ("EN", "ENABLE", "CE") and p["number"] not in nm:
+                nm[p["number"]] = INPUT_RAIL
 
     wired, unmatched = [], []
     for iface in spec.get("interfaces", []):
@@ -147,14 +179,22 @@ def _netmap_for(spec, cs_net):
     return nm, wired, unmatched, pulls
 
 
-def _support(spec, pulls, refn, x, y, nets):
-    """Decoupling cap per power pin + the pull-up resistors from _netmap_for."""
+def _support(spec, pulls, refn, x, y, nets, netmap=None):
+    """Decoupling cap per power pin + the pull-up resistors from _netmap_for.
+    Each decoupling entry names the pin it belongs to ("from": "VIN"); the cap
+    goes on THAT pin's net. It used to go on the part's generic rail, so a
+    regulator's input cap sat on +3V3 while VIN was on +5V (gate: "no decoupling
+    capacitor on the net of power pin 1 (VIN)")."""
     body = ""
     rail = _rail_for(spec)
     sc = spec.get("support_circuit", {}) or {}
     yy = y
     for i, _d in enumerate(sc.get("decoupling", [])):
-        body += compose.cap("C%d" % (refn + i), x, yy, rail, "GND", nets)
+        net = rail
+        num = _pin_number(spec, str(_d.get("from", ""))) if _d.get("from") else None
+        if netmap and num and netmap.get(num) and netmap[num] != "GND":
+            net = netmap[num]
+        body += compose.cap("C%d" % (refn + i), x, yy, net, "GND", nets)
         yy += 3
     for i, (pnet, prail) in enumerate(pulls):
         body += compose.res("R%d" % (refn + 50 + i), x, yy, pnet, prail, nets)
@@ -311,6 +351,9 @@ def block_mcu_generic(spec, alloc, x, y, nets):
 
 
 def synth(design, out_path):
+    global INPUT_RAIL
+    _vin = ((design.get("intent") or {}).get("power") or {}).get("input_v")
+    INPUT_RAIL = "+%gV" % _vin if _vin and abs(float(_vin) - 5.0) > 0.5 else "+5V"
     specs = [s for s in design["final_design"] if s.get("pins")]
     nets = compose.Nets()
     compose._DEVICES[:] = []
@@ -472,7 +515,7 @@ def synth(design, out_path):
         except Exception as e:
             dropped.append({"mpn": spec["mpn"], "reason": "footprint place failed: %s" % e})
             continue
-        body += _support(spec, pulls, refn * 3, x, row_y + 14, nets)
+        body += _support(spec, pulls, refn * 3, x, row_y + 14, nets, netmap=nm)
         note_extent(x, row_y)
         compose._DEVICES.append({"ref": ref, "type": spec.get("category", "part").split(".")[-1],
                                  "name": spec["mpn"], "footprint": name,
@@ -826,6 +869,10 @@ def _qfn_for(netmap):
 # land on. Dropping the pads while still shipping the procedure that needs them
 # is the worst of both. design_check.py now warns when a board has no probeable
 # pad at all; a placed test point is kept.
+# Footprint libraries whose patterns the router path cannot take yet (see
+# netlist_from_design): module boards with castellated/THT hand-solder pads.
+_MODULE_FP_LIBS = re.compile(r"^(RPi_Pico|RF_Module|Module):|Pico|WROOM|MDBT50Q", re.I)
+
 _CHIP_SCALE_DROP_LIBS = {
                          # bench-board mechanicals: run_board drills its OWN
                          # collision-checked NPTH mounting holes, and a fiducial
@@ -841,7 +888,7 @@ def _is_chip_scale_extra(ref, lib):
     return ref.startswith("RCAL")
 
 
-def netlist_from_design(design, chip_scale=True, real_geometry=False):
+def netlist_from_design(design, chip_scale=True, real_geometry=True):
     """MERGER: export the planner's real-parts design as a run_board
     {parts, nets, gnd} netlist, by running the SAME synth net-assembly (its real
     MCU pin allocation + bus matching) and reading the recorded placements. Real
@@ -957,6 +1004,13 @@ def netlist_from_design(design, chip_scale=True, real_geometry=False):
                             "%s wired pads exceed run_board's qfn64 limit — no honest footprint mapping" % mq.group(1)})
             continue
         part = {"name": ref, "kind": kind, "footprint": fp}
+        # A module (Pico, WROOM, radio module) carries its own flash/crystal/
+        # regulator: the design rules must not demand them externally. The flag
+        # had been dropped from the export and the RP2040 hub failed the gate on
+        # "no external QSPI flash" for a Pico that has it onboard.
+        _pkg = str((by_mpn.get(mpn) or {}).get("package", ""))
+        if _pkg.lower().startswith("module") or _MODULE_FP_LIBS.search("%s:%s" % (c["lib"], c["name"])):
+            part["module"] = True
         if mpn:
             part["mpn"] = mpn
         if lcsc:
@@ -968,13 +1022,25 @@ def netlist_from_design(design, chip_scale=True, real_geometry=False):
         # carries the planner's real design (real parts, real MCU allocation, real
         # connectivity); the footprint is an approximation until the router-vs-real-
         # geometry issue is fixed. So default to the routable qfnN footprint.
-        if real_geometry:
+        # Real .kicad_mod geometry is the DEFAULT for every standard package and
+        # connector: measured on the STM32 sensor node with all 23 footprints real,
+        # the board routes clean (0 DRC errors). MODULE footprints (Pico, WROOM,
+        # radio modules — castellated + THT hand-solder patterns) still break the
+        # router path (82 errors, 13 shorts, 37 mask bridges on the RP2040 hub), so
+        # they keep the qfnN stand-in and say so: that board is NOT buildable as
+        # drawn until the module footprint path is fixed.
+        if real_geometry and not _MODULE_FP_LIBS.search("%s:%s" % (c["lib"], c["name"])):
             try:
                 mod = compose._load(c["lib"], c["name"])
             except Exception:
                 mod = None
             if mod:
                 part["kicadMod"] = mod
+                part["kicad_footprint"] = "%s:%s" % (c["lib"], c["name"])
+        if real_geometry and "kicadMod" not in part and c["lib"] not in ("TestPoint", "Fiducial"):
+            notes.append("%s (%s): STAND-IN footprint %s — the real %s:%s is a module/unsupported "
+                         "pattern; land pattern approximate, not buildable as drawn"
+                         % (ref, mpn or name, fp, c["lib"], c["name"]))
         parts.append(part)
         for pad, net in nm.items():
             ep = "%s.%s" % (ref, pad)
@@ -991,7 +1057,7 @@ def netlist_from_design(design, chip_scale=True, real_geometry=False):
         for i in range(len(eps) - 1):
             nets.append([eps[i], eps[i + 1]])
 
-    return {"parts": parts, "nets": nets, "gnd": gnd,
+    return {"parts": parts, "nets": nets, "gnd": gnd, "input_rail": INPUT_RAIL,
             "components": len(parts), "signal_nets": len([n for n in by_net if len(by_net[n]) > 1]),
             "ground_pins": len(gnd),
             # provenance + honesty: this spec came from the PLANNER's design (one
@@ -1005,8 +1071,10 @@ def netlist_from_design(design, chip_scale=True, real_geometry=False):
 if __name__ == "__main__":
     if len(sys.argv) >= 3 and sys.argv[1] == "--netlist":
         # emit the run_board {parts, nets, gnd} netlist for a design.json (merger)
+        # --real: attach every part's real .kicad_mod (KiCad library / LCSC) so
+        # the router works with true pad geometry instead of the qfnN stand-in
         design = json.load(open(sys.argv[2]))
-        print(json.dumps(netlist_from_design(design)))
+        print(json.dumps(netlist_from_design(design, real_geometry=("--stand-in" not in sys.argv[3:]))))
     else:
         design = json.load(open(sys.argv[1]))
         synth(design, sys.argv[2])

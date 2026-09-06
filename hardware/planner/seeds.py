@@ -16,6 +16,21 @@ import ingest
 
 # (symbol_query, mpn, manufacturer, category, overrides)
 SEEDS = [
+    # Relay/solenoid driver: 8 Darlington sinks with flyback diodes to COM. It has
+    # no logic supply; COM (pin 10) is the clamp common and goes to the coil rail.
+    # Without this seed a "relay" request resolved through an on-the-fly ingest
+    # whose symbol marks COM as passive, and every relay board came back
+    # "unsupported: missing power pins".
+    ("ULN2803A", "ULN2803A", "Texas Instruments", "driver.relay", {
+        "description": "8-channel Darlington transistor array, 500mA sinks, flyback diodes to COM",
+        "capabilities": ["relay", "relay_driver", "relay_matrix", "solenoid_driver", "high_side_load"],
+        "power": {"pins": {"power": ["10"], "ground": ["9"]},
+                  "vcc_min": 5.0, "vcc_max": 50.0, "vcc_typ": 12.0, "i_max_ma": 500.0},
+        "interfaces": [{"type": "gpio", "signals": {"gpio0": "I1", "gpio1": "I2", "gpio2": "I3", "gpio3": "I4",
+                                                     "gpio4": "I5", "gpio5": "I6", "gpio6": "I7", "gpio7": "I8"}}],
+        "support_circuit": {"decoupling": [], "pullups": [], "pulldowns": [], "crystals": [], "reset_config": [],
+                             "other_passives": []},
+    }),
     ("74HC595", "74HC595", "Texas Instruments", "logic.shift_register", {
         "description": "8-bit serial-in, parallel-out shift register (write-only SPI)",
         "interfaces": [{"type": "spi_write_only",

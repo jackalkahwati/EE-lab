@@ -183,6 +183,99 @@ def check(spec, rules, intent_text=None):
             if not reaches:
                 report(sc["severity"], f"{mux_ref}->{adc_ref}", sc["msg"])
 
+    # ---- support circuit + power integrity (FAIL severity) -------------------
+    # The seeds carry curated per-part requirements (support_circuit: decoupling
+    # per power pin, pull-ups, crystals) and synth emits them — but nothing
+    # verified the emitted netlist actually carries them, and nothing checked
+    # that a regulator's OUTPUT is on a net. Measured: every board with an LDO
+    # shipped with VOUT floating (the +3V3 rail had no source) and passed this
+    # gate. These are hard failures: a board that fails them cannot power up.
+    def res_on_net(root):
+        if root is None:
+            return False
+        return any(find(p) == root and re.match(r"R\d", p.split(".")[0]) for p in signal_pins)
+    def any_net(ref, num):
+        return pin(ref, num) in signal_pins or pin(ref, num) in gnd_pins
+    try:
+        import seeds as _seeds
+        _lib = _seeds.build_seeds()
+    except Exception:
+        _lib = {}
+    def seed_of(mpn):
+        m = (mpn or "").upper()
+        for k, v in _lib.items():
+            if k.upper() == m or m in {a.upper() for a in (v.get("aliases") or [])}:
+                return v
+        return None
+    # The spec carries no net names (only pin pairs); synth records the board's
+    # input rail on the spec itself ("input_rail": "+12V").
+    _ir = re.match(r"^\+(\d{1,2}(?:\.\d)?)V$", str(spec.get("input_rail") or ""))
+    input_v = float(_ir.group(1)) if _ir else None
+    regulators = [q["name"] for q in parts if str(seed_of(q.get("mpn")) and seed_of(q.get("mpn")).get("category") or "").startswith("power.")
+                  or (q.get("module") and (seed_of(q.get("mpn")) or {}).get("regulator_out"))]
+    # nets that ARE a rail: every power pin's net root (a config pin tied straight
+    # to a rail is a valid "pull-up"); and the input connector's net root
+    rail_roots = set()
+    input_roots = set()
+    for q in parts:
+        sd0 = seed_of(q.get("mpn"))
+        for num in ((sd0 or {}).get("power") or {}).get("pins", {}).get("power", []):
+            r0 = net_of(q["name"], num)
+            if r0 is not None:
+                rail_roots.add(r0)
+        if str(q.get("kind", "")) == "connector" and re.search(r"terminal|usb|barrel|jack", str(q.get("footprint", "")) + str(q.get("mpn", "")), re.I):
+            r1 = net_of(q["name"], "1")
+            if r1 is not None:
+                input_roots.add(r1)
+    for part in parts:
+        ref, mpn = part["name"], (part.get("mpn") or "")
+        sd = seed_of(mpn)
+        if not sd:
+            continue
+        if part.get("module"):
+            continue  # a module carries its own decoupling/crystal/flash
+        pw = (sd.get("power") or {}).get("pins") or {}
+        by_num = {p["number"]: p for p in sd.get("pins", [])}
+        # decoupling: a capacitor on every power pin's net
+        for num in pw.get("power", []):
+            if not any_net(ref, num):
+                report("fail", ref, f"[{mpn}] power pin {num} ({by_num.get(num, {}).get('name', '?')}) is on NO net")
+            elif not cap_on_net(net_of(ref, num)):
+                report("fail", ref, f"[{mpn}] no decoupling capacitor on the net of power pin {num} ({by_num.get(num, {}).get('name', '?')})")
+        # ground pins on GND
+        for num in pw.get("ground", []):
+            if pin(ref, num) not in gnd_pins and not any_net(ref, num):
+                report("fail", ref, f"[{mpn}] ground pin {num} is on NO net")
+        # regulator output: on a net, with a capacitor
+        if str(sd.get("category", "")).startswith(("power.ldo_regulator", "power.buck_regulator")):
+            outs = [p["number"] for p in sd.get("pins", []) if p.get("etype") == "power_out" or p.get("name", "").upper() in ("VOUT", "OUT", "VO")]
+            for num in outs:
+                if not any_net(ref, num):
+                    report("fail", ref, f"[{mpn}] regulator OUTPUT pin {num} is on NO net — the rail it feeds has no source")
+                elif not cap_on_net(net_of(ref, num)):
+                    report("fail", ref, f"[{mpn}] regulator OUTPUT pin {num} has no output capacitor")
+        # pull-ups / pull-downs from the support circuit
+        sc = sd.get("support_circuit") or {}
+        for pu in sc.get("pullups", []):
+            num = next((p["number"] for p in sd.get("pins", []) if p.get("name", "").upper().replace("~{", "").replace("}", "") == str(pu.get("pin", "")).upper()), None)
+            if num and any_net(ref, num) and net_of(ref, num) is not None and not res_on_net(net_of(ref, num)) \
+                    and net_of(ref, num) not in rail_roots:
+                report("fail", ref, f"[{mpn}] pin {num} ({pu.get('pin')}) needs a pull-up and its net has no resistor")
+        if sc.get("crystals"):
+            if not any(re.match(r"^(Y|X)\d", q["name"]) or "crystal" in str(q.get("kind", "")).lower() for q in parts):
+                report("fail", ref, f"[{mpn}] requires a crystal and the board has none")
+    # a board fed from a rail above 5V with 3.3V parts and no regulator cannot work
+    if input_v and input_roots:
+        for q in parts:
+            sd = seed_of(q.get("mpn"))
+            if not sd or q.get("module") or str(sd.get("category", "")).startswith("power."):
+                continue
+            vmax = float(((sd.get("power") or {}).get("vcc_max") or 99))
+            on_input = any(net_of(q["name"], num) in input_roots for num in ((sd.get("power") or {}).get("pins", {}).get("power", [])))
+            if on_input and vmax < input_v:
+                report("fail", q["name"], f"[{q.get('mpn')}] rated to {vmax:g}V is fed straight from the +{input_v:g}V input"
+                       + ("" if regulators else " and there is no regulator on the board"))
+
     # ---- datasheet evidence (advisory) ---------------------------------------
     # The planner has ingested per-part datasheet requirements for years
     # (datasheet_db_v2.json: operating voltage, address straps, decoupling,

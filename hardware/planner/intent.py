@@ -101,6 +101,11 @@ PART_INTENT = {
 }
 
 
+# Highest input a family tolerates on its supply pin WITHOUT an external
+# regulator (module MCUs regulate onboard: the Pico takes VSYS up to 5.5V).
+_MCU_VIN_MAX = {"RP2040": 5.5, "ATMEGA328": 5.5, "ESP32": 3.6, "STM32": 3.6, "NRF52": 3.6, "SAMD21": 3.63}
+
+
 def _blank_intent():
     return {
         "product_goal": "", "functional_requirements": [],
@@ -189,6 +194,24 @@ def parse_intent(prompt):
     if "usb-c" in p or "usb c" in p:
         di["power"]["source"] = "usb_c"
         di["power"]["rails"] = ["+5V", "+3V3"]
+    # A DC input ("12V input", "screw terminal for 24V", "5V supply") names the
+    # rail the board is fed from. A bare 3.3V MCU fed from anything above its
+    # vin_max needs a regulator — measured: a 12V relay board shipped with the
+    # STM32's rail fed straight from the terminal and no regulator anywhere.
+    mv = re.search(r"\b(\d{1,2}(?:\.\d)?)\s*v(?:olt)?s?\b[^.]{0,40}?\b(?:input|in\b|supply|feed|screw terminal|terminal|barrel|jack)|"
+                   r"(?:input|supply|feed|screw terminal|terminal|barrel|jack)[^.]{0,40}?\b(\d{1,2}(?:\.\d)?)\s*v(?:olt)?s?\b", p)
+    if mv and not di["power"]["source"]:
+        vin = float(mv.group(1) or mv.group(2))
+        if 3.0 <= vin <= 48.0:
+            di["power"]["source"] = "dc_input"
+            di["power"]["input_v"] = vin
+            di["power"]["rails"] = ["+%gV" % vin, "+3V3"] if vin != 5.0 else ["+5V", "+3V3"]
+            fam = (di["mcu"] or {}).get("family")
+            vin_max = _MCU_VIN_MAX.get(fam or "", 3.6)
+            if vin > vin_max:
+                cap = "regulator_3v3" if vin <= 6.5 else "buck"
+                if cap not in di["required_capabilities"]:
+                    di["required_capabilities"].append(cap)
     if "battery" in p:
         di["battery"]["required"] = True
 

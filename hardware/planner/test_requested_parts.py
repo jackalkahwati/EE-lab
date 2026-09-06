@@ -136,3 +136,25 @@ def test_an_unknown_part_number_is_reported_unsupported_not_swapped_for_a_random
     for h in r["honest_report"]:
         if h["request"] == "AMS1117-3.3":
             assert h["outcome"] != "substituted" or h.get("mpn", "").upper().startswith("AMS"), h
+
+
+def test_a_dc_input_above_the_mcu_rail_requires_a_regulator():
+    import intent as _intent
+    di = _intent.parse_intent("STM32F103 relay controller, 2-pin screw terminal for 12V input, status LED")
+    assert di["power"]["source"] == "dc_input" and di["power"]["input_v"] == 12.0, di["power"]
+    assert "buck" in di["required_capabilities"], di["required_capabilities"]
+    di5 = _intent.parse_intent("STM32F103 sensor node with a 5V input screw terminal and a BME280")
+    assert di5["power"]["input_v"] == 5.0 and "regulator_3v3" in di5["required_capabilities"], di5
+    pico = _intent.parse_intent("RP2040 hub, 5V input on a screw terminal")
+    assert not any(c in pico["required_capabilities"] for c in ("buck", "regulator_3v3")), "the Pico regulates onboard"
+
+
+def test_the_regulator_is_wired_input_to_output():
+    import planner as _planner, synth as _synth
+    r = _planner.run("STM32F103 sensor node with a 5V input screw terminal and a BME280 over I2C")
+    assert any(s.get("category", "").startswith("power.ldo") for s in r["final_design"]), [s["mpn"] for s in r["final_design"]]
+    nl = _synth.netlist_from_design({"final_design": r["final_design"], "intent": r["intent"]}, real_geometry=False)
+    reg = next(p for p in nl["parts"] if str(p.get("mpn", "")).startswith("AP2112"))
+    pins = {e for n in nl["nets"] for e in n if e.startswith(reg["name"] + ".")}
+    assert reg["name"] + ".5" in pins, "VOUT must be on a net (it shipped floating before)"
+    assert reg["name"] + ".1" in pins, "VIN must be on a net"
