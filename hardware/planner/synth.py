@@ -515,10 +515,15 @@ def synth(design, out_path):
     # parsed by nobody and consumed by nobody, so "a 2-position screw terminal
     # and a 2x4 pin header" produced a board with neither.
     jn = 20
+    # The board's logic rail, from the nets this board actually has. `rail` above is
+    # a per-spec local that only leaked into this block by accident; the header
+    # branch raised NameError on the first board that asked for a header (the
+    # spec export died and the design gate was skipped).
+    board_rail = "+3V3" if "+3V3" in nets.order else ("+5V" if "+5V" in nets.order else "+3V3")
     for c in intent.get("connectors") or []:
         if c.get("kind") == "screwterminal":
             n = max(2, int(c.get("pins") or 2))
-            vin = "+5V" if "+5V" in nets.order else rail
+            vin = "+5V" if "+5V" in nets.order else board_rail
             fpname = ("TerminalBlock_MaiXu_MX126-5.0-02P_1x02_P5.00mm" if n == 2
                       else "TerminalBlock_bornier-%d_P5.08mm" % n)
             body += compose.place("TerminalBlock", fpname, "J%d" % jn, px, py, 0,
@@ -529,7 +534,7 @@ def synth(design, out_path):
             px += 14 + 5 * (n - 2); jn += 1
         elif c.get("kind") == "header":
             r, cols = int(c.get("rows") or 1), int(c.get("cols") or 4)
-            want = [rail, "GND", "MCU_SWDIO", "MCU_SWCLK", "I2C_SDA", "I2C_SCL", "MCU_RESET", "+5V"]
+            want = [board_rail, "GND", "MCU_SWDIO", "MCU_SWCLK", "I2C_SDA", "I2C_SCL", "MCU_RESET", "+5V"]
             have = [w for w in want if w in nets.order][: r * cols]
             if len(have) < 2:
                 print("CONNECTOR_SKIPPED: %dx%d header -- fewer than two of its nets exist on this board" % (r, cols))

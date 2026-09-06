@@ -86,7 +86,7 @@ def test_requested_connector_row_starts_past_the_test_points(tmp_path):
     design = {"final_design": [dev("ADS1115IDGS", "adc.precision", "Package_SO:TSSOP-10_3x3mm_P0.5mm"),
                                dev("24LC02", "memory.eeprom", "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm")],
               "intent": {"mcu": {"family": "rp2040"},
-                         "connectors": [{"kind": "screwterminal", "pins": 2}]}}
+                         "connectors": [{"kind": "screwterminal", "pins": 2}, {"kind": "header", "rows": 2, "cols": 3}]}}
     placed = {}
     real_place, real_tp = compose.place, compose.tp
     def rec_place(lib, fp, ref, x, y, *a, **k):
@@ -100,6 +100,7 @@ def test_requested_connector_row_starts_past_the_test_points(tmp_path):
         compose.place, compose.tp = real_place, real_tp
     tps = {r: xy for r, xy in placed.items() if r.startswith("TP")}
     assert "J20" in placed, sorted(placed)
+    assert "J21" in placed, "the requested 2x3 header must be placed too (its branch raised NameError on the first real board)"
     assert tps, sorted(placed)
     jx, jy = placed["J20"]
     same_row = [r for r, (x, y) in tps.items() if abs(y - jy) < 3]
