@@ -404,7 +404,14 @@ function plannerNetlist(designPath: string): Promise<{ parts: any[]; nets: any[]
   })
 }
 
-function runBoard(payload: object, svgPath: string, timeoutMs = 285_000, signal?: AbortSignal): Promise<any> {
+// The FIRST build's wall. 285s made a 22-part QFN board run only 3 of its 8
+// strategy rungs (the runner sizes its ladder to wall − 150s) and ship at score
+// 91, when the full ladder ships that class of board at score 4. 450s lets the
+// full ladder run; the grow/re-plan rungs below keep their own budgets and skip
+// when under 120s remain, so the route stays inside its 560s envelope and
+// maxDuration=600. The pipeline's early build overlaps other stages anyway.
+const FIRST_BUILD_WALL_MS = 450_000
+function runBoard(payload: object, svgPath: string, timeoutMs = FIRST_BUILD_WALL_MS, signal?: AbortSignal): Promise<any> {
   const script = path.join(process.cwd(), '..', '..', 'tools', 'tscircuit', 'run_board.mjs')
   return new Promise((resolve, reject) => {
     // process.execPath, not 'node': run_board.mjs is an EXTERNAL tool (two dirs
@@ -758,7 +765,7 @@ async function buildChipScale(
         // the lcsc ids still flow to the BOM/sourcing artifacts unchanged.
         const realFootprints = process.env.FL_CS_REAL_FP === '1' ? await attachRealFootprints(nl.parts) : 0
         plannerHonest = nl.honest ?? null
-        const result = await runBoard({ parts: nl.parts, nets: nl.nets, gnd: nl.gnd ?? [], ...boardOpts }, path.join(dir, 'chipscale.svg'), 285_000, req.signal ?? undefined)
+        const result = await runBoard({ parts: nl.parts, nets: nl.nets, gnd: nl.gnd ?? [], ...boardOpts }, path.join(dir, 'chipscale.svg'), FIRST_BUILD_WALL_MS, req.signal ?? undefined)
         // planner-spec path: the netlist came from the planner, not a design
         // model call, so there is no design trail to report.
         cand = { parts: nl.parts, nets: nl.nets, gnd: nl.gnd ?? [], note: undefined, droppedCapabilities: undefined, realFootprints, result, svgName: 'chipscale.svg', designTrail: [] }
@@ -776,7 +783,7 @@ async function buildChipScale(
     // Only the FIRST design goes hierarchical. The re-plan rungs exist to repair
     // a specific routing failure quickly, and N+1 calls per rung would blow the
     // budget for no design benefit — they inherit this board's part set anyway.
-    if (!cand) cand = await buildCandidate(baseMsg, req, dir, 'chipscale.svg', 285_000, boardOpts, undefined, hierarchical)
+    if (!cand) cand = await buildCandidate(baseMsg, req, dir, 'chipscale.svg', FIRST_BUILD_WALL_MS, boardOpts, undefined, hierarchical)
     let designConvergence: any = null
 
     // PLANNER density relief — GROW, don't cut. A planner netlist is a deliberate,
