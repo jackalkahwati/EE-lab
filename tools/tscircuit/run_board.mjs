@@ -2023,7 +2023,15 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15 } = {}) {
   const TSCI_MAX_PARTS = Number(process.env.FL_TSCI_MAX_PARTS || 60)
   const frAvailable = Boolean(FR_JAR && JAVA)
   // Wall for the whole ladder. Leaves room for ground-plane + DRC afterwards.
-  const LADDER_DEADLINE_MS = Number(process.env.FL_LADDER_BUDGET_MS || 240_000)
+  // The ladder must FIT the caller's wall. electronics-cs kills the runner at
+  // FL_WALL_MS (285s in prod); placement probe, per-rung DRC, the pour and the
+  // residual nudge need ~90s after the ladder, so a 240s ladder inside a 285s
+  // wall shipped NO board (measured: chipscale-early failed at 285,196ms on a
+  // 22-part relay board — the ladder was still running when the wall hit).
+  const WALL_MS = Number(process.env.FL_WALL_MS) || 0
+  const LADDER_DEADLINE_MS = Number(process.env.FL_LADDER_BUDGET_MS)
+    || (WALL_MS ? Math.max(90_000, WALL_MS - 90_000) : 240_000)
+  if (WALL_MS) process.stderr.write(`[t] ladder: budget ${Math.round(LADDER_DEADLINE_MS / 1000)}s inside a ${Math.round(WALL_MS / 1000)}s wall\n`)
   const tLadder = Date.now()
   // FL_ONLY_RUNG=<substring>: run just the matching rung(s). A geometry change
   // to ONE router is otherwise measured through a 20-50 min ladder whose earlier

@@ -418,7 +418,10 @@ function runBoard(payload: object, svgPath: string, timeoutMs = 285_000, signal?
     // wires its cancel path here, so a cancelled EDA run can't leave an
     // orphaned router writing into the run dir).
     const t0 = Date.now()
-    const py = spawn(process.execPath, [script], { timeout: timeoutMs, signal })
+    // The runner sizes its strategy ladder to fit this wall (FL_WALL_MS): a 240s
+    // ladder inside a 285s wall left no time for the pour and DRC, and the early
+    // chip-scale build was killed at 285,196ms with no board on a 22-part board.
+    const py = spawn(process.execPath, [script], { timeout: timeoutMs, signal, env: { ...process.env, FL_WALL_MS: String(timeoutMs) } })
     let out = '', err = ''
     py.stdout.on('data', (d) => (out += d))
     py.stderr.on('data', (d) => (err += d))
