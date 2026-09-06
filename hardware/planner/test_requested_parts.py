@@ -125,3 +125,14 @@ def test_planner_reports_the_unbuildable_requests_by_name():
     outcomes = {h["request"]: h["outcome"] for h in r["honest_report"]}
     assert "SHT40" in outcomes and outcomes["SHT40"] in ("substituted", "unsupported"), outcomes
     assert outcomes.get("sd_storage") == "unsupported", outcomes
+
+
+def test_an_unknown_part_number_is_reported_unsupported_not_swapped_for_a_random_part():
+    import intent as _intent, planner as _planner
+    di = _intent.parse_intent("STM32F103 relay controller with an AMS1117-3.3 LDO and a DS18B20 probe")
+    mpns = [e["mpn"] for e in di["exact_part_requests"]]
+    assert "AMS1117-3.3" in mpns, mpns  # the ".3" suffix survives
+    r = _planner.run("STM32F103 relay controller with an AMS1117-3.3 LDO and a DS18B20 probe")
+    for h in r["honest_report"]:
+        if h["request"] == "AMS1117-3.3":
+            assert h["outcome"] != "substituted" or h.get("mpn", "").upper().startswith("AMS"), h

@@ -226,7 +226,7 @@ def parse_intent(prompt):
                   "CAN", "TVS", "ESD", "EMI", "FL1", "QFN", "LQFP", "BGA", "SOT23", "SOIC", "TSSOP",
                   "IP67", "IP65", "USBC", "HDMI", "PoE", "POE", "LiPo", "LIPO", "NTC", "PTC", "DC", "AC"}
     known = {e["mpn"].upper() for e in di["exact_part_requests"]}
-    for tok in re.findall(r"\b([A-Za-z]{2,6}[0-9]{2,5}[A-Za-z0-9-]{0,8})\b", prompt):
+    for tok in re.findall(r"\b([A-Za-z]{2,6}[0-9]{2,5}[A-Za-z0-9-]{0,8}(?:\.[0-9])?)\b", prompt):
         up = tok.upper()
         if up in _NOT_PARTS or re.fullmatch(r"[0-9]+V|[0-9]+[KMG]?B|[0-9]+MM|[0-9]+X[0-9]+", up):
             continue

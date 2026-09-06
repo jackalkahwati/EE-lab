@@ -43,6 +43,14 @@ def run(prompt, recover_routing=True):
                            "mpn": res["mpn"], "source": res["source"]})
         else:
             intended = req["intended_capabilities"] or res.get("capabilities") or []
+            if not intended:
+                # A part number the user typed that nothing here understands. With no
+                # capability model there is nothing to preserve, so recovery would
+                # just hand back an unrelated part (it proposed a DS18B20 for an
+                # AMS1117 regulator). Say so instead.
+                honest.append({"request": req["mpn"], "outcome": "unsupported",
+                               "reason": "not in the seed library and no capability model for it"})
+                continue
             rec = recover(res, intended, lib)
             recovery_report.append(rec)
             if rec["recovered"]:
