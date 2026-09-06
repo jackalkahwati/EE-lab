@@ -9,11 +9,12 @@ const cut = (start, end) => src.slice(src.indexOf(start), src.indexOf(end, src.i
 const ns = {}
 new Function('exports',
   cut('const FAB_PROFILES', '\n}\n') + '\n}\n' +
+  cut('function setDsnTraceRules', '\n}\n') + '\n}\n' +
   cut('function setViaClearance', 'function viaClearanceUm') +
   cut('function viaClearanceUm', '\n}\n') + '\n}\n' +
   cut('function emitBoardCode', '\n}\n') + '\n}\n' +
   cut('function mergeStackedVias', '\n}\n') + '\n}\n' +
-  'exports.FAB_PROFILES=FAB_PROFILES;exports.setViaClearance=setViaClearance;exports.viaClearanceUm=viaClearanceUm;exports.viaPadstackUm=viaPadstackUm;exports.routerViaPadMm=routerViaPadMm;exports.emitBoardCode=emitBoardCode;exports.mergeStackedVias=mergeStackedVias;exports.setViaPadstack=setViaPadstack;'
+  'exports.FAB_PROFILES=FAB_PROFILES;exports.setViaClearance=setViaClearance;exports.viaClearanceUm=viaClearanceUm;exports.viaPadstackUm=viaPadstackUm;exports.setDsnTraceRules=setDsnTraceRules;exports.routerViaPadMm=routerViaPadMm;exports.emitBoardCode=emitBoardCode;exports.mergeStackedVias=mergeStackedVias;exports.setViaPadstack=setViaPadstack;'
 )(ns)
 
 const dsn = () => ({
@@ -115,6 +116,23 @@ t('mergeStackedVias collapses a blind+buried twin into one via and re-points the
 t('mergeStackedVias leaves different nets and well-separated vias alone', () => {
   const a = twinBoard(0.241, 'netB'); assert.equal(ns.mergeStackedVias(a, { maxDist: 0.6 }), 0); assert.equal(a.filter((e) => e.type === 'pcb_via').length, 2)
   const b = twinBoard(1.0); assert.equal(ns.mergeStackedVias(b, { maxDist: 0.6 }), 0); assert.equal(b.filter((e) => e.type === 'pcb_via').length, 2)
+})
+
+t('setDsnTraceRules: the DSN carries the PROFILE trace rules, in structure and net class, typed via clearances untouched', () => {
+  const mk = () => ({ structure: { rule: { width: 200, clearances: [{ value: 150 }, { value: 50, type: 'smd_smd' }, { value: 400, type: 'via_via' }] } },
+                      network: { classes: [{ name: 'kicad_default', rule: { width: 150, clearances: [{ value: 150 }] } }] } })
+  const h = mk(); ns.setDsnTraceRules(h, 'hdi')
+  assert.equal(h.structure.rule.width, 100); assert.equal(h.structure.rule.clearances.find((c) => !c.type).value, 70)
+  assert.equal(h.network.classes[0].rule.width, 100); assert.equal(h.network.classes[0].rule.clearances.find((c) => !c.type).value, 70)
+  assert.equal(h.structure.rule.clearances.find((c) => c.type === 'via_via').value, 400)
+  assert.equal(h.structure.rule.clearances.find((c) => c.type === 'smd_smd').value, 50)
+  const s = mk(); ns.setDsnTraceRules(s, 'standard'); assert.equal(s.structure.rule.width, 150); assert.equal(s.structure.rule.clearances[0].value, 100)
+  for (const [k, p] of Object.entries(ns.FAB_PROFILES)) assert.ok(p.trace && p.trace.width + 2 * p.trace.clearance <= 0.25 + 1e-9 || k === 'standard', `${k}: must fit a 0.25mm LQFP pin gap`)
+  const u = mk(); ns.setDsnTraceRules(u, 'no-such-profile'); assert.equal(u.structure.rule.width, 200, 'unknown profile leaves the DSN alone')
+})
+t('the ladder passes the rung profile to freerouting (a rule nobody passes is a comment)', () => {
+  assert.match(src, /freeroute\(cj, \{ layers: s\.layers, profile: s\.profile \}\)/)
+  assert.match(src, /setDsnTraceRules\(dsnPcb, profile\)/)
 })
 
 console.log(`${pass} passed`)

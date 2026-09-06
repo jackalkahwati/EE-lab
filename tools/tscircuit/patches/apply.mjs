@@ -19,7 +19,9 @@ import { dirname, join } from "node:path";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PATCHED = join(HERE, "dsn-converter-index.PATCHED.js");
 const TARGET = join(HERE, "..", "node_modules", "dsn-converter", "dist", "index.js");
-const SENTINEL = "function flGeomSig";
+// Keyed on the LATEST patch marker, so a node_modules that carries an older
+// patch level is re-patched rather than mistaken for current.
+const SENTINEL = "FL PATCH v2";
 
 try {
   if (!existsSync(PATCHED)) {

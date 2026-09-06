@@ -224,6 +224,29 @@ function dsnTo4Layer(d) { return dsnToNLayer(d, 4) }
  *  construction. value is in DSN units (this converter emits um: 1 unit = 1um).
  *  freerouting reads these Specctra typed clearances natively — config, not a
  *  new router. */
+/** Trace width and copper-to-copper clearance the DSN tells freerouting, per fab
+ *  profile. dsn-converter emits (width 200)(clearance 150) at structure level and
+ *  (width 150)(clearance 150) in the net class for EVERY board, so the HDI rungs
+ *  routed with standard-profile rules and only got JUDGED by HDI rules: on a
+ *  0.5mm-pitch LQFP the pin gap is 250um and a 150um wire with 150um clearance
+ *  each side needs 450um — escape between pins was impossible by construction
+ *  (measured: 14 of 34 nets unrouted, 24 shorts, on a 23-part sensor node).
+ *  Typed via clearances (setViaClearance) are left alone. */
+function setDsnTraceRules(dsnPcb, profileKey) {
+  const t = FAB_PROFILES[profileKey]?.trace
+  if (!t) return
+  const W = Math.round(t.width * 1000), C = Math.round(t.clearance * 1000)
+  const apply = (rule) => {
+    if (!rule) return
+    rule.width = W
+    const cl = (rule.clearances = rule.clearances || [])
+    const base = cl.find((c) => !c.type)
+    if (base) base.value = C; else cl.unshift({ value: C })
+  }
+  apply(dsnPcb.structure?.rule)
+  for (const k of dsnPcb.network?.classes || []) apply(k.rule)
+}
+
 function setViaClearance(dsnPcb, um) {
   const rule = dsnPcb.structure && dsnPcb.structure.rule
   if (!rule) return
@@ -397,7 +420,7 @@ function reorderDsnNets(dsnPcb, firstNames) {
   return true
 }
 
-async function freerouteReal(cj, { layers = 2, routeFirst = null } = {}) {
+async function freerouteReal(cj, { layers = 2, routeFirst = null, profile = 'standard' } = {}) {
   if (!JAVA || !FR_JAR) return null
   let dir
   try {
@@ -418,6 +441,7 @@ async function freerouteReal(cj, { layers = 2, routeFirst = null } = {}) {
     // 0.3mm holes; the profiles use 0.5/0.4mm pads and 0.2mm holes, and the
     // hardcoded 250um it justified was below what either profile needs.)
     setViaClearance(dsnPcb, viaClearanceUm())
+    setDsnTraceRules(dsnPcb, profile)
     // Retry ordering: put previously-unrouted nets at the front. Changing the
     // net order changes the DSN text, so this also misses the route cache by
     // construction — which is what makes the retry a genuinely different pass
@@ -560,6 +584,7 @@ const FAB_PROFILES = {
     label: 'JLCPCB standard (0.09mm track/space, 0.45mm via)',
     via: { pad: 0.5, hole: 0.2 },
     holeClearance: 0.5,
+    trace: { width: 0.15, clearance: 0.10 },   // DSN rules for freerouting; rule is 0.09 space
     rules: `(version 1)
 (rule "t" (constraint track_width (min 0.09mm)))
 (rule "c" (constraint clearance (min 0.09mm)))
@@ -572,6 +597,7 @@ const FAB_PROFILES = {
     label: 'JLCPCB HDI/advanced (0.0635mm track/space, 0.3mm via)',
     via: { pad: 0.4, hole: 0.2 },
     holeClearance: 0.4,
+    trace: { width: 0.10, clearance: 0.07 },   // rule is 0.0635 space; 0.10 + 2×0.07 fits a 0.25mm LQFP pin gap
     rules: `(version 1)
 (rule "t" (constraint track_width (min 0.0635mm)))
 (rule "c" (constraint clearance (min 0.0635mm)))
@@ -2017,7 +2043,7 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15 } = {}) {
     let cj = await buildCircuit(code, s.name)
     let fixes = [], unrouted = 0, unroutedNets = []
     if (s.router === 'fr') {
-      let fr = await freeroute(cj, { layers: s.layers })
+      let fr = await freeroute(cj, { layers: s.layers, profile: s.profile })
       if (!fr) continue // freerouting failed this pass; try the next strategy
       // Rip-up-and-reorder: if the router left nets open, hand it the SAME board
       // once more with those nets moved to the front of the net order. Nets
@@ -2027,7 +2053,7 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15 } = {}) {
       // errors — otherwise the original stands.
       if (fr.unrouted > 0 && (fr.unroutedNets?.length ?? 0) > 0
           && (Date.now() - tLadder) + 25_000 < LADDER_DEADLINE_MS) {
-        const retry = await freeroute(cj, { layers: s.layers, routeFirst: fr.unroutedNets })
+        const retry = await freeroute(cj, { layers: s.layers, routeFirst: fr.unroutedNets, profile: s.profile })
         if (retry?.reordered && retry.unrouted < fr.unrouted) {
           const before = fr.unrouted
           fr = retry

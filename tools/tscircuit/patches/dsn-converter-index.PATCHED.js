@@ -488,7 +488,14 @@ function getFootprintName(sourceComponent, pcbComponent) {
 // strands the nets whose pins sit at the phantom spots. Appending a geometry
 // signature splits each orientation into its own image.
 function flGeomSig(pads, cx, cy) {
-  const sig = (pads || []).map((p) => `${Math.round(((p.x ?? 0) - cx) * 1e3)},${Math.round(((p.y ?? 0) - cy) * 1e3)}`).sort().join(";");
+  // FL PATCH v2: the signature carries the PIN NUMBER with each position. Two
+  // 0402s rotated 180 apart have identical pad positions and swapped pins; they
+  // shared an image built from whichever came first, so freerouting put pin 1
+  // where the sibling's pad 2 is (measured: a VDD track landing on a decoupling
+  // cap's GND pad and on a pull-up's wrong end — shorts + opens on every board
+  // with rotated passives). Pin identity follows createPinForImage's rule.
+  const pinOf = (p) => (p.port_hints || []).find((h) => !Number.isNaN(Number(h))) || 1;
+  const sig = (pads || []).map((p) => `${pinOf(p)}:${Math.round(((p.x ?? 0) - cx) * 1e3)},${Math.round(((p.y ?? 0) - cy) * 1e3)}`).sort().join(";");
   let h = 0;
   for (let i = 0; i < sig.length; i++) h = (h * 31 + sig.charCodeAt(i)) | 0;
   return Math.abs(h).toString(36);

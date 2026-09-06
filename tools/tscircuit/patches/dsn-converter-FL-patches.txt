@@ -15,3 +15,8 @@ File: node_modules/dsn-converter/dist/index.js
 --- PATCH 4+5: inner-layer wire mapping (two sites) ---
 1962:      layer: /^In(\d+)/.test(String(wire.polyline_path?.layer)) ? "inner" + String(wire.polyline_path?.layer).match(/^In(\d+)/)[1] : wire.polyline_path?.layer.includes("B.") ? "bottom" : "top"
 1996:      layer: /^In(\d+)/.test(String(wire.path.layer)) ? "inner" + String(wire.path.layer).match(/^In(\d+)/)[1] : wire.path.layer.includes("F.") ? "top" : "bottom"
+
+--- PATCH 1b (v2): flGeomSig includes the PIN NUMBER per position ---
+Without it, 180-degree-rotated siblings (same positions, swapped pins) shared one
+image and freerouting connected nets to the wrong end of every rotated passive.
+Marker: 'FL PATCH v2' — apply.mjs must key its idempotency check on this.
