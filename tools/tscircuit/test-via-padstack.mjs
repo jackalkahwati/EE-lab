@@ -16,10 +16,11 @@ new Function('exports',
   cut('function setDsnTraceRules', '\n}\n') + '\n}\n' +
   cut('function setViaClearance', 'function viaClearanceUm') +
   cut('function inflateThtPadstacks', '\n}\n') + '\n}\n' +
+  cut('function kicadModToFootprint', '\n}\n') + '\n}\n' +
   cut('function viaClearanceUm', '\n}\n') + '\n}\n' +
   cut('function emitBoardCode', '\n}\n') + '\n}\n' +
   cut('function mergeStackedVias', '\n}\n') + '\n}\n' +
-  'exports.FAB_PROFILES=FAB_PROFILES;exports.setViaClearance=setViaClearance;exports.viaClearanceUm=viaClearanceUm;exports.viaPadstackUm=viaPadstackUm;exports.setDsnTraceRules=setDsnTraceRules;exports.dsnToNLayer=dsnToNLayer;exports.groundChainNets=groundChainNets;exports.gndStubNets=gndStubNets;exports.portPos=portPos;exports.routerViaPadMm=routerViaPadMm;exports.emitBoardCode=emitBoardCode;exports.mergeStackedVias=mergeStackedVias;exports.setViaPadstack=setViaPadstack;exports.inflateThtPadstacks=inflateThtPadstacks;'
+  'exports.FAB_PROFILES=FAB_PROFILES;exports.setViaClearance=setViaClearance;exports.viaClearanceUm=viaClearanceUm;exports.viaPadstackUm=viaPadstackUm;exports.setDsnTraceRules=setDsnTraceRules;exports.dsnToNLayer=dsnToNLayer;exports.groundChainNets=groundChainNets;exports.gndStubNets=gndStubNets;exports.portPos=portPos;exports.routerViaPadMm=routerViaPadMm;exports.emitBoardCode=emitBoardCode;exports.mergeStackedVias=mergeStackedVias;exports.setViaPadstack=setViaPadstack;exports.inflateThtPadstacks=inflateThtPadstacks;exports.kicadModToFootprint=kicadModToFootprint;'
 )(ns)
 
 const dsn = () => ({
@@ -34,11 +35,12 @@ let pass = 0
 const t = (name, fn) => { fn(); pass++; console.log('  ok  ' + name) }
 
 t('viaPadstackUm derives from the PROFILE: hole/2 + holeClearance - the trace clearance the DSN carries, +20um', () => {
-  // hdi: 2*(100 + 400 - 70) + 20 = 880 ; standard: 2*(100 + 500 - 100) + 20 = 1020
-  assert.equal(ns.viaPadstackUm(dsn(), 'hdi'), 880)
-  assert.equal(ns.viaPadstackUm(dsn(), 'standard'), 1020)
-  assert.equal(ns.viaPadstackUm(dsn()), 1020, 'no profile named -> the strictest')
-  assert.equal(ns.viaPadstackUm(dsn(), 'no-such-profile'), 1020, 'unknown profile -> the strictest, never smaller')
+  // JLCPCB rule (capabilities page, 2026-09-06): PTH hole to track 0.35 recommended / inner 0.3
+  // hdi: 2*(100 + 300 - 70) + 20 = 680 ; standard: 2*(100 + 350 - 100) + 20 = 720
+  assert.equal(ns.viaPadstackUm(dsn(), 'hdi'), 680)
+  assert.equal(ns.viaPadstackUm(dsn(), 'standard'), 720)
+  assert.equal(ns.viaPadstackUm(dsn()), 720, 'no profile named -> the strictest')
+  assert.equal(ns.viaPadstackUm(dsn(), 'no-such-profile'), 720, 'unknown profile -> the strictest, never smaller')
   for (const [k, p] of Object.entries(ns.FAB_PROFILES)) {
     const r = ns.viaPadstackUm(dsn(), k) / 2 / 1000, rh = p.via.hole / 2, hc = p.holeClearance, tc = p.trace.clearance
     assert.ok(r + tc >= rh + hc, `${k}: copper radius ${r} + clearance ${tc} must reach hole edge ${rh} + rule ${hc}`)
@@ -68,13 +70,13 @@ t('an explicit hole-sized shape, if present, is left alone', () => {
 t('setViaClearance sets the pair types freerouting honours and NOT the ones it ignores', () => {
   const d = dsn(); ns.setViaClearance(d, ns.viaClearanceUm())
   const types = Object.fromEntries(d.structure.rule.clearances.filter((c) => c.type).map((c) => [c.type, c.value]))
-  for (const k of ['via_via', 'via_pin', 'via_smd']) assert.equal(types[k], 400, k)
+  for (const k of ['via_via', 'via_pin', 'via_smd']) assert.equal(types[k], 250, k)
   for (const k of ['via_wire', 'wire_via']) assert.equal(types[k], undefined, k + ' measured as ignored by freerouting; must not be re-added')
   assert.equal(types.smd_smd, 50, 'pre-existing rules kept')
 })
 
-t('viaClearanceUm derives from the profiles (standard H0.5 pad0.5 hole0.2 -> 350 + 50 margin)', () => {
-  assert.equal(ns.viaClearanceUm(), 400)
+t('viaClearanceUm derives from the profiles (standard hc0.35 pad0.5 hole0.2 -> 200 + 50 margin; hdi hc0.3 pad0.4 -> the same 200)', () => {
+  assert.equal(ns.viaClearanceUm(), 250)
 })
 
 t('routerViaPadMm: the pad the built-in router sees keeps a 0.1mm-clearance trace outside the SHIPPED hole rule', () => {
@@ -84,7 +86,7 @@ t('routerViaPadMm: the pad the built-in router sees keeps a 0.1mm-clearance trac
     assert.ok(pad / 2 + 0.1 >= hole / 2 + hc - 1e-9, `${key}: router pad ${pad} leaves hole edge→track ${(pad / 2 + 0.1 - hole / 2).toFixed(3)} < rule ${hc}`)
     assert.ok(pad >= 0.5, `${key}: ${pad} is under the 0.5mm annular floor the pinned via was chosen for`)
   }
-  assert.equal(ns.routerViaPadMm('hdi'), 0.8) // 2·(0.2/2 + 0.4 − 0.1): the number measured against
+  assert.equal(ns.routerViaPadMm('hdi'), 0.6) // 2·(0.2/2 + 0.3 − 0.1) under the fab's 0.3mm inner-layer PTH rule
   assert.equal(ns.routerViaPadMm('no-such-profile'), 1)  // falls to the 0.2/0.5 defaults, never to 0.5 blind
 })
 
@@ -187,23 +189,65 @@ t('targeted GND retry: one stub per unreached pad to its NEAREST reached ground 
   assert.match(src, /unreachedPads: Array\.isArray\(gp\.unreachedPads\)/, 'the pour must hand the runner the names of the pads it could not reach')
 })
 
-t('through-hole padstacks are inflated so copper stays hole_clearance from the HOLE: header ring 350um → +70um at standard, SMD pads untouched, rule wired into freerouteReal', () => {
+t('through-hole padstacks are inflated so copper stays hole_clearance from the HOLE: a 150um ring → +120um at standard, a 2.54mm header (350um ring) already clears the fab rule, SMD pads untouched, rule wired into freerouteReal', () => {
   const d = { library: { padstacks: [
-    { name: 'Round[A]Pad_1000_1700_um', shapes: [{ shapeType: 'circle', layer: 'F.Cu', diameter: 1700 }, { shapeType: 'circle', layer: 'B.Cu', diameter: 1700 }], hole: { shape: 'circle', diameter: 1700 } },
-    { name: 'Rect[A]Pad_1700x1700_um', shapes: [{ shapeType: 'polygon', layer: 'F.Cu', width: 0, coordinates: [-850, 850, 850, 850, 850, -850, -850, -850, -850, 850] }], hole: { shape: 'circle', diameter: 1000 } },
-    { name: 'Oval[A]Pad_1000x1600_um', shapes: [{ shapeType: 'path', layer: 'F.Cu', width: 1700, coordinates: [0, -300, 0, 300] }], hole: { shape: 'oval', width: 1000, height: 1600 } },
-    { name: 'Round[A]Pad_1300_2600_um', shapes: [{ shapeType: 'circle', layer: 'F.Cu', diameter: 2600 }], hole: { shape: 'circle', diameter: 2600 } },
+    { name: 'Round[A]Pad_1000_1300_um', shapes: [{ shapeType: 'circle', layer: 'F.Cu', diameter: 1300 }, { shapeType: 'circle', layer: 'B.Cu', diameter: 1300 }], hole: { shape: 'circle', diameter: 1300 } },
+    { name: 'Rect[A]Pad_1300x1300_um', shapes: [{ shapeType: 'polygon', layer: 'F.Cu', width: 0, coordinates: [-650, 650, 650, 650, 650, -650, -650, -650, -650, 650] }], hole: { shape: 'circle', diameter: 1000 } },
+    { name: 'Oval[A]Pad_1000x1600_um', shapes: [{ shapeType: 'path', layer: 'F.Cu', width: 1300, coordinates: [0, -300, 0, 300] }], hole: { shape: 'oval', width: 1000, height: 1600 } },
+    { name: 'Round[A]Pad_1000_1700_um', shapes: [{ shapeType: 'circle', layer: 'F.Cu', diameter: 1700 }], hole: { shape: 'circle', diameter: 1700 } },
     { name: 'RoundRect[T]Pad_875x250_um', shapes: [{ shapeType: 'polygon', layer: 'F.Cu', coordinates: [-437, 125, 437, 125, 437, -125, -437, -125, -437, 125] }] },
   ] } }
-  const r = ns.inflateThtPadstacks(d, 'standard') // hc 500, tc 100: ring 350 → 500-100-350 = 50 + 20 margin = 70
-  assert.equal(r.count, 3, 'the three header-class pads inflate; the 0.65mm-ring terminal pad and the SMD pad do not')
-  assert.equal(r.maxUm, 70)
-  assert.equal(d.library.padstacks[0].shapes[0].diameter, 1840); assert.equal(d.library.padstacks[0].shapes[1].diameter, 1840)
-  assert.deepEqual(d.library.padstacks[1].shapes[0].coordinates, [-920, 920, 920, 920, 920, -920, -920, -920, -920, 920])
-  assert.equal(d.library.padstacks[2].shapes[0].width, 1840)
-  assert.equal(d.library.padstacks[3].shapes[0].diameter, 2600, 'ring already clears the rule → untouched')
+  const r = ns.inflateThtPadstacks(d, 'standard') // hc 350, tc 100: ring 150 → 350-100-150 = 100 + 20 margin = 120
+  assert.equal(r.count, 3, 'the three thin-ring pads inflate; the 2.54mm header pad and the SMD pad do not')
+  assert.equal(r.maxUm, 120)
+  assert.equal(d.library.padstacks[0].shapes[0].diameter, 1540); assert.equal(d.library.padstacks[0].shapes[1].diameter, 1540)
+  assert.deepEqual(d.library.padstacks[1].shapes[0].coordinates, [-770, 770, 770, 770, 770, -770, -770, -770, -770, 770])
+  assert.equal(d.library.padstacks[2].shapes[0].width, 1540)
+  assert.equal(d.library.padstacks[3].shapes[0].diameter, 1700, 'a 2.54mm header ring (350um) already clears the fab rule → untouched')
   assert.deepEqual(d.library.padstacks[4].shapes[0].coordinates, [-437, 125, 437, 125, 437, -125, -437, -125, -437, 125], 'SMD pad untouched')
   assert.match(src, /if \(process\.env\.FL_THT_PADSTACK !== '0'\) \{ const th = inflateThtPadstacks\(dsnPcb, profile\)/, 'freerouteReal must apply it per rung profile')
+})
+
+t('a real footprint is sized by its COURTYARD, not its pad box (terminal block: pads 7.6x2.6 → body 10x7.5); the placer takes the larger of courtyard and box', () => {
+  const mod = `(footprint "TerminalBlock_2P" (layer "F.Cu")
+  (fp_line (start -5 -3.75) (end 5 -3.75) (stroke (width 0.05) (type solid)) (layer "F.CrtYd"))
+  (fp_line (start 5 -3.75) (end 5 3.75) (stroke (width 0.05) (type solid)) (layer "F.CrtYd"))
+  (fp_line (start -2 -1) (end 2 -1) (stroke (width 0.1) (type solid)) (layer "F.SilkS"))
+  (pad "1" thru_hole circle (at -2.5 0) (size 2.6 2.6) (drill 1.3) (layers "*.Cu" "*.Mask"))
+  (pad "2" thru_hole circle (at 2.5 0) (size 2.6 2.6) (drill 1.3) (layers "*.Cu" "*.Mask")))`
+  const fp = ns.kicadModToFootprint(mod)
+  assert.equal(fp.w, 10); assert.equal(fp.h, 7.5)
+  assert.match(fp.jsx, /platedhole[^>]*holeDiameter="1.3mm" outerDiameter="2.6mm"/)
+  const smd = ns.kicadModToFootprint(`(footprint "R" (pad "1" smd rect (at -0.5 0) (size 0.6 0.5)) (pad "2" smd rect (at 0.5 0) (size 0.6 0.5)))`)
+  assert.equal(smd.w, 1.6, 'no courtyard → pad box, as before')
+  assert.match(src, /const c = courtyard\[st\.name\], p = partSize\(st\); const \[w, h\] = c \? \[Math\.max\(c\[0\], p\[0\]\), Math\.max\(c\[1\], p\[1\]\)\] : p/, 'the placer must take the larger of rendered courtyard and footprint box')
+})
+
+t('a TO-92 with `(drill 0.75 (offset …))` and rectangular THT pads parses: three plated holes as rect-pad holes, not a dropped part', () => {
+  const mod = `(footprint "TO-92_HandSolder" (layer "F.Cu")
+	(pad "1" thru_hole rect
+		(at 0 0)
+		(size 1.1 1.8)
+		(drill 0.75
+			(offset 0 0.4)
+		)
+		(layers "*.Cu" "*.Mask")
+	)
+	(pad "2" thru_hole roundrect
+		(at 1.27 -1.27)
+		(size 1.1 1.8)
+		(drill 0.75
+			(offset 0 -0.4)
+		)
+	)
+	(pad "3" thru_hole oval (at 2.54 0) (size 1.1 1.8) (drill oval 0.75 1.0))
+)`
+  const fp = ns.kicadModToFootprint(mod)
+  assert.ok(fp, 'must parse')
+  assert.equal((fp.jsx.match(/<platedhole/g) || []).length, 3)
+  assert.equal((fp.jsx.match(/circular_hole_with_rect_pad/g) || []).length, 3)
+  assert.match(fp.jsx, /rectPadWidth="1.1mm" rectPadHeight="1.8mm"/)
+  assert.equal(fp.h, 3.07, 'height spans the rect pads, not a circle of the narrow side')
 })
 
 console.log(`${pass} passed`)

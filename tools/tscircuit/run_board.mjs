@@ -643,11 +643,21 @@ async function freerouteReal(cj, { layers = 2, routeFirst = null, profile = 'sta
 // capabilities. Standard (cheapest) vs HDI/advanced (finer, pricier). A
 // chip-scale earbud board is genuinely an HDI board, so converging under the
 // HDI profile is a real, buildable answer — not a cop-out.
+//
+// hole_clearance: jlcpcb.com/capabilities/pcb-capabilities (read 2026-09-06)
+// publishes "PTH to track 0.28mm (0.35mm recommended)", "via hole to track
+// 0.2mm", "inner layer PTH pad hole to copper 0.3mm". The profiles enforced
+// 0.5mm / 0.4mm — self-imposed, nearly double the fab's rule — and that rule
+// alone produced 12 of 23 errors on the sourced STM board (tracks 0.43-0.49mm
+// from a header hole) and makes a 1.27mm-pitch TO-92 unbuildable by definition.
+// Standard uses the fab's RECOMMENDED PTH value (0.35), HDI the inner-layer PTH
+// value (0.3); both still exceed the via rule. Everything downstream (via
+// keep-out, THT padstack inflation, legalizer margin) derives from these.
 const FAB_PROFILES = {
   standard: {
     label: 'JLCPCB standard (0.09mm track/space, 0.45mm via)',
     via: { pad: 0.5, hole: 0.2 },
-    holeClearance: 0.5,
+    holeClearance: 0.35,
     trace: { width: 0.15, clearance: 0.10 },   // DSN rules for freerouting; rule is 0.09 space
     rules: `(version 1)
 (rule "t" (constraint track_width (min 0.09mm)))
@@ -655,12 +665,12 @@ const FAB_PROFILES = {
 (rule "h" (constraint hole_size (min 0.2mm)))
 (rule "v" (constraint via_diameter (min 0.45mm)))
 (rule "a" (constraint annular_width (min 0.13mm)))
-(rule "hc" (constraint hole_clearance (min 0.5mm)))`,
+(rule "hc" (constraint hole_clearance (min 0.35mm)))`,
   },
   hdi: {
     label: 'JLCPCB HDI/advanced (0.0635mm track/space, 0.3mm via)',
     via: { pad: 0.4, hole: 0.2 },
-    holeClearance: 0.4,
+    holeClearance: 0.3,
     trace: { width: 0.10, clearance: 0.07 },   // rule is 0.0635 space; 0.10 + 2×0.07 fits a 0.25mm LQFP pin gap
     rules: `(version 1)
 (rule "t" (constraint track_width (min 0.0635mm)))
@@ -668,7 +678,7 @@ const FAB_PROFILES = {
 (rule "h" (constraint hole_size (min 0.15mm)))
 (rule "v" (constraint via_diameter (min 0.3mm)))
 (rule "a" (constraint annular_width (min 0.075mm)))
-(rule "hc" (constraint hole_clearance (min 0.4mm)))`,
+(rule "hc" (constraint hole_clearance (min 0.3mm)))`,
   },
 }
 
@@ -1000,11 +1010,14 @@ function kicadModToFootprint(mod) {
   // Through-hole pads too: headers, terminal blocks and TO-package tabs are
   // ordinary parts, and refusing them was the single most common reason a real
   // netlist bounced. These become <platedhole> rather than <smtpad>.
-  const thtRe = /\(pad\s+(\S+)\s+thru_hole\s+\w+\s+\(at\s+(-?[\d.]+)\s+(-?[\d.]+)(?:\s+-?[\d.]+)?\)\s+\(size\s+([\d.]+)\s+([\d.]+)\)\s+\(drill\s+([\d.]+)\)/g
+  // `(drill 0.75 (offset 0 0.4))` and `(drill oval 1.0 1.6)` are legal KiCad —
+  // the old pattern demanded `(drill d)` and silently dropped every pad of a
+  // TO-92 (DS18B20), so the part fell back to a synthetic qfn6 land pattern.
+  const thtRe = /\(pad\s+(\S+)\s+thru_hole\s+\w+\s+\(at\s+(-?[\d.]+)\s+(-?[\d.]+)(?:\s+-?[\d.]+)?\)\s+\(size\s+([\d.]+)\s+([\d.]+)\)\s+\(drill\s+(?:oval\s+)?([\d.]+)/g
   const holes = []
   let t
   while ((t = thtRe.exec(mod))) {
-    holes.push({ n: t[1].replace(/"/g, ''), x: +t[2], y: -+t[3], d: +t[4], drill: +t[6] })
+    holes.push({ n: t[1].replace(/"/g, ''), x: +t[2], y: -+t[3], d: +t[4], h: +t[5], drill: +t[6] })
   }
   const pads = []
   let m
@@ -1015,14 +1028,31 @@ function kicadModToFootprint(mod) {
   if (!pads.length && !holes.length) return null
   // Bounding box spans BOTH pad kinds, so a header's board area is honest.
   const xs = [...pads.map((p) => [p.x - p.w / 2, p.x + p.w / 2]), ...holes.map((h) => [h.x - h.d / 2, h.x + h.d / 2])].flat()
-  const ys = [...pads.map((p) => [p.y - p.h / 2, p.y + p.h / 2]), ...holes.map((h) => [h.y - h.d / 2, h.y + h.d / 2])].flat()
-  const maxX = Math.max(...xs), minX = Math.min(...xs)
-  const maxY = Math.max(...ys), minY = Math.min(...ys)
+  const ys = [...pads.map((p) => [p.y - p.h / 2, p.y + p.h / 2]), ...holes.map((h) => [h.y - h.h / 2, h.y + h.h / 2])].flat()
+  let maxX = Math.max(...xs), minX = Math.min(...xs)
+  let maxY = Math.max(...ys), minY = Math.min(...ys)
+  // The COURTYARD (F.CrtYd) is the part's real board footprint; the pad bbox is
+  // not. A 2-pin 5.0mm terminal block has pads spanning 7.6 x 2.6mm and a body
+  // of 10 x 7.5mm — sized by its pads it was packed 1mm from a QFN and shipped
+  // with its pad on the QFN's pins (RP board: 6 clearance + 6 mask bridges,
+  // all "PTH pad 2 of J20 <-> Pad 3x of U1"). Grow the box to the courtyard.
+  // first (layer …) after the element's start/end belongs to that element
+  // (stroke/width/type carry no layer of their own)
+  const crt = /\(fp_(?:line|rect)\s+\(start\s+(-?[\d.]+)\s+(-?[\d.]+)\)\s+\(end\s+(-?[\d.]+)\s+(-?[\d.]+)\)[\s\S]*?\(layer\s+"?([^"\s)]+)"?\)/g
+  let c
+  while ((c = crt.exec(mod))) {
+    if (c[5] !== 'F.CrtYd' && c[5] !== 'B.CrtYd') continue
+    for (const [x, y] of [[+c[1], -+c[2]], [+c[3], -+c[4]]]) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y) }
+  }
   const jsx = '<footprint>'
     + pads.map((p) =>
       `<smtpad portHints={["${p.n}","pin${p.n}"]} pcbX="${p.x.toFixed(3)}mm" pcbY="${p.y.toFixed(3)}mm" width="${p.w}mm" height="${p.h}mm" shape="rect" />`).join('')
-    + holes.map((h) =>
-      `<platedhole portHints={["${h.n}","pin${h.n}"]} pcbX="${h.x.toFixed(3)}mm" pcbY="${h.y.toFixed(3)}mm" shape="circle" holeDiameter="${h.drill}mm" outerDiameter="${h.d}mm" />`).join('')
+    // a non-square THT pad (TO-92: 1.1 x 1.8) is a rect pad around a round hole;
+    // emitting it as a circle of the SMALLER side understated its copper and let
+    // the router put tracks on it
+    + holes.map((h) => Math.abs(h.d - h.h) > 0.05
+      ? `<platedhole portHints={["${h.n}","pin${h.n}"]} pcbX="${h.x.toFixed(3)}mm" pcbY="${h.y.toFixed(3)}mm" shape="circular_hole_with_rect_pad" holeDiameter="${h.drill}mm" rectPadWidth="${h.d}mm" rectPadHeight="${h.h}mm" />`
+      : `<platedhole portHints={["${h.n}","pin${h.n}"]} pcbX="${h.x.toFixed(3)}mm" pcbY="${h.y.toFixed(3)}mm" shape="circle" holeDiameter="${h.drill}mm" outerDiameter="${h.d}mm" />`).join('')
     + '</footprint>'
   return { jsx, w: +(maxX - minX).toFixed(2), h: +(maxY - minY).toFixed(2) }
 }
@@ -1200,7 +1230,10 @@ async function netAwarePlace(parts, nets, { maxW = 15, gap = 2.1 } = {}) {
   const courtyard = extractCourtyardSizes(cj0)
 
   const rot = (o, deg) => { const r = deg * Math.PI / 180, c = Math.cos(r), s = Math.sin(r); return [o[0] * c - o[1] * s, o[0] * s + o[1] * c] }
-  const size = (st) => { const [w, h] = courtyard[st.name] || partSize(st); return (st.rot % 180) ? [h, w] : [w, h] }
+  // the rendered courtyard AND the footprint's own box: tscircuit's courtyard for
+  // a through-hole-only <footprint> is smaller than its pads (the RP board's
+  // terminal block landed on the QFN), so neither alone is trusted
+  const size = (st) => { const c = courtyard[st.name], p = partSize(st); const [w, h] = c ? [Math.max(c[0], p[0]), Math.max(c[1], p[1])] : p; return (st.rot % 180) ? [h, w] : [w, h] }
   const aabb = (st) => { const [w, h] = size(st); return [st.x - w / 2, st.y - h / 2, st.x + w / 2, st.y + h / 2] }
   const gapBetween = (a, b) => Math.max(Math.max(a[0] - b[2], b[0] - a[2]), Math.max(a[1] - b[3], b[1] - a[3]))
   const pinPos = (st, pinNum) => { const o = offsets[st.name]?.[pinNum] || [0, 0]; const ro = rot(o, st.rot); return [st.x + ro[0], st.y + ro[1]] }
