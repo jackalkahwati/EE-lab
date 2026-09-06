@@ -392,6 +392,13 @@ export async function GET(req: Request) {
   // chain (see the kick after ucs_design.json lands). Abortable so a cancelled
   // or timed-out run can't leave an orphaned builder writing into the run dir.
   let earlyCs: Promise<Record<string, unknown>> | null = null
+  // How long the fab-package and firmware steps wait for the early chip-scale
+  // build. It used to be 5 min while the build's own wall is 450s plus the
+  // route's re-plan budget: on the first API product the wait expired, the
+  // package was cut from the intermediate board, and the shipped board landed
+  // 90s later. The wait covers the build's whole envelope (electronics-cs
+  // maxDuration = 600s); the pipeline route itself has 1800s.
+  const EARLY_CS_WAIT_MS = 600_000
   const earlyCsAbort = new AbortController()
 
   // Full record of the run, every event in order, persisted on completion so
@@ -1490,10 +1497,10 @@ export async function GET(req: Request) {
               let waitTimer: ReturnType<typeof setTimeout> | undefined
               const waited = await Promise.race([
                 earlyCs,
-                new Promise<null>((res) => { waitTimer = setTimeout(() => res(null), 300_000) }),
+                new Promise<null>((res) => { waitTimer = setTimeout(() => res(null), EARLY_CS_WAIT_MS) }),
               ])
               clearTimeout(waitTimer)
-              if (waited === null) log('validation', 'chip-scale build still running after a 5 min wait — fab package will be cut from the intermediate board', 'warn')
+              if (waited === null) log('validation', `chip-scale build still running after a ${Math.round(EARLY_CS_WAIT_MS / 60000)} min wait — fab package will be cut from the intermediate board`, 'warn')
             }
             const csPcb = path.join(runRoot, 'electronics', 'chipscale.kicad_pcb')
             let csBoard: { ok?: boolean; drc?: { errors?: number }; wallHit?: boolean } | null = null
@@ -1740,11 +1747,11 @@ export async function GET(req: Request) {
             let waitTimer: ReturnType<typeof setTimeout> | undefined
             const waited = await Promise.race([
               earlyCs,
-              new Promise<null>((res) => { waitTimer = setTimeout(() => res(null), 300_000) }),
+              new Promise<null>((res) => { waitTimer = setTimeout(() => res(null), EARLY_CS_WAIT_MS) }),
             ])
             clearTimeout(waitTimer)
             if (waited === null)
-              log('firmware', 'chip-scale build still running after a 5 min wait — proceeding without it', 'warn')
+              log('firmware', `chip-scale build still running after a ${Math.round(EARLY_CS_WAIT_MS / 60000)} min wait — proceeding without it`, 'warn')
           }
           let csBoard: {
             boardSource?: string
