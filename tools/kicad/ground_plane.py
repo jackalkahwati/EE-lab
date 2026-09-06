@@ -27,6 +27,7 @@ import math
 import os
 import sys
 import json
+import re
 import pcbnew
 
 inp, outp, gndf = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -60,44 +61,25 @@ for fp in board.GetFootprints():
             gnd_pads.append(pad.GetPosition())
             gnd_pad_objs.append(pad)
 
-# 1b. GND is now also a ROUTED net (run_board chains the ground pins into traces
-# the router connects). Those tracks/vias arrive under 2-pin trace net names;
-# give every piece of copper that touches a GND pad -- and everything touching
-# that -- the GND net, to a fixpoint, so the pour merges with it and KiCad sees
-# one net instead of a short between "U1.23 to U1.35" and GND.
-def _touch_pad(pt, pad):
-    bb = pad.GetBoundingBox()
-    return bb.GetLeft() <= pt.x <= bb.GetRight() and bb.GetTop() <= pt.y <= bb.GetBottom()
-gnd_pad_list = [p for fp in board.GetFootprints() for p in fp.Pads() if p.GetNetCode() == gnd.GetNetCode()]
-tracks_all = [t for t in board.GetTracks()]
-gnd_track_ids = set()
-gnd_points = []  # (x, y) of GND track/via endpoints, for endpoint-to-endpoint joins
-changed = True
+# 1b. Nets the ROUTER carried between two ground pins (run_board's targeted GND
+# retry stubs, or the opt-in GND chain) arrive under 2-pin trace net names like
+# ".U1 > .pin8 to .C2 > .pin2". Give every track/via of such a net the GND net,
+# BY NAME, so the pour merges with it and KiCad sees one net. The earlier
+# version did this geometrically (any copper touching a ground pad, to a
+# fixpoint) and renamed unrelated copper: 34 shorts + 19 opens on the relay
+# board and two VDD track fragments on the STM board, all from a VDD track that
+# merely came near a ground pad or a renamed via.
+_PIN_RE = re.compile(r"\.([A-Za-z0-9_]+) > \.pin([A-Za-z0-9_]+)")
+def _gnd_stub_net(name):
+    pins = _PIN_RE.findall(name or "")
+    return len(pins) == 2 and all(f"{r}.{n}" in gnd_pins or f"{norm_ref(r)}.{n}" in gnd_pins for r, n in pins)
 propagated = 0
-while changed:
-    changed = False
-    for t in tracks_all:
-        if id(t) in gnd_track_ids:
-            continue
-        is_via = isinstance(t, pcbnew.PCB_VIA)
-        pts = [t.GetPosition()] if is_via else [t.GetStart(), t.GetEnd()]
-        hit = False
-        for pt in pts:
-            if any(_touch_pad(pt, p) for p in gnd_pad_list):
-                hit = True
-                break
-            for (gx, gy) in gnd_points:
-                if abs(pt.x - gx) <= 1000 and abs(pt.y - gy) <= 1000:  # 1um
-                    hit = True
-                    break
-            if hit:
-                break
-        if hit:
-            t.SetNet(gnd)
-            gnd_track_ids.add(id(t))
-            gnd_points.extend((pt.x, pt.y) for pt in pts)
-            propagated += 1
-            changed = True
+stub_nets = set()
+for t in board.GetTracks():
+    if t.GetNetCode() != gnd.GetNetCode() and _gnd_stub_net(t.GetNetname()):
+        stub_nets.add(t.GetNetname())
+        t.SetNet(gnd)
+        propagated += 1
 
 # 2. Pick the reference plane layer: a dedicated inner layer on a 4-layer board,
 #    else the back copper. The top pour bonds top-side ground pads directly; the
@@ -505,6 +487,19 @@ if zone_tracks:
     pcbnew.ZONE_FILLER(board).Fill(board.Zones())
 board.BuildConnectivity()
 unconnected = board.GetConnectivity().GetUnconnectedCount(False)
+# Name the ground pads the plane never reached (no copper connected to the pad
+# at all). run_board uses the list for a TARGETED retry: it routes only these
+# pads as stubs to a reached ground pad and pours again.
+_conn = board.GetConnectivity()
+unreached_pads = []
+for fp in board.GetFootprints():
+    for pad in fp.Pads():
+        if pad.GetNetCode() != GND_CODE:
+            continue
+        # reached = its connectivity cluster contains a GND zone (the cluster is
+        # transitive: pad -> via -> plane counts, a stub track to nowhere does not)
+        if not any(i.GetClass() == 'ZONE' and i.GetNetCode() == GND_CODE for i in _conn.GetConnectedItems(pad)):
+            unreached_pads.append(f"{fp.GetReference()}.{pad.GetNumber()}")
 
 pcbnew.SaveBoard(outp, board)
 print(json.dumps({
@@ -513,5 +508,6 @@ print(json.dumps({
     "zones": board.GetAreaCount(),
     "stitched": stitched, "fanned": fanned,
     "skipped": skipped, "zoneTracks": zone_tracks, "propagated": propagated,
+    "unreachedPads": unreached_pads, "stubNets": sorted(stub_nets),
     "mhKeepout": mh_set,
 }))

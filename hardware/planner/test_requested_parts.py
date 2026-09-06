@@ -64,7 +64,7 @@ def test_unknown_part_with_no_family_is_reported_loudly():
 
 
 def test_header_with_words_between_dimensions_and_header_is_parsed():
-    from hardware.planner.intent import parse_intent
+    from intent import parse_intent
     for prompt in ("2x4 pin SWD header for debug", "a 2x5 shrouded header", "2x4 header"):
         di = parse_intent(prompt)
         heads = [c for c in di["connectors"] if c["kind"] == "header"]
@@ -176,3 +176,16 @@ def test_exported_parts_carry_values_and_real_orderable_parts():
     assert all(p.get("lcsc") for p in caps), [(p["name"], p.get("lcsc")) for p in caps]
     term = next(p for p in nl["parts"] if p["name"] == "J20")
     assert term.get("lcsc"), term
+
+
+def test_a_driver_ics_inputs_reach_the_mcu_and_its_outputs_reach_a_header():
+    import planner as _planner, synth as _synth
+    r = _planner.run("STM32F103 relay controller with a ULN2803A driver, 2-pin screw terminal for 5V input, status LED")
+    nl = _synth.netlist_from_design({"final_design": r["final_design"], "intent": r["intent"]}, real_geometry=False)
+    drv = next(p for p in nl["parts"] if str(p.get("mpn", "")).startswith("ULN2803"))
+    ins = [n for n in nl["nets"] if any(e == "%s.%d" % (drv["name"], k) for k in range(1, 9) for e in n)]
+    assert len(ins) == 8 and all(any(e.startswith("U1.") for e in n) for n in ins), \
+        "every driver input needs its own MCU GPIO: %s" % ins
+    outs = [n for n in nl["nets"] if any(e == "%s.%d" % (drv["name"], k) for k in range(11, 19) for e in n)]
+    assert len(outs) == 8 and all(any(e.startswith("J") for e in n) for n in outs), \
+        "every driver output needs a header pin: %s" % outs

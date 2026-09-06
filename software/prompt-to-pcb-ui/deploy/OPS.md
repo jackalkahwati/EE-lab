@@ -343,6 +343,10 @@ three times against copper the target rung never produced). Use these:
 - `FL_DUMP_CJ=<path>` — write the winning circuit-json.
 - `FL_BASELINE=1` — disable every cache/skip optimisation (identical results, slower).
 
+- `FL_THT_PADSTACK=0` opts out of inflating through-hole padstacks in the DSN (default on: header/terminal pad copper is grown so tracks and vias keep the profile's `hole_clearance` from the pad's HOLE, not just the trace clearance from its copper — the 0.43-0.49 mm hole-clearance class on boards with a 2.54 mm header).
+- `FL_GND_RETRY=0` opts out of the targeted ground retry (default on): when the pour names ground pads it could not reach, the winning rung is re-run on the SAME placement with one 2-pin stub net per stranded pad to its nearest reached ground pad; kept only if the grounded board's DRC score drops AND no signal net opens. `FL_ROUTE_GND=1` still routes ALL of ground as a chain (opt-in).
+- `FL_POUR_SELECT=0` opts out of post-pour rung selection (default on): the top 3 rungs by pre-pour score are each poured and the one whose GROUNDED board scores best ships (`drcRepair.pourSelection` records the candidates). The pour merges stub/chain nets into GND by NAME (a net between two ground pins), never by geometry.
+
 Compare rung-to-rung using `drcRepair.iterations[]` in the output JSON, not the final
 winner: the winner changes with whichever rungs the deadline let run.
 

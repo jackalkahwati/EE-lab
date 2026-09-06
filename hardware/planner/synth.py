@@ -142,6 +142,9 @@ def _netmap_for(spec, cs_net):
                 nm[p["number"]] = INPUT_RAIL
 
     wired, unmatched = [], []
+    # per-instance nets carry the part's ref ("U3_I1"): the MCU allocator asks
+    # for the same names (_gpio_nets) so the driver's inputs and the MCU meet.
+    ref = spec.get("_ref") or spec["mpn"][:6]
     for iface in spec.get("interfaces", []):
         for role, pin_name in iface.get("signals", {}).items():
             if role in ("cs", "latch"):
@@ -149,6 +152,17 @@ def _netmap_for(spec, cs_net):
                 if num:
                     nm[num] = cs_net
                     wired.append(role)
+                continue
+            if role.startswith("gpio"):
+                # a GPIO-driven input (a Darlington array's I1..I8): its own net,
+                # one MCU GPIO each. It used to fall through ROLE_NET and ship
+                # as an unconnected pad -- the "8 unmatched" on the relay board.
+                num = _pin_number(spec, pin_name)
+                if num and num not in nm:
+                    nm[num] = "%s_%s" % (ref, resolve_part._norm(pin_name))
+                    wired.append(role)
+                else:
+                    unmatched.append("%s(%s)" % (role, pin_name))
                 continue
             net = ROLE_NET.get(role)
             if not net:
@@ -176,7 +190,31 @@ def _netmap_for(spec, cs_net):
         num = _pin_number(spec, pd.get("pin", ""))
         if num and num not in nm:
             nm[num] = "GND"  # tie the config pin low directly
+    # a driver's outputs (O1..O8 / OUT1..) leave the board: each gets its own net
+    # and synth() puts them on an output header next to the part.
+    outs = []
+    if str(spec.get("category", "")).startswith("driver"):
+        for p in spec["pins"]:
+            pn = resolve_part._norm(p["name"])
+            if re.match(r"^(O|OUT)\d+$", pn) and p["number"] not in nm:
+                nm[p["number"]] = "%s_%s" % (ref, pn)
+                outs.append((pn, nm[p["number"]]))
+    spec["_out_nets"] = outs
     return nm, wired, unmatched, pulls
+
+
+def _gpio_nets(specs):
+    """Per-instance GPIO nets every part asks the MCU for, in placement order."""
+    out = []
+    for s in specs:
+        ref = s.get("_ref") or s["mpn"][:6]
+        for i in s.get("interfaces", []):
+            if i.get("type") != "gpio":
+                continue
+            for role, pin in sorted(i.get("signals", {}).items()):
+                if _pin_number(s, pin):
+                    out.append("%s_%s" % (ref, resolve_part._norm(pin)))
+    return out
 
 
 def _support(spec, pulls, refn, x, y, nets, netmap=None):
@@ -225,6 +263,10 @@ def _wire_mcu(design_specs):
         n.update({"uart_cell_tx": "RS485_DI", "uart_cell_rx": "RS485_RO",
                   "cell_pwrkey": "RS485_DE"})
     n.update({"uart_gps_tx": "DEBUG_TX", "uart_gps_rx": "DEBUG_RX"})
+    # the Pico's spare GPIO bank (GP10-GP13, pins 14-17) carries per-part GPIO
+    # nets; a part that needs more than four is reported unmatched, not faked.
+    for key, net in zip(("gp_a", "gp_b", "gp_c", "gp_d"), _gpio_nets(design_specs)):
+        n[key] = net
     return n
 
 
@@ -253,6 +295,7 @@ def _mcu_requests(specs):
                  {"role": "CAN_RX", "net": "CAN_RX", "cap": "can_rx"}]
     reqs += [{"role": "DEBUG_TX", "net": "DEBUG_TX", "cap": "uart_tx"},
              {"role": "DEBUG_RX", "net": "DEBUG_RX", "cap": "uart_rx"}]
+    reqs += [{"role": n, "net": n, "cap": "gpio"} for n in _gpio_nets(specs)]
     return reqs
 
 
@@ -260,12 +303,14 @@ def _mcu_requests(specs):
 # RP2040 pin-assignment artifact reflects the real board, not a fresh allocation.
 _PICO_OPT = {"4": "spi_sck", "5": "spi_mosi", "6": "spi_miso", "7": "spi_cs",
              "11": "i2c_sda", "12": "i2c_scl", "24": "can_txd",
+             "14": "gp_a", "15": "gp_b", "16": "gp_c", "17": "gp_d",
              "19": "uart_cell_tx", "20": "uart_cell_rx", "21": "cell_pwrkey",
              "1": "uart_gps_tx", "2": "uart_gps_rx"}
 _KEY_CAP = {"spi_sck": "spi_sck", "spi_mosi": "spi_mosi", "spi_miso": "spi_miso",
             "spi_cs": "spi_cs", "i2c_sda": "i2c_sda", "i2c_scl": "i2c_scl",
             "can_txd": "gpio", "uart_cell_tx": "uart_tx", "uart_cell_rx": "uart_rx",
-            "cell_pwrkey": "gpio", "uart_gps_tx": "uart_tx", "uart_gps_rx": "uart_rx"}
+            "cell_pwrkey": "gpio", "uart_gps_tx": "uart_tx", "uart_gps_rx": "uart_rx",
+            "gp_a": "gpio", "gp_b": "gpio", "gp_c": "gpio", "gp_d": "gpio"}
 
 
 def _rp2040_alloc(n_mcu):
@@ -424,6 +469,21 @@ def synth(design, out_path):
     mcu_alloc = None
     x = X0 + MARGIN
     ytop = Y0 + MARGIN
+    # Pre-assign the U-refs the placement loop below hands out (same order, same
+    # skips), so a part's per-instance nets ("U3_I1", "U3_O1") carry the ref the
+    # MCU allocator and the output header also see.
+    specs = sorted(specs, key=lambda s: 0 if s.get("category", "").startswith(
+        ("connector.usb", "connector.power", "power")) else 1)
+    _rn = 2
+    for _s in specs:
+        _fp = _s.get("kicad_footprint")
+        if not _fp or ":" not in _fp:
+            continue
+        _s["_ref"] = "U%d" % _rn
+        if not _netmap_for(_s, "CSX")[0]:
+            _s.pop("_ref", None)
+            continue
+        _rn += 1
     sel = mcu_decision.get("selected")
     if sel == "RP2040" or not sel:
         # PROVEN RP2040 path (also the safe fallback if selection could not fit) —
@@ -508,7 +568,7 @@ def synth(design, out_path):
         if x + COLW - X0 > WRAP:
             x = X0 + MARGIN
             row_y = bottom_extent[0] + GAP
-        ref = "U%d" % refn
+        ref = spec.get("_ref") or "U%d" % refn
         refn += 1
         # recovery hint: a per-component rotation (keyed by ref or MPN)
         rot = float(hrot.get(ref, hrot.get(spec["mpn"], {})).get("rotate", 0))
@@ -519,6 +579,26 @@ def synth(design, out_path):
             continue
         body += _support(spec, pulls, refn * 3, x, row_y + 14, nets, netmap=nm)
         note_extent(x, row_y)
+        outs = spec.get("_out_nets") or []
+        if outs:
+            # the driver's outputs + its COM/supply + GND on a header below its
+            # passives, so the loads it drives have somewhere to plug in
+            com = next((nm[p["number"]] for p in spec["pins"]
+                        if p.get("etype") == "power_in" and p["number"] in nm), INPUT_RAIL)
+            hn = [n for _, n in outs] + [com, "GND"]
+            rows = 2 if len(hn) > 6 else 1
+            cols = -(-len(hn) // rows)
+            hm = {str(i + 1): n for i, n in enumerate(hn)}
+            jref = "J%d" % (30 + refn)
+            sc_ = spec.get("support_circuit") or {}
+            hy = row_y + 14 + 3 * (len(sc_.get("decoupling") or []) + len(pulls)) + 2
+            body += compose.place("Connector_PinHeader_2.54mm",
+                                  "PinHeader_%dx%02d_P2.54mm_Vertical" % (rows, cols),
+                                  jref, x, hy, 0, hm, nets)
+            compose._DEVICES.append({"ref": jref, "type": "connector",
+                                     "name": "%s output header (%s)" % (ref, ",".join(hn))})
+            note_extent(x, hy, 3 + 2.54 * cols, 3 + 2.54 * rows)
+            wired.append("outputs->%s" % jref)
         compose._DEVICES.append({"ref": ref, "type": spec.get("category", "part").split(".")[-1],
                                  "name": spec["mpn"], "footprint": name,
                                  "wired": wired, "unmatched": unmatched})

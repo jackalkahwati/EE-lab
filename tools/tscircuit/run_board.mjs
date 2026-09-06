@@ -136,7 +136,7 @@ async function applyGroundPlane(cj, gndPins, profileKey = 'standard') {
     fs.writeFileSync(inPcb, decorateMountingHoles(conv.getOutputString(), hcNum))
     fs.writeFileSync(gndJson, JSON.stringify(gndPins))
     const hc = String(hcNum)
-    const r = spawnSync(KICAD_PY, [GROUND_PLANE_PY, inPcb, outPcb, gndJson, hc], { encoding: 'utf8', timeout: 120000 })
+    const r = spawnSync(KICAD_PY, [GROUND_PLANE_PY, inPcb, outPcb, gndJson, hc], { encoding: 'utf8', timeout: 120000, env: { ...process.env, FL_GND_ROUTED: GND_ROUTED ? '1' : '0' } })
     if (!fs.existsSync(outPcb)) return { available: false, reason: 'ground plane pass produced no board', stderr: (r.stderr || '').slice(0, 200) }
     let gp = {}; try { gp = JSON.parse((r.stdout || '').trim().split('\n').pop() || '{}') } catch { /* keep defaults */ }
     fs.writeFileSync(path.join(dir, 'g.kicad_dru'), (FAB_PROFILES[profileKey] || FAB_PROFILES.standard).rules)
@@ -170,7 +170,7 @@ async function applyGroundPlane(cj, gndPins, profileKey = 'standard') {
         violations: pos.points.slice(0, 40),
       }
     }
-    return { available: true, assigned: gp.assigned ?? 0, unconnected: gp.unconnected ?? null, stitched: gp.stitched ?? 0, skipped: gp.skipped ?? 0, zoneTracks: gp.zoneTracks ?? 0, errors: drcAfter?.errors ?? null, drcAfter, pcb }
+    return { available: true, assigned: gp.assigned ?? 0, unconnected: gp.unconnected ?? null, stitched: gp.stitched ?? 0, skipped: gp.skipped ?? 0, zoneTracks: gp.zoneTracks ?? 0, unreachedPads: Array.isArray(gp.unreachedPads) ? gp.unreachedPads : [], errors: drcAfter?.errors ?? null, drcAfter, pcb }
   } catch (e) {
     return { available: false, reason: String(e).slice(0, 160) }
   } finally {
@@ -356,6 +356,48 @@ function setViaPadstack(dsnPcb, um) {
  *  0.3mm pad. fabRepair ships the profile's via regardless of what the router saw,
  *  so the pad here is a keep-out, not copper: inflate it until pad/2 + 0.1 ≥
  *  hole/2 + holeClearance, hole being the SHIPPED drill. hdi: 2·(0.1+0.4−0.1) = 0.8. */
+/** Inflate every THROUGH-HOLE padstack ("[A]" = all layers) in the DSN so the
+ *  router keeps tracks and vias the fab's hole_clearance away from the pad's
+ *  HOLE, not just the trace clearance away from its copper. A 2.54mm header pin
+ *  (1.7mm pad, 1.0mm hole) has a 0.35mm ring: trace clearance 0.1 puts copper
+ *  0.45mm from the hole edge against a 0.5mm rule. Measured on the sourced STM
+ *  board that shipped from prod: 12 of 23 errors were exactly this — tracks and
+ *  vias 0.43-0.49mm from a header hole (J1, J21). Ring comes from the padstack
+ *  itself: circle pads carry hole_outer in their name, oval/rect carry `hole`.
+ *  Opt out with FL_THT_PADSTACK=0. Returns { count, maxUm }. */
+function inflateThtPadstacks(dsnPcb, profileKey = 'standard') {
+  const prof = FAB_PROFILES[profileKey] || FAB_PROFILES.standard
+  const hcUm = (prof.holeClearance ?? 0.5) * 1000
+  const tcUm = (prof.trace?.clearance ?? 0.1) * 1000
+  let count = 0, maxUm = 0
+  for (const ps of dsnPcb?.library?.padstacks || []) {
+    if (!/\[A\]Pad_/.test(ps.name || '')) continue
+    let ring = null
+    const m = /^Round\[A\]Pad_([0-9.]+)_([0-9.]+)_um$/.exec(ps.name)
+    if (m) ring = (Number(m[2]) - Number(m[1])) / 2
+    else if (ps.hole?.shape === 'circle' && Number.isFinite(ps.hole.diameter)) {
+      const poly = (ps.shapes || []).find((s) => s.shapeType === 'polygon' && Array.isArray(s.coordinates))
+      if (poly) {
+        const xs = poly.coordinates.filter((_, i) => i % 2 === 0).map(Math.abs), ys = poly.coordinates.filter((_, i) => i % 2 === 1).map(Math.abs)
+        ring = (Math.min(Math.max(...xs) * 2, Math.max(...ys) * 2) - ps.hole.diameter) / 2
+      }
+    } else if (ps.hole?.shape === 'oval' && Number.isFinite(ps.hole.width) && Number.isFinite(ps.hole.height)) {
+      const path = (ps.shapes || []).find((s) => s.shapeType === 'path' && Number.isFinite(s.width))
+      if (path) ring = (path.width - Math.min(ps.hole.width, ps.hole.height)) / 2
+    }
+    if (!Number.isFinite(ring) || ring < 0) continue
+    const inflate = Math.max(0, Math.ceil(hcUm - tcUm - ring) + 20)
+    if (!inflate) continue
+    for (const s of ps.shapes || []) {
+      if (s.shapeType === 'circle' && Number.isFinite(s.diameter)) s.diameter += 2 * inflate
+      else if (s.shapeType === 'path' && Number.isFinite(s.width)) s.width += 2 * inflate
+      else if (s.shapeType === 'polygon' && Array.isArray(s.coordinates)) s.coordinates = s.coordinates.map((c) => c === 0 ? 0 : c + Math.sign(c) * inflate)
+    }
+    count++; maxUm = Math.max(maxUm, inflate)
+  }
+  return { count, maxUm }
+}
+
 function routerViaPadMm(profileKey) {
   const p = FAB_PROFILES[profileKey] || {}
   const hole = p.via?.hole ?? 0.2, hc = p.holeClearance ?? 0.5
@@ -456,6 +498,7 @@ async function freerouteReal(cj, { layers = 2, routeFirst = null, profile = 'sta
     //   fresh LQFP board  off 5 hole_clearance | 880um 1 (cleared by repair) | 910um 2 nets open
     //   hard QFN board    off 7 hole_clearance, 2 shorts shipped | 880um: 0 errors, score 0
     if (process.env.FL_VIA_PADSTACK !== '0') setViaPadstack(dsnPcb, Number(process.env.FL_VIA_PADSTACK_UM) || viaPadstackUm(dsnPcb, profile))
+    if (process.env.FL_THT_PADSTACK !== '0') { const th = inflateThtPadstacks(dsnPcb, profile); if (th.count) process.stderr.write(`[t] tht padstacks: ${th.count} through-hole pad shape(s) inflated up to ${th.maxUm}um for ${profile} hole_clearance\n`) }
     if (layers > 2) dsnPcb = dsnToNLayer(dsnPcb, layers)
     // Via copper spacing derived from the fab rules the board will be graded
     // on -- see viaClearanceUm. (The old comment here described 0.6mm pads and
@@ -1950,7 +1993,11 @@ function legalizeTraces(cj, { minClear = FAB_PROFILES.standard.holeClearance + L
  *  DRC clean (a real, buildable solution). If the ladder is exhausted without
  *  converging, returns the BEST board found plus an honest verdict naming the
  *  residual and the capability wall. Never fakes convergence. */
-async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15 } = {}) {
+async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15, only = null, placeNets = null } = {}) {
+  // `only`: run exactly the named rung (the targeted GND retry re-runs the winner).
+  // `placeNets`: nets the PLACEMENT sees — the retry places on the original nets
+  //   so the board stays identical and only the stub nets are new to the router.
+  const pNets = placeNets ?? nets
   // Prefer freerouting (real push-and-shove router) when available; fall back to
   // the built-in router + geometry repair. Escalate the fab process (standard ->
   // HDI) within each router. A board only truly converges when DRC is clean AND
@@ -2007,10 +2054,11 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15 } = {}) {
   // freerouting passes (they differ only in layers/fab profile). Null -> the
   // strategies fall back to the connectivity shelf-pack.
   const tNap = Date.now()
-  const netAwarePlaced = FR_JAR && JAVA ? await netAwarePlace(parts, nets, { gap, maxW }) : null
+  const netAwarePlaced = FR_JAR && JAVA ? await netAwarePlace(parts, pNets, { gap, maxW }) : null
   if (FR_JAR && JAVA) tAdd('netAwarePlace', Date.now() - tNap, `gap=${gap}, ${netAwarePlaced ? 'ok' : 'fallback to shelf-pack'}`)
 
   const trail = []
+  const cands = [] // every DRC-checked rung, for the post-pour selection in main()
   let best = null
   // The built-in autorouter scales badly with part count: MEASURED, a 120-part
   // board spent 525s of a 527s run inside it, while the same board BUILDS in
@@ -2036,6 +2084,10 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15 } = {}) {
   // FL_ONLY_RUNG=<substring>: run just the matching rung(s). A geometry change
   // to ONE router is otherwise measured through a 20-50 min ladder whose earlier
   // rungs are wall-clock budgeted (so machine load changes which rungs even run).
+  if (only) {
+    const keep = ladder.filter((s) => s.name === only)
+    ladder.length = 0; ladder.push(...keep)
+  }
   if (process.env.FL_ONLY_RUNG) {
     const keep = ladder.filter((s) => s.name.includes(process.env.FL_ONLY_RUNG))
     process.stderr.write(`[t] ladder: FL_ONLY_RUNG="${process.env.FL_ONLY_RUNG}" keeps ${keep.length}/${ladder.length} rungs\n`)
@@ -2064,7 +2116,7 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15 } = {}) {
     // the spread rung must actually RE-PLACE with the roomier gap/width —
     // reusing the tight net-aware placement would make it a no-op
     const placed = s.respace && FR_JAR && JAVA
-      ? (await netAwarePlace(parts, nets, { gap: s.place.gap, maxW: s.place.maxW })) ?? netAwarePlaced
+      ? (await netAwarePlace(parts, pNets, { gap: s.place.gap, maxW: s.place.maxW })) ?? netAwarePlaced
       : netAwarePlaced
     const code = placed
       ? emitBoardCode(placed, nets, { clearance: s.router === 'tsci' ? s.place.clearance : null, routingDisabled: rd, numLayers: s.router === 'tsci' ? (s.layers ?? 2) : 2 })
@@ -2161,8 +2213,10 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15 } = {}) {
     // not the same unit and must not be summed as if they were.
     const score = drcScore(drc, unrouted)
     trail.push({ iter: i + 1, strategy: s.name, profile: FAB_PROFILES[s.profile].label, errors: drc.errors, errorTypes: drc.errorTypes, unrouted })
-    if (!best || score < best.score) best = { cj, drc, fixes, unrouted, unroutedStructural, unroutedNets, score, strategy: s.name, layers: s.layers ?? 2 }
-    if (best) CHECKPOINT = () => ({ best, trail })
+    const cand = { cj, drc, fixes, unrouted, unroutedStructural, unroutedNets, score, strategy: s.name, layers: s.layers ?? 2 }
+    cands.push(cand)
+    if (!best || score < best.score) best = cand
+    if (best && !only) CHECKPOINT = () => ({ best, trail }) // a retry rung never becomes the wall-hit checkpoint
     if (drc.errors === 0 && unrouted === 0) break // fully routed AND fab-clean — done
   }
   if (!best) return { available: false, drc: { available: false, reason: 'all routing strategies failed' }, trail }
@@ -2200,7 +2254,12 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15 } = {}) {
       verdict = `iterated ${trail.length} strateg${trail.length === 1 ? 'y' : 'ies'}; best ${best.drc.errors} error(s) (${top || 'DRC'}) under ${best.drc.ruleProfile} — beyond the loop's current levers.`
     }
   }
-  return { available: true, converged, best, trail, verdict }
+  // Top rungs by pre-pour score, best first. main() pours each and ships the one
+  // whose GROUNDED board scores best — the ladder's own pick is made before the
+  // pour, and a rung that pours clean can lose here to one that does not.
+  const candidates = [...cands].sort((a, b) => a.score - b.score).slice(0, 3)
+  if (!candidates.includes(best)) candidates.unshift(best)
+  return { available: true, converged, best, trail, verdict, candidates }
 }
 
 /** Best-so-far checkpoint. Every rung ends with an exported, KiCad-DRC'd board,
@@ -2210,6 +2269,7 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15 } = {}) {
  *  board: "chipscale-early failed at 285,196ms, no board"). The ladder registers
  *  its best rung here; SIGTERM (what a spawn timeout sends) flushes it as the
  *  result, labelled: no ground pour, no residual repair, wallHit: true. */
+let GND_ROUTED = false // set when main() chained the ground pins into routed nets
 let CHECKPOINT = null // () => ({ best, trail })
 let FLUSHING = false
 async function flushCheckpoint(reason) {
@@ -2252,6 +2312,39 @@ process.on('SIGTERM', () => { flushCheckpoint('runner wall hit (SIGTERM)') })
  *  inner-layer trace under them and no via spot within 2.6mm, and no same-layer
  *  path into the pour within 6mm. The pour still runs afterwards; ground_plane.py
  *  propagates the GND net onto whatever copper touches a ground pad. */
+/** Position of a named pin ("U1.47") on the built board, or null. */
+function portPos(cj, name) {
+  const i = name.lastIndexOf('.')
+  if (i < 1) return null
+  const ref = name.slice(0, i), pin = name.slice(i + 1)
+  const comp = cj.find((e) => e.type === 'source_component' && e.name === ref)
+  if (!comp) return null
+  const sp = cj.find((e) => e.type === 'source_port' && e.source_component_id === comp.source_component_id
+    && (String(e.pin_number) === pin || e.name === pin || e.name === `pin${pin}` || (Array.isArray(e.port_hints) && e.port_hints.includes(pin))))
+  if (!sp) return null
+  const pp = cj.find((e) => e.type === 'pcb_port' && e.source_port_id === sp.source_port_id)
+  return pp && Number.isFinite(pp.x) && Number.isFinite(pp.y) ? { x: pp.x, y: pp.y } : null
+}
+
+/** Targeted ground retry nets: one 2-pin stub per pad the pour could not reach,
+ *  to the NEAREST ground pad it did reach. Routing all of GND crowded boards the
+ *  pour would have closed (measured: hard QFN board clean → 4 nets stranded);
+ *  routing only the stranded pads is the shape that measurement asked for. */
+function gndStubNets(cj, gnd, unreached) {
+  const names = (gnd || []).filter((p) => typeof p === 'string' && p.includes('.'))
+  const bad = new Set(unreached || [])
+  const reached = names.filter((n) => !bad.has(n)).map((n) => ({ n, p: portPos(cj, n) })).filter((r) => r.p)
+  const out = []
+  for (const u of unreached || []) {
+    const p = portPos(cj, u)
+    if (!p || !reached.length) continue
+    let best = null, bd = Infinity
+    for (const r of reached) { const d = Math.hypot(r.p.x - p.x, r.p.y - p.y); if (d < bd) { bd = d; best = r.n } }
+    if (best) out.push([u, best])
+  }
+  return out
+}
+
 function groundChainNets(gnd) {
   const pins = (gnd || []).filter((p) => typeof p === 'string' && p.includes('.'))
   const out = []
@@ -2270,6 +2363,7 @@ async function main() {
   if (Array.isArray(input.nets) && input.gnd?.length > 1 && (input.routeGround === true || process.env.FL_ROUTE_GND === '1')) {
     const chain = groundChainNets(input.gnd)
     input.nets = [...input.nets, ...chain]
+    GND_ROUTED = true
     process.stderr.write(`[t] ground: routing GND as a net (${chain.length} chain traces over ${input.gnd.length} pins)\n`)
   }
   // strict DRC: count non-electrical classes (footprint-lib drift, text, silk)
@@ -2365,7 +2459,44 @@ async function main() {
       }
       if (attempt.available && attempt.converged) break // smallest board that routes clean — done
     }
+    let pourSelection = null
     if (res && res.available) {
+      // Post-pour selection: pour the top rungs and ship the one whose GROUNDED
+      // board scores best. The ladder picks its winner from the pre-pour DRC, so
+      // on the STM board a 'standard fab' rung with 3 hole_clearance nits won
+      // over an HDI rung that pours with every ground pad on the plane. Cost:
+      // one pour (~5-10s) per extra candidate. Opt out with FL_POUR_SELECT=0.
+      const MAIN_WALL_MS0 = Number(process.env.FL_WALL_MS) || 0
+      const selLimit = MAIN_WALL_MS0 ? MAIN_WALL_MS0 - 60_000 : BUDGET_MS
+      const cands = (res.candidates || []).filter((c) => c?.cj && c.drc?.available)
+      if (input.gnd?.length && cands.length > 1 && process.env.FL_POUR_SELECT !== '0'
+          && (Date.now() - T_START) + 25_000 * cands.length < selLimit) {
+        const tSel = Date.now()
+        const scored = []
+        for (const c of cands) {
+          const cjc = JSON.parse(JSON.stringify(c.cj))
+          applyBoardFeatures(cjc, input, c.drc.profileKey || 'standard')
+          const g = await applyGroundPlane(cjc, input.gnd, c.drc.profileKey || 'standard')
+          const sc = g?.available && g.drcAfter ? drcScore(g.drcAfter, 0) : Infinity
+          scored.push({ c, sc, unreached: g?.unreachedPads?.length ?? null, errors: g?.errors ?? null })
+        }
+        const cur = scored.find((s) => s.c === res.best)
+        const pick = [...scored].sort((a, b) => a.sc - b.sc)[0]
+        pourSelection = { tried: scored.map((s) => ({ strategy: s.c.strategy, prePour: s.c.score, postPour: s.sc, unreached: s.unreached, errors: s.errors })), picked: pick?.c.strategy ?? null }
+        tAdd('pourSelection', Date.now() - tSel, scored.map((s) => `${s.c.strategy}: ${s.c.score}→${s.sc}`).join('; '))
+        if (pick && cur && pick.c !== res.best && pick.sc < cur.sc) {
+          pourSelection.note = `post-pour selection: '${pick.c.strategy}' ships (grounded-board score ${pick.sc}) over the ladder's '${res.best.strategy}' (${cur.sc})`
+          // scored on the rungs as routed (before via/trace legalization); the
+          // legalizers below run on whichever board ships
+          pourSelection.scoredBeforeLegalization = true
+          // the ladder's verdict described ITS pick; the shipped rung is another
+          const pb = pick.c
+          const verdict = (pb.drc.errors === 0 && pb.unrouted === 0) ? null
+            : pb.unrouted > 0 ? `best board has ${pb.drc.errors} DRC error(s) and ${pb.unrouted} net(s) the autorouter couldn't complete — needs manual routing or a simpler netlist.`
+            : `best ${pb.drc.errors} error(s) (${Object.entries(pb.drc.errorTypes || {}).sort((a, b) => b[1] - a[1])[0]?.[0] || 'DRC'}) under ${pb.drc.ruleProfile} — beyond the loop's current levers.`
+          res = { ...res, best: pb, converged: pb.drc.errors === 0 && pb.unrouted === 0, verdict }
+        }
+      }
       cj = res.best.cj
       drc = res.best.drc
       code = buildCode(input.parts, input.nets, { gap: usedGap, maxW: MAXW }) // representative source
@@ -2392,6 +2523,10 @@ async function main() {
           : res.best.fixes,
         verdict: res.verdict,
         gapConvergence: { ladder: gapTrail, chosenGap: usedGap, loosened },
+      }
+      if (pourSelection) {
+        drcRepair.pourSelection = pourSelection
+        if (pourSelection.note) drcRepair.fixes = [...drcRepair.fixes, pourSelection.note]
       }
       // Board features (circular outline / mounting holes): applied to the REAL
       // routed geometry (res.best.cj — the same object the ground-plane pass and
@@ -2601,8 +2736,60 @@ async function main() {
       if (input.gnd?.length) {
         const tGp = Date.now()
         TIMINGS.counters.groundPlanePasses++
-        const gp = await applyGroundPlane(cj, input.gnd, res.best.drc.profileKey || 'standard')
+        let gp = await applyGroundPlane(cj, input.gnd, res.best.drc.profileKey || 'standard')
         tAdd('groundPlane', Date.now() - tGp, gp?.available ? `${gp.assigned} pins, ${gp.errors} errors` : 'unavailable')
+        // Targeted GND retry: the pour names the ground pads it could not reach
+        // (QFN ring pins boxed in by signal copper, typically 1-3 per board).
+        // Re-run ONLY the winning rung on the SAME placement with one stub net per
+        // stranded pad to its nearest reached ground pad, pour again with GND
+        // propagation on, and keep the result only if the shipped board's real
+        // DRC score improves. Measured before this on the three default boards:
+        // stm 3 unreached (score 78), rp 3 unreached (score 75) — every fault a
+        // stranded ground pad. Opt out with FL_GND_RETRY=0.
+        const MAIN_WALL_MS = Number(process.env.FL_WALL_MS) || 0
+        const retryLimitMs = MAIN_WALL_MS ? MAIN_WALL_MS - 45_000 : BUDGET_MS
+        if (process.env.FL_GND_RETRY !== '0' && gp?.available && gp.unreachedPads?.length && gp.unreachedPads.length <= 8
+            && res.best?.strategy && Array.isArray(input.nets) && (Date.now() - T_START) + 45_000 < retryLimitMs) {
+          const stubs = gndStubNets(cj, input.gnd, gp.unreachedPads)
+          const strat = res.best.strategy.replace(/ \+ inner-layer completion$/, '')
+          if (stubs.length) {
+            const tR = Date.now()
+            const savedCp = CHECKPOINT
+            process.stderr.write(`[t] gndRetry: ${gp.unreachedPads.length} unreached ground pad(s) ${JSON.stringify(gp.unreachedPads)} → re-running '${strat}' with ${stubs.length} stub net(s)\n`)
+            let again = null
+            try { again = await iterativeRedesign(input.parts, [...input.nets, ...stubs], { gap: usedGap, maxW: MAXW, only: strat, placeNets: input.nets }) } catch (e) { process.stderr.write(`[t] gndRetry: failed (${String(e).slice(0, 120)})\n`) }
+            CHECKPOINT = savedCp
+            if (again?.available && again.best?.cj) {
+              const cj2 = again.best.cj
+              applyBoardFeatures(cj2, input, again.best.drc.profileKey || 'standard')
+              const gp2 = await applyGroundPlane(cj2, input.gnd, again.best.drc.profileKey || 'standard')
+              const sc = (g) => g?.available && g.drcAfter ? drcScore(g.drcAfter, 0) : Infinity
+              const sigOpen = (g) => Math.max(0, (g?.unconnected ?? 0) - (g?.unreachedPads?.length ?? 0))
+              const before = sc(gp), after = sc(gp2)
+              tAdd('gndRetry', Date.now() - tR, `score ${before} → ${after}, unreached ${gp.unreachedPads.length} → ${gp2?.unreachedPads?.length ?? '?'}, signal opens ${sigOpen(gp)} → ${sigOpen(gp2)}`)
+              // A retry that grounds the stranded pads by breaking a signal net
+              // (measured: 3 GND opens → 0, but VDD split into 2 fragments) is a
+              // trade, not a fix: the shipped board is still open. Require BOTH.
+              if (after < before && sigOpen(gp2) <= sigOpen(gp)) {
+                cj = cj2; drc = again.best.drc; gp = gp2
+                res = { ...res, best: again.best, converged: again.converged, verdict: again.verdict }
+                drcRepair.verdict = again.verdict // the ladder's verdict described the pre-retry board
+                drcRepair.winningStrategy = `${again.best.strategy} + targeted GND retry`
+                drcRepair.layers = again.best.layers ?? drcRepair.layers
+                // signal opens on the SHIPPED board = KiCad's open count minus the ground pads still off the plane
+                // (a stub the router left open IS an unreached ground pad; counting it twice made 3→2 unreached read as 3→4)
+                drcRepair.unrouted = Math.max(0, (gp2.unconnected ?? 0) - (gp2.unreachedPads?.length ?? 0))
+                drcRepair.unroutedNets = again.best.unroutedNets ?? []
+                drcRepair.errorsBest = again.best.drc.errors
+                drcRepair.gndRetry = { stubs, before, after, unreachedBefore: stubs.map((s) => s[0]), unreachedAfter: gp2?.unreachedPads ?? null, signalOpens: [sigOpen(gp), sigOpen(gp2)], accepted: true }
+                drcRepair.fixes = [...drcRepair.fixes, `targeted GND retry: routed ${stubs.length} stranded ground pad(s) as stubs to the plane (${stubs.map((s) => s[0]).join(', ')}) — shipped-board score ${before} → ${after}`]
+              } else {
+                drcRepair.gndRetry = { stubs, before, after, signalOpens: [sigOpen(gp), sigOpen(gp2)], accepted: false }
+                drcRepair.fixes = [...drcRepair.fixes, `targeted GND retry tried for ${gp.unreachedPads.join(', ')} and rejected (shipped-board score ${before} → ${after}, signal opens ${sigOpen(gp)} → ${sigOpen(gp2)})`]
+              }
+            }
+          }
+        }
         // `input.gnd` reaches exactly ONE place in this file: the pass above.
         // Ground pins are never emitted as nets, so freerouting never routes
         // them and KiCad cannot report them as unconnected either — those pads
@@ -2657,18 +2844,25 @@ async function main() {
             drc = { available: false, reason: 'ground plane applied but its DRC produced no report — the shipped board is unchecked', groundPlaneApplied: true }
             drcRepair.converged = false
           }
-          if (gp.unconnected) {
+          // Ground pads still off the plane. `gp.unconnected` is KiCad's count of
+          // EVERY open item on the board — the signal opens already in `unrouted`
+          // included — so adding it double-counted: 2 signal opens + 0 stranded
+          // ground pads shipped as "4 unrouted". The pour now names the pads
+          // whose cluster holds no GND zone; that is the number that belongs here.
+          const gndOpen = Array.isArray(gp.unreachedPads) ? gp.unreachedPads.length : (gp.unconnected ?? 0)
+          if (gndOpen) {
             // Keep the SIGNAL-only count. Callers that ask "is this board too
             // dense for one PCB?" must not read a stranded ground pad as a net
             // the autorouter could not complete — splitting a board in two does
             // nothing about a pad the pour could not reach.
             drcRepair.unroutedSignal = drcRepair.unrouted ?? 0
-            drcRepair.unrouted = (drcRepair.unrouted ?? 0) + gp.unconnected
+            drcRepair.unrouted = (drcRepair.unrouted ?? 0) + gndOpen
           }
           const planeClean = (gp.unconnected ?? 0) === 0 && (gp.errors ?? 0) === 0
           if (!planeClean) {
             const bits = []
-            if (gp.unconnected) bits.push(`${gp.unconnected} ground pin(s) unreached${gp.skipped ? ` (${gp.skipped} via-in-pad skipped to hold hole_clearance)` : ''}`)
+            if (gndOpen) bits.push(`${gndOpen} ground pin(s) unreached (${(gp.unreachedPads || []).join(', ')})${gp.skipped ? ` (${gp.skipped} via-in-pad skipped to hold hole_clearance)` : ''}`)
+            else if (gp.unconnected) bits.push(`${gp.unconnected} open item(s) on the shipped board (signal nets, not ground)`)
             if (gp.errors) bits.push(`${gp.errors} zone DRC error(s) amid the dense routing`)
             // build on the REFRESHED (post-legalization / post-nudge) verdict, not
             // the ladder's original res.verdict, so the detail never quotes a stale count
@@ -2744,6 +2938,10 @@ async function main() {
   const isCircle = boardFeatures?.boardShape?.type === 'circle'
   const totalMs = Date.now() - T_RUN0
   process.stderr.write(`[t] total: ${(totalMs / 1000).toFixed(1)}s (${TIMINGS.counters.freeroutingPasses} freerouting passes, ${TIMINGS.counters.jvmStarts} jvm starts, ${TIMINGS.counters.kicadDrcRuns} kicad drc runs, ${TIMINGS.counters.tscircuitBuilds} tscircuit builds)\n`)
+  // The result is being written: a wall-hit flush arriving now must not append a
+  // second JSON document (measured on the relay board: main wrote at 600.0s, the
+  // SIGTERM flush at 600.3s, and the caller's JSON.parse died on 'Extra data').
+  FLUSHING = true
   process.stdout.write(JSON.stringify({
     ok: !!board && (!needsTraces || traces.length > 0) && drcClean && unroutedNets === 0,
     // Severity-weighted badness of the board that shipped (lower is better).
@@ -2775,4 +2973,4 @@ async function main() {
   }))
 }
 
-main().catch((e) => { process.stdout.write(JSON.stringify({ ok: false, error: String(e).slice(0, 300) })); process.exit(1) })
+main().catch((e) => { FLUSHING = true; process.stdout.write(JSON.stringify({ ok: false, error: String(e).slice(0, 300) })); process.exit(1) })

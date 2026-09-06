@@ -11,12 +11,15 @@ new Function('exports',
   cut('const FAB_PROFILES', '\n}\n') + '\n}\n' +
   cut('function dsnToNLayer', '\n}\n') + '\n}\n' +
   cut('function groundChainNets', '\n}\n') + '\n}\n' +
+  cut('function portPos', '\n}\n') + '\n}\n' +
+  cut('function gndStubNets', '\n}\n') + '\n}\n' +
   cut('function setDsnTraceRules', '\n}\n') + '\n}\n' +
   cut('function setViaClearance', 'function viaClearanceUm') +
+  cut('function inflateThtPadstacks', '\n}\n') + '\n}\n' +
   cut('function viaClearanceUm', '\n}\n') + '\n}\n' +
   cut('function emitBoardCode', '\n}\n') + '\n}\n' +
   cut('function mergeStackedVias', '\n}\n') + '\n}\n' +
-  'exports.FAB_PROFILES=FAB_PROFILES;exports.setViaClearance=setViaClearance;exports.viaClearanceUm=viaClearanceUm;exports.viaPadstackUm=viaPadstackUm;exports.setDsnTraceRules=setDsnTraceRules;exports.dsnToNLayer=dsnToNLayer;exports.groundChainNets=groundChainNets;exports.routerViaPadMm=routerViaPadMm;exports.emitBoardCode=emitBoardCode;exports.mergeStackedVias=mergeStackedVias;exports.setViaPadstack=setViaPadstack;'
+  'exports.FAB_PROFILES=FAB_PROFILES;exports.setViaClearance=setViaClearance;exports.viaClearanceUm=viaClearanceUm;exports.viaPadstackUm=viaPadstackUm;exports.setDsnTraceRules=setDsnTraceRules;exports.dsnToNLayer=dsnToNLayer;exports.groundChainNets=groundChainNets;exports.gndStubNets=gndStubNets;exports.portPos=portPos;exports.routerViaPadMm=routerViaPadMm;exports.emitBoardCode=emitBoardCode;exports.mergeStackedVias=mergeStackedVias;exports.setViaPadstack=setViaPadstack;exports.inflateThtPadstacks=inflateThtPadstacks;'
 )(ns)
 
 const dsn = () => ({
@@ -163,10 +166,44 @@ t('groundChainNets: the ground pins become one connected chain of 2-pin traces; 
 
 t('a wall kill ships the best rung so far: SIGTERM is handled, the ladder registers its best, the flush carries a board and says so', () => {
   assert.match(src, /process\.on\('SIGTERM', \(\) => \{ flushCheckpoint\(/)
-  assert.match(src, /if \(best\) CHECKPOINT = \(\) => \(\{ best, trail \}\)/, 'the ladder must register every new best rung')
+  assert.match(src, /if \(best && !only\) CHECKPOINT = \(\) => \(\{ best, trail \}\)/, 'the ladder must register every new best rung (but never a retry rung)')
   const flush = cut('async function flushCheckpoint', '\n}\n')
   for (const must of ['wallHit: true', 'kicadPcb', 'drcScore(best.drc, unrouted)', "verdict: 'wall hit", 'process.exit(0)']) assert.ok(flush.includes(must), `flush must carry ${must}`)
   assert.match(src, /WALL_MS - 150_000/, 'the ladder must leave 150s of the wall for post-processing')
+})
+
+t('targeted GND retry: one stub per unreached pad to its NEAREST reached ground pad; winner-only rung on the original placement; kept only if the shipped score drops', () => {
+  const cj = []
+  const comp = (name, id) => cj.push({ type: 'source_component', name, source_component_id: id })
+  const port = (cid, pin, spid, x, y) => { cj.push({ type: 'source_port', source_component_id: cid, pin_number: pin, name: `pin${pin}`, source_port_id: spid }); cj.push({ type: 'pcb_port', source_port_id: spid, x, y }) }
+  comp('U1', 'c1'); comp('C2', 'c2'); comp('C5', 'c5')
+  port('c1', 8, 'p1', 0, 0); port('c1', 47, 'p2', 10, 0); port('c2', 2, 'p3', 1, 1); port('c5', 2, 'p4', 9, 1)
+  assert.deepEqual(ns.portPos(cj, 'U1.47'), { x: 10, y: 0 })
+  assert.equal(ns.portPos(cj, 'U9.1'), null)
+  assert.deepEqual(ns.gndStubNets(cj, ['U1.8', 'U1.47', 'C2.2', 'C5.2'], ['U1.8', 'U1.47']), [['U1.8', 'C2.2'], ['U1.47', 'C5.2']])
+  assert.deepEqual(ns.gndStubNets(cj, ['U1.8', 'U1.47'], ['U1.8', 'U1.47']), [], 'no reached pad to stub to → no retry nets')
+  assert.match(src, /only: strat, placeNets: input\.nets/, 'the retry re-runs the winning rung on the original placement')
+  assert.match(src, /if \(after < before && sigOpen\(gp2\) <= sigOpen\(gp\)\) \{/, "the retry is accepted only when the shipped-board score improves AND no signal net opens")
+  assert.match(src, /unreachedPads: Array\.isArray\(gp\.unreachedPads\)/, 'the pour must hand the runner the names of the pads it could not reach')
+})
+
+t('through-hole padstacks are inflated so copper stays hole_clearance from the HOLE: header ring 350um → +70um at standard, SMD pads untouched, rule wired into freerouteReal', () => {
+  const d = { library: { padstacks: [
+    { name: 'Round[A]Pad_1000_1700_um', shapes: [{ shapeType: 'circle', layer: 'F.Cu', diameter: 1700 }, { shapeType: 'circle', layer: 'B.Cu', diameter: 1700 }], hole: { shape: 'circle', diameter: 1700 } },
+    { name: 'Rect[A]Pad_1700x1700_um', shapes: [{ shapeType: 'polygon', layer: 'F.Cu', width: 0, coordinates: [-850, 850, 850, 850, 850, -850, -850, -850, -850, 850] }], hole: { shape: 'circle', diameter: 1000 } },
+    { name: 'Oval[A]Pad_1000x1600_um', shapes: [{ shapeType: 'path', layer: 'F.Cu', width: 1700, coordinates: [0, -300, 0, 300] }], hole: { shape: 'oval', width: 1000, height: 1600 } },
+    { name: 'Round[A]Pad_1300_2600_um', shapes: [{ shapeType: 'circle', layer: 'F.Cu', diameter: 2600 }], hole: { shape: 'circle', diameter: 2600 } },
+    { name: 'RoundRect[T]Pad_875x250_um', shapes: [{ shapeType: 'polygon', layer: 'F.Cu', coordinates: [-437, 125, 437, 125, 437, -125, -437, -125, -437, 125] }] },
+  ] } }
+  const r = ns.inflateThtPadstacks(d, 'standard') // hc 500, tc 100: ring 350 → 500-100-350 = 50 + 20 margin = 70
+  assert.equal(r.count, 3, 'the three header-class pads inflate; the 0.65mm-ring terminal pad and the SMD pad do not')
+  assert.equal(r.maxUm, 70)
+  assert.equal(d.library.padstacks[0].shapes[0].diameter, 1840); assert.equal(d.library.padstacks[0].shapes[1].diameter, 1840)
+  assert.deepEqual(d.library.padstacks[1].shapes[0].coordinates, [-920, 920, 920, 920, 920, -920, -920, -920, -920, 920])
+  assert.equal(d.library.padstacks[2].shapes[0].width, 1840)
+  assert.equal(d.library.padstacks[3].shapes[0].diameter, 2600, 'ring already clears the rule → untouched')
+  assert.deepEqual(d.library.padstacks[4].shapes[0].coordinates, [-437, 125, 437, 125, 437, -125, -437, -125, -437, 125], 'SMD pad untouched')
+  assert.match(src, /if \(process\.env\.FL_THT_PADSTACK !== '0'\) \{ const th = inflateThtPadstacks\(dsnPcb, profile\)/, 'freerouteReal must apply it per rung profile')
 })
 
 console.log(`${pass} passed`)
