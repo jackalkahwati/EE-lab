@@ -39,6 +39,23 @@ SIGNALS = [
 ]
 
 
+# Real device drivers keyed by MPN (seed library parts). Each is a bounded,
+# datasheet-register driver over embedded-hal 1.0 traits with a probe() that
+# reads the part's ID register — the self-test proves the bus and the part.
+NAME_TO_PERIPH = [
+    (r"^BME280", "bme280"), (r"^SSD1306", "ssd1306"), (r"^MCP23017", "mcp23017"),
+    (r"^INA219", "ina219"), (r"^DS3231", "ds3231"), (r"^LIS3DH", "lis3dh"), (r"^W25Q", "spi_flash"),
+    (r"^MPU-?6050", "imu"), (r"^SX127|^RFM95", "radio"),
+]
+
+
+def _periph_for_name(name):
+    for rx, periph in NAME_TO_PERIPH:
+        if re.search(rx, name, re.I):
+            return periph
+    return None
+
+
 def load():
     b = pcbnew.LoadBoard(BOARD)
     pins = {}          # signal -> gpio
@@ -78,7 +95,10 @@ def load():
             devs = []
         peripherals = []
         for d in devs:
-            p = type_to_periph.get(d.get("type"))
+            # the PART decides the driver: a BME280 is not an LM75 (the coarse
+            # type map sent every I2C environmental sensor to the LM75-register
+            # driver, which reads garbage from a BME280)
+            p = _periph_for_name(str(d.get("name") or "")) or type_to_periph.get(d.get("type"))
             if p and p not in peripherals:
                 peripherals.append(p)
     else:
@@ -391,6 +411,371 @@ pub fn disarm<P: SetDutyCycle>(pwm: &mut P, period_us: u32) -> Result<(), P::Err
 '''.format(n=n, chans=chans, arms=arms)
 
 
+
+BME280_RS = """//! Bosch BME280 temperature / humidity / pressure sensor over embedded-hal I2C.
+//! Register map + compensation per the BME280 datasheet (section 4.2.3). Forced
+//! mode: every read() triggers one conversion. Returns fixed-point values.
+#![allow(dead_code)]
+use embedded_hal::i2c::I2c;
+
+pub const ADDR: u8 = 0x76; // SDO low; 0x77 with SDO high
+const REG_ID: u8 = 0xD0;
+const REG_RESET: u8 = 0xE0;
+const REG_CTRL_HUM: u8 = 0xF2;
+const REG_STATUS: u8 = 0xF3;
+const REG_CTRL_MEAS: u8 = 0xF4;
+const REG_CONFIG: u8 = 0xF5;
+const REG_DATA: u8 = 0xF7;
+const REG_CALIB00: u8 = 0x88;
+const REG_CALIB26: u8 = 0xE1;
+pub const CHIP_ID: u8 = 0x60;
+
+#[derive(Clone, Copy, Default)]
+struct Calib {
+    t1: u16, t2: i16, t3: i16,
+    p1: u16, p2: i16, p3: i16, p4: i16, p5: i16, p6: i16, p7: i16, p8: i16, p9: i16,
+    h1: u8, h2: i16, h3: u8, h4: i16, h5: i16, h6: i8,
+}
+
+#[derive(Clone, Copy, Default, Debug)]
+pub struct Reading {
+    /// temperature in 0.01 degC
+    pub temp_centi_c: i32,
+    /// pressure in Pa
+    pub pressure_pa: u32,
+    /// relative humidity in 1/1024 %
+    pub humidity_q10: u32,
+}
+
+pub struct Bme280<I2C> {
+    i2c: I2C,
+    addr: u8,
+    calib: Calib,
+    t_fine: i32,
+}
+
+impl<I2C: I2c> Bme280<I2C> {
+    pub fn new(i2c: I2C) -> Self {
+        Self { i2c, addr: ADDR, calib: Calib::default(), t_fine: 0 }
+    }
+    pub fn with_addr(i2c: I2C, addr: u8) -> Self {
+        Self { i2c, addr, calib: Calib::default(), t_fine: 0 }
+    }
+    fn rd(&mut self, reg: u8, buf: &mut [u8]) -> Result<(), I2C::Error> {
+        self.i2c.write_read(self.addr, &[reg], buf)
+    }
+    fn wr(&mut self, reg: u8, v: u8) -> Result<(), I2C::Error> {
+        self.i2c.write(self.addr, &[reg, v])
+    }
+    /// ID register must read 0x60.
+    pub fn probe(&mut self) -> Result<bool, I2C::Error> {
+        let mut id = [0u8; 1];
+        self.rd(REG_ID, &mut id)?;
+        Ok(id[0] == CHIP_ID)
+    }
+    /// Load calibration and configure: humidity x1, temp x1, pressure x1, forced mode.
+    pub fn init(&mut self) -> Result<(), I2C::Error> {
+        let mut c = [0u8; 26];
+        self.rd(REG_CALIB00, &mut c)?;
+        let mut h = [0u8; 7];
+        self.rd(REG_CALIB26, &mut h)?;
+        let u16le = |a: u8, b: u8| u16::from_le_bytes([a, b]);
+        let i16le = |a: u8, b: u8| i16::from_le_bytes([a, b]);
+        self.calib = Calib {
+            t1: u16le(c[0], c[1]), t2: i16le(c[2], c[3]), t3: i16le(c[4], c[5]),
+            p1: u16le(c[6], c[7]), p2: i16le(c[8], c[9]), p3: i16le(c[10], c[11]), p4: i16le(c[12], c[13]),
+            p5: i16le(c[14], c[15]), p6: i16le(c[16], c[17]), p7: i16le(c[18], c[19]), p8: i16le(c[20], c[21]),
+            p9: i16le(c[22], c[23]),
+            h1: c[25],
+            h2: i16le(h[0], h[1]), h3: h[2],
+            h4: ((h[3] as i16) << 4) | (h[4] as i16 & 0x0F),
+            h5: ((h[5] as i16) << 4) | ((h[4] as i16) >> 4),
+            h6: h[6] as i8,
+        };
+        self.wr(REG_CTRL_HUM, 0x01)?;   // humidity oversampling x1
+        self.wr(REG_CONFIG, 0x00)?;     // filter off, standby n/a in forced mode
+        Ok(())
+    }
+    /// One forced conversion, then compensated temperature / pressure / humidity.
+    pub fn read(&mut self) -> Result<Reading, I2C::Error> {
+        self.wr(REG_CTRL_MEAS, (0x01 << 5) | (0x01 << 2) | 0x01)?; // osrs_t x1, osrs_p x1, forced
+        // wait for measuring bit to clear (typ. ~8 ms); bounded spin on the bus
+        for _ in 0..200 {
+            let mut st = [0u8; 1];
+            self.rd(REG_STATUS, &mut st)?;
+            if st[0] & 0x08 == 0 { break; }
+        }
+        let mut d = [0u8; 8];
+        self.rd(REG_DATA, &mut d)?;
+        let adc_p: i32 = ((d[0] as i32) << 12) | ((d[1] as i32) << 4) | ((d[2] as i32) >> 4);
+        let adc_t: i32 = ((d[3] as i32) << 12) | ((d[4] as i32) << 4) | ((d[5] as i32) >> 4);
+        let adc_h: i32 = ((d[6] as i32) << 8) | (d[7] as i32);
+        let c = self.calib;
+        // temperature (datasheet 4.2.3, integer form)
+        let var1 = ((((adc_t >> 3) - ((c.t1 as i32) << 1))) * (c.t2 as i32)) >> 11;
+        let var2 = (((((adc_t >> 4) - (c.t1 as i32)) * ((adc_t >> 4) - (c.t1 as i32))) >> 12) * (c.t3 as i32)) >> 14;
+        self.t_fine = var1 + var2;
+        let temp_centi_c = (self.t_fine * 5 + 128) >> 8;
+        // pressure (64-bit integer form)
+        let mut v1: i64 = (self.t_fine as i64) - 128000;
+        let mut v2: i64 = v1 * v1 * (c.p6 as i64);
+        v2 += (v1 * (c.p5 as i64)) << 17;
+        v2 += (c.p4 as i64) << 35;
+        v1 = ((v1 * v1 * (c.p3 as i64)) >> 8) + ((v1 * (c.p2 as i64)) << 12);
+        v1 = ((((1i64) << 47) + v1) * (c.p1 as i64)) >> 33;
+        let pressure_pa: u32 = if v1 == 0 { 0 } else {
+            let mut p: i64 = 1048576 - adc_p as i64;
+            p = (((p << 31) - v2) * 3125) / v1;
+            let v1b = ((c.p9 as i64) * (p >> 13) * (p >> 13)) >> 25;
+            let v2b = ((c.p8 as i64) * p) >> 19;
+            p = ((p + v1b + v2b) >> 8) + ((c.p7 as i64) << 4);
+            (p / 256) as u32
+        };
+        // humidity (integer form, result in Q22.10 %RH)
+        let mut vh: i32 = self.t_fine - 76800;
+        vh = (((adc_h << 14) - ((c.h4 as i32) << 20) - ((c.h5 as i32) * vh)) + 16384) >> 15;
+        vh = vh * (((((((vh * (c.h6 as i32)) >> 10) * (((vh * (c.h3 as i32)) >> 11) + 32768)) >> 10) + 2097152) * (c.h2 as i32) + 8192) >> 14);
+        vh -= ((((vh >> 15) * (vh >> 15)) >> 7) * (c.h1 as i32)) >> 4;
+        let vh = vh.clamp(0, 419430400);
+        let humidity_q10 = (vh >> 12) as u32;
+        Ok(Reading { temp_centi_c, pressure_pa, humidity_q10 })
+    }
+}
+"""
+
+SSD1306_RS = """//! Solomon SSD1306 128x64 OLED over embedded-hal I2C: init sequence, clear,
+//! and a page-buffer write. No font: the application draws into `fb`.
+#![allow(dead_code)]
+use embedded_hal::i2c::I2c;
+
+pub const ADDR: u8 = 0x3C; // 0x3D with SA0 high
+const CTRL_CMD: u8 = 0x00;
+const CTRL_DATA: u8 = 0x40;
+pub const WIDTH: usize = 128;
+pub const HEIGHT: usize = 64;
+pub const PAGES: usize = HEIGHT / 8;
+
+pub struct Ssd1306<I2C> {
+    i2c: I2C,
+    addr: u8,
+    pub fb: [u8; WIDTH * PAGES],
+}
+
+impl<I2C: I2c> Ssd1306<I2C> {
+    pub fn new(i2c: I2C) -> Self { Self { i2c, addr: ADDR, fb: [0; WIDTH * PAGES] } }
+    fn cmd(&mut self, c: u8) -> Result<(), I2C::Error> { self.i2c.write(self.addr, &[CTRL_CMD, c]) }
+    /// The panel has no ID register; a probe is an ACKed command write.
+    pub fn probe(&mut self) -> Result<bool, I2C::Error> { self.cmd(0xE3).map(|_| true) } // NOP
+    pub fn init(&mut self) -> Result<(), I2C::Error> {
+        for c in [0xAEu8, 0xD5, 0x80, 0xA8, 0x3F, 0xD3, 0x00, 0x40, 0x8D, 0x14, 0x20, 0x00,
+                  0xA1, 0xC8, 0xDA, 0x12, 0x81, 0xCF, 0xD9, 0xF1, 0xDB, 0x40, 0xA4, 0xA6, 0xAF] {
+            self.cmd(c)?;
+        }
+        self.clear()?;
+        Ok(())
+    }
+    pub fn clear(&mut self) -> Result<(), I2C::Error> {
+        self.fb = [0; WIDTH * PAGES];
+        self.flush()
+    }
+    pub fn set_pixel(&mut self, x: usize, y: usize, on: bool) {
+        if x >= WIDTH || y >= HEIGHT { return; }
+        let i = x + (y / 8) * WIDTH;
+        let m = 1u8 << (y % 8);
+        if on { self.fb[i] |= m } else { self.fb[i] &= !m }
+    }
+    /// Push the whole framebuffer (horizontal addressing mode, 16-byte chunks).
+    pub fn flush(&mut self) -> Result<(), I2C::Error> {
+        for c in [0x21u8, 0x00, (WIDTH - 1) as u8, 0x22, 0x00, (PAGES - 1) as u8] { self.cmd(c)?; }
+        let mut chunk = [0u8; 17];
+        chunk[0] = CTRL_DATA;
+        for i in (0..self.fb.len()).step_by(16) {
+            let n = core::cmp::min(16, self.fb.len() - i);
+            chunk[1..1 + n].copy_from_slice(&self.fb[i..i + n]);
+            self.i2c.write(self.addr, &chunk[..1 + n])?;
+        }
+        Ok(())
+    }
+}
+"""
+
+MCP23017_RS = """//! Microchip MCP23017 16-bit I2C GPIO expander (BANK=0 register map).
+#![allow(dead_code)]
+use embedded_hal::i2c::I2c;
+
+pub const ADDR: u8 = 0x20; // A2..A0 low
+const IODIRA: u8 = 0x00;
+const IODIRB: u8 = 0x01;
+const GPPUA: u8 = 0x0C;
+const GPIOA: u8 = 0x12;
+const GPIOB: u8 = 0x13;
+const OLATA: u8 = 0x14;
+const OLATB: u8 = 0x15;
+const IOCON: u8 = 0x0A;
+
+pub struct Mcp23017<I2C> { i2c: I2C, addr: u8 }
+
+impl<I2C: I2c> Mcp23017<I2C> {
+    pub fn new(i2c: I2C) -> Self { Self { i2c, addr: ADDR } }
+    fn rd(&mut self, reg: u8) -> Result<u8, I2C::Error> { let mut b = [0u8; 1]; self.i2c.write_read(self.addr, &[reg], &mut b)?; Ok(b[0]) }
+    fn wr(&mut self, reg: u8, v: u8) -> Result<(), I2C::Error> { self.i2c.write(self.addr, &[reg, v]) }
+    /// No ID register: IOCON bit 7 (BANK) must read back as written (0).
+    pub fn probe(&mut self) -> Result<bool, I2C::Error> { self.wr(IOCON, 0x00)?; Ok(self.rd(IOCON)? & 0x80 == 0) }
+    /// 1 = input, 0 = output, per port (A = bits 0-7, B = bits 8-15).
+    pub fn set_direction(&mut self, mask: u16) -> Result<(), I2C::Error> { self.wr(IODIRA, mask as u8)?; self.wr(IODIRB, (mask >> 8) as u8) }
+    pub fn set_pullups(&mut self, mask: u16) -> Result<(), I2C::Error> { self.wr(GPPUA, mask as u8)?; self.wr(GPPUA + 1, (mask >> 8) as u8) }
+    pub fn write(&mut self, bits: u16) -> Result<(), I2C::Error> { self.wr(OLATA, bits as u8)?; self.wr(OLATB, (bits >> 8) as u8) }
+    pub fn read(&mut self) -> Result<u16, I2C::Error> { Ok(self.rd(GPIOA)? as u16 | ((self.rd(GPIOB)? as u16) << 8)) }
+}
+"""
+
+INA219_RS = """//! TI INA219 high-side current / power monitor over I2C.
+#![allow(dead_code)]
+use embedded_hal::i2c::I2c;
+
+pub const ADDR: u8 = 0x40;
+const REG_CONFIG: u8 = 0x00;
+const REG_SHUNT: u8 = 0x01;
+const REG_BUS: u8 = 0x02;
+const REG_CALIB: u8 = 0x05;
+const CONFIG_RESET_VALUE: u16 = 0x399F;
+
+pub struct Ina219<I2C> { i2c: I2C, addr: u8, shunt_micro_ohm: u32 }
+
+impl<I2C: I2c> Ina219<I2C> {
+    /// `shunt_micro_ohm`: the board's shunt (100000 = 0.1 ohm).
+    pub fn new(i2c: I2C, shunt_micro_ohm: u32) -> Self { Self { i2c, addr: ADDR, shunt_micro_ohm } }
+    fn rd16(&mut self, reg: u8) -> Result<u16, I2C::Error> { let mut b = [0u8; 2]; self.i2c.write_read(self.addr, &[reg], &mut b)?; Ok(u16::from_be_bytes(b)) }
+    fn wr16(&mut self, reg: u8, v: u16) -> Result<(), I2C::Error> { let b = v.to_be_bytes(); self.i2c.write(self.addr, &[reg, b[0], b[1]]) }
+    /// Reset and check the configuration register's documented power-on value.
+    pub fn probe(&mut self) -> Result<bool, I2C::Error> { self.wr16(REG_CONFIG, 0x8000)?; Ok(self.rd16(REG_CONFIG)? == CONFIG_RESET_VALUE) }
+    /// Bus voltage in mV (LSB 4 mV, bits 15..3).
+    pub fn bus_mv(&mut self) -> Result<u32, I2C::Error> { Ok(((self.rd16(REG_BUS)? >> 3) as u32) * 4) }
+    /// Shunt voltage in uV (LSB 10 uV, signed).
+    pub fn shunt_uv(&mut self) -> Result<i32, I2C::Error> { Ok((self.rd16(REG_SHUNT)? as i16 as i32) * 10) }
+    /// Current in uA from the shunt reading (no calibration register needed).
+    pub fn current_ua(&mut self) -> Result<i32, I2C::Error> { let uv = self.shunt_uv()? as i64; Ok(((uv * 1_000_000) / (self.shunt_micro_ohm as i64)) as i32) }
+}
+"""
+
+DS3231_RS = """//! Maxim DS3231 real-time clock over I2C (BCD registers 0x00..0x06).
+#![allow(dead_code)]
+use embedded_hal::i2c::I2c;
+
+pub const ADDR: u8 = 0x68;
+const REG_SECONDS: u8 = 0x00;
+const REG_CONTROL: u8 = 0x0E;
+const REG_TEMP_MSB: u8 = 0x11;
+
+#[derive(Clone, Copy, Default, Debug)]
+pub struct DateTime { pub year: u16, pub month: u8, pub day: u8, pub hour: u8, pub minute: u8, pub second: u8 }
+
+fn bcd2bin(v: u8) -> u8 { (v >> 4) * 10 + (v & 0x0F) }
+fn bin2bcd(v: u8) -> u8 { ((v / 10) << 4) | (v % 10) }
+
+pub struct Ds3231<I2C> { i2c: I2C, addr: u8 }
+
+impl<I2C: I2c> Ds3231<I2C> {
+    pub fn new(i2c: I2C) -> Self { Self { i2c, addr: ADDR } }
+    /// Control register bit 7 (EOSC) is writable and readable: write 0, read back.
+    pub fn probe(&mut self) -> Result<bool, I2C::Error> {
+        let mut b = [0u8; 1];
+        self.i2c.write_read(self.addr, &[REG_CONTROL], &mut b)?;
+        self.i2c.write(self.addr, &[REG_CONTROL, b[0] & 0x7F])?;
+        self.i2c.write_read(self.addr, &[REG_CONTROL], &mut b)?;
+        Ok(b[0] & 0x80 == 0)
+    }
+    pub fn read(&mut self) -> Result<DateTime, I2C::Error> {
+        let mut r = [0u8; 7];
+        self.i2c.write_read(self.addr, &[REG_SECONDS], &mut r)?;
+        Ok(DateTime {
+            second: bcd2bin(r[0] & 0x7F), minute: bcd2bin(r[1] & 0x7F), hour: bcd2bin(r[2] & 0x3F),
+            day: bcd2bin(r[4] & 0x3F), month: bcd2bin(r[5] & 0x1F), year: 2000 + bcd2bin(r[6]) as u16,
+        })
+    }
+    pub fn set(&mut self, t: DateTime) -> Result<(), I2C::Error> {
+        self.i2c.write(self.addr, &[REG_SECONDS, bin2bcd(t.second), bin2bcd(t.minute), bin2bcd(t.hour), 1,
+                                    bin2bcd(t.day), bin2bcd(t.month), bin2bcd((t.year.saturating_sub(2000)) as u8)])
+    }
+    /// Die temperature in 0.25 degC units.
+    pub fn temp_quarter_c(&mut self) -> Result<i16, I2C::Error> {
+        let mut b = [0u8; 2];
+        self.i2c.write_read(self.addr, &[REG_TEMP_MSB], &mut b)?;
+        Ok(((b[0] as i8 as i16) << 2) | ((b[1] >> 6) as i16))
+    }
+}
+"""
+
+LIS3DH_RS = """//! ST LIS3DH 3-axis accelerometer over I2C (WHO_AM_I = 0x33).
+#![allow(dead_code)]
+use embedded_hal::i2c::I2c;
+
+pub const ADDR: u8 = 0x18; // SA0 low; 0x19 high
+const WHO_AM_I: u8 = 0x0F;
+const CTRL_REG1: u8 = 0x20;
+const CTRL_REG4: u8 = 0x23;
+const OUT_X_L: u8 = 0x28;
+pub const ID: u8 = 0x33;
+
+pub struct Lis3dh<I2C> { i2c: I2C, addr: u8 }
+
+impl<I2C: I2c> Lis3dh<I2C> {
+    pub fn new(i2c: I2C) -> Self { Self { i2c, addr: ADDR } }
+    pub fn probe(&mut self) -> Result<bool, I2C::Error> { let mut b = [0u8; 1]; self.i2c.write_read(self.addr, &[WHO_AM_I], &mut b)?; Ok(b[0] == ID) }
+    /// 100 Hz, all axes, +/-2 g, high-resolution.
+    pub fn init(&mut self) -> Result<(), I2C::Error> { self.i2c.write(self.addr, &[CTRL_REG1, 0x57])?; self.i2c.write(self.addr, &[CTRL_REG4, 0x08]) }
+    /// Raw 12-bit left-justified samples (x, y, z); 1 g = 16384 in +/-2 g HR mode.
+    pub fn read(&mut self) -> Result<(i16, i16, i16), I2C::Error> {
+        let mut b = [0u8; 6];
+        self.i2c.write_read(self.addr, &[OUT_X_L | 0x80], &mut b)?; // auto-increment
+        Ok((i16::from_le_bytes([b[0], b[1]]), i16::from_le_bytes([b[2], b[3]]), i16::from_le_bytes([b[4], b[5]])))
+    }
+}
+"""
+
+SPI_FLASH_RS = """//! Winbond W25Q-series SPI NOR flash over an embedded-hal SpiDevice.
+#![allow(dead_code)]
+use embedded_hal::spi::SpiDevice;
+
+const CMD_JEDEC_ID: u8 = 0x9F;
+const CMD_READ: u8 = 0x03;
+const CMD_WRITE_ENABLE: u8 = 0x06;
+const CMD_READ_STATUS1: u8 = 0x05;
+pub const WINBOND: u8 = 0xEF;
+
+pub struct SpiFlash<SPI> { spi: SPI }
+
+impl<SPI: SpiDevice> SpiFlash<SPI> {
+    pub fn new(spi: SPI) -> Self { Self { spi } }
+    /// JEDEC id: (manufacturer, memory type, capacity code).
+    pub fn jedec_id(&mut self) -> Result<(u8, u8, u8), SPI::Error> {
+        let mut b = [CMD_JEDEC_ID, 0, 0, 0];
+        self.spi.transfer_in_place(&mut b)?;
+        Ok((b[1], b[2], b[3]))
+    }
+    pub fn probe(&mut self) -> Result<bool, SPI::Error> { Ok(self.jedec_id()?.0 == WINBOND) }
+    pub fn read(&mut self, addr: u32, buf: &mut [u8]) -> Result<(), SPI::Error> {
+        let cmd = [CMD_READ, (addr >> 16) as u8, (addr >> 8) as u8, addr as u8];
+        self.spi.transaction(&mut [embedded_hal::spi::Operation::Write(&cmd), embedded_hal::spi::Operation::Read(buf)])
+    }
+    pub fn busy(&mut self) -> Result<bool, SPI::Error> { let mut b = [CMD_READ_STATUS1, 0]; self.spi.transfer_in_place(&mut b)?; Ok(b[1] & 0x01 != 0) }
+}
+"""
+
+# name -> (module, struct type expr, ctor args, selftest body, app read stmt, bus generic)
+REAL_DRIVERS = {
+    "bme280": ("bme280", "crate::bme280::Bme280<I2Cb>", "let _ = self.bme280.read().map_err(|_| ())?;", "i2c"),
+    "ssd1306": ("ssd1306", "crate::ssd1306::Ssd1306<I2Cd>", "self.ssd1306.flush().map_err(|_| ())?;", "i2c"),
+    "mcp23017": ("mcp23017", "crate::mcp23017::Mcp23017<I2Cg>", "let _ = self.mcp23017.read().map_err(|_| ())?;", "i2c"),
+    "ina219": ("ina219", "crate::ina219::Ina219<I2Ci>", "let _ = self.ina219.current_ua().map_err(|_| ())?;", "i2c"),
+    "ds3231": ("ds3231", "crate::ds3231::Ds3231<I2Cr>", "let _ = self.ds3231.read().map_err(|_| ())?;", "i2c"),
+    "lis3dh": ("lis3dh", "crate::lis3dh::Lis3dh<I2Ca>", "let _ = self.lis3dh.read().map_err(|_| ())?;", "i2c"),
+    "spi_flash": ("spi_flash", "crate::spi_flash::SpiFlash<SPIf>", "let _ = self.spi_flash.busy().map_err(|_| ())?;", "spi"),
+}
+REAL_DRIVER_SRC = {"bme280": BME280_RS, "ssd1306": SSD1306_RS, "mcp23017": MCP23017_RS, "ina219": INA219_RS,
+                   "ds3231": DS3231_RS, "lis3dh": LIS3DH_RS, "spi_flash": SPI_FLASH_RS}
+
+
 def emit_selftest(peripherals):
     steps, doc = [], []
     if "radio" in peripherals:
@@ -430,6 +815,17 @@ def emit_selftest(peripherals):
     {
         t.probe()
     }''')
+    for periph, (mod, ftype, _step, bus) in REAL_DRIVERS.items():
+        if periph not in peripherals:
+            continue
+        struct = ftype[len("crate::%s::" % mod):ftype.index("<")]
+        bound = "embedded_hal::spi::SpiDevice" if bus == "spi" else "embedded_hal::i2c::I2c"
+        doc.append("//! - %s: read the part's ID / documented register and compare" % mod)
+        steps.append("""    /// %s: probe the part's identity register over the bus.
+    pub fn %s<B: %s>(d: &mut crate::%s::%s<B>) -> Result<bool, B::Error> {
+        d.probe()
+    }
+""" % (mod, mod, bound, mod, struct))
     if "gnss" in peripherals:
         doc.append("//! - gnss: read a sentence, confirm a valid NMEA fix frame")
         steps.append('''    /// Bring up the GNSS: confirm it is emitting valid NMEA fix sentences.
@@ -508,6 +904,16 @@ def emit_app(peripherals, motors):
         init_stmts += ["let _ = self.modem.probe().map_err(|_| ())?;",
                        "let _ = self.modem.network_attach().map_err(|_| ())?;"]
         step_stmts.append('let _ = self.modem.send_at("AT").map_err(|_| ())?;')
+    for periph, (mod, ftype, step, bus) in REAL_DRIVERS.items():
+        if periph not in peripherals:
+            continue
+        tp = ftype[ftype.index("<") + 1:-1]
+        add_tp(tp, "embedded_hal::spi::SpiDevice" if bus == "spi" else "embedded_hal::i2c::I2c")
+        fields.append((mod, ftype))
+        init_stmts.append("let _ = self.%s.probe().map_err(|_| ())?;" % mod)
+        if periph in ("bme280", "ssd1306", "lis3dh"):
+            init_stmts.append("let _ = self.%s.init().map_err(|_| ())?;" % mod)
+        step_stmts.append(step)
     if motors:
         add_tp("Pm", "embedded_hal::pwm::SetDutyCycle")
         fields.append(("pwm", "Pm"))
@@ -589,6 +995,10 @@ def emit(pins, peripherals, motors):
     if "tempsensor" in peripherals:
         open(os.path.join(OUT, "src", "tempsensor.rs"), "w").write(TEMPSENSOR_RS)
         mods.append("tempsensor")
+    for periph, (mod, _ftype, _step, _bus) in REAL_DRIVERS.items():
+        if periph in peripherals:
+            open(os.path.join(OUT, "src", mod + ".rs"), "w").write(REAL_DRIVER_SRC[periph])
+            mods.append(mod)
     if "motors" in peripherals:
         open(os.path.join(OUT, "src", "motors.rs"), "w").write(emit_motors(motors))
         mods.append("motors")
