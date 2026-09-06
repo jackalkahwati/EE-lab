@@ -411,6 +411,7 @@ function plannerNetlist(designPath: string): Promise<{ parts: any[]; nets: any[]
 // when under 120s remain, so the route stays inside its 560s envelope and
 // maxDuration=600. The pipeline's early build overlaps other stages anyway.
 const FIRST_BUILD_WALL_MS = 600_000 // measured: the 22-27 part real-footprint boards need 300s of ladder + the post-pour repairs; 450s starved those repairs on prod
+const ROUTE_ENVELOPE_MS = 1_200_000 // first build + grow rungs; see handlePost
 function runBoard(payload: object, svgPath: string, timeoutMs = FIRST_BUILD_WALL_MS, signal?: AbortSignal): Promise<any> {
   const script = path.join(process.cwd(), '..', '..', 'tools', 'tscircuit', 'run_board.mjs')
   return new Promise((resolve, reject) => {
@@ -621,7 +622,6 @@ async function handlePost(req: Request) {
   // 135s ladder, no pour-selection, no ground retry and no residual nudge, and
   // kept a 0.25mm via nit against the 0.30mm rule. The pipeline's fab/firmware
   // wait (EARLY_CS_WAIT_MS) is sized above this.
-  const ROUTE_ENVELOPE_MS = 1_200_000
   let body: any
   try { body = await req.json() } catch { return Response.json({ error: 'bad json body' }, { status: 400 }) }
   const spec = body.spec as ProductSpec | undefined
