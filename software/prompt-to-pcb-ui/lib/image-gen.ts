@@ -43,8 +43,10 @@ async function cloudflareImage(prompt: string): Promise<ImageResult> {
       {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-        // Fixed seed so the prompt-only fallback path is deterministic run-to-run.
-        body: JSON.stringify({ prompt, steps: 8, seed: 42 }),
+        // No `seed`: the endpoint now rejects it ("Additional or unevaluated
+        // properties '/seed' at '/' not allowed" — measured on the first product
+        // through the API; the whole industrial-design render failed on it).
+        body: JSON.stringify({ prompt, steps: 8 }),
         signal: AbortSignal.timeout(60_000),
       },
     )
