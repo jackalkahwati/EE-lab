@@ -345,3 +345,21 @@ three times against copper the target rung never produced). Use these:
 
 Compare rung-to-rung using `drcRepair.iterations[]` in the output JSON, not the final
 winner: the winner changes with whichever rungs the deadline let run.
+
+## Building a board from the command line (no UI)
+
+Two entry points, both in `tools/cli/`:
+
+- **`tools/cli/fl-board.sh "<prompt>" [outdir]`** — no server, no auth. Runs the
+  planner (`hardware/planner/plan_cli.py`), the netlist export (`synth.py --netlist`),
+  and the router (`tools/tscircuit/run_board.mjs`): the same chain as the pipeline's
+  electronics stage, minus the LLM architect's prompt rewrite. Prints the planner's
+  honest report (substituted / unsupported parts), the ladder trail and the shipped
+  verdict; writes `design.json`, `spec.json`, `board.json`, `board.kicad_pcb`, `run.log`.
+  `FL_WALL_MS=285000` emulates the prod wall (SIGTERM at the wall; the runner ships
+  its best rung with `wallHit: true`). `FL_ONLY_RUNG` / `FL_ROUTE_GND` etc. apply.
+- **`FL_API_KEY=flk_live_… tools/cli/fl-api.sh "<prompt>"`** — the FULL pipeline over
+  the programmatic API (`POST /api/v1/boards`, poll `GET /api/v1/runs/<id>`): same
+  stages and gates as Compose, run owned by the key's creator. Mint a read_write key
+  at `/enterprise/integrations`; export it, never pass it as an argument.
+  `FL_BASE` overrides the base URL (default the production app).
