@@ -29,13 +29,16 @@ const dsn = () => ({
 let pass = 0
 const t = (name, fn) => { fn(); pass++; console.log('  ok  ' + name) }
 
-t('viaPadstackUm is sized from the STRICTEST profile hole rule, not a constant', () => {
-  const um = ns.viaPadstackUm(dsn())
-  // standard: H 0.5, hole 0.2 -> 2*(500+100-150)+50 = 950
-  assert.equal(um, 950)
-  // a tighter default clearance in the DSN makes the padstack LARGER, never smaller
-  const d = dsn(); d.structure.rule.clearances[0].value = 100
-  assert.equal(ns.viaPadstackUm(d), 1050)
+t('viaPadstackUm derives from the PROFILE: hole/2 + holeClearance - the trace clearance the DSN carries, +20um', () => {
+  // hdi: 2*(100 + 400 - 70) + 20 = 880 ; standard: 2*(100 + 500 - 100) + 20 = 1020
+  assert.equal(ns.viaPadstackUm(dsn(), 'hdi'), 880)
+  assert.equal(ns.viaPadstackUm(dsn(), 'standard'), 1020)
+  assert.equal(ns.viaPadstackUm(dsn()), 1020, 'no profile named -> the strictest')
+  assert.equal(ns.viaPadstackUm(dsn(), 'no-such-profile'), 1020, 'unknown profile -> the strictest, never smaller')
+  for (const [k, p] of Object.entries(ns.FAB_PROFILES)) {
+    const r = ns.viaPadstackUm(dsn(), k) / 2 / 1000, rh = p.via.hole / 2, hc = p.holeClearance, tc = p.trace.clearance
+    assert.ok(r + tc >= rh + hc, `${k}: copper radius ${r} + clearance ${tc} must reach hole edge ${rh} + rule ${hc}`)
+  }
 })
 
 t('setViaPadstack inflates EVERY copper shape of the via and nothing else', () => {

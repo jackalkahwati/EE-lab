@@ -314,15 +314,21 @@ function setViaClearance(dsnPcb, um) {
  * strictest profile. fabRepair then normalises the SHIPPED via back to the
  * profile's own pad/hole, so this number never reaches the board.
  */
-function viaPadstackUm(dsnPcb) {
-  const cls = dsnPcb.structure?.rule?.clearances || []
-  const cDefault = (cls.find((c) => !c.type)?.value) ?? 150       // um, whatever the DSN actually says
+function viaPadstackUm(dsnPcb, profileKey = null) {
+  // Copper radius the router must keep tracks outside of so the SHIPPED hole
+  // clears KiCad's hole_clearance: r = hole/2 + holeClearance - traceClearance,
+  // where traceClearance is what the DSN tells freerouting (setDsnTraceRules).
+  // Sized for the strictest profile unless one is named. Measured on a 23-part
+  // LQFP board: 800um left 6 hole_clearance nits, 950um cleared them all but
+  // stranded 2 nets; the derivation lands between (hdi: 2*(0.1+0.4-0.07)=0.86mm).
+  const keys = profileKey && FAB_PROFILES[profileKey] ? [profileKey] : Object.keys(FAB_PROFILES)
   let need = 0
-  for (const p of Object.values(FAB_PROFILES)) {
-    const rHole = ((p.via?.hole ?? 0.2) / 2) * 1000
-    need = Math.max(need, 2 * ((p.holeClearance ?? 0.5) * 1000 + rHole - cDefault))
+  for (const k of keys) {
+    const p = FAB_PROFILES[k]
+    const rh = (p.via?.hole ?? 0.2) / 2, hc = p.holeClearance ?? 0.5, tc = p.trace?.clearance ?? 0.15
+    need = Math.max(need, rh + hc - tc)
   }
-  return Math.round(need + 50)                                     // +50um margin
+  return Math.round(2 * need * 1000 + 20) // +20um margin, DSN um
 }
 function setViaPadstack(dsnPcb, um) {
   for (const ps of (dsnPcb.library?.padstacks || [])) {
@@ -440,13 +446,15 @@ async function freerouteReal(cj, { layers = 2, routeFirst = null, profile = 'sta
     const unrouted = cj.filter((e) => e.type !== 'pcb_trace' && e.type !== 'pcb_via')
     let dsnPcb = convertCircuitJsonToDsnJson(unrouted)
     // BEFORE dsnToNLayer, which copies shapes[0].diameter onto every layer.
-    // Inflated via padstack for freerouting: OPT-IN (FL_VIA_PADSTACK=1). Correct by
-    // derivation and unit-tested, but measured worse where freerouting wins: golden
-    // tiny went 4 DRC / 4 electrical / 3 unrouted with it (twice, identical) against
-    // <=1 / 2 / 2 without, same machine, same hour — a 0.95mm keep-out closes the
-    // channels a tight 2-layer board needs. The hole_clearance faults it targeted
-    // came from the built-in router anyway (see routerViaPadMm/mergeStackedVias).
-    if (process.env.FL_VIA_PADSTACK === '1') setViaPadstack(dsnPcb, Number(process.env.FL_VIA_PADSTACK_UM) || viaPadstackUm(dsnPcb)) // FL_VIA_PADSTACK_UM: A/B the size
+    // Inflated via padstack for freerouting, derived per profile (viaPadstackUm):
+    // the copper the router keeps tracks outside of, so the SHIPPED hole clears
+    // hole_clearance. ON by default (FL_VIA_PADSTACK=0 opts out; FL_VIA_PADSTACK_UM
+    // overrides the size). The earlier "measured worse" verdict was taken on boards
+    // that were failing for the pin-image reason; re-measured after that fix and
+    // the profile trace rules, same rung, same machine:
+    //   fresh LQFP board  off 5 hole_clearance | 880um 1 (cleared by repair) | 910um 2 nets open
+    //   hard QFN board    off 7 hole_clearance, 2 shorts shipped | 880um: 0 errors, score 0
+    if (process.env.FL_VIA_PADSTACK !== '0') setViaPadstack(dsnPcb, Number(process.env.FL_VIA_PADSTACK_UM) || viaPadstackUm(dsnPcb, profile))
     if (layers > 2) dsnPcb = dsnToNLayer(dsnPcb, layers)
     // Via copper spacing derived from the fab rules the board will be graded
     // on -- see viaClearanceUm. (The old comment here described 0.6mm pads and

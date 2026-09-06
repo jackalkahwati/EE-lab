@@ -331,10 +331,9 @@ three times against copper the target rung never produced). Use these:
 - `FL_LADDER_BUDGET_MS=3600000` — lift the 240 s ladder deadline. Skipped rungs are now
   logged as `[t] ladder: skipped '<rung>' — budget spent`.
 - `FL_FR_DEBUG=1` — dump freerouting DSN passes and the via sizes fabRepair saw.
-- `FL_VIA_PADSTACK=1` — opt in to the inflated freerouting via padstack. Off by default:
-  measured worse on golden `tiny` (4/4/3 vs ≤1/2/2 DRC/electrical/unrouted) — the bigger
-  keep-out closes channels on tight 2-layer boards. Re-measure on a quiet machine before
-  changing the default.
+- `FL_VIA_PADSTACK=0` — opt OUT of the profile-derived freerouting via keep-out (on by
+  default; `FL_VIA_PADSTACK_UM=<um>` overrides the size). With it the hard QFN board
+  ships at 0 DRC errors through freerouting; 910 µm and up starts stranding nets.
 - `FL_GP_DEBUG=1` — the ground pour prints, per unreached GND pad, which rule rejected
   every via candidate (`hole` / `copper` / `track`).
 - `FL_DUMP_CJ=<path>` — write the winning circuit-json.
