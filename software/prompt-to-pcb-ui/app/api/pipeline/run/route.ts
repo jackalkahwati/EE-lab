@@ -710,9 +710,14 @@ export async function GET(req: Request) {
             }
             if (sd && Array.isArray(sd.final_design)) {
               const subs = (sd.honest_report || []).filter((h) => h.outcome === 'substituted')
+              const dropped = (sd.honest_report || []).filter((h) => h.outcome !== 'substituted' && h.outcome !== 'built')
               log('design', `planned: ${sd.final_design.length} real parts + ${sd.intent?.mcu?.family ?? '?'} MCU · ${sd.overall_status ?? ''}`, 'ok')
               for (const s of subs)
                 log('design', `⚠ substituted ${s.request}${s.mpn ? ' → ' + s.mpn : ''}${s.lost?.length ? ' (lost: ' + s.lost.join(', ') + ')' : ''}`, 'warn')
+              // Every requested item the planner could NOT build is said out loud here,
+              // at the design step — not discovered three stages later by validation.
+              for (const s of dropped)
+                log('design', `⚠ NOT built: ${s.request} (${s.outcome}${(s as { reason?: string }).reason ? ': ' + (s as { reason?: string }).reason : ''})`, 'warn')
               // Stage 2: the recursive subsystem tree — log the decomposition and
               // persist it so the product is legible as a hierarchy, not a flat list.
               const tree = (synthDesign as {

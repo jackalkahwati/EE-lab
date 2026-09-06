@@ -216,6 +216,27 @@ def parse_intent(prompt):
         di["unsupported_or_risky"].append(
             {"request": "Ethernet", "reason": "needs an unsupported PHY + differential routing"})
 
+    # Any part-number-looking token the user typed is a REQUEST, whether or not
+    # this parser knows the family: it goes through resolve_part_request and
+    # comes back built / substituted / unsupported in the honest report. Before
+    # this, "SHT40" was read only as "temperature/humidity", built as a BME280,
+    # and never mentioned again.
+    _NOT_PARTS = {"I2C", "SPI", "UART", "USB", "USB2", "USB3", "LED", "LDO", "SWD", "JTAG", "GPIO",
+                  "ADC", "DAC", "PWM", "RTC", "BLE", "MCU", "PCB", "SMT", "THT", "FR4", "RS485", "RS232",
+                  "CAN", "TVS", "ESD", "EMI", "FL1", "QFN", "LQFP", "BGA", "SOT23", "SOIC", "TSSOP",
+                  "IP67", "IP65", "USBC", "HDMI", "PoE", "POE", "LiPo", "LIPO", "NTC", "PTC", "DC", "AC"}
+    known = {e["mpn"].upper() for e in di["exact_part_requests"]}
+    for tok in re.findall(r"\b([A-Za-z]{2,6}[0-9]{2,5}[A-Za-z0-9-]{0,8})\b", prompt):
+        up = tok.upper()
+        if up in _NOT_PARTS or re.fullmatch(r"[0-9]+V|[0-9]+[KMG]?B|[0-9]+MM|[0-9]+X[0-9]+", up):
+            continue
+        if any(up.startswith(fam) for fam in ("STM32", "RP2040", "ESP32", "NRF52", "ATMEGA", "SAMD", "PIC")):
+            continue  # the MCU request is handled above, with its family logic
+        if up in known:
+            continue
+        _add_part(di, tok, must_substitute=False, intended=[])
+        known.add(up)
+
     # functional requirements summary (human-readable)
     di["functional_requirements"] = [
         c.replace("_", " ") for c in di["required_capabilities"]]

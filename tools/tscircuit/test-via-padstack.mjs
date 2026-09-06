@@ -10,12 +10,13 @@ const ns = {}
 new Function('exports',
   cut('const FAB_PROFILES', '\n}\n') + '\n}\n' +
   cut('function dsnToNLayer', '\n}\n') + '\n}\n' +
+  cut('function groundChainNets', '\n}\n') + '\n}\n' +
   cut('function setDsnTraceRules', '\n}\n') + '\n}\n' +
   cut('function setViaClearance', 'function viaClearanceUm') +
   cut('function viaClearanceUm', '\n}\n') + '\n}\n' +
   cut('function emitBoardCode', '\n}\n') + '\n}\n' +
   cut('function mergeStackedVias', '\n}\n') + '\n}\n' +
-  'exports.FAB_PROFILES=FAB_PROFILES;exports.setViaClearance=setViaClearance;exports.viaClearanceUm=viaClearanceUm;exports.viaPadstackUm=viaPadstackUm;exports.setDsnTraceRules=setDsnTraceRules;exports.dsnToNLayer=dsnToNLayer;exports.routerViaPadMm=routerViaPadMm;exports.emitBoardCode=emitBoardCode;exports.mergeStackedVias=mergeStackedVias;exports.setViaPadstack=setViaPadstack;'
+  'exports.FAB_PROFILES=FAB_PROFILES;exports.setViaClearance=setViaClearance;exports.viaClearanceUm=viaClearanceUm;exports.viaPadstackUm=viaPadstackUm;exports.setDsnTraceRules=setDsnTraceRules;exports.dsnToNLayer=dsnToNLayer;exports.groundChainNets=groundChainNets;exports.routerViaPadMm=routerViaPadMm;exports.emitBoardCode=emitBoardCode;exports.mergeStackedVias=mergeStackedVias;exports.setViaPadstack=setViaPadstack;'
 )(ns)
 
 const dsn = () => ({
@@ -151,6 +152,13 @@ t('dsnToNLayer: a through-hole PAD gets copper on every inner layer; an SMD pad 
   assert.equal(out.library.padstacks.find((p) => p.name === 'Round[A]Pad_1000_1700_um').shapes.find((s) => s.layer === 'In1.Cu').diameter, 1700)
   assert.deepEqual(layers('RoundRect[T]Pad_540x640_um'), ['F.Cu'])
   assert.deepEqual(layers('Via[0-1]_600:300_um'), ['B.Cu', 'F.Cu', 'In1.Cu', 'In2.Cu'])
+})
+
+t('groundChainNets: the ground pins become one connected chain of 2-pin traces; junk pins are ignored', () => {
+  assert.deepEqual(ns.groundChainNets(['U1.23', 'U1.35', 'C2.2']), [['U1.23', 'U1.35'], ['U1.35', 'C2.2']])
+  assert.deepEqual(ns.groundChainNets(['U1.23']), [])
+  assert.deepEqual(ns.groundChainNets(['U1.23', 14, 'GND', 'C2.2']), [['U1.23', 'C2.2']])
+  assert.match(src, /input\.nets = \[\.\.\.input\.nets, \.\.\.chain\]/, 'main() must actually append the chain to the nets the router sees')
 })
 
 console.log(`${pass} passed`)

@@ -60,6 +60,45 @@ for fp in board.GetFootprints():
             gnd_pads.append(pad.GetPosition())
             gnd_pad_objs.append(pad)
 
+# 1b. GND is now also a ROUTED net (run_board chains the ground pins into traces
+# the router connects). Those tracks/vias arrive under 2-pin trace net names;
+# give every piece of copper that touches a GND pad -- and everything touching
+# that -- the GND net, to a fixpoint, so the pour merges with it and KiCad sees
+# one net instead of a short between "U1.23 to U1.35" and GND.
+def _touch_pad(pt, pad):
+    bb = pad.GetBoundingBox()
+    return bb.GetLeft() <= pt.x <= bb.GetRight() and bb.GetTop() <= pt.y <= bb.GetBottom()
+gnd_pad_list = [p for fp in board.GetFootprints() for p in fp.Pads() if p.GetNetCode() == gnd.GetNetCode()]
+tracks_all = [t for t in board.GetTracks()]
+gnd_track_ids = set()
+gnd_points = []  # (x, y) of GND track/via endpoints, for endpoint-to-endpoint joins
+changed = True
+propagated = 0
+while changed:
+    changed = False
+    for t in tracks_all:
+        if id(t) in gnd_track_ids:
+            continue
+        is_via = isinstance(t, pcbnew.PCB_VIA)
+        pts = [t.GetPosition()] if is_via else [t.GetStart(), t.GetEnd()]
+        hit = False
+        for pt in pts:
+            if any(_touch_pad(pt, p) for p in gnd_pad_list):
+                hit = True
+                break
+            for (gx, gy) in gnd_points:
+                if abs(pt.x - gx) <= 1000 and abs(pt.y - gy) <= 1000:  # 1um
+                    hit = True
+                    break
+            if hit:
+                break
+        if hit:
+            t.SetNet(gnd)
+            gnd_track_ids.add(id(t))
+            gnd_points.extend((pt.x, pt.y) for pt in pts)
+            propagated += 1
+            changed = True
+
 # 2. Pick the reference plane layer: a dedicated inner layer on a 4-layer board,
 #    else the back copper. The top pour bonds top-side ground pads directly; the
 #    reference plane is where the stitched vias land.
@@ -473,6 +512,6 @@ print(json.dumps({
     "unconnected": unconnected,
     "zones": board.GetAreaCount(),
     "stitched": stitched, "fanned": fanned,
-    "skipped": skipped, "zoneTracks": zone_tracks,
+    "skipped": skipped, "zoneTracks": zone_tracks, "propagated": propagated,
     "mhKeepout": mh_set,
 }))

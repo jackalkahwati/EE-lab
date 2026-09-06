@@ -107,3 +107,21 @@ def test_requested_connector_row_starts_past_the_test_points(tmp_path):
     assert same_row, "test points and the connector should share the bottom row"
     last_tp_x = max(placed[r][0] for r in same_row)
     assert jx >= last_tp_x + 4 + 3, f"J20 at x={jx} overlaps test points ending at x={last_tp_x}: {tps}"
+
+
+def test_a_typed_part_number_becomes_an_honest_request_even_if_the_family_is_unknown():
+    import intent as _intent
+    di = _intent.parse_intent("ESP32-C3 logger with an SHT40 sensor over I2C and a microSD socket, 3.3V LDO, 2x3 SWD header, 35x30mm")
+    mpns = [e["mpn"].upper() for e in di["exact_part_requests"]]
+    assert "SHT40" in mpns, mpns
+    for junk in ("I2C", "LDO", "SWD", "3V", "35X30MM", "2X3"):
+        assert junk not in mpns, mpns
+    assert "sd_storage" in di["required_capabilities"]
+
+
+def test_planner_reports_the_unbuildable_requests_by_name():
+    import planner as _planner
+    r = _planner.run("ESP32-C3 logger with an SHT40 sensor over I2C and a microSD socket, 3.3V LDO")
+    outcomes = {h["request"]: h["outcome"] for h in r["honest_report"]}
+    assert "SHT40" in outcomes and outcomes["SHT40"] in ("substituted", "unsupported"), outcomes
+    assert outcomes.get("sd_storage") == "unsupported", outcomes

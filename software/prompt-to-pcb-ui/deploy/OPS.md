@@ -334,6 +334,10 @@ three times against copper the target rung never produced). Use these:
 - `FL_VIA_PADSTACK=0` — opt OUT of the profile-derived freerouting via keep-out (on by
   default; `FL_VIA_PADSTACK_UM=<um>` overrides the size). With it the hard QFN board
   ships at 0 DRC errors through freerouting; 910 µm and up starts stranding nets.
+- `FL_ROUTE_GND=1` — route GND as a net (chain of traces over the ground pins) before the
+  pour. Opt-in: it closed the one open ground pad on an LQFP board (score 25 → 2) but
+  stranded 4 nets on a QFN board the pour alone ships clean (0 → 175). Next step is a
+  targeted retry for only the pads the pour reports unreached.
 - `FL_GP_DEBUG=1` — the ground pour prints, per unreached GND pad, which rule rejected
   every via candidate (`hole` / `copper` / `track`).
 - `FL_DUMP_CJ=<path>` — write the winning circuit-json.

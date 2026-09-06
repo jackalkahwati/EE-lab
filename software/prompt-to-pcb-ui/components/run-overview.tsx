@@ -73,7 +73,10 @@ export function RunOverview({ runId, run }: { runId: string | null; run?: Run | 
     return () => {
       off = true
     }
-  }, [runId])
+    // Re-read when the pipeline moves: the artefacts this panel describes are
+    // written stage by stage, and a fetch at run start (before any exist) used to
+    // leave every tile at "not generated" for the life of the page.
+  }, [runId, run?.status, run?.stages?.map((s) => `${s.id}:${s.state}`).join(',')])
 
   if (!runId || a === null)
     return <div className="p-4 text-xs text-muted-foreground">Select a run to see its overview.</div>

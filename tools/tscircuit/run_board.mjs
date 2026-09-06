@@ -246,7 +246,8 @@ function dsnTo4Layer(d) { return dsnToNLayer(d, 4) }
 function setDsnTraceRules(dsnPcb, profileKey) {
   const t = FAB_PROFILES[profileKey]?.trace
   if (!t) return
-  const W = Math.round(t.width * 1000), C = Math.round(t.clearance * 1000)
+  let W = Math.round(t.width * 1000), C = Math.round(t.clearance * 1000)
+  if (process.env.FL_DSN_TRACE) { const [w, c] = process.env.FL_DSN_TRACE.split(',').map(Number); if (w > 0 && c > 0) { W = w; C = c } } // A/B knob, um
   const apply = (rule) => {
     if (!rule) return
     rule.width = W
@@ -2193,8 +2194,34 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15 } = {}) {
   return { available: true, converged, best, trail, verdict }
 }
 
+/** GND as a ROUTED net: a chain of 2-pin traces over the ground pins, so the
+ *  router (freerouting groups them into one net by connectivity) connects every
+ *  ground pad with copper it can see, instead of leaving all of GND to a pour
+ *  that runs after the signal tracks have boxed the pins in. Measured before
+ *  this: on two fresh boards the last open items were QFN GND pins with an
+ *  inner-layer trace under them and no via spot within 2.6mm, and no same-layer
+ *  path into the pour within 6mm. The pour still runs afterwards; ground_plane.py
+ *  propagates the GND net onto whatever copper touches a ground pad. */
+function groundChainNets(gnd) {
+  const pins = (gnd || []).filter((p) => typeof p === 'string' && p.includes('.'))
+  const out = []
+  for (let i = 1; i < pins.length; i++) out.push([pins[i - 1], pins[i]])
+  return out
+}
+
 async function main() {
   const input = JSON.parse(fs.readFileSync(0, 'utf8'))
+  // OPT-IN (FL_ROUTE_GND=1 or input.routeGround=true). Measured on the HDI rung:
+  //   fresh LQFP board  pour-only: 1 open GND pad, score 25 | GND routed: 0 open, 2 nits, score 2
+  //   hard QFN board    pour-only: clean, score 0          | GND routed: 4 nets stranded, score 175
+  // Routing all of GND crowds a board the pour would have closed. The right shape
+  // is a targeted retry that routes ONLY the pads the pour reports unreached; until
+  // that exists this stays a switch, not a default.
+  if (Array.isArray(input.nets) && input.gnd?.length > 1 && (input.routeGround === true || process.env.FL_ROUTE_GND === '1')) {
+    const chain = groundChainNets(input.gnd)
+    input.nets = [...input.nets, ...chain]
+    process.stderr.write(`[t] ground: routing GND as a net (${chain.length} chain traces over ${input.gnd.length} pins)\n`)
+  }
   // strict DRC: count non-electrical classes (footprint-lib drift, text, silk)
   // toward errors/converged too. Off by default; see NON_ELECTRICAL_DRC.
   if (input.strictDrc === true) STRICT_NON_ELECTRICAL = true
