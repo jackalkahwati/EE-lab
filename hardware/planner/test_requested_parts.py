@@ -158,3 +158,21 @@ def test_the_regulator_is_wired_input_to_output():
     pins = {e for n in nl["nets"] for e in n if e.startswith(reg["name"] + ".")}
     assert reg["name"] + ".5" in pins, "VOUT must be on a net (it shipped floating before)"
     assert reg["name"] + ".1" in pins, "VIN must be on a net"
+
+
+def test_exported_parts_carry_values_and_real_orderable_parts():
+    import synth as _synth, planner as _planner, os
+    r = _planner.run("STM32F103 sensor node with a 5V input screw terminal and a BME280 over I2C")
+    nl = _synth.netlist_from_design({"final_design": r["final_design"], "intent": r["intent"]}, real_geometry=False)
+    caps = [p for p in nl["parts"] if p["name"].startswith("C")]
+    ress = [p for p in nl["parts"] if p["name"].startswith("R")]
+    assert caps and all(p.get("value") for p in caps), caps
+    assert ress and all(p.get("value") for p in ress), [(p["name"], p.get("value")) for p in ress]
+    reg = _synth._registry()
+    if not reg or (reg.stats() if hasattr(reg, "stats") else {}).get("parts", 0) < 1000:
+        return  # registry not ingested on this machine: sourcing is honestly absent
+    ics = [p for p in nl["parts"] if p["name"].startswith("U")]
+    assert all(p.get("lcsc") and (p.get("stock") or 0) > 0 for p in ics), [(p["name"], p.get("lcsc"), p.get("stock")) for p in ics]
+    assert all(p.get("lcsc") for p in caps), [(p["name"], p.get("lcsc")) for p in caps]
+    term = next(p for p in nl["parts"] if p["name"] == "J20")
+    assert term.get("lcsc"), term

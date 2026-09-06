@@ -171,7 +171,7 @@ def _netmap_for(spec, cs_net):
             continue
         pnet = "%s_%s" % (spec["mpn"][:6], resolve_part._norm(pu["pin"]))
         nm[num] = pnet
-        pulls.append((pnet, rail))
+        pulls.append((pnet, rail, pu.get("value") or "10k"))
     for pd in sc.get("pulldowns", []):
         num = _pin_number(spec, pd.get("pin", ""))
         if num and num not in nm:
@@ -194,10 +194,12 @@ def _support(spec, pulls, refn, x, y, nets, netmap=None):
         num = _pin_number(spec, str(_d.get("from", ""))) if _d.get("from") else None
         if netmap and num and netmap.get(num) and netmap[num] != "GND":
             net = netmap[num]
-        body += compose.cap("C%d" % (refn + i), x, yy, net, "GND", nets)
+        body += compose.cap("C%d" % (refn + i), x, yy, net, "GND", nets, value=_d.get("value") or "100nF")
         yy += 3
-    for i, (pnet, prail) in enumerate(pulls):
-        body += compose.res("R%d" % (refn + 50 + i), x, yy, pnet, prail, nets)
+    for i, pull in enumerate(pulls):
+        pnet, prail = pull[0], pull[1]
+        pval = pull[2] if len(pull) > 2 else "10k"
+        body += compose.res("R%d" % (refn + 50 + i), x, yy, pnet, prail, nets, value=pval)
         yy += 3
     return body
 
@@ -325,12 +327,12 @@ def block_mcu_generic(spec, alloc, x, y, nets):
         body += compose.cap("C%d" % ci, xr, yc, rail, "GND", nets)
         ci += 1
         yc += 6
-    body += compose.res("R10", xr, yc, "MCU_RESET", rail, nets)   # reset pull-up
+    body += compose.res("R10", xr, yc, "MCU_RESET", rail, nets, value="10k")   # reset pull-up
     yc += 6
     if "I2C_SDA" in pmap.values():                          # I2C pull-ups
-        body += compose.res("R11", xr, yc, "I2C_SDA", rail, nets)
+        body += compose.res("R11", xr, yc, "I2C_SDA", rail, nets, value="4.7k")
         yc += 6
-        body += compose.res("R12", xr, yc, "I2C_SCL", rail, nets)
+        body += compose.res("R12", xr, yc, "I2C_SCL", rail, nets, value="4.7k")
         yc += 6
     # programming header: SWD (ARM) taps the debug pads; ISP (AVR) taps SPI+reset
     prog = spec.get("programming", [])
@@ -530,14 +532,14 @@ def synth(design, out_path):
     px = X0 + MARGIN
     py = bottom_extent[0] + GAP
     if any(i["type"] == "i2c" for s in specs for i in s.get("interfaces", [])):
-        body += compose.res("R90", px, py, "I2C_SDA", "+3V3", nets)
-        body += compose.res("R91", px, py + 4, "I2C_SCL", "+3V3", nets)
+        body += compose.res("R90", px, py, "I2C_SDA", "+3V3", nets, value="4.7k")
+        body += compose.res("R91", px, py + 4, "I2C_SCL", "+3V3", nets, value="4.7k")
         note_extent(px, py, 6, 10)
         px += 10
     if any(i["type"] == "rs485" for s in specs for i in s.get("interfaces", [])):
         body += compose.place("Connector_PinHeader_2.54mm", "PinHeader_1x03_P2.54mm_Vertical",
                               "J90", px, py, 0, {"1": "RS485_A", "2": "RS485_B", "3": "GND"}, nets)
-        body += compose.res("R92", px, py + 12, "RS485_A", "RS485_B", nets)  # 120R term
+        body += compose.res("R92", px, py + 12, "RS485_A", "RS485_B", nets, value="120R")  # 120R term
         note_extent(px, py, 8, 16)
         px += 14
     tp_last = -1
@@ -572,7 +574,8 @@ def synth(design, out_path):
             body += compose.place("TerminalBlock", fpname, "J%d" % jn, px, py, 0,
                                   {"1": vin, "2": "GND"}, nets)
             compose._DEVICES.append({"ref": "J%d" % jn, "type": "connector",
-                                     "name": "Power input screw terminal (%s/GND)" % vin})
+                                     "name": "Power input screw terminal (%s/GND)" % vin,
+                                     "mpn": "MX126-5.0-02P" if n == 2 else None})
             note_extent(px, py, 10 + 5 * (n - 2), 10)
             px += 14 + 5 * (n - 2); jn += 1
         elif c.get("kind") == "header":
@@ -620,9 +623,9 @@ def synth(design, out_path):
                                  "name": "FL-1 instrument bus v2",
                                  "id_straps": "ID_A0-A2 from backplane slot (0x50-0x57)"})
         # strap pull-downs (default 0x50 standalone)
-        body += compose.res("R70", px + 14, py, "ID_A0", "GND", nets)
-        body += compose.res("R71", px + 14, py + 5, "ID_A1", "GND", nets)
-        body += compose.res("R72", px + 14, py + 10, "ID_A2", "GND", nets)
+        body += compose.res("R70", px + 14, py, "ID_A0", "GND", nets, value="10k")
+        body += compose.res("R71", px + 14, py + 5, "ID_A1", "GND", nets, value="10k")
+        body += compose.res("R72", px + 14, py + 10, "ID_A2", "GND", nets, value="10k")
         note_extent(px, py, 24, 20)
 
     # ---- assemble the board (outline that ENCLOSES every placement) ---------
@@ -783,6 +786,70 @@ def _registry():
     return _REG or None
 
 
+_PASSIVE_VALUE_RX = re.compile(r"^(\d+(?:\.\d+)?)\s*([kKmMuUnNpP]?)\s*(F|Ω|ohm|R)?$", re.I)
+
+
+def _norm_value_token(value):
+    """'10k' -> ('10k', 'Ω'), '100nF' -> ('100n', 'F'): the token the JLC catalog
+    description carries ('10kΩ', '100nF')."""
+    m = _PASSIVE_VALUE_RX.match(str(value or "").strip())
+    if not m:
+        return None
+    num, mult, unit = m.group(1), (m.group(2) or ""), (m.group(3) or "")
+    return num + mult.lower().replace("k", "k").replace("m", "M") if unit.upper() == "F" else num + mult.lower()
+
+
+def _source_part(mpn=None, value=None, footprint=None, ref=""):
+    """Pick a real, orderable part from the shared registry (jlcparts catalog).
+    ICs: exact-family MPN match, in stock, JLC-basic first. Passives: value +
+    package, the value token verified IN the catalog description (a token-AND
+    search for "10k 0402" also matches 510k). Returns None when honestly none."""
+    reg = _registry()
+    if not reg:
+        return None
+    try:
+        fp_s = str(footprint or "")
+        if fp_s.startswith("header_") and not (mpn and re.search(r"\d", str(mpn))):
+            mpn = None  # "Programming header" is a role, not an MPN: source by row x col below
+        if mpn and not fp_s.startswith(("0402", "0603", "0805", "header_", "screwterminal_")) or (mpn and re.search(r"\d", str(mpn)) and fp_s.startswith(("header_", "screwterminal_"))):
+            key = str(mpn).upper()
+            rows = [r for r in reg.search(str(mpn), limit=12)
+                    if str(r.get("mpn", "")).upper().startswith(key) and (r.get("stock") or 0) > 0]
+        elif value and str(footprint or "") in ("0402", "0603", "0805", "1206"):
+            tok = _norm_value_token(value)
+            if not tok:
+                return None
+            unit = "F" if str(value).strip().upper().endswith("F") else "Ω"
+            want = tok + unit
+            rows = [r for r in reg.search("%s %s" % (tok + unit if unit == "F" else tok, footprint), limit=20)
+                    if str(r.get("package", "")) == str(footprint) and want.lower() in str(r.get("description", "")).lower().replace("kω", "kω")
+                    and (r.get("stock") or 0) > 0]
+            if not rows and unit == "Ω":
+                rows = [r for r in reg.search("%s %s" % (tok + "Ω", footprint), limit=20)
+                        if str(r.get("package", "")) == str(footprint) and (r.get("stock") or 0) > 0
+                        and (tok + "Ω").lower() in str(r.get("description", "")).lower()]
+        elif str(footprint or "").startswith("header_"):
+            m = re.match(r"header_(\d+)x(\d+)$", str(footprint))
+            if not m:
+                return None
+            rr, cc = int(m.group(1)), int(m.group(2))
+            tag = "%dx%dP" % (rr, cc)
+            rows = [r for r in reg.search("%s 2.54mm pin header" % tag, limit=20)
+                    if tag.lower() in str(r.get("description", "")).lower().replace("*", "x") and "2.54mm" in str(r.get("description", ""))
+                    and (r.get("stock") or 0) > 0]
+        else:
+            return None
+        rows.sort(key=lambda r: (-(r.get("jlc_basic") or 0), -(r.get("stock") or 0)))
+        if not rows:
+            return None
+        r = rows[0]
+        return {"lcsc": r.get("lcsc"), "sourced_mpn": r.get("mpn"), "stock": r.get("stock"),
+                "jlc_basic": int(r.get("jlc_basic") or 0), "sourcing": "registry:jlcparts",
+                "sourcing_desc": (r.get("description") or "")[:80]}
+    except Exception:
+        return None
+
+
 def _lcsc_for(mpn, spec=None):
     """Real LCSC id for a part: the UCS spec's own sourcing first, then the
     shared part registry (mpn -> lcsc). Returns None when honestly unknown —
@@ -904,6 +971,7 @@ def netlist_from_design(design, chip_scale=True, real_geometry=True):
     import io
     compose._NETLIST = []
     compose._DEVICES[:] = []
+    compose._VALUES.clear()
     tmpd = tempfile.mkdtemp(prefix="fl_netlist_")
     buf = io.StringIO()
     try:
@@ -1015,6 +1083,16 @@ def netlist_from_design(design, chip_scale=True, real_geometry=True):
             part["mpn"] = mpn
         if lcsc:
             part["lcsc"] = lcsc
+        # value (passives) + a real orderable part from the registry
+        _val = compose._VALUES.get(ref) or ("100nF" if ref.startswith("C") and fp == "0402" else None)
+        if _val:
+            part["value"] = _val
+        _dev_mpn = next((d.get("mpn") for d in compose._DEVICES if d.get("ref") == ref and d.get("mpn")), None)
+        _src = _source_part(mpn=(_dev_mpn or mpn) if not ref.startswith(("C", "R", "TP", "FID")) else None, value=_val, footprint=fp, ref=ref)
+        if _src:
+            part.update(_src)
+            if not part.get("lcsc"):
+                part["lcsc"] = _src["lcsc"]
         # Real .kicad_mod geometry is OPT-IN: it currently breaks run_board's
         # routers (freerouting DSN export fails, built-in autorouter errors on the
         # real pad geometry), whereas the qfnN string footprint — sized by the

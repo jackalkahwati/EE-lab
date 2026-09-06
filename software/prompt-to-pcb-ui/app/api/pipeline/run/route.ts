@@ -1511,8 +1511,13 @@ export async function GET(req: Request) {
               // BOM from the planner's part list (real MPNs; LCSC ids where the
               // planner had them), the parts that are actually on that board.
               try {
-                const spec = JSON.parse(fs.readFileSync(path.join(pubData, 'chipscale-spec.json'), 'utf8')) as { parts?: { name: string; mpn?: string; lcsc?: string; footprint?: string; kind?: string }[] }
-                const rows = ['Reference,MPN,LCSC,Footprint,Kind', ...(spec.parts ?? []).map((q) => [q.name, q.mpn ?? '', q.lcsc ?? '', q.footprint ?? '', q.kind ?? ''].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))]
+                // Every row is a real orderable part where the registry (JLCPCB
+                // catalog, ~684k parts) had one in stock: the planner's export sources
+                // ICs by exact-family MPN, passives by value + package (value verified
+                // in the catalog description), headers/terminals by row x col. Test
+                // points are pads, not parts, and stay unsourced on purpose.
+                const spec = JSON.parse(fs.readFileSync(path.join(pubData, 'chipscale-spec.json'), 'utf8')) as { parts?: { name: string; mpn?: string; value?: string; lcsc?: string; sourced_mpn?: string; stock?: number; jlc_basic?: number; sourcing?: string; footprint?: string; kind?: string }[] }
+                const rows = ['Reference,Value,MPN,SourcedMPN,LCSC,Stock,JLCBasic,Sourcing,Footprint,Kind', ...(spec.parts ?? []).map((q) => [q.name, q.value ?? '', q.mpn ?? '', q.sourced_mpn ?? '', q.lcsc ?? '', q.stock ?? '', q.jlc_basic ? 'yes' : '', q.sourcing ?? (q.lcsc ? 'seed' : 'unsourced'), q.footprint ?? '', q.kind ?? ''].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))]
                 bomCsv = path.join(pubData, 'chipscale-bom.csv')
                 fs.writeFileSync(bomCsv, rows.join('\n') + '\n')
               } catch { /* no spec: export_fab reports bom.csv skipped */ }

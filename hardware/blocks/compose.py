@@ -436,6 +436,12 @@ def with_body(fp_text, w, d, h):
     return s[:idx] + model + s[idx:] + "\n"
 
 
+# ref -> electrical value ("100nF", "10k") for every passive placed with one, so
+# the netlist export can source a real orderable part for it. Reset alongside
+# _NETLIST by the exporter.
+_VALUES = {}
+
+
 def _set_value(fp_text, value):
     """Capture a real electrical value at design time by writing it into the
     footprint's Value property. It rides through renumber_duplicate_refs (which
@@ -443,6 +449,9 @@ def _set_value(fp_text, value):
     Use ASCII 'u' for microfarads ('10uF') so that regex matches."""
     if not value:
         return fp_text
+    m_ref = re.search(r'\(property "Reference" "([^"]+)"', fp_text)
+    if m_ref:
+        _VALUES[m_ref.group(1)] = value
     return re.sub(r'(\(property "Value" ")[^"]*(")',
                   lambda m: m.group(1) + value + m.group(2), fp_text, count=1)
 
