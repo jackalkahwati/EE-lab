@@ -1763,7 +1763,11 @@ export async function GET(req: Request) {
               fs.readFileSync(path.join(runRoot, 'electronics', 'chipscale-board.json'), 'utf8'),
             )
           } catch { /* no shipped board persisted (yet) */ }
-          if (csBoard?.boardSource === 'planner-merged' && Array.isArray(csBoard.parts)) {
+          // Any planner-built shipped board is the target ('planner' when the early
+          // build came straight from the planner netlist, 'planner-merged' when it
+          // went through the merge): the first product through the API shipped a
+          // clean 'planner' board and firmware still targeted the intermediate view.
+          if (typeof csBoard?.boardSource === 'string' && csBoard.boardSource.startsWith('planner') && Array.isArray(csBoard.parts)) {
             const shipped = new Set(csBoard.parts.map((p) => String(p.name)))
             // retarget the peripheral manifest: the generator derives its driver
             // set from <board>.devices.json — filter it to devices actually ON
