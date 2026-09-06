@@ -385,3 +385,21 @@ PATH puts /opt/homebrew/bin first). Gates, in the order they bit on real boards:
 
 Check what the runner sees: `python3 tools/sim/run_sim.py < request.json` with a run's
 `disciplines/simulation.json` → `inputs` as the request; rows say `install-gated: …`.
+
+## Part registry (sourcing)
+
+`tools/parts/registry.sqlite` is gitignored and holds the JLCPCB catalog (~684k
+orderable parts, ~350 MB) that the planner's netlist export sources every part
+from. A fresh checkout has an EMPTY registry and every BOM row comes out
+unsourced. Populate it:
+
+```bash
+# download the jlcparts dataset (split zip: cache.zip + cache.z01..zNN) and join it
+cd ~/.jlcparts-cache && for i in $(seq 1 40); do f=$(printf 'cache.z%02d' $i); curl -sfL -o "$f" "https://yaqwsx.github.io/jlcparts/data/$f" || { rm -f "$f"; break; }; done
+curl -sfL -o cache.zip https://yaqwsx.github.io/jlcparts/data/cache.zip
+cat $(ls cache.z?? | sort) cache.zip > joined.zip && unzip -o joined.zip     # -> cache.sqlite3 (~5.9 GB)
+cd ~/EE-lab && python3 tools/parts/ingest_jlcparts.py --db ~/.jlcparts-cache/cache.sqlite3
+cp tools/parts/registry.sqlite ~/firstlight-prod/tools/parts/registry.sqlite  # prod reads its own copy
+```
+`zip -s 0` does NOT join these parts correctly on macOS (produced a malformed
+sqlite); `cat` in z01..zNN then .zip order does.
