@@ -363,3 +363,7 @@ Two entry points, both in `tools/cli/`:
   stages and gates as Compose, run owned by the key's creator. Mint a read_write key
   at `/enterprise/integrations`; export it, never pass it as an argument.
   `FL_BASE` overrides the base URL (default the production app).
+- **`FL_APP_DIR=~/firstlight-prod/software/prompt-to-pcb-ui node tools/cli/fl-key.mjs --owner <email>`**
+  mints a read_write key straight into that checkout's enterprise store (prints the
+  plaintext once on stdout; revoke at `/enterprise/integrations`). Runs owned by the key
+  are owned by `--owner`.
