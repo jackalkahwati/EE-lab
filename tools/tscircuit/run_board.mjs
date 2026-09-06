@@ -140,7 +140,16 @@ async function applyGroundPlane(cj, gndPins, profileKey = 'standard') {
     if (!fs.existsSync(outPcb)) return { available: false, reason: 'ground plane pass produced no board', stderr: (r.stderr || '').slice(0, 200) }
     let gp = {}; try { gp = JSON.parse((r.stdout || '').trim().split('\n').pop() || '{}') } catch { /* keep defaults */ }
     fs.writeFileSync(path.join(dir, 'g.kicad_dru'), (FAB_PROFILES[profileKey] || FAB_PROFILES.standard).rules)
-    spawnSync(KICAD_CLI, ['pcb', 'drc', '--format', 'json', '--output', drcJson, outPcb], { encoding: 'utf8', timeout: 120000 })
+    // The grounded board's DRC is the verdict of the board that SHIPS. Under
+    // memory pressure kicad-cli has died without writing its report (replay of
+    // the STM board: pour 13s, "DRC produced no report", while the same file
+    // checks in 8s by hand) — one retry before the board is declared unchecked,
+    // and the tool's exit is kept for the reason.
+    let drcRun = null
+    for (let attempt = 0; attempt < 2 && !fs.existsSync(drcJson); attempt++) {
+      drcRun = spawnSync(KICAD_CLI, ['pcb', 'drc', '--format', 'json', '--output', drcJson, outPcb], { encoding: 'utf8', timeout: 120000 })
+      if (!fs.existsSync(drcJson)) process.stderr.write(`[t] groundPlane: DRC attempt ${attempt + 1} produced no report (status ${drcRun.status}, signal ${drcRun.signal ?? '-'})${drcRun.stderr ? `: ${String(drcRun.stderr).trim().slice(0, 160)}` : ''}\n`)
+    }
     // return the grounded .kicad_pcb too (read before the temp dir is cleaned) so
     // the caller can persist it for the 3D render — the real chip-down board.
     const pcb = fs.readFileSync(outPcb, 'utf8')
@@ -170,7 +179,8 @@ async function applyGroundPlane(cj, gndPins, profileKey = 'standard') {
         violations: pos.points.slice(0, 40),
       }
     }
-    return { available: true, assigned: gp.assigned ?? 0, unconnected: gp.unconnected ?? null, stitched: gp.stitched ?? 0, skipped: gp.skipped ?? 0, zoneTracks: gp.zoneTracks ?? 0, unreachedPads: Array.isArray(gp.unreachedPads) ? gp.unreachedPads : [], errors: drcAfter?.errors ?? null, drcAfter, pcb }
+    const drcReason = drcAfter ? null : `kicad-cli drc exited ${drcRun?.status ?? '?'}${drcRun?.signal ? ` (${drcRun.signal})` : ''}${drcRun?.stderr ? `: ${String(drcRun.stderr).trim().slice(0, 120)}` : ''}`
+    return { available: true, assigned: gp.assigned ?? 0, unconnected: gp.unconnected ?? null, stitched: gp.stitched ?? 0, skipped: gp.skipped ?? 0, zoneTracks: gp.zoneTracks ?? 0, unreachedPads: Array.isArray(gp.unreachedPads) ? gp.unreachedPads : [], errors: drcAfter?.errors ?? null, drcAfter, drcReason, pcb }
   } catch (e) {
     return { available: false, reason: String(e).slice(0, 160) }
   } finally {
@@ -2901,7 +2911,7 @@ async function main() {
             // The pour changed the board but its referee run produced no report.
             // The pre-plane numbers describe a board that no longer exists, so
             // they cannot stand as the verdict for the one being shipped.
-            drc = { available: false, reason: 'ground plane applied but its DRC produced no report — the shipped board is unchecked', groundPlaneApplied: true }
+            drc = { available: false, reason: `ground plane applied but its DRC produced no report (${gp.drcReason ?? 'no exit recorded'}) — the shipped board is unchecked`, groundPlaneApplied: true }
             drcRepair.converged = false
           }
           // Ground pads still off the plane. `gp.unconnected` is KiCad's count of

@@ -271,4 +271,9 @@ t('a requested 2-layer board keeps its 2-layer rung, rung admission is by projec
   assert.match(src, /const retryCostMs = \(res\.best\?\.ms \?\? 45_000\) \+ pourMs \+ 5_000/, 'the ground retry is admitted on MEASURED cost')
 })
 
+t('the grounded board\'s DRC is retried once before the board is declared unchecked, and the tool\'s exit is in the reason', () => {
+  assert.match(src, /for \(let attempt = 0; attempt < 2 && !fs\.existsSync\(drcJson\); attempt\+\+\) \{/)
+  assert.match(src, /reason: `ground plane applied but its DRC produced no report \(\$\{gp\.drcReason/)
+})
+
 console.log(`${pass} passed`)
