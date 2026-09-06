@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import test from 'node:test'
 
 const { simStageVerdict, mechFitDetail } = await import(`../lib/run-pipeline.ts?t=${Date.now()}`)
@@ -60,4 +61,11 @@ test('the pipeline detail never prints "fits the cavity" for an unverified fit',
   const d = mechFitDetail({ fitCheck: { fits: null, verdict: 'unknown', pcbMm: { w: 24, h: 24 }, cavityMm: null, enclosureMm: { w: 90, h: 90 }, problems: [] } })
   assert.doesNotMatch(d, /fits the cavity/)
   assert.match(d, /NOT verified/)
+})
+
+test('the product job\'s firmware stage follows the EDA firmware BUILD: no image, no pass', () => {
+  const rp = fs.readFileSync(new URL('../lib/run-pipeline.ts', import.meta.url), 'utf8')
+  assert.match(rp, /\/runs\/\$\{opts\.runId\}\/data\/last-run\.json/, 'reads the EDA run record')
+  assert.match(rp, /if \(fw && fw\.state === 'failed'\) \{\s*set\('firmware', 'failed'/, 'a failed build fails the discipline stage')
+  assert.match(rp, /fw\.state === 'passed' && !last\.fwZip/, 'a passed build with no persisted image is not a pass either')
 })

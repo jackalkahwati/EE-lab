@@ -648,6 +648,27 @@ async function runPipelineStages(opts: RunOpts, timer: RunTimer): Promise<Pipeli
 
   await Promise.all([physicalBranch(), disciplineBranch(spec, false)])
 
+  // ---- firmware: the document is not the image ----
+  // The firmware discipline writes an architecture document; the EDA pipeline
+  // BUILDS the firmware (plan-mode firmware stage: generator + cargo). API run
+  // e24b2db0 showed firmware=passed on the document while the build had
+  // refused ("no target for MCU family stm32f1") and no image existed. The
+  // build's verdict wins: no image, no pass.
+  if (!aborted()) {
+    try {
+      const r = await fetch(`${opts.baseUrl ?? ''}/runs/${opts.runId}/data/last-run.json`, { cache: 'no-store', headers: opts.headers, signal: opts.signal })
+      if (r.ok) {
+        const last = await r.json() as { stages?: Record<string, { state?: string; failReason?: string }>; fwZip?: string | null }
+        const fw = last?.stages?.firmware
+        if (fw && fw.state === 'failed') {
+          set('firmware', 'failed', `no firmware image: the build ${fw.failReason ? `refused — ${fw.failReason.slice(0, 220)}` : 'failed'} (the architecture document was generated; there is nothing to flash)`)
+        } else if (fw && fw.state === 'passed' && !last.fwZip) {
+          set('firmware', 'failed', 'no firmware image: the build reported passed but persisted no firmware.zip')
+        }
+      }
+    } catch { /* the EDA run may not have persisted yet; the document verdict stands, labelled as such below */ }
+  }
+
   // ---- 5. Reconcile the fork ----
   // Branch B raced Branch A, so it grounded on `opts.spec`. If the feedback loop
   // converged on genuinely different budgets, those four docs now describe a design
