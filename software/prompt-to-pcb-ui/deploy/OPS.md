@@ -367,3 +367,21 @@ Two entry points, both in `tools/cli/`:
   mints a read_write key straight into that checkout's enterprise store (prints the
   plaintext once on stdout; revoke at `/enterprise/integrations`). Runs owned by the key
   are owned by `--owner`.
+
+## Simulation solvers (tools/sim/run_sim.py)
+
+The sim stage runs under the service's `python3` (`FL_PYTHON` overrides; the launchd
+PATH puts /opt/homebrew/bin first). Gates, in the order they bit on real boards:
+
+- **structural / enclosure 3D FEA** need `brew install costerwi/calculix/calculix-ccx`
+  (found as `/opt/homebrew/bin/ccx_*`) AND the `gmsh` **Python module** in that
+  interpreter: `/opt/homebrew/bin/python3 -m pip install --break-system-packages gmsh`.
+  The gmsh CLI alone is not enough — the runner meshes through the Python API.
+- **cavity acoustic FEM** needs ElmerSolver at `~/.local/elmer/bin/ElmerSolver` (no
+  package for macOS; build from source with the GCC toolchain — Apple clang has no
+  OpenMP: `-DCMAKE_C_COMPILER=gcc-16 -DCMAKE_CXX_COMPILER=g++-16 -DWITH_MPI=OFF
+  -DWITH_ELMERGUI=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5`).
+- thermal / drop / PDN / RF need only scipy + ngspice; CFD needs OpenFOAM.
+
+Check what the runner sees: `python3 tools/sim/run_sim.py < request.json` with a run's
+`disciplines/simulation.json` → `inputs` as the request; rows say `install-gated: …`.
