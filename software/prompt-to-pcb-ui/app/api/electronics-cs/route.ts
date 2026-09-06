@@ -587,7 +587,7 @@ async function buildCandidate(userMsg: string, req: Request, dir: string, svgNam
   const { parts, nets, gnd, note, droppedCapabilities } = designed
   const realFootprints = await attachRealFootprints(parts)
   const result = await runBoard({ parts, nets, gnd, ...boardOpts }, path.join(dir, svgName), timeoutMs, req.signal ?? undefined)
-  return { parts, nets, gnd, note, droppedCapabilities, realFootprints, result, svgName, designTrail }
+  return { parts, nets, gnd, maxLayers: undefined as number | undefined, note, droppedCapabilities, realFootprints, result, svgName, designTrail }
 }
 
 // ---- in-flight lock ----------------------------------------------------------
@@ -744,7 +744,7 @@ async function buildChipScale(
     let plannerHonest: { dropped?: unknown[]; notes?: unknown[] } | null = null
     const dataDir = path.join(process.cwd(), 'public', 'runs', runId, 'data')
     if (!keepCapabilities) {
-      let nl: { parts: any[]; nets: any[]; gnd?: string[]; honest?: any } | null = null
+      let nl: { parts: any[]; nets: any[]; gnd?: string[]; honest?: any; maxLayers?: number | null } | null = null
       let src: 'planner' | 'planner-merged' = 'planner'
       try {
         const specJson = JSON.parse(await fs.readFile(path.join(dataDir, 'chipscale-spec.json'), 'utf8'))
@@ -765,10 +765,13 @@ async function buildChipScale(
         // the lcsc ids still flow to the BOM/sourcing artifacts unchanged.
         const realFootprints = process.env.FL_CS_REAL_FP === '1' ? await attachRealFootprints(nl.parts) : 0
         plannerHonest = nl.honest ?? null
-        const result = await runBoard({ parts: nl.parts, nets: nl.nets, gnd: nl.gnd ?? [], ...boardOpts }, path.join(dir, 'chipscale.svg'), FIRST_BUILD_WALL_MS, req.signal ?? undefined)
+        // the planner's layer request ("2-layer board" in the prompt) rides along so the
+        // runner keeps that rung and the verdict can say when the shipped board exceeds it
+        const layerReq = [2, 4, 6, 8].includes(Number(nl.maxLayers)) ? Number(nl.maxLayers) : undefined
+        const result = await runBoard({ parts: nl.parts, nets: nl.nets, gnd: nl.gnd ?? [], ...(layerReq ? { maxLayers: layerReq } : {}), ...boardOpts }, path.join(dir, 'chipscale.svg'), FIRST_BUILD_WALL_MS, req.signal ?? undefined)
         // planner-spec path: the netlist came from the planner, not a design
         // model call, so there is no design trail to report.
-        cand = { parts: nl.parts, nets: nl.nets, gnd: nl.gnd ?? [], note: undefined, droppedCapabilities: undefined, realFootprints, result, svgName: 'chipscale.svg', designTrail: [] }
+        cand = { parts: nl.parts, nets: nl.nets, gnd: nl.gnd ?? [], maxLayers: layerReq, note: undefined, droppedCapabilities: undefined, realFootprints, result, svgName: 'chipscale.svg', designTrail: [] }
         boardSource = src
       }
     }
@@ -798,7 +801,7 @@ async function buildChipScale(
     // can't run away. This is automatic: overcrowding → grow → retry, no human ask.
     if (DENSITY_REPLAN && !keepCapabilities && boardSource !== 'llm' && densityFailed(cand.result)) {
       const first = cand.result
-      const payload = { parts: cand.parts, nets: cand.nets, gnd: cand.gnd ?? [] }
+      const payload = { parts: cand.parts, nets: cand.nets, gnd: cand.gnd ?? [], ...((cand as { maxLayers?: number }).maxLayers ? { maxLayers: (cand as { maxLayers?: number }).maxLayers } : {}) }
       // grow ladder: each rung is a wider board + roomier channels than the last.
       // Stop at the FIRST clean route; otherwise keep the best board across rungs.
       const GROW_RUNGS = [
@@ -980,7 +983,7 @@ async function buildChipScale(
       const dc = designConvergence
       const tail = dc.kept === 'replanned'
         ? `re-planned the design (${dc.replans} parallel candidate(s); ${dc.change}) → ${dc.after?.drc} vs ${dc.before.drc} DRC error(s)${dc.converged ? ', routes clean' : ''}`
-        : `kept the original — ${dc.replans} parallel re-plan candidate(s) were no better`
+        : `kept the original — ${dc.replans ?? dc.iterations?.length ?? '?'} parallel re-plan candidate(s) were no better`
       result.drcRepair.fixes = [
         ...(result.drcRepair.fixes ?? []),
         `design↔routing outer loop: ${dc.reason} → ${tail}`,
@@ -1072,7 +1075,7 @@ async function buildChipScale(
       //     drilled in the .kicad_pcb, in BOARD-CENTERED mm (+x right, +y up).
       //     The enclosure should put its bosses/standoffs exactly there.
       await fs.writeFile(path.join(dir, 'chipscale-board.json'),
-        JSON.stringify({ ok: !!result.ok && pinViolations.length === 0, pinViolations, drcScore: result.drcScore ?? null, boardMm: result.boardMm, areaMm2: result.areaMm2, components: result.components, routedTraces: result.routedTraces, realFootprints, parts: partList, boardShape: result.boardShape ?? null, mountingHoles: result.mountingHoles ?? [], drc: result.drc ?? null, drcRepair: result.drcRepair ?? null, designConvergence, boardSource, plannerHonest }))
+        JSON.stringify({ ok: !!result.ok && pinViolations.length === 0, pinViolations, drcScore: result.drcScore ?? null, boardMm: result.boardMm, areaMm2: result.areaMm2, components: result.components, routedTraces: result.routedTraces, realFootprints, parts: partList, boardShape: result.boardShape ?? null, mountingHoles: result.mountingHoles ?? [], drc: result.drc ?? null, drcRepair: result.drcRepair ?? null, layers: result.layers ?? result.drcRepair?.layers ?? null, layersRequested: result.layersRequested ?? result.drcRepair?.layersRequested ?? null, designConvergence, boardSource, plannerHonest }))
       // the routed .kicad_pcb for the 3D render (the real chip-down board)
       if (result.kicadPcb) await fs.writeFile(path.join(dir, 'chipscale.kicad_pcb'), result.kicadPcb)
     }

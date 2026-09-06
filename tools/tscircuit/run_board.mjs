@@ -2494,7 +2494,11 @@ async function main() {
       ? input.gapLadder.map(Number).filter((g) => g >= 1.5 && g <= 8).slice(0, 4)
       : [2.1, 3.2, 4.6]
     const T_START = Date.now()
-    const BUDGET_MS = Number(process.env.FL_BUDGET_MS || 255_000) // under the electronics-cs runner's 285s hard wall, leaving margin for post-processing
+    // Inner run budget (gap ladder, legalizers, residual nudge). It was a fixed
+    // 255s whatever the wall: with a 600s wall the residual nudge still reported
+    // "out of time budget" at 194s and shipped a 0.25mm nit against a 0.30mm rule.
+    const MAIN_WALL = Number(process.env.FL_WALL_MS) || 0
+    const BUDGET_MS = Number(process.env.FL_BUDGET_MS) || (MAIN_WALL ? Math.max(120_000, MAIN_WALL - 60_000) : 255_000)
     let res = null, gapTrail = [], usedGap = GAP_LADDER[0], lastMs = 0
     // Score with drcScore, the same severity model the inner ladder uses.
     // This was `errors + unrouted * 5`, which weights a SHORT and a silkscreen
