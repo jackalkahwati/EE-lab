@@ -170,7 +170,7 @@ async function applyGroundPlane(cj, gndPins, profileKey = 'standard') {
         violations: pos.points.slice(0, 40),
       }
     }
-    return { available: true, assigned: gp.assigned ?? 0, unconnected: gp.unconnected ?? null, stitched: gp.stitched ?? 0, skipped: gp.skipped ?? 0, errors: drcAfter?.errors ?? null, drcAfter, pcb }
+    return { available: true, assigned: gp.assigned ?? 0, unconnected: gp.unconnected ?? null, stitched: gp.stitched ?? 0, skipped: gp.skipped ?? 0, zoneTracks: gp.zoneTracks ?? 0, errors: drcAfter?.errors ?? null, drcAfter, pcb }
   } catch (e) {
     return { available: false, reason: String(e).slice(0, 160) }
   } finally {

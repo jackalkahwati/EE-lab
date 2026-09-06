@@ -378,6 +378,11 @@ try:
 except Exception as _e:
     mh_set = -1  # surfaced in the JSON; pour proceeds with the default clearance
 
+# The GND pads were re-netted above; the filler must see that, or it keeps a
+# different-net clearance void around every one of them (measured: the zone-track
+# fallback found nothing on a fresh board and a spot 0.3mm away on the same board
+# reloaded from disk — the only difference was connectivity).
+board.BuildConnectivity()
 pcbnew.ZONE_FILLER(board).Fill(board.Zones())
 
 # 5. Zone-track fallback for pads no through-via can reach. A GND pin on a
@@ -423,20 +428,31 @@ for pos, pad in unreached:
                 return False
         return True
     hit = None
-    for r_mm in OFFSETS_MM[1:]:
+    zrej = {'fill': 0, 'copper': 0}
+    # Reach further than the via search: the pour retreats several mm from a
+    # fanned-out LQFP, and a same-layer track is checked exactly along its length.
+    for r_mm in OFFSETS_MM[1:] + [3.0, 3.5, 4.0, 4.5, 5.0, 6.0]:
         r = pcbnew.FromMM(r_mm)
         for k in range(DIRS):
             ang = 2.0 * math.pi * k / DIRS
             c = pcbnew.VECTOR2I(int(pos.x + r * math.cos(ang)), int(pos.y + r * math.sin(ang)))
-            if _inside(c) and _clears(pos, c):
-                hit = c
-                break
+            if not _inside(c):
+                zrej['fill'] += 1
+                continue
+            if not _clears(pos, c):
+                zrej['copper'] += 1
+                continue
+            hit = c
+            break
         if hit:
             break
     if hit is None:
         if os.environ.get('FL_GP_DEBUG'):
-            sys.stderr.write('[gp] zone-track fallback: nothing reaches the pour from GND pad at (%.2f, %.2f) mm\n'
-                             % (pcbnew.ToMM(pos.x), pcbnew.ToMM(pos.y)))
+            bb = polys.BBox()
+            sys.stderr.write('[gp] zone-track fallback: nothing reaches the pour from GND pad at (%.2f, %.2f) mm; rejected by %s; fill: %d outlines, bbox %.1fx%.1fmm at (%.1f,%.1f), area %.1fmm2, contains(pad)=%s contains(pad+2mm)=%s\n'
+                             % (pcbnew.ToMM(pos.x), pcbnew.ToMM(pos.y), zrej, polys.OutlineCount(),
+                                pcbnew.ToMM(bb.GetWidth()), pcbnew.ToMM(bb.GetHeight()), pcbnew.ToMM(bb.GetX()), pcbnew.ToMM(bb.GetY()),
+                                polys.Area() / 1e12, polys.Contains(pos), polys.Contains(pcbnew.VECTOR2I(pos.x + pcbnew.FromMM(2.0), pos.y))))
         continue
     t = pcbnew.PCB_TRACK(board)
     t.SetStart(pos)
