@@ -398,7 +398,7 @@ export async function GET(req: Request) {
   // package was cut from the intermediate board, and the shipped board landed
   // 90s later. The wait covers the build's whole envelope (electronics-cs
   // maxDuration = 600s); the pipeline route itself has 1800s.
-  const EARLY_CS_WAIT_MS = 780_000 // > electronics-cs FIRST_BUILD_WALL_MS (600s) + its post-processing
+  const EARLY_CS_WAIT_MS = 1_260_000 // > electronics-cs ROUTE_ENVELOPE_MS (1200s: first build + grow rungs) + persistence
   const earlyCsAbort = new AbortController()
 
   // Full record of the run, every event in order, persisted on completion so

@@ -12,7 +12,8 @@ test('first build wall is >= 450s and is what both first-build paths use', () =>
   assert.match(src, /buildCandidate\(baseMsg, req, dir, 'chipscale\.svg', FIRST_BUILD_WALL_MS/)
 })
 test('re-plan rungs stay bounded inside the route envelope', () => {
-  assert.match(src, /Math\.min\(285_000, 560_000 - elapsed\)/)
+  assert.match(src, /Math\.min\(FIRST_BUILD_WALL_MS, ROUTE_ENVELOPE_MS - elapsed\)/, 'grow rungs get the first-build wall inside the route envelope')
+  assert.match(src, /const ROUTE_ENVELOPE_MS = 1_200_000/)
   assert.match(src, /if \(budget < 120_000\)/)
   assert.match(src, /export const maxDuration = 600/)
 })

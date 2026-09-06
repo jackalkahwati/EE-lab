@@ -31,7 +31,7 @@ export const dynamic = 'force-dynamic'
 // hard wall so it can't hang forever. The design↔routing OUTER loop can run a
 // second (re-planned) board when the first hits a density limit, so the cap
 // covers two builds — the runner timeouts (285s + 220s) still bound each one.
-export const maxDuration = 600
+export const maxDuration = 1300 // self-hosted `next start` does not enforce this; kept truthful to ROUTE_ENVELOPE_MS below
 
 const RUN_ID = /^run-[A-Za-z0-9._-]{1,128}$/
 
@@ -615,6 +615,13 @@ async function handlePost(req: Request) {
   // first candidate build (LLM + up to 285s route) counts against the budget
   // too, not just the re-plan loop. maxDuration=600 covers the whole route.
   const routeStart = Date.now()
+  // Whole-route envelope: first build (FIRST_BUILD_WALL_MS) + the grow rungs.
+  // It was 560s with grow rungs capped at 285s — a cap left from the 285s era —
+  // so the grown board that SHIPPED (API runs e24b2db0, da8cf6ef) ran with a
+  // 135s ladder, no pour-selection, no ground retry and no residual nudge, and
+  // kept a 0.25mm via nit against the 0.30mm rule. The pipeline's fab/firmware
+  // wait (EARLY_CS_WAIT_MS) is sized above this.
+  const ROUTE_ENVELOPE_MS = 1_200_000
   let body: any
   try { body = await req.json() } catch { return Response.json({ error: 'bad json body' }, { status: 400 }) }
   const spec = body.spec as ProductSpec | undefined
@@ -812,7 +819,7 @@ async function buildChipScale(
       let best = cand
       for (let i = 0; i < GROW_RUNGS.length; i++) {
         const elapsed = Date.now() - routeStart
-        const budget = Math.min(285_000, 560_000 - elapsed)
+        const budget = Math.min(FIRST_BUILD_WALL_MS, ROUTE_ENVELOPE_MS - elapsed)
         if (budget < 120_000) { growTrail.push({ rung: i + 1, skipped: 'time budget', elapsedMs: elapsed }); break }
         const rung = GROW_RUNGS[i]
         const svgName = `chipscale-grow${i + 1}.svg`
