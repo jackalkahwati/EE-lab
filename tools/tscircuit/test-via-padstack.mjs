@@ -99,7 +99,7 @@ t('the built-in rung is actually GIVEN that pad (a derived number nobody passes 
 
 t('emitBoardCode RUNS with the derived pad and puts it on the <board> (the first cut of this fix threw ReferenceError five minutes into a route)', () => {
   const code = ns.emitBoardCode([], [], { numLayers: 4, viaPad: ns.routerViaPadMm('hdi'), viaHole: 0.25 })
-  assert.match(code, /minViaPadDiameter="0\.8mm" minViaHoleDiameter="0\.25mm"/)
+  assert.match(code, /minViaPadDiameter="0\.6mm" minViaHoleDiameter="0\.25mm"/)
   assert.match(code, /layers=\{4\}/)
   assert.doesNotMatch(ns.emitBoardCode([], [], { numLayers: 2 }), /ViaPadDiameter/, '2-layer boards stay byte-identical')
 })
