@@ -497,10 +497,18 @@ def synth(design, out_path):
         body += compose.res("R92", px, py + 12, "RS485_A", "RS485_B", nets)  # 120R term
         note_extent(px, py, 8, 16)
         px += 14
+    tp_last = -1
     for i, net in enumerate(["+5V", "+3V3", "I2C_SCL", "SPI_SCK"]):
         if net in nets.order:
             body += compose.tp("TP%d" % (i + 1), px + i * 5, py, net, nets)
             note_extent(px + i * 5, py, 4, 6)
+            tp_last = i
+    if tp_last >= 0:
+        # advance past the test points: the requested-connector row below starts
+        # at px, and without this the first connector sat ON TP1/TP2 (measured:
+        # "PLACEMENT GATE: FAIL overlap: TP1 <-> J20" on the first board that
+        # asked for a screw terminal).
+        px += 5 * tp_last + 4 + 3
     # Connectors the user asked for BY NAME (intent["connectors"]) -- placed as
     # real parts on real KiCad footprints, wired to nets the board actually has,
     # and skipped LOUDLY when a net they need does not exist. This slot was

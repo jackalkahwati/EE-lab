@@ -61,3 +61,48 @@ def test_unknown_part_with_no_family_is_reported_loudly():
     assert r["selected"]                             # something is built
     assert r["substituted_for"] == "XYZ9000", r      # but the drop is not silent
     assert "no stocked relative" in r["why"], r["why"]
+
+
+def test_header_with_words_between_dimensions_and_header_is_parsed():
+    from hardware.planner.intent import parse_intent
+    for prompt in ("2x4 pin SWD header for debug", "a 2x5 shrouded header", "2x4 header"):
+        di = parse_intent(prompt)
+        heads = [c for c in di["connectors"] if c["kind"] == "header"]
+        assert heads and heads[0]["rows"] == 2 and heads[0]["cols"] in (4, 5), (prompt, di["connectors"])
+
+
+def test_requested_connector_row_starts_past_the_test_points(tmp_path):
+    """The bottom row placed TP1-TP4 at 5mm steps but never advanced the cursor, so
+    the first requested connector sat on TP1/TP2 (measured: PLACEMENT GATE FAIL
+    'overlap: TP1 <-> J20' on the first board that asked for a screw terminal)."""
+    import synth
+    compose = synth.compose  # the module object synth actually calls, not a second import
+    pins = [{"number": "1", "name": "SDA", "etype": "bidirectional"},
+            {"number": "2", "name": "SCL", "etype": "bidirectional"},
+            {"number": "3", "name": "VCC", "etype": "power_in"},
+            {"number": "4", "name": "GND", "etype": "power_in"}]
+    dev = lambda mpn, cat, fp: {"mpn": mpn, "category": cat, "pins": pins, "kicad_footprint": fp,
+                                "interfaces": [{"type": "i2c", "signals": {}}]}
+    design = {"final_design": [dev("ADS1115IDGS", "adc.precision", "Package_SO:TSSOP-10_3x3mm_P0.5mm"),
+                               dev("24LC02", "memory.eeprom", "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm")],
+              "intent": {"mcu": {"family": "rp2040"},
+                         "connectors": [{"kind": "screwterminal", "pins": 2}]}}
+    placed = {}
+    real_place, real_tp = compose.place, compose.tp
+    def rec_place(lib, fp, ref, x, y, *a, **k):
+        placed[ref] = (x, y); return real_place(lib, fp, ref, x, y, *a, **k)
+    def rec_tp(ref, x, y, *a, **k):
+        placed[ref] = (x, y); return real_tp(ref, x, y, *a, **k)
+    compose.place, compose.tp = rec_place, rec_tp
+    try:
+        synth.synth(design, str(tmp_path / "board.kicad_pcb"))
+    finally:
+        compose.place, compose.tp = real_place, real_tp
+    tps = {r: xy for r, xy in placed.items() if r.startswith("TP")}
+    assert "J20" in placed, sorted(placed)
+    assert tps, sorted(placed)
+    jx, jy = placed["J20"]
+    same_row = [r for r, (x, y) in tps.items() if abs(y - jy) < 3]
+    assert same_row, "test points and the connector should share the bottom row"
+    last_tp_x = max(placed[r][0] for r in same_row)
+    assert jx >= last_tp_x + 4 + 3, f"J20 at x={jx} overlaps test points ending at x={last_tp_x}: {tps}"

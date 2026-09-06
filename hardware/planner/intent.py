@@ -155,7 +155,10 @@ def parse_intent(prompt):
         di["connectors"].append({"kind": "screwterminal", "pins": int(mm.group(1))})
     if not any(c["kind"] == "screwterminal" for c in di["connectors"]) and re.search(r"screw[- ]?terminal|terminal[- ]?block", p):
         di["connectors"].append({"kind": "screwterminal", "pins": 2})
-    for mm in re.finditer(r"(\d)\s*[x×]\s*(\d{1,2})\s*(?:pin\s*)?(?:header|pin[- ]?header)", p):
+    # "2x4 pin SWD header", "2x5 shrouded header": up to two words may sit between
+    # the dimensions and "header" (measured: the architect's own rewrite of a prompt
+    # produced "2x4 pin SWD header" and the request was silently dropped).
+    for mm in re.finditer(r"(\d)\s*[x×]\s*(\d{1,2})\s*(?:pin\s*)?(?:[a-z0-9/-]+\s+){0,2}(?:header|pin[- ]?header)", p):
         di["connectors"].append({"kind": "header", "rows": int(mm.group(1)), "cols": int(mm.group(2))})
 
     # exact part requests (skip ones that appear inside an "unsupported ..." clause,
