@@ -9,12 +9,13 @@ const cut = (start, end) => src.slice(src.indexOf(start), src.indexOf(end, src.i
 const ns = {}
 new Function('exports',
   cut('const FAB_PROFILES', '\n}\n') + '\n}\n' +
+  cut('function dsnToNLayer', '\n}\n') + '\n}\n' +
   cut('function setDsnTraceRules', '\n}\n') + '\n}\n' +
   cut('function setViaClearance', 'function viaClearanceUm') +
   cut('function viaClearanceUm', '\n}\n') + '\n}\n' +
   cut('function emitBoardCode', '\n}\n') + '\n}\n' +
   cut('function mergeStackedVias', '\n}\n') + '\n}\n' +
-  'exports.FAB_PROFILES=FAB_PROFILES;exports.setViaClearance=setViaClearance;exports.viaClearanceUm=viaClearanceUm;exports.viaPadstackUm=viaPadstackUm;exports.setDsnTraceRules=setDsnTraceRules;exports.routerViaPadMm=routerViaPadMm;exports.emitBoardCode=emitBoardCode;exports.mergeStackedVias=mergeStackedVias;exports.setViaPadstack=setViaPadstack;'
+  'exports.FAB_PROFILES=FAB_PROFILES;exports.setViaClearance=setViaClearance;exports.viaClearanceUm=viaClearanceUm;exports.viaPadstackUm=viaPadstackUm;exports.setDsnTraceRules=setDsnTraceRules;exports.dsnToNLayer=dsnToNLayer;exports.routerViaPadMm=routerViaPadMm;exports.emitBoardCode=emitBoardCode;exports.mergeStackedVias=mergeStackedVias;exports.setViaPadstack=setViaPadstack;'
 )(ns)
 
 const dsn = () => ({
@@ -133,6 +134,20 @@ t('setDsnTraceRules: the DSN carries the PROFILE trace rules, in structure and n
 t('the ladder passes the rung profile to freerouting (a rule nobody passes is a comment)', () => {
   assert.match(src, /freeroute\(cj, \{ layers: s\.layers, profile: s\.profile \}\)/)
   assert.match(src, /setDsnTraceRules\(dsnPcb, profile\)/)
+})
+
+t('dsnToNLayer: a through-hole PAD gets copper on every inner layer; an SMD pad stays single-layer', () => {
+  const d = { structure: { layers: [{ name: 'F.Cu', type: 'signal' }, { name: 'B.Cu', type: 'signal' }] }, library: { padstacks: [
+    { name: 'Round[A]Pad_1000_1700_um', shapes: [{ shapeType: 'circle', layer: 'F.Cu', diameter: 1700 }, { shapeType: 'circle', layer: 'B.Cu', diameter: 1700 }] },
+    { name: 'RoundRect[T]Pad_540x640_um', shapes: [{ shapeType: 'polygon', layer: 'F.Cu' }] },
+    { name: 'Via[0-1]_600:300_um', shapes: [{ shapeType: 'circle', layer: 'F.Cu', diameter: 600 }, { shapeType: 'circle', layer: 'B.Cu', diameter: 600 }] },
+  ] } }
+  const out = ns.dsnToNLayer(d, 4)
+  const layers = (n) => out.library.padstacks.find((p) => p.name === n).shapes.map((s) => s.layer).sort()
+  assert.deepEqual(layers('Round[A]Pad_1000_1700_um'), ['B.Cu', 'F.Cu', 'In1.Cu', 'In2.Cu'])
+  assert.equal(out.library.padstacks.find((p) => p.name === 'Round[A]Pad_1000_1700_um').shapes.find((s) => s.layer === 'In1.Cu').diameter, 1700)
+  assert.deepEqual(layers('RoundRect[T]Pad_540x640_um'), ['F.Cu'])
+  assert.deepEqual(layers('Via[0-1]_600:300_um'), ['B.Cu', 'F.Cu', 'In1.Cu', 'In2.Cu'])
 })
 
 console.log(`${pass} passed`)

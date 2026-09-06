@@ -208,6 +208,17 @@ function dsnToNLayer(d, n = 4) {
     if (/via/i.test(ps.name)) {
       const dia = ps.shapes?.[0]?.diameter || 600
       ps.shapes = all.map((layer) => ({ shapeType: 'circle', layer, diameter: dia }))
+      continue
+    }
+    // Through-hole PADS: the converter emits copper on F.Cu and B.Cu only, so on
+    // a 4+ layer board the barrel is invisible to freerouting on the inner
+    // layers and it routes straight through it (measured: an In1.Cu VDD track
+    // through two GND pins of the SWD header -> 2 shorts). Replicate the front
+    // shape onto every inner layer.
+    const layersOf = new Set((ps.shapes || []).map((sh) => sh.layer))
+    if (layersOf.has('F.Cu') && layersOf.has('B.Cu')) {
+      const front = ps.shapes.find((sh) => sh.layer === 'F.Cu')
+      for (const layer of all) if (!layersOf.has(layer)) ps.shapes.push({ ...front, layer })
     }
   }
   return d
@@ -257,6 +268,7 @@ function setViaClearance(dsnPcb, um) {
   set('via_via', um)
   set('via_pin', um)
   set('via_smd', um)
+  if (process.env.FL_VIA_WIRE_CLEARANCE === '1') { set('via_wire', um); set('wire_via', um) } // A/B: re-test the 'ignored' verdict, which predates the pin-image fix
   // NOT via_wire / wire_via: freerouting emits nothing for them and measurably
   // ignores them -- with both set to 400um a track still landed 0.27mm from a
   // via hole. Track-to-via distance is governed by the via PADSTACK diameter
@@ -434,7 +446,7 @@ async function freerouteReal(cj, { layers = 2, routeFirst = null, profile = 'sta
     // <=1 / 2 / 2 without, same machine, same hour — a 0.95mm keep-out closes the
     // channels a tight 2-layer board needs. The hole_clearance faults it targeted
     // came from the built-in router anyway (see routerViaPadMm/mergeStackedVias).
-    if (process.env.FL_VIA_PADSTACK === '1') setViaPadstack(dsnPcb, viaPadstackUm(dsnPcb))
+    if (process.env.FL_VIA_PADSTACK === '1') setViaPadstack(dsnPcb, Number(process.env.FL_VIA_PADSTACK_UM) || viaPadstackUm(dsnPcb)) // FL_VIA_PADSTACK_UM: A/B the size
     if (layers > 2) dsnPcb = dsnToNLayer(dsnPcb, layers)
     // Via copper spacing derived from the fab rules the board will be graded
     // on -- see viaClearanceUm. (The old comment here described 0.6mm pads and
