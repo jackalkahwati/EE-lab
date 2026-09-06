@@ -45,6 +45,10 @@ export interface BoardFacts {
     unroutedSignal?: number | null
     converged?: boolean | null
     groundPlane?: { available?: boolean; unconnected?: number | null; errors?: number | null } | null
+    /** copper layers of the shipped board, and the count the user asked for (planner intent) */
+    layers?: number | null
+    layersRequested?: number | null
+    layerRequestMet?: boolean | null
   } | null
   pinViolations?: string[] | null
 }
@@ -101,10 +105,16 @@ export function boardVerdict(board: BoardFacts | null | undefined): BoardVerdict
   const reasons: string[] = []
   if (board.ok === false) reasons.push('the runner reported not ok')
   if ((errors ?? 0) > 0) {
-    const top = Object.entries(types).sort((a, b) => b[1] - a[1])[0]?.[0]
-    reasons.push(`${errors} DRC error(s)${top ? ` (${top.replace(/_/g, ' ')})` : ''}`)
+    // every class, not just the top one: "3 DRC error(s) (hole clearance)" hid a
+    // copper clearance fault and an open behind the headline
+    const classes = Object.entries(types).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${n} ${k.replace(/_/g, ' ')}`)
+    reasons.push(`${errors} DRC error(s)${classes.length ? ` (${classes.join(', ')})` : ''}`)
   }
   if ((unrouted ?? 0) > 0) reasons.push(`${unrouted} net(s) unrouted`)
+  // the user asked for a layer count; a board routed on more layers is an
+  // alternative, not the board they asked for
+  const lreq = rep?.layersRequested
+  if (lreq && rep?.layerRequestMet === false) reasons.push(`requested ${lreq}-layer board, routed on ${rep?.layers ?? '?'} layers`)
   const gp = rep?.groundPlane
   if (gp && gp.available === false) reasons.push('the ground plane pass did not run')
   for (const v of pins) reasons.push(String(v))

@@ -410,7 +410,7 @@ function plannerNetlist(designPath: string): Promise<{ parts: any[]; nets: any[]
 // full ladder run; the grow/re-plan rungs below keep their own budgets and skip
 // when under 120s remain, so the route stays inside its 560s envelope and
 // maxDuration=600. The pipeline's early build overlaps other stages anyway.
-const FIRST_BUILD_WALL_MS = 450_000
+const FIRST_BUILD_WALL_MS = 600_000 // measured: the 22-27 part real-footprint boards need 300s of ladder + the post-pour repairs; 450s starved those repairs on prod
 function runBoard(payload: object, svgPath: string, timeoutMs = FIRST_BUILD_WALL_MS, signal?: AbortSignal): Promise<any> {
   const script = path.join(process.cwd(), '..', '..', 'tools', 'tscircuit', 'run_board.mjs')
   return new Promise((resolve, reject) => {

@@ -130,6 +130,13 @@ def _blank_intent():
     }
 
 
+def _layer_count(prompt):
+    """An explicit "2-layer board" / "4 layer" in the prompt. Recorded so the
+    router can keep the requested rung and the verdict can say when the shipped
+    board has more layers than asked for."""
+    m = re.search(r"\b([2468])\s*-?\s*layers?\b", prompt or "", re.I)
+    return int(m.group(1)) if m else None
+
 def parse_intent(prompt):
     di = _blank_intent()
     p = prompt.lower()
@@ -263,6 +270,7 @@ def parse_intent(prompt):
     # functional requirements summary (human-readable)
     di["functional_requirements"] = [
         c.replace("_", " ") for c in di["required_capabilities"]]
+    di["layer_count"] = _layer_count(prompt)
     return di
 
 

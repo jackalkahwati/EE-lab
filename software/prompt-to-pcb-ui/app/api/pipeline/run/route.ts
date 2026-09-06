@@ -398,7 +398,7 @@ export async function GET(req: Request) {
   // package was cut from the intermediate board, and the shipped board landed
   // 90s later. The wait covers the build's whole envelope (electronics-cs
   // maxDuration = 600s); the pipeline route itself has 1800s.
-  const EARLY_CS_WAIT_MS = 600_000
+  const EARLY_CS_WAIT_MS = 780_000 // > electronics-cs FIRST_BUILD_WALL_MS (600s) + its post-processing
   const earlyCsAbort = new AbortController()
 
   // Full record of the run, every event in order, persisted on completion so
@@ -1480,8 +1480,13 @@ export async function GET(req: Request) {
         }
 
         let fabZip: string | undefined
-        if (drcPass) {
-          log('validation', 'GATE validation: DRC = 0, PASS', 'ok')
+        let shippedOk: boolean | null = null // the SHIPPED chip-scale board's own verdict, when it exists
+        // In plan mode the package is cut from the SHIPPED chip-scale board, so the
+        // intermediate variant's DRC must not gate it: it did, and a run whose variant
+        // had 7 nits produced NO package and said nothing (API run 58437e03).
+        if (drcPass || planMode) {
+          if (drcPass) log('validation', 'GATE validation: DRC = 0, PASS', 'ok')
+          else log('validation', 'intermediate variant board not DRC-clean — the package is cut from the shipped chip-scale board and carries ITS verdict', 'warn')
           // ---- fab outputs: gerbers/drill/P&P/STEP/BOM -> zip --------------
           // ---- Which board does the customer get? The SHIPPED chip-scale board —
           // the one the Electronics verdict describes — never the intermediate
@@ -1522,6 +1527,7 @@ export async function GET(req: Request) {
                 fs.writeFileSync(bomCsv, rows.join('\n') + '\n')
               } catch { /* no spec: export_fab reports bom.csv skipped */ }
               const errs = csBoard.drc?.errors
+              shippedOk = csBoard.ok === true
               log('validation', `fabrication package from the ${fabBoardLabel} (${csBoard.ok ? 'DRC clean' : `NOT clean: ${errs ?? '?'} DRC error(s)`}${csBoard.wallHit ? ', wall hit — no pour' : ''})`, csBoard.ok ? 'ok' : 'warn')
             } else {
               log('validation', 'shipped chip-scale board not available — fab package cut from the intermediate variant board (labelled)', 'warn')
@@ -1648,9 +1654,13 @@ export async function GET(req: Request) {
                 : `${unconnected} unconnected (missing connections)`,
           })
         }
-        const validationStatus: 'PASSED' | 'GATE FAILED' = drcPass || planMode
-          ? 'PASSED'
-          : 'GATE FAILED'
+        // Plan mode: the run's status is the SHIPPED board's. It used to be PASSED
+        // unconditionally in plan mode, so last-run.md opened with "PASSED" over a
+        // variant carrying a GND/+3V3 short and a chip-scale board that failed.
+        const validationStatus: 'PASSED' | 'GATE FAILED' = planMode
+          ? (shippedOk === false ? 'GATE FAILED' : 'PASSED')
+          : (drcPass ? 'PASSED' : 'GATE FAILED')
+        if (planMode && shippedOk === false) log('validation', 'GATE validation: the shipped chip-scale board is not clean — run status GATE FAILED', 'warn')
 
         const failBoard = boardMode ? variantBoard : wsBoard
         // ---- gate: DRC must be clean before electrical/firmware stages. In plan
@@ -1814,7 +1824,13 @@ export async function GET(req: Request) {
           variantBoard,
           fwDir,
         ])
-        if (!gen.out.includes('FIRMWARE:') || gen.out.includes('ERROR')) {
+        const fwSkipped = gen.out.match(/^FIRMWARE: SKIPPED[^\n]*/m)?.[0]
+        if (fwSkipped) {
+          // the generator refused (no image for this MCU family): that is a FAILED
+          // stage, not a green cargo build of a template for another chip
+          log('firmware', fwSkipped, 'warn')
+          send({ type: 'stage', id: 'firmware', state: 'failed', failReason: fwSkipped.replace(/^FIRMWARE: /, '').slice(0, 200) })
+        } else if (!gen.out.includes('FIRMWARE:') || gen.out.includes('ERROR')) {
           send({ type: 'stage', id: 'firmware', state: 'failed', failReason: 'firmware generation failed' })
         } else {
           // plan mode: stamp the crate with WHICH board it targets (shipped

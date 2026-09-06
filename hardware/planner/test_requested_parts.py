@@ -189,3 +189,13 @@ def test_a_driver_ics_inputs_reach_the_mcu_and_its_outputs_reach_a_header():
     outs = [n for n in nl["nets"] if any(e == "%s.%d" % (drv["name"], k) for k in range(11, 19) for e in n)]
     assert len(outs) == 8 and all(any(e.startswith("J") for e in n) for n in outs), \
         "every driver output needs a header pin: %s" % outs
+
+
+def test_layer_count_and_mcu_family_reach_the_router_and_the_firmware_manifest():
+    import intent as _intent, synth as _synth
+    assert _intent.parse_intent("STM32F103 sensor node, 2-layer board, 5V input")["layer_count"] == 2
+    assert _intent.parse_intent("ESP32-C3 logger on a 4 layer board")["layer_count"] == 4
+    assert _intent.parse_intent("RP2040 hub")["layer_count"] is None
+    assert _synth._mcu_family_tag("STM32F103C8T6") == "stm32f1"
+    assert _synth._mcu_family_tag("RP2040") == "rp2040"
+    assert _synth._mcu_family_tag("ESP32-C3-MINI-1") == "esp32c3"

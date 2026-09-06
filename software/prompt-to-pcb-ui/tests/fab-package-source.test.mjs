@@ -17,3 +17,10 @@ test('the package waits for the early chip-scale build and says which board it u
   assert.match(src, /fabrication package from the \$\{fabBoardLabel\}/)
   assert.match(src, /chipscale-bom\.csv/)
 })
+
+test('plan mode cuts the package from the shipped board even when the intermediate variant is not DRC-clean, and the run status follows the shipped board', () => {
+  assert.match(src, /if \(drcPass \|\| planMode\) \{/, 'the variant DRC must not gate the shipped-board package')
+  assert.match(src, /shippedOk = csBoard\.ok === true/)
+  assert.match(src, /planMode\s*\? \(shippedOk === false \? 'GATE FAILED' : 'PASSED'\)/, 'plan-mode status is the shipped board\'s')
+  assert.match(src, /const fwSkipped = gen\.out\.match\(\/\^FIRMWARE: SKIPPED/, 'a generator refusal fails the firmware stage instead of building a template for another MCU')
+})

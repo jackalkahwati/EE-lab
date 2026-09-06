@@ -2034,7 +2034,7 @@ function legalizeTraces(cj, { minClear = FAB_PROFILES.standard.holeClearance + L
  *  DRC clean (a real, buildable solution). If the ladder is exhausted without
  *  converging, returns the BEST board found plus an honest verdict naming the
  *  residual and the capability wall. Never fakes convergence. */
-async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15, only = null, placeNets = null } = {}) {
+async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15, only = null, placeNets = null, maxLayers = null } = {}) {
   // `only`: run exactly the named rung (the targeted GND retry re-runs the winner).
   // `placeNets`: nets the PLACEMENT sees — the retry places on the original nets
   //   so the board stays identical and only the stub nets are new to the router.
@@ -2059,7 +2059,10 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15, only = nul
   //  - a final ROOMIER rung (bigger gap + wider board) runs before giving up,
   //    so a genuinely routable-but-tight board grows honestly instead of
   //    triggering the part-shedding density re-plan
-  const dense = process.env.FL_DENSE_4L !== '0' && (parts?.length ?? 0) > 10
+  // A board the user asked for as 2-layer keeps its 2-layer rung whatever the
+  // part count: dropping it silently shipped a 4-layer board against an explicit
+  // "2-layer board" in the prompt, with manufacturing describing 4 layers.
+  const dense = process.env.FL_DENSE_4L !== '0' && (parts?.length ?? 0) > 10 && maxLayers !== 2
   const ladder = noNets
     ? [{ name: 'placement only (no signal nets)', router: 'tsci', place: { gap, maxW, clearance: 0.5 }, profile: 'standard' }]
     : FR_JAR && JAVA
@@ -2101,6 +2104,7 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15, only = nul
   const trail = []
   const cands = [] // every DRC-checked rung, for the post-pour selection in main()
   let best = null
+  let lastRungMs = 0 // wall time of the last rung that ran, for admission
   // The built-in autorouter scales badly with part count: MEASURED, a 120-part
   // board spent 525s of a 527s run inside it, while the same board BUILDS in
   // 5.4s with routing off. The ladder puts freerouting rungs first, so on a
@@ -2137,11 +2141,17 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15, only = nul
   for (let i = 0; i < ladder.length; i++) {
     const s = ladder[i]
     const elapsedLadder = Date.now() - tLadder
-    if (best && elapsedLadder > LADDER_DEADLINE_MS) {
-      trail.push({ strategy: s.name, skipped: `ladder budget spent (${Math.round(elapsedLadder / 1000)}s)` })
-      process.stderr.write(`[t] ladder: skipped '${s.name}' — budget spent (${Math.round(elapsedLadder / 1000)}s of ${Math.round(LADDER_DEADLINE_MS / 1000)}s)\n`)
+    // Admission by PROJECTED time: a rung that starts just inside the deadline
+    // runs to completion and eats the reserve the post-pour repairs need
+    // (measured on the prod STM board: 6 rungs, 322s of a 300s ladder inside a
+    // 450s wall — the pour-selection and the ground retry were both skipped).
+    const projected = elapsedLadder + Math.max(lastRungMs, 15_000)
+    if (best && (elapsedLadder > LADDER_DEADLINE_MS || projected > LADDER_DEADLINE_MS)) {
+      trail.push({ strategy: s.name, skipped: `ladder budget spent (${Math.round(elapsedLadder / 1000)}s${projected > LADDER_DEADLINE_MS && elapsedLadder <= LADDER_DEADLINE_MS ? `, next rung projected ${Math.round(projected / 1000)}s` : ''})` })
+      process.stderr.write(`[t] ladder: skipped '${s.name}' — budget spent (${Math.round(elapsedLadder / 1000)}s of ${Math.round(LADDER_DEADLINE_MS / 1000)}s, last rung ${Math.round(lastRungMs / 1000)}s)\n`)
       continue
     }
+    const tRung = Date.now()
     if (s.router === 'tsci' && frAvailable && parts.length > TSCI_MAX_PARTS) {
       trail.push({ strategy: s.name, skipped: `built-in router skipped: ${parts.length} parts > ${TSCI_MAX_PARTS} (it scales superlinearly; freerouting rungs already covered this board)` })
       continue
@@ -2254,7 +2264,8 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15, only = nul
     // not the same unit and must not be summed as if they were.
     const score = drcScore(drc, unrouted)
     trail.push({ iter: i + 1, strategy: s.name, profile: FAB_PROFILES[s.profile].label, errors: drc.errors, errorTypes: drc.errorTypes, unrouted })
-    const cand = { cj, drc, fixes, unrouted, unroutedStructural, unroutedNets, score, strategy: s.name, layers: s.layers ?? 2 }
+    lastRungMs = Date.now() - tRung
+    const cand = { cj, drc, fixes, unrouted, unroutedStructural, unroutedNets, score, strategy: s.name, layers: s.layers ?? 2, ms: lastRungMs }
     cands.push(cand)
     if (!best || score < best.score) best = cand
     if (best && !only) CHECKPOINT = () => ({ best, trail }) // a retry rung never becomes the wall-hit checkpoint
@@ -2467,6 +2478,8 @@ async function main() {
     // — more channel room and space for the mounting-hole keepout — instead of
     // shedding parts. Guard-railed to sane ranges so a bad payload can't wedge it.
     const MAXW = Number.isFinite(+input.maxW) && +input.maxW >= 15 && +input.maxW <= 60 ? +input.maxW : 15
+    // layer count the USER asked for (planner intent "2-layer board" -> maxLayers); reported against what shipped
+    const LAYERS_REQ = [2, 4, 6, 8].includes(+input.maxLayers) ? +input.maxLayers : null
     const GAP_LADDER = Array.isArray(input.gapLadder) && input.gapLadder.length
       ? input.gapLadder.map(Number).filter((g) => g >= 1.5 && g <= 8).slice(0, 4)
       : [2.1, 3.2, 4.6]
@@ -2489,7 +2502,7 @@ async function main() {
         }
       }
       const tA = Date.now()
-      const attempt = await iterativeRedesign(input.parts, input.nets, { gap: g, maxW: MAXW })
+      const attempt = await iterativeRedesign(input.parts, input.nets, { gap: g, maxW: MAXW, maxLayers: LAYERS_REQ })
       lastMs = Date.now() - tA
       gapTrail.push({ gap: g, available: attempt.available,
         errors: attempt.best?.drc?.errors ?? null, unrouted: attempt.best?.unrouted ?? null,
@@ -2508,10 +2521,11 @@ async function main() {
       // over an HDI rung that pours with every ground pad on the plane. Cost:
       // one pour (~5-10s) per extra candidate. Opt out with FL_POUR_SELECT=0.
       const MAIN_WALL_MS0 = Number(process.env.FL_WALL_MS) || 0
-      const selLimit = MAIN_WALL_MS0 ? MAIN_WALL_MS0 - 60_000 : BUDGET_MS
+      const selLimit = MAIN_WALL_MS0 ? MAIN_WALL_MS0 - 40_000 : BUDGET_MS
       const cands = (res.candidates || []).filter((c) => c?.cj && c.drc?.available)
+      // one pour + one DRC per candidate; measured 5-10s on 20-part boards, so 12s each
       if (input.gnd?.length && cands.length > 1 && process.env.FL_POUR_SELECT !== '0'
-          && (Date.now() - T_START) + 25_000 * cands.length < selLimit) {
+          && (Date.now() - T_START) + 12_000 * cands.length < selLimit) {
         const tSel = Date.now()
         const scored = []
         for (const c of cands) {
@@ -2549,6 +2563,8 @@ async function main() {
         // explicit copper layer count of the winning board (2 or 4) — consumers
         // (lib/ground-board) previously had to regex winningStrategy for it.
         layers: res.best.layers ?? null,
+        layersRequested: LAYERS_REQ,
+        layerRequestMet: LAYERS_REQ ? (res.best.layers ?? 2) <= LAYERS_REQ : null,
         errorsFirst: res.trail[0]?.errors ?? null,
         errorsBest: res.best.drc.errors,
         unrouted: res.best.unrouted,
@@ -2778,7 +2794,8 @@ async function main() {
         const tGp = Date.now()
         TIMINGS.counters.groundPlanePasses++
         let gp = await applyGroundPlane(cj, input.gnd, res.best.drc.profileKey || 'standard')
-        tAdd('groundPlane', Date.now() - tGp, gp?.available ? `${gp.assigned} pins, ${gp.errors} errors` : 'unavailable')
+        const pourMs = Date.now() - tGp
+        tAdd('groundPlane', pourMs, gp?.available ? `${gp.assigned} pins, ${gp.errors} errors` : 'unavailable')
         // Targeted GND retry: the pour names the ground pads it could not reach
         // (QFN ring pins boxed in by signal copper, typically 1-3 per board).
         // Re-run ONLY the winning rung on the SAME placement with one stub net per
@@ -2788,9 +2805,11 @@ async function main() {
         // stm 3 unreached (score 78), rp 3 unreached (score 75) — every fault a
         // stranded ground pad. Opt out with FL_GND_RETRY=0.
         const MAIN_WALL_MS = Number(process.env.FL_WALL_MS) || 0
-        const retryLimitMs = MAIN_WALL_MS ? MAIN_WALL_MS - 45_000 : BUDGET_MS
+        const retryLimitMs = MAIN_WALL_MS ? MAIN_WALL_MS - 20_000 : BUDGET_MS
+        // the retry costs one rung (measured: the winner's own wall time) + one pour
+        const retryCostMs = (res.best?.ms ?? 45_000) + pourMs + 5_000
         if (process.env.FL_GND_RETRY !== '0' && gp?.available && gp.unreachedPads?.length && gp.unreachedPads.length <= 8
-            && res.best?.strategy && Array.isArray(input.nets) && (Date.now() - T_START) + 45_000 < retryLimitMs) {
+            && res.best?.strategy && Array.isArray(input.nets) && (Date.now() - T_START) + retryCostMs < retryLimitMs) {
           const stubs = gndStubNets(cj, input.gnd, gp.unreachedPads)
           const strat = res.best.strategy.replace(/ \+ inner-layer completion$/, '')
           if (stubs.length) {
@@ -2798,7 +2817,7 @@ async function main() {
             const savedCp = CHECKPOINT
             process.stderr.write(`[t] gndRetry: ${gp.unreachedPads.length} unreached ground pad(s) ${JSON.stringify(gp.unreachedPads)} → re-running '${strat}' with ${stubs.length} stub net(s)\n`)
             let again = null
-            try { again = await iterativeRedesign(input.parts, [...input.nets, ...stubs], { gap: usedGap, maxW: MAXW, only: strat, placeNets: input.nets }) } catch (e) { process.stderr.write(`[t] gndRetry: failed (${String(e).slice(0, 120)})\n`) }
+            try { again = await iterativeRedesign(input.parts, [...input.nets, ...stubs], { gap: usedGap, maxW: MAXW, only: strat, placeNets: input.nets, maxLayers: LAYERS_REQ }) } catch (e) { process.stderr.write(`[t] gndRetry: failed (${String(e).slice(0, 120)})\n`) }
             CHECKPOINT = savedCp
             if (again?.available && again.best?.cj) {
               const cj2 = again.best.cj
@@ -2991,6 +3010,7 @@ async function main() {
     // instead of on a raw error count that cannot tell a short from a nit.
     drcScore: drc?.available === true ? drcScore(drc, unroutedNets) : null,
     layers: drcRepair?.layers ?? board?.num_layers ?? null,
+    layersRequested: drcRepair?.layersRequested ?? null,
     kicadPcb,
     boardMm: board ? { w: Math.round(board.width * 10) / 10, h: Math.round(board.height * 10) / 10 } : null,
     areaMm2: board ? Math.round((isCircle ? Math.PI / 4 : 1) * board.width * board.height) : null,

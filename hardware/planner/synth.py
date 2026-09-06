@@ -71,6 +71,24 @@ def _pin_number(spec, name):
 INPUT_RAIL = "+5V"
 
 
+def _mcu_family_tag(mpn):
+    """Firmware-target family for the device manifest. The firmware generator
+    only emits RP2040 images and defaults a manifest WITHOUT a family to
+    rp2040 — so an STM32F103 board got a Pico image and a green firmware gate."""
+    m = str(mpn or "").upper()
+    if m.startswith("RP2040") or "PICO" in m:
+        return "rp2040"
+    if m.startswith("ESP32-C3") or m.startswith("ESP32C3"):
+        return "esp32c3"
+    if m.startswith("STM32F1"):
+        return "stm32f1"
+    if m.startswith("STM32"):
+        return "stm32"
+    if m.startswith("ESP32"):
+        return "esp32"
+    return m.split("-")[0].lower() or "unknown"
+
+
 def _regulator_out_rail(spec):
     """Rail a regulator produces: regulator_out, else an MPN suffix like -3.3 /
     -5.0, else +3V3 (every seed regulator here is a 3.3V part)."""
@@ -391,7 +409,7 @@ def block_mcu_generic(spec, alloc, x, y, nets):
                           "PinHeader_2x03_P2.54mm_Vertical", "J1", xr + 4, yc + 5,
                           0, hdrmap, nets)
     yc += 14
-    compose._DEVICES.append({"ref": "U1", "type": "mcu", "name": spec["mpn"]})
+    compose._DEVICES.append({"ref": "U1", "type": "mcu", "name": spec["mpn"], "family": _mcu_family_tag(spec["mpn"])})
     compose._DEVICES.append({"ref": "J1", "type": "connector", "name": "Programming header"})
     # extent must enclose the MCU body AND the support column
     return body, mw + 14, max(mh, yc - y) + 4
@@ -491,7 +509,7 @@ def synth(design, out_path):
         n_mcu = _wire_mcu(specs)
         mb, mw, mh = compose.block_mcu_pico(x, ytop, n_mcu, nets)
         body += mb
-        compose._DEVICES.append({"ref": "U1", "type": "mcu", "name": "RP2040"})
+        compose._DEVICES.append({"ref": "U1", "type": "mcu", "name": "RP2040", "family": "rp2040"})
         if sel == "RP2040":
             mcu_alloc = _rp2040_alloc(n_mcu)   # matches the real Pico wiring
     else:
@@ -1215,7 +1233,9 @@ def netlist_from_design(design, chip_scale=True, real_geometry=True):
         for i in range(len(eps) - 1):
             nets.append([eps[i], eps[i + 1]])
 
+    _lc = ((design.get("intent") or {}).get("layer_count"))
     return {"parts": parts, "nets": nets, "gnd": gnd, "input_rail": INPUT_RAIL,
+            "maxLayers": _lc if _lc in (2, 4, 6, 8) else None,
             "components": len(parts), "signal_nets": len([n for n in by_net if len(by_net[n]) > 1]),
             "ground_pins": len(gnd),
             # provenance + honesty: this spec came from the PLANNER's design (one

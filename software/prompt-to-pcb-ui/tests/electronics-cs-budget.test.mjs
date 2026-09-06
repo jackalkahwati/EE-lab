@@ -7,7 +7,7 @@ import test from 'node:test'
 const src = fs.readFileSync(new URL('../app/api/electronics-cs/route.ts', import.meta.url), 'utf8')
 test('first build wall is >= 450s and is what both first-build paths use', () => {
   const m = src.match(/const FIRST_BUILD_WALL_MS = (\d[\d_]*)/); assert.ok(m, 'FIRST_BUILD_WALL_MS declared')
-  assert.ok(Number(m[1].replace(/_/g, '')) >= 450_000)
+  assert.ok(Number(m[1].replace(/_/g, '')) >= 600_000, 'the first build wall must leave the ladder AND the post-pour repairs room (measured: 450s starved them)')
   assert.match(src, /path\.join\(dir, 'chipscale\.svg'\), FIRST_BUILD_WALL_MS, req\.signal/)
   assert.match(src, /buildCandidate\(baseMsg, req, dir, 'chipscale\.svg', FIRST_BUILD_WALL_MS/)
 })
