@@ -1476,20 +1476,58 @@ export async function GET(req: Request) {
         if (drcPass) {
           log('validation', 'GATE validation: DRC = 0, PASS', 'ok')
           // ---- fab outputs: gerbers/drill/P&P/STEP/BOM -> zip --------------
-          log('validation', 'generating fabrication package (gerbers, drill, P&P, STEP, BOM)…')
+          // ---- Which board does the customer get? The SHIPPED chip-scale board —
+          // the one the Electronics verdict describes — never the intermediate
+          // variant. Until now the package was cut from the variant unconditionally:
+          // gerbers, P&P and STEP of a board nobody DRC-gated as shipped, under the
+          // verdict of another. Wait for the early chip-scale build (bounded, same
+          // as firmware does), use it when it exists, and say so either way.
+          let fabBoard = variantBoard
+          let fabBoardLabel = 'intermediate variant board'
+          let bomCsv = path.join(hwDir, 'build/builds/default/default.bom.csv')
+          if (planMode) {
+            if (earlyCs) {
+              let waitTimer: ReturnType<typeof setTimeout> | undefined
+              const waited = await Promise.race([
+                earlyCs,
+                new Promise<null>((res) => { waitTimer = setTimeout(() => res(null), 300_000) }),
+              ])
+              clearTimeout(waitTimer)
+              if (waited === null) log('validation', 'chip-scale build still running after a 5 min wait — fab package will be cut from the intermediate board', 'warn')
+            }
+            const csPcb = path.join(runRoot, 'electronics', 'chipscale.kicad_pcb')
+            let csBoard: { ok?: boolean; drc?: { errors?: number }; wallHit?: boolean } | null = null
+            try { csBoard = JSON.parse(fs.readFileSync(path.join(runRoot, 'electronics', 'chipscale-board.json'), 'utf8')) } catch { /* not persisted */ }
+            if (csBoard && fs.existsSync(csPcb)) {
+              fabBoard = csPcb
+              fabBoardLabel = 'SHIPPED chip-scale board'
+              // BOM from the planner's part list (real MPNs; LCSC ids where the
+              // planner had them), the parts that are actually on that board.
+              try {
+                const spec = JSON.parse(fs.readFileSync(path.join(pubData, 'chipscale-spec.json'), 'utf8')) as { parts?: { name: string; mpn?: string; lcsc?: string; footprint?: string; kind?: string }[] }
+                const rows = ['Reference,MPN,LCSC,Footprint,Kind', ...(spec.parts ?? []).map((q) => [q.name, q.mpn ?? '', q.lcsc ?? '', q.footprint ?? '', q.kind ?? ''].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))]
+                bomCsv = path.join(pubData, 'chipscale-bom.csv')
+                fs.writeFileSync(bomCsv, rows.join('\n') + '\n')
+              } catch { /* no spec: export_fab reports bom.csv skipped */ }
+              const errs = csBoard.drc?.errors
+              log('validation', `fabrication package from the ${fabBoardLabel} (${csBoard.ok ? 'DRC clean' : `NOT clean: ${errs ?? '?'} DRC error(s)`}${csBoard.wallHit ? ', wall hit — no pour' : ''})`, csBoard.ok ? 'ok' : 'warn')
+            } else {
+              log('validation', 'shipped chip-scale board not available — fab package cut from the intermediate variant board (labelled)', 'warn')
+            }
+          }
+          log('validation', `generating fabrication package (gerbers, drill, P&P, STEP, BOM) from the ${fabBoardLabel}…`)
           const fabDir = path.join(ws, 'fab')
-          const bomCsv = path.join(hwDir, 'build/builds/default/default.bom.csv')
           const fab = await exec('validation', 'python3', [
             path.join(appDir, 'scripts/export_fab.py'),
-            variantBoard,
+            fabBoard,
             fabDir,
             bomCsv,
           ])
-          // ---- FL-1 test plan: probe map + limits, straight from the board.
+          // ---- FL-1 test plan: probe map + limits, straight from the SAME board.
           // The artifact that makes every Compose board FL-1-ready.
           const tpPath = path.join(pubData, 'fl1-testplan.json')
           const tpGen = await exec('validation', KPY, [
-            path.join(appDir, 'scripts/gen_testplan.py'), variantBoard, tpPath,
+            path.join(appDir, 'scripts/gen_testplan.py'), fabBoard, tpPath,
           ])
           const tpCount = tpGen.out.match(/^TESTPLAN (\d+)/m)?.[1]
           if (tpCount !== undefined)
