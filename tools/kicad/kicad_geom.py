@@ -194,3 +194,23 @@ def spiral(center, step, rmax):
             a = 2.0 * math.pi * k / n
             yield pcbnew.VECTOR2I(int(center.x + r * math.cos(a)), int(center.y + r * math.sin(a)))
         r += step
+
+
+def unreached_gnd_pads(board, gnd_code):
+    """Ground pads NOT on the plane: every GND pad whose connectivity cluster is
+    not the main GND cluster (the one holding the most ground pads). "Cluster
+    contains a zone" was the old test, and a pad bonded to a small pour ISLAND
+    passed it — two such pads shipped as opens on a 2-layer board with the
+    targeted retry never triggered. Returns ["U1.8", ...]."""
+    conn = board.GetConnectivity()
+    pads = [(fp, p) for fp in board.GetFootprints() for p in fp.Pads() if p.GetNetCode() == gnd_code]
+    if not pads:
+        return []
+    clusters = []  # list of (set of pad uuids)
+    key = lambda p: p.m_Uuid.AsString()  # noqa: E731
+    for fp, p in pads:
+        members = {key(i) for i in conn.GetConnectedItems(p) if i.GetClass() == 'PAD' and i.GetNetCode() == gnd_code}
+        members.add(key(p))
+        clusters.append(members)
+    main = max(clusters, key=len)
+    return [f"{fp.GetReference()}.{p.GetNumber()}" for fp, p in pads if key(p) not in main]

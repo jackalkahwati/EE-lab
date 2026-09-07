@@ -192,8 +192,14 @@ t('targeted GND retry: one stub per unreached pad to its NEAREST reached ground 
   // only when errors fall and neither opens nor unreached ground pads rise; the
   // pour-selection compare does not pay for it; the profile's own clearance rule
   assert.match(src, /const CLOSURE_ROUNDS = 2/, 'closure is bounded')
-  assert.match(src, /d2\.errors < drcAfter\.errors && opens2 <= opensBefore && unreached2\.length <= unreachedPads\.length/, 'closure acceptance: fewer errors, no new opens, no new stranded ground pads')
-  assert.match(src, /applyGroundPlane\(cjc, input\.gnd, c\.drc\.profileKey \|\| 'standard', \{ closure: false \}\)/, 'pour-selection candidates skip the closure')
+  assert.match(src, /\(d2\.errors < drcAfter\.errors \|\| \(d2\.errors === drcAfter\.errors && unreached2\.length < unreachedPads\.length\)\)\s*&& opens2 <= opensBefore && unreached2\.length <= unreachedPads\.length/, 'closure acceptance: fewer errors (or a ground pad reached), no new opens, no new stranded ground pads')
+  assert.match(src, /applyGroundPlane\(cjc, input\.gnd, c\.drc\.profileKey \|\| 'standard', \{ closure: withinReq\(c\) \}\)/, 'pour-selection pays for the closure only on a requested-layer candidate')
+  // the requested layer count is a selection rule, not just a verdict: the best
+  // fully-routed rung within it is kept as a candidate, poured WITH the closure,
+  // and ships when clean — over a cleaner taller board
+  assert.match(src, /within\.layerRequestCandidate = true/, 'the ladder keeps the best rung that meets the layer request')
+  assert.match(src, /\{ closure: withinReq\(c\) \}/, 'the requested-layer candidate is poured with the closure')
+  assert.match(src, /if \(cleanWithin\) pick = cleanWithin/, 'a clean board at the requested layer count wins the selection')
   assert.equal(ns.profileClearanceMm('standard'), 0.09)
   assert.equal(ns.profileClearanceMm('hdi'), 0.0635)
 })

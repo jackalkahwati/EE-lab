@@ -217,8 +217,9 @@ async function applyGroundPlane(cj, gndPins, profileKey = 'standard', opts = {})
     let unconnected = gp.unconnected ?? null
     let unreachedPads = Array.isArray(gp.unreachedPads) ? gp.unreachedPads : []
     let closure = null
+    // clearance faults and stranded ground pads are both the closure's job
     const closable = (d) => d && d.errors > 0 && d.errors <= CLOSURE_MAX_ERRORS
-      && ((d.errorTypes?.clearance || 0) + (d.errorTypes?.hole_clearance || 0)) > 0
+      && ((d.errorTypes?.clearance || 0) + (d.errorTypes?.hole_clearance || 0) + (d.errorTypes?.unconnected_items || 0)) > 0
     if (opts.closure !== false && process.env.FL_DRC_CLOSURE !== '0' && DRC_CLOSURE_PY && closable(drcAfter)) {
       closure = { rounds: [], accepted: 0 }
       let curPcb = outPcb, curJson = drcJson
@@ -237,7 +238,8 @@ async function applyGroundPlane(cj, gndPins, profileKey = 'standard', opts = {})
         const opens2 = rep2.unconnected_items?.length ?? 0
         const opensBefore = unconnected ?? 0
         const unreached2 = Array.isArray(cinfo.unreachedPads) ? cinfo.unreachedPads : unreachedPads
-        const better = d2.errors < drcAfter.errors && opens2 <= opensBefore && unreached2.length <= unreachedPads.length
+        const better = (d2.errors < drcAfter.errors || (d2.errors === drcAfter.errors && unreached2.length < unreachedPads.length))
+          && opens2 <= opensBefore && unreached2.length <= unreachedPads.length
         closure.rounds.push({ round, ms: Date.now() - tC, attempted: cinfo.attempted ?? null, fixed: cinfo.fixed ?? null, unfixed: cinfo.unfixed ?? null, errors: [drcAfter.errors, d2.errors], opens: [opensBefore, opens2], accepted: better })
         process.stderr.write(`[t] closure round ${round}: ${drcAfter.errors} → ${d2.errors} error(s), opens ${opensBefore} → ${opens2}, fixed ${JSON.stringify(cinfo.fixed ?? {})}${better ? '' : ' — rejected'}\n`)
         if (!better) break
@@ -2388,6 +2390,18 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15, only = nul
   // pour, and a rung that pours clean can lose here to one that does not.
   const candidates = [...cands].sort((a, b) => a.score - b.score).slice(0, 3)
   if (!candidates.includes(best)) candidates.unshift(best)
+  // The requested-layer candidate: the best fully-routed rung within the
+  // user's layer count. It may lose the pre-pour score to a taller board on
+  // clearance nits alone, and those are exactly what the DRC closure repairs
+  // on the grounded board — so main() pours it with the closure and ships it
+  // if it comes out clean (a 2-layer board with 8 hole nits vs a 4-layer one
+  // with 4: the 4-layer closed to 0, the 2-layer was never poured).
+  if (maxLayers) {
+    const within = [...cands].filter((c) => (c.layers ?? 2) <= maxLayers && c.unrouted === 0 && c.drc?.available)
+      .sort((a, b) => a.score - b.score)[0]
+    if (within && !candidates.includes(within)) { within.layerRequestCandidate = true; candidates.push(within) }
+    else if (within) within.layerRequestCandidate = true
+  }
   return { available: true, converged, best, trail, verdict, candidates }
 }
 
@@ -2604,24 +2618,37 @@ async function main() {
       const MAIN_WALL_MS0 = Number(process.env.FL_WALL_MS) || 0
       const selLimit = MAIN_WALL_MS0 ? MAIN_WALL_MS0 - 40_000 : BUDGET_MS
       const cands = (res.candidates || []).filter((c) => c?.cj && c.drc?.available)
-      // one pour + one DRC per candidate; measured 5-10s on 20-part boards, so 12s each
-      if (input.gnd?.length && cands.length > 1 && process.env.FL_POUR_SELECT !== '0'
-          && (Date.now() - T_START) + 12_000 * cands.length < selLimit) {
+      // A candidate that meets the requested layer count while the ladder's pick
+      // exceeds it is poured WITH the DRC closure (its faults are the repairable
+      // kind, or it would not be a candidate) and ships if it comes out clean:
+      // a clean board with the layers the user asked for beats a clean taller one.
+      const overSpec = LAYERS_REQ && (res.best.layers ?? 2) > LAYERS_REQ
+      const withinReq = (c) => !!(overSpec && (c.layers ?? 2) <= LAYERS_REQ && c.unrouted === 0)
+      const nWithin = cands.filter(withinReq).length
+      // one pour + one DRC per candidate; measured 5-10s on 20-part boards, so 12s
+      // each; a closure pour is one more DRC and a few seconds of pcbnew, 15s more
+      if (input.gnd?.length && (cands.length > 1 || nWithin) && process.env.FL_POUR_SELECT !== '0'
+          && (Date.now() - T_START) + 12_000 * cands.length + 15_000 * nWithin < selLimit) {
         const tSel = Date.now()
         const scored = []
         for (const c of cands) {
           const cjc = JSON.parse(JSON.stringify(c.cj))
           applyBoardFeatures(cjc, input, c.drc.profileKey || 'standard')
-          const g = await applyGroundPlane(cjc, input.gnd, c.drc.profileKey || 'standard', { closure: false })
+          const g = await applyGroundPlane(cjc, input.gnd, c.drc.profileKey || 'standard', { closure: withinReq(c) })
           const sc = g?.available && g.drcAfter ? drcScore(g.drcAfter, 0) : Infinity
-          scored.push({ c, sc, unreached: g?.unreachedPads?.length ?? null, errors: g?.errors ?? null })
+          scored.push({ c, sc, unreached: g?.unreachedPads?.length ?? null, errors: g?.errors ?? null, layers: c.layers ?? 2, closed: withinReq(c) ? (g?.closure?.accepted ?? 0) : null })
         }
         const cur = scored.find((s) => s.c === res.best)
-        const pick = [...scored].sort((a, b) => a.sc - b.sc)[0]
-        pourSelection = { tried: scored.map((s) => ({ strategy: s.c.strategy, prePour: s.c.score, postPour: s.sc, unreached: s.unreached, errors: s.errors })), picked: pick?.c.strategy ?? null }
-        tAdd('pourSelection', Date.now() - tSel, scored.map((s) => `${s.c.strategy}: ${s.c.score}→${s.sc}`).join('; '))
-        if (pick && cur && pick.c !== res.best && pick.sc < cur.sc) {
-          pourSelection.note = `post-pour selection: '${pick.c.strategy}' ships (grounded-board score ${pick.sc}) over the ladder's '${res.best.strategy}' (${cur.sc})`
+        let pick = [...scored].sort((a, b) => a.sc - b.sc)[0]
+        // the requested layer count wins when it can be made clean
+        const cleanWithin = scored.filter((s) => withinReq(s.c) && s.errors === 0 && (s.unreached ?? 0) === 0).sort((a, b) => a.sc - b.sc)[0]
+        if (cleanWithin) pick = cleanWithin
+        pourSelection = { tried: scored.map((s) => ({ strategy: s.c.strategy, layers: s.layers, prePour: s.c.score, postPour: s.sc, unreached: s.unreached, errors: s.errors, closureRounds: s.closed })), picked: pick?.c.strategy ?? null, layersRequested: LAYERS_REQ, layerRequestCandidates: nWithin, layerRequestMetByClosure: !!cleanWithin }
+        tAdd('pourSelection', Date.now() - tSel, scored.map((s) => `${s.c.strategy}: ${s.c.score}→${s.sc}${s.closed ? ` (closure ${s.closed})` : ''}`).join('; '))
+        if (pick && cur && pick.c !== res.best && (pick.sc < cur.sc || pick === cleanWithin)) {
+          pourSelection.note = cleanWithin && pick === cleanWithin
+            ? `post-pour selection: '${pick.c.strategy}' ships — it meets the requested ${LAYERS_REQ}-layer count and the DRC closure made its grounded board clean (score ${pick.sc}); the ladder's '${res.best.strategy}' (${cur.sc}) exceeded the request`
+            : `post-pour selection: '${pick.c.strategy}' ships (grounded-board score ${pick.sc}) over the ladder's '${res.best.strategy}' (${cur.sc})`
           // scored on the rungs as routed (before via/trace legalization); the
           // legalizers below run on whichever board ships
           pourSelection.scoredBeforeLegalization = true

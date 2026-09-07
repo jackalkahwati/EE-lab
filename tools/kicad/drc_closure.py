@@ -31,7 +31,7 @@ import sys
 import pcbnew
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from kicad_geom import CopperIndex, seg_shape, circle_shape, spiral  # noqa: E402
+from kicad_geom import CopperIndex, seg_shape, circle_shape, spiral, unreached_gnd_pads  # noqa: E402
 
 inp, outp, drcf = sys.argv[1], sys.argv[2], sys.argv[3]
 CLEARANCE = pcbnew.FromMM(float(sys.argv[4]) if len(sys.argv) > 4 else 0.09)
@@ -407,15 +407,32 @@ for v in viol:
 # zones retreat from the moved copper on their own
 pcbnew.ZONE_FILLER(board).Fill(board.Zones())
 board.BuildConnectivity()
-unconnected = board.GetConnectivity().GetUnconnectedCount(False)
-unreached = []
-_conn = board.GetConnectivity()
-for fp in board.GetFootprints():
-    for pad in fp.Pads():
-        if pad.GetNetCode() != GND_CODE or GND_CODE < 0:
+
+# 4. stranded ground pads: a pad the pour never reached (or that a repair above
+# cut loose) gets a clean dog-bone to a fresh via, else a same-layer track into
+# the main pour — the same clearance-checked search, so it is a repair, never
+# a new fault. Pads that still have no legal path stay reported.
+fixed["gndReach"] = 0
+if GND_CODE >= 0:
+    for name in unreached_gnd_pads(board, GND_CODE):
+        ref, num = name.rsplit(".", 1)
+        pad = next((p for fp in board.GetFootprints() if fp.GetReference() == ref for p in fp.Pads() if p.GetNumber() == num), None)
+        if pad is None:
             continue
-        if not any(i.GetClass() == 'ZONE' and i.GetNetCode() == GND_CODE for i in _conn.GetConnectedItems(pad)):
-            unreached.append(f"{fp.GetReference()}.{pad.GetNumber()}")
+        layer = pcbnew.F_Cu if pad.IsOnLayer(pcbnew.F_Cu) else (pcbnew.B_Cu if pad.IsOnLayer(pcbnew.B_Cu) else None)
+        if layer is None:
+            continue
+        idx = item_index(GND_CODE)
+        pos = pcbnew.VECTOR2I(pad.GetPosition())
+        if _place_dogbone(idx, pos, pcbnew.FromMM(0.15), layer, pcbnew.FromMM(0.5), pcbnew.FromMM(0.2)) \
+                or _place_zone_track(idx, pos, pcbnew.FromMM(0.15), layer):
+            fixed["gndReach"] += 1
+            pcbnew.ZONE_FILLER(board).Fill(board.Zones())
+            board.BuildConnectivity()
+    attempted += 0
+board.BuildConnectivity()
+unconnected = board.GetConnectivity().GetUnconnectedCount(False)
+unreached = unreached_gnd_pads(board, GND_CODE) if GND_CODE >= 0 else []
 pcbnew.SaveBoard(outp, board)
 print(json.dumps({"attempted": attempted, "fixed": fixed, "unfixed": unfixed,
                   "unconnected": unconnected, "unreachedPads": unreached}))

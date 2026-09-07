@@ -31,7 +31,7 @@ import re
 import pcbnew
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from kicad_geom import CopperIndex, seg_shape, circle_shape  # noqa: E402
+from kicad_geom import CopperIndex, seg_shape, circle_shape, unreached_gnd_pads  # noqa: E402
 
 inp, outp, gndf = sys.argv[1], sys.argv[2], sys.argv[3]
 hole_clearance = float(sys.argv[4]) if len(sys.argv) > 4 else 0.5
@@ -482,16 +482,9 @@ unconnected = board.GetConnectivity().GetUnconnectedCount(False)
 # Name the ground pads the plane never reached (no copper connected to the pad
 # at all). run_board uses the list for a TARGETED retry: it routes only these
 # pads as stubs to a reached ground pad and pours again.
-_conn = board.GetConnectivity()
-unreached_pads = []
-for fp in board.GetFootprints():
-    for pad in fp.Pads():
-        if pad.GetNetCode() != GND_CODE:
-            continue
-        # reached = its connectivity cluster contains a GND zone (the cluster is
-        # transitive: pad -> via -> plane counts, a stub track to nowhere does not)
-        if not any(i.GetClass() == 'ZONE' and i.GetNetCode() == GND_CODE for i in _conn.GetConnectedItems(pad)):
-            unreached_pads.append(f"{fp.GetReference()}.{pad.GetNumber()}")
+# reached = in the main ground cluster (pad -> via -> plane); a pad bonded only
+# to a pour island is NOT reached, whatever zone the island is
+unreached_pads = unreached_gnd_pads(board, GND_CODE)
 
 pcbnew.SaveBoard(outp, board)
 print(json.dumps({
