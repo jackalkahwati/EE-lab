@@ -282,7 +282,9 @@ t('a pin-1-origin footprint (2x3 header) is re-centred so its copper sits inside
 t('a requested 2-layer board keeps its 2-layer rung, rung admission is by projected time, and the verdict carries the layer request', () => {
   assert.match(src, /const dense = process\.env\.FL_DENSE_4L !== '0' && \(parts\?\.length \?\? 0\) > 10 && maxLayers !== 2/)
   assert.match(src, /const projected = elapsedLadder \+ Math\.max\(lastRungMs, 15_000\)/)
-  assert.match(src, /layersRequested: LAYERS_REQ,\s*layerRequestMet: LAYERS_REQ \? \(res\.best\.layers \?\? 2\) <= LAYERS_REQ : null/)
+  assert.match(src, /layerRequestMet: LAYERS_REQ \? \(res\.best\.layers \?\? 2\) >= LAYERS_REQ : null/, 'the layer request is a floor')
+  assert.match(src, /const ladder = ladder0\.filter\(floorOk\)/, 'rungs below the requested layer count are not attempted')
+  assert.match(src, /layerDeviation: LAYERS_REQ && \(res\.best\.layers \?\? 2\) > LAYERS_REQ/, 'more layers than asked is a stated deviation')
   assert.match(src, /const retryCostMs = \(res\.best\?\.ms \?\? 45_000\) \+ pourMs \+ 5_000/, 'the ground retry is admitted on MEASURED cost')
 })
 

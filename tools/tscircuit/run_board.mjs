@@ -2142,7 +2142,11 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15, only = nul
   // part count: dropping it silently shipped a 4-layer board against an explicit
   // "2-layer board" in the prompt, with manufacturing describing 4 layers.
   const dense = process.env.FL_DENSE_4L !== '0' && (parts?.length ?? 0) > 10 && maxLayers !== 2
-  const ladder = noNets
+  // The user's layer count is a FLOOR: "4-layer board" means build a 4-layer
+  // board, and escalate to 6 when the board needs it (reported as a deviation,
+  // never a failure). Rungs below the request are not attempted.
+  const floorOk = (r) => !maxLayers || r.layers == null || r.layers >= maxLayers
+  const ladder0 = noNets
     ? [{ name: 'placement only (no signal nets)', router: 'tsci', place: { gap, maxW, clearance: 0.5 }, profile: 'standard' }]
     : FR_JAR && JAVA
     ? [
@@ -2172,6 +2176,7 @@ async function iterativeRedesign(parts, nets, { gap = 2.1, maxW = 15, only = nul
         { name: 'built-in router, spread',   router: 'tsci', place: { gap: spread, maxW: maxW + 3, clearance: 0.5 }, profile: 'standard' },
         { name: 'built-in router, HDI fab',  router: 'tsci', place: { gap, maxW, clearance: 0.45 }, profile: 'hdi' },
       ]
+  const ladder = ladder0.filter(floorOk)
   // Net-aware placement (min pin-to-pin wirelength + routing channels) once, up
   // front — it's what lets the router complete every net. Reused across the
   // freerouting passes (they differ only in layers/fab profile). Null -> the
@@ -2672,7 +2677,14 @@ async function main() {
         // (lib/ground-board) previously had to regex winningStrategy for it.
         layers: res.best.layers ?? null,
         layersRequested: LAYERS_REQ,
-        layerRequestMet: LAYERS_REQ ? (res.best.layers ?? 2) <= LAYERS_REQ : null,
+        // the request is a floor: met when the shipped board has AT LEAST the
+        // requested layers; more layers than asked is a stated deviation
+        layerRequestMet: LAYERS_REQ ? (res.best.layers ?? 2) >= LAYERS_REQ : null,
+        layerDeviation: LAYERS_REQ && (res.best.layers ?? 2) > LAYERS_REQ
+          ? `requested ${LAYERS_REQ} layers, built on ${res.best.layers}: ${pourSelection?.layerRequestCandidates
+              ? (() => { const w = (pourSelection.tried || []).filter((t) => (t.layers ?? 2) <= LAYERS_REQ).sort((a, b) => (a.errors ?? 99) - (b.errors ?? 99))[0]; return w ? `the best ${LAYERS_REQ}-layer board still had ${w.errors ?? '?'} DRC error(s)${w.unreached ? ` and ${w.unreached} ground pin(s) off the plane` : ''} after repair` : `no ${LAYERS_REQ}-layer board came out clean` })()
+              : `no ${LAYERS_REQ}-layer attempt routed every net`}`
+          : null,
         errorsFirst: res.trail[0]?.errors ?? null,
         errorsBest: res.best.drc.errors,
         unrouted: res.best.unrouted,

@@ -384,6 +384,19 @@ DRC clearance test itself):
   request. Measured on the STM32 gate board with a 2-layer request: one LQFP
   ground pin has no legal via spot and no pour path on 2 layers, so it ships
   4-layer clean and says so.
+- **The requested layer count is a FLOOR (product decision 2026-09-07):** "a
+  4-layer board" means build at 4, and go to 6 when the board needs it; more
+  layers than asked is a deviation stated on a PASSED board
+  (`drcRepair.layerDeviation`, in the verdict detail), fewer is a failure.
+  Rungs below the request are not attempted; the requested count still wins
+  the post-pour selection when it can be made clean.
+- **Mechanical fit closure:** the enclosure plan is measured against the real
+  board (cavity vs board + slack, walls, standoffs on the mounting holes, a
+  90°-rotated board counts) and regenerated from the measured problems up to
+  `FIT_ROUNDS` = 2 times BEFORE the picture judge sees it, and once more after
+  the judge's revisions if they broke the fit. `fitClosure` in plan.json /
+  mechanical.json is the audit trail. Run 47acb0ae shipped a 66×41 cavity for
+  a 32×50 board with standoffs on nothing; the judge only looked at pictures.
 - **Unreached ground pad** = not in the main ground cluster (the one holding the
   most ground pads). "Cluster contains a zone" counted a pad on a pour island
   as reached and shipped two opens with the targeted retry never fired. The

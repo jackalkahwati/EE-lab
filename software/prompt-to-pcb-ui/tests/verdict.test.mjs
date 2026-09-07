@@ -85,3 +85,13 @@ test('every state produces a headline and a non-empty detail', () => {
     assert.ok(v.detail.length > 0, JSON.stringify(v))
   }
 })
+
+test('the layer request is a floor: more layers than asked passes with the deviation stated, fewer fails', () => {
+  const clean = { ok: true, boardMm: { w: 50, h: 50 }, drc: { available: true, errors: 0, errorTypes: {}, ruleProfile: 'JLCPCB standard' }, drcRepair: { unrouted: 0, layers: 4, layersRequested: 2, layerRequestMet: true, layerDeviation: 'requested 2 layers, built on 4: the best 2-layer board still had 4 DRC error(s) after repair' } }
+  const v = boardVerdict(clean)
+  assert.equal(v.state, 'passed')
+  assert.match(v.detail, /requested 2 layers, built on 4/)
+  const under = boardVerdict({ ...clean, drcRepair: { unrouted: 0, layers: 2, layersRequested: 4, layerRequestMet: false } })
+  assert.equal(under.state, 'failed')
+  assert.match(under.reasons.join(' '), /requested 4-layer board, built on 2 layers/)
+})

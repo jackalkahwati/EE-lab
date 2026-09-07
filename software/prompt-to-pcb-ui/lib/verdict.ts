@@ -49,6 +49,8 @@ export interface BoardFacts {
     layers?: number | null
     layersRequested?: number | null
     layerRequestMet?: boolean | null
+    /** set when the board shipped with MORE layers than asked (the request is a floor) */
+    layerDeviation?: string | null
     /** the runner's post-pour selection: what the requested-layer candidate came to */
     pourSelection?: {
       layerRequestCandidates?: number | null
@@ -117,24 +119,15 @@ export function boardVerdict(board: BoardFacts | null | undefined): BoardVerdict
     reasons.push(`${errors} DRC error(s)${classes.length ? ` (${classes.join(', ')})` : ''}`)
   }
   if ((unrouted ?? 0) > 0) reasons.push(`${unrouted} net(s) unrouted`)
-  // the user asked for a layer count; a board routed on more layers is an
-  // alternative, not the board they asked for
+  // The user's layer count is a FLOOR (product decision 2026-09-07): fewer
+  // layers than asked is a failure; MORE layers is a deviation stated on a
+  // passed board — "if 4 layers would really benefit from 6, make it 6".
   const lreq = rep?.layersRequested
-  if (lreq && rep?.layerRequestMet === false) {
-    // say what the requested-layer board came to, not only that it lost: the
-    // runner pours the best fully-routed candidate within the request and
-    // repairs it; its residual is the reason the taller board shipped
-    const ps = rep?.pourSelection
-    const within = (ps?.tried ?? []).filter((t) => (t.layers ?? 2) <= lreq).sort((a, b) => (a.errors ?? 99) - (b.errors ?? 99))[0]
-    const why = ps == null
-      ? ''
-      : !ps.layerRequestCandidates
-        ? ` — no ${lreq}-layer attempt routed every net`
-        : within
-          ? ` — the best ${lreq}-layer board still had ${within.errors ?? '?'} DRC error(s)${within.unreached ? ` and ${within.unreached} ground pin(s) off the plane` : ''} after repair`
-          : ''
-    reasons.push(`requested ${lreq}-layer board, routed on ${rep?.layers ?? '?'} layers${why}`)
-  }
+  const shippedLayers = rep?.layers ?? null
+  if (lreq && shippedLayers != null && shippedLayers < lreq) reasons.push(`requested ${lreq}-layer board, built on ${shippedLayers} layers`)
+  const deviation = lreq && shippedLayers != null && shippedLayers > lreq
+    ? (rep?.layerDeviation ?? `requested ${lreq} layers, built on ${shippedLayers}`)
+    : null
   const gp = rep?.groundPlane
   if (gp && gp.available === false) reasons.push('the ground plane pass did not run')
   for (const v of pins) reasons.push(String(v))
@@ -152,7 +145,7 @@ export function boardVerdict(board: BoardFacts | null | undefined): BoardVerdict
   return {
     state: 'passed',
     headline: 'passed',
-    detail: `${size}routed clean, 0 DRC errors under ${drc?.ruleProfile || 'the fab profile'}`.trim(),
+    detail: `${size}routed clean, 0 DRC errors under ${drc?.ruleProfile || 'the fab profile'}${deviation ? ` — ${deviation}` : ''}`.trim(),
     drcErrors: errors ?? 0, unrouted: unrouted ?? 0, electrical: electrical ?? 0,
     reasons: [],
   }

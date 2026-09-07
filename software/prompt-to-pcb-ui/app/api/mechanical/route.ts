@@ -405,12 +405,128 @@ async function handlePost(req: Request) {
       .trim()
       .slice(0, 64) || 'part'
 
+    // Honest fit check, as a function of a PLAN: does the real PCB fit the
+    // enclosure cavity, and do the standoffs land on its mounting holes?
+    // (a violation the redesign loop consumes — never silently shrink the board
+    // to fake a fit). Shape-aware: the REAL board (circle or rect) is compared
+    // against the plan's actual cavity pocket (circle-in-circle, rect-in-circle
+    // via the diagonal, circle-in-rect via the narrow side), and the cavity
+    // against the outer body. Cavity SELECTION lives in lib/mechanical-plan
+    // (selectCavity): named cavity → pocket enclosing the PCB op → largest
+    // qualifying pocket → none. When no board cavity can be identified the
+    // verdict is 'unknown' (fit NOT verified), never a failure — a ⌀6 mount
+    // hole must not be "the cavity" ever again.
+    // A board may sit either way round in its cavity: a plan whose cavity and
+    // standoffs match the board ROTATED 90° is a fit, and says so.
+    type Prof = { kind?: string; w?: number; h?: number; d?: number }
+    type FitMeasure = {
+      fitCheck: FitCheckT | null
+      problems: string[]
+      mountingAligned: boolean | 'not-applicable'
+      cavitySelection: ReturnType<typeof selectCavity>
+      rotated: boolean
+    }
+    type FitCheckT = {
+      fits: boolean | null
+      verdict: FitVerdict
+      boardShape: 'circle' | 'rect'
+      enclosureMm: { w: number; h: number }
+      cavityMm: { w: number; h: number; d?: number } | null
+      cavitySource: CavitySource
+      cavityOp: string | null
+      pcbMm: { w: number; h: number }
+      mountingAligned: boolean | 'not-applicable'
+      problems: string[]
+    }
+    const SLACK = 0.5
+    const measureFitAs = (plan: MechPlan, rotated: boolean): FitMeasure => {
+      const firstExtrude = plan.operations.find((o) => o.op === 'extrude') as { sketch?: string; depth?: number; offset?: number } | undefined
+      const firstSketch = plan.operations.find((o) => o.op === 'sketch') as { profile?: MechProfile } | undefined
+      const outerProf = (plan.operations.find((o) => o.op === 'sketch' && o.name === firstExtrude?.sketch) as { profile?: MechProfile } | undefined)?.profile
+      const outer: FitShape | null = profileToShape(outerProf ?? firstSketch?.profile ?? null)
+      const pcbComp = pcbShapeFromComponent(plan)
+      const bw = rotated ? board.hMm : board.wMm, bh = rotated ? board.wMm : board.hMm
+      const pcb: FitShape | null =
+        board.shape === 'circle' && board.diaMm ? { kind: 'circle', d: board.diaMm }
+        : bw && bh ? { kind: 'rect', w: bw, h: bh }
+        : pcbComp?.shape ?? null
+      const cavitySelection = selectCavity(plan, pcb, clearance)
+      const cavity = cavitySelection.shape
+      const problems: string[] = []
+      let mountingAligned: boolean | 'not-applicable' = 'not-applicable'
+      if (board.mountingHoles?.length) {
+        const holes = rotated ? board.mountingHoles.map((h) => ({ ...h, x: -h.y, y: h.x })) : board.mountingHoles
+        const standoffs = plan.operations.filter((o) => o.op === 'standoff') as { x: number; y: number }[]
+        mountingAligned = holes.every((h) =>
+          standoffs.some((st) => Math.abs(st.x - h.x) <= 0.5 && Math.abs(st.y - h.y) <= 0.5))
+        if (!mountingAligned)
+          problems.push(`standoffs do not match the board's mounting holes (need one within ±0.5 mm of each of: ${holes.map((h) => `(${h.x}, ${h.y})`).join(', ')})`)
+      }
+      let fitCheck: FitCheckT | null = null
+      if (pcb && (cavity || outer)) {
+        const ev = evaluateFit({ pcb, cavity, outer, wall, slack: SLACK, cavitySelection })
+        problems.push(...ev.problems)
+        fitCheck = {
+          fits: ev.fits,
+          verdict: ev.verdict,
+          boardShape: pcb.kind,
+          enclosureMm: shapeDims(outer ?? cavity!),
+          cavityMm: cavity ? { ...shapeDims(cavity), ...(cavitySelection.depth != null ? { d: cavitySelection.depth } : {}) } : null,
+          cavitySource: cavitySelection.source,
+          cavityOp: cavitySelection.op,
+          pcbMm: shapeDims(pcb),
+          mountingAligned,
+          problems,
+        }
+      }
+      return { fitCheck, problems, mountingAligned, cavitySelection, rotated }
+    }
+    const fitFails = (m: FitMeasure) => m.fitCheck?.fits === false || m.mountingAligned === false
+    const measureFit = (plan: MechPlan): FitMeasure => {
+      const asIs = measureFitAs(plan, false)
+      if (!fitFails(asIs) || board.shape === 'circle') return asIs
+      const rot = measureFitAs(plan, true)
+      if (!fitFails(rot)) { rot.problems.unshift('board sits rotated 90° in the cavity'); return rot }
+      return asIs
+    }
+    // What the model is told when the plan does not fit: the measured problems
+    // plus the numbers that close them. Same measure → constrain → regenerate
+    // pattern the board uses for DRC; the fidelity judge only sees a plan that
+    // holds the board.
+    const fitBlock = (round: number, m: FitMeasure): string => {
+      const bw = board.wMm ? Math.round(board.wMm * 10) / 10 : null, bh = board.hMm ? Math.round(board.hMm * 10) / 10 : null
+      const need = bw && bh ? `${(bw + 2 * SLACK).toFixed(1)} × ${(bh + 2 * SLACK).toFixed(1)} mm (board ${bw} × ${bh} + ${SLACK} mm slack per side)` : 'the board plus slack'
+      const holes = board.mountingHoles?.length ? board.mountingHoles.map((h) => `(${h.x}, ${h.y})`).join(', ') : null
+      return `\n\nFIT CHECK FAILED (round ${round}) — the plan does not hold the real board. Measured problems:\n` +
+        m.problems.map((p, i) => `${i + 1}. ${p}`).join('\n') +
+        `\nFix EXACTLY these and keep everything else:\n` +
+        `- The board cavity pocket must be at least ${need} in the SAME orientation as the pcb component, or rotate the pcb component 90° so its long side runs along the cavity's long side${holes ? ' (then the standoff pattern rotates with it: (x, y) → (−y, x))' : ''}.\n` +
+        `- The outer body must be at least the cavity plus ${wall} mm wall on every side.\n` +
+        (holes ? `- One 'standoff' op at EXACTLY each board mounting hole (board-centred mm): ${holes}.\n` : '')
+    }
+    const FIT_ROUNDS = 2
+
     // ID-fidelity loop: render the plan, judge the REAL rendered views against
     // the ID brief (+ concept sheet when it exists), and revise the plan from
     // the judge's specific violations. Honest degradation: no judge / no brief
     // → the stage still ships, fidelity recorded "unverified" with the reason.
     const fidelity: FidelityReport = { state: 'unverified', threshold: FIDELITY_THRESHOLD, rounds: [] }
     let plan = await callLLM(userMsg, override)
+    // Fit closure BEFORE rendering: a plan that does not hold the board is
+    // regenerated from its measured problems, up to FIT_ROUNDS times, keeping
+    // the plan with the fewest problems. (Run 47acb0ae shipped a 66×41 cavity
+    // for a 32×50 board with standoffs on nothing; the judge loop only ever
+    // looked at the pictures.)
+    let fit = measureFit(plan)
+    const fitClosure: { round: number; problems: string[]; fits: boolean | null; accepted: boolean }[] =
+      [{ round: 0, problems: fit.problems, fits: fit.fitCheck?.fits ?? null, accepted: true }]
+    for (let round = 1; round <= FIT_ROUNDS && fitFails(fit); round++) {
+      const next = await callLLM(userMsg + fitBlock(round, fit), override)
+      const m2 = measureFit(next)
+      const better = !fitFails(m2) || m2.problems.length < fit.problems.length
+      fitClosure.push({ round, problems: m2.problems, fits: m2.fitCheck?.fits ?? null, accepted: better })
+      if (better) { plan = next; fit = m2 }
+    }
     let result = await renderPlan(plan, outDir, safeName)
 
     if (FIDELITY_ENABLED && idBrief) {
@@ -460,49 +576,25 @@ async function handlePost(req: Request) {
       await fs.writeFile(path.join(dDir, 'mech-fidelity.json'), JSON.stringify(fidelity, null, 1))
     } catch { /* fidelity file is evidence, not a gate on the response */ }
 
-    // Honest fit check: does the real PCB fit the enclosure cavity? (a violation
-    // the redesign loop consumes — never silently shrink the board to fake a fit)
-    // Shape-aware: the REAL board (circle or rect) is compared against the plan's
-    // actual cavity pocket (circle-in-circle, rect-in-circle via the diagonal,
-    // circle-in-rect via the narrow side), and the cavity against the outer body.
-    // Cavity SELECTION lives in lib/mechanical-plan (selectCavity): named cavity
-    // → pocket enclosing the PCB op → largest qualifying pocket → none. When no
-    // board cavity can be identified the verdict is 'unknown' (fit NOT verified),
-    // never a failure — a ⌀6 mount hole must not be "the cavity" ever again.
-    type Prof = { kind?: string; w?: number; h?: number; d?: number }
+    // The fidelity re-plans may have moved the cavity: re-measure the plan that
+    // ships, and give it one more fit round if the judge's revisions broke it.
+    fit = measureFit(plan)
+    if (fitFails(fit)) {
+      const next = await callLLM(userMsg + fitBlock(FIT_ROUNDS + 1, fit), override)
+      const m2 = measureFit(next)
+      const better = !fitFails(m2) || m2.problems.length < fit.problems.length
+      fitClosure.push({ round: FIT_ROUNDS + 1, problems: m2.problems, fits: m2.fitCheck?.fits ?? null, accepted: better })
+      if (better) { plan = next; fit = m2; result = await renderPlan(plan, outDir, safeName) }
+    }
     const sketchProf = (name?: string): Prof | null => {
       if (!name) return null
       const s = plan.operations.find((o) => o.op === 'sketch' && o.name === name) as { profile?: Prof } | undefined
       return s?.profile ?? null
     }
-
-    // outer = sketch of the first additive extrude (else first sketch) — by
-    // contract the FIRST extrude is the BASE shell, the one that holds the board
     const firstExtrude = plan.operations.find((o) => o.op === 'extrude') as { sketch?: string; depth?: number; offset?: number } | undefined
-    const firstSketch = plan.operations.find((o) => o.op === 'sketch') as { profile?: MechProfile } | undefined
-    const outerProf = (plan.operations.find((o) => o.op === 'sketch' && o.name === firstExtrude?.sketch) as { profile?: MechProfile } | undefined)?.profile
-    const outer: FitShape | null = profileToShape(outerProf ?? firstSketch?.profile ?? null)
     // base top of the FIRST extrude — kept for the two-shell feature inventory below
     const baseTop = firstExtrude ? (firstExtrude.offset ?? 0) + (firstExtrude.depth ?? 0) : Infinity
-    // the REAL board is ground truth; the plan's pcb component is only a fallback
-    const pcbComp = pcbShapeFromComponent(plan)
-    const pcb: FitShape | null =
-      board.shape === 'circle' && board.diaMm ? { kind: 'circle', d: board.diaMm }
-      : board.wMm && board.hMm ? { kind: 'rect', w: board.wMm, h: board.hMm }
-      : pcbComp?.shape ?? null
-    const cavitySelection = selectCavity(plan, pcb, clearance)
-    const cavity = cavitySelection.shape
-
-    const SLACK = 0.5
-    const problems: string[] = []
-    let mountingAligned: boolean | 'not-applicable' = 'not-applicable'
-    if (board.mountingHoles?.length) {
-      const standoffs = plan.operations.filter((o) => o.op === 'standoff') as { x: number; y: number }[]
-      mountingAligned = board.mountingHoles.every((h) =>
-        standoffs.some((s) => Math.abs(s.x - h.x) <= 0.5 && Math.abs(s.y - h.y) <= 0.5))
-      if (!mountingAligned)
-        problems.push(`standoffs do not match the board's mounting holes (need one within ±0.5 mm of each of: ${board.mountingHoles.map((h) => `(${h.x}, ${h.y})`).join(', ')})`)
-    }
+    const { mountingAligned, cavitySelection } = fit
     /** fitCheck contract (persisted in mechanical.json, consumed by run-pipeline,
      *  work-items, redesign, checkpoint-seal):
      *  - fits: true ONLY for 'fits', false ONLY for 'does_not_fit', NULL for
@@ -513,35 +605,7 @@ async function handlePost(req: Request) {
      *    the OUTER body (compat — never print it as the cavity)
      *  - cavitySource: how the cavity was chosen; cavityOp: its pocket op name
      *  - problems: human-readable, incl. the 'unknown' warning and mounting misfit */
-    let fitCheck: {
-      fits: boolean | null
-      verdict: FitVerdict
-      boardShape: 'circle' | 'rect'
-      enclosureMm: { w: number; h: number }
-      cavityMm: { w: number; h: number; d?: number } | null
-      cavitySource: CavitySource
-      cavityOp: string | null
-      pcbMm: { w: number; h: number }
-      mountingAligned: boolean | 'not-applicable'
-      problems: string[]
-    } | null = null
-    if (pcb && (cavity || outer)) {
-      const ev = evaluateFit({ pcb, cavity, outer, wall, slack: SLACK, cavitySelection })
-      // mounting misalignment stays a listed problem but is not a fit verdict
-      problems.push(...ev.problems)
-      fitCheck = {
-        fits: ev.fits,
-        verdict: ev.verdict,
-        boardShape: pcb.kind,
-        enclosureMm: shapeDims(outer ?? cavity!),
-        cavityMm: cavity ? { ...shapeDims(cavity), ...(cavitySelection.depth != null ? { d: cavitySelection.depth } : {}) } : null,
-        cavitySource: cavitySelection.source,
-        cavityOp: cavitySelection.op,
-        pcbMm: shapeDims(pcb),
-        mountingAligned,
-        problems,
-      }
-    }
+    const fitCheck: FitCheckT | null = fit.fitCheck
 
     // Persist the PLAN + the cavity-selection trace next to mechanical.json so a
     // wrong fit verdict can be audited after the fact (the plan used to live
@@ -557,6 +621,8 @@ async function handlePost(req: Request) {
         clearanceMm: clearance,
         cavitySelection,
         fitCheck,
+        fitClosure,
+        boardRotated: fit.rotated,
         executorOk: !!result?.ok,
       }, null, 1))
     } catch { /* audit file is evidence, not a gate on the response */ }
@@ -627,7 +693,7 @@ async function handlePost(req: Request) {
     // one. The STEP/PNG are already written to this dir by renderPlan.
     try {
       await fs.writeFile(path.join(outDir, 'mechanical.json'),
-        JSON.stringify({ part: payload.part, previewUrl: payload.previewUrl, stepUrl: payload.stepUrl, gltfUrl: payload.gltfUrl, onshapeUrl: payload.onshapeUrl, opsRendered: payload.opsRendered, opsFailed: payload.opsFailed, fitCheck, mountingAligned, fastening, features: featureList }))
+        JSON.stringify({ part: payload.part, previewUrl: payload.previewUrl, stepUrl: payload.stepUrl, gltfUrl: payload.gltfUrl, onshapeUrl: payload.onshapeUrl, opsRendered: payload.opsRendered, opsFailed: payload.opsFailed, fitCheck, fitClosure, boardRotated: fit.rotated, mountingAligned, fastening, features: featureList }))
     } catch { /* best effort */ }
 
     return Response.json(payload)
