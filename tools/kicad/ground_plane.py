@@ -31,7 +31,7 @@ import re
 import pcbnew
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from kicad_geom import CopperIndex, seg_shape, circle_shape, unreached_gnd_pads  # noqa: E402
+from kicad_geom import CopperIndex, seg_shape, circle_shape, unreached_gnd_pads, mounting_hole_keepouts  # noqa: E402
 
 inp, outp, gndf = sys.argv[1], sys.argv[2], sys.argv[3]
 hole_clearance = float(sys.argv[4]) if len(sys.argv) > 4 else 0.5
@@ -388,14 +388,13 @@ for pad_i, pos in enumerate(gnd_pads):
 # JUST the holes, without receding from every trace. Guarded: a pcbnew API drift
 # must never crash the fill (that would break EVERY board), so on failure we log
 # and pour as before.
+# A pad-level local clearance was the first cut; KiCad grades that against
+# every copper item, so a track that met the fab's hole rule still tripped
+# "pad clearance 0.45mm" beside a screw hole. The keep-out is now a rule area
+# that forbids the POUR only (kicad_geom.mounting_hole_keepouts).
 mh_set = 0
 try:
-    mh_clear = pcbnew.FromMM(hole_clearance + 0.15)
-    for fp in board.GetFootprints():
-        for p in fp.Pads():
-            if p.GetAttribute() == pcbnew.PAD_ATTRIB_NPTH:
-                p.SetLocalClearance(mh_clear)
-                mh_set += 1
+    mh_set = mounting_hole_keepouts(board, hole_clearance)
 except Exception as _e:
     mh_set = -1  # surfaced in the JSON; pour proceeds with the default clearance
 

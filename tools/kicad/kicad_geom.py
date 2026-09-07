@@ -214,3 +214,43 @@ def unreached_gnd_pads(board, gnd_code):
         clusters.append(members)
     main = max(clusters, key=len)
     return [f"{fp.GetReference()}.{p.GetNumber()}" for fp, p in pads if key(p) not in main]
+
+
+def mounting_hole_keepouts(board, hole_clearance_mm, margin_mm=0.15, sides=24):
+    """Keep the copper POUR (only) `hole_clearance + margin` away from every NPTH
+    mounting hole with a rule area, and clear any pad-level local clearance.
+
+    The pour used to get this margin via NPTH `SetLocalClearance`, which KiCad
+    grades against EVERY copper item: a signal track 0.4456mm from a screw hole
+    tripped "pad clearance 0.45mm" while the fab's own hole rule (0.3mm) was
+    met — a self-inflicted fault no repair step knew about (run 47acb0ae). A
+    rule area that forbids pours and nothing else keeps the pour back without
+    adding a constraint the fab does not have. Returns the number of holes."""
+    n = 0
+    all_cu = pcbnew.LSET.AllCuMask(board.GetCopperLayerCount())
+    for fp in board.GetFootprints():
+        for p in fp.Pads():
+            if p.GetAttribute() != pcbnew.PAD_ATTRIB_NPTH:
+                continue
+            try:
+                p.SetLocalClearance(0)
+            except Exception:
+                pass
+            pos = p.GetPosition()
+            r = max(p.GetDrillSize().x, p.GetDrillSize().y) // 2 + pcbnew.FromMM(hole_clearance_mm + margin_mm)
+            z = pcbnew.ZONE(board)
+            z.SetIsRuleArea(True)
+            z.SetDoNotAllowZoneFills(True)
+            z.SetDoNotAllowTracks(False)
+            z.SetDoNotAllowVias(False)
+            z.SetDoNotAllowPads(False)
+            z.SetDoNotAllowFootprints(False)
+            z.SetLayerSet(all_cu)
+            o = z.Outline()
+            o.NewOutline()
+            for k in range(sides):
+                a = 2.0 * math.pi * k / sides
+                o.Append(int(pos.x + r * math.cos(a)), int(pos.y + r * math.sin(a)))
+            board.Add(z)
+            n += 1
+    return n
