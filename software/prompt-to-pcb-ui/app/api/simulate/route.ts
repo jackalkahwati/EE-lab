@@ -91,6 +91,7 @@ async function handlePost(req: Request) {
     // ON-BOARD dissipation from rail currents (not the product's activeMw budget)
     let powerBudget: Record<string, unknown> | undefined
     let autoAntenna: string | undefined
+    let componentCount: number | undefined
     if (runId && RUN_ID.test(runId)) {
       // real Onshape CAD (when the mechanical stage has run) → 3D FEA target
       const stepPath = path.join(process.cwd(), 'public', 'runs', runId, 'mechanical', 'enclosure.step')
@@ -103,6 +104,9 @@ async function handlePost(req: Request) {
         boardMm = { w: gb.wMm, h: gb.hMm }
         if (typeof gb.layers === 'number' && isFinite(gb.layers) && gb.layers > 0)
           layerCount = gb.layers
+        // component count for the mass estimate below (the drop/modal solver
+        // needs a mass and nothing upstream states one)
+        componentCount = typeof gb.components === 'number' ? gb.components : gb.parts?.length
       }
       // PDN inputs for the REAL ngspice rail-impedance sweep: per-rail load
       // currents from the run's power budget + the decoupling caps the
@@ -168,6 +172,13 @@ async function handlePost(req: Request) {
     const specDuty = num(design.dutyCycle) ?? p.dutyCycle
     const dutyCycleAssumed = specDuty == null && sleepUw != null
     const dutyCycle = specDuty ?? (sleepUw != null ? DEFAULT_DUTY : undefined)
+    // Board mass when neither the design nor the spec states one: bare FR4
+    // (1.6mm, 1.9 g/cm³ → 0.304 g/cm²) plus 0.25 g per placed component, the
+    // typical mixed-SMD average. An estimate is labelled as one; it is never a
+    // reason for a REQUIRED modal/drop analysis to not run at all.
+    const massEstimateG = boardAreaMm2 != null && isFinite(boardAreaMm2)
+      ? Math.round((boardAreaMm2 / 100) * 0.304 * 10 + (componentCount ?? 0) * 0.25 * 10) / 10
+      : undefined
     // design (optimizer's selected candidate) overrides spec budgets where present
     const simReq: Record<string, unknown> = {
       activeMw: num(design.activeMw) ?? p.activeMw,
@@ -175,7 +186,8 @@ async function handlePost(req: Request) {
       boardAreaMm2: num(design.boardAreaMm2) ?? boardAreaMm2,
       boardMm,
       layerCount,
-      massG: num(design.massG) ?? spec.budgets?.massG,
+      massG: num(design.massG) ?? spec.budgets?.massG ?? massEstimateG,
+      massGAssumed: num(design.massG) == null && spec.budgets?.massG == null && massEstimateG != null,
       envelopeMm: spec.budgets?.sizeMm,
       enclosureMaterial: design.enclosureMaterial,
       antennaPlacement: design.antennaPlacement ?? autoAntenna,
@@ -198,6 +210,7 @@ async function handlePost(req: Request) {
       isAudio: /audio|speaker|headphone|earbud|hearable|microphone/i.test(
         `${spec.product} ${spec.description ?? ''}`),
     })
+    if (simReq.massGAssumed) plan.assumptions.push(`board mass ${massEstimateG} g ESTIMATED from ${boardAreaMm2 ? Math.round(boardAreaMm2) : '?'} mm² FR4 + ${componentCount ?? 0} components × 0.25 g (no mass stated by the design or spec)`)
     // thermal pass/fail limit = the reliability class's junction rating (lib/sim-judge.ts);
     // the solver's own default is 85. The 43°C skin figure is never the solver limit.
     simReq.limitC = plan.environment.ratingC ?? 85

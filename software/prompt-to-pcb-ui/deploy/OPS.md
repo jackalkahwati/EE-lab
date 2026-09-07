@@ -396,6 +396,18 @@ three cargo builds that way on 2026-09-06, all logged as ordinary failures. A
 died build no longer counts as a firmware fill attempt, and a real compile
 failure logs the compiler's first `error[...]` lines.
 
+## Simulation requirements come from the spec's own words (2026-09-07)
+
+`lib/sim-router.ts` classes the service environment from the product spec's
+reliability line and description. `rugged` needs an explicit signal (rugged,
+MIL-, military, defense, field-deployed, drone/UAV); a bare "field" no longer
+qualifies (it turned "bench/field tool, informal use" into a 70°C defense
+environment with a REQUIRED drop test). The modal/drop solver needs a board
+mass: when neither the design nor the spec states one, `/api/simulate`
+estimates it from FR4 area plus 0.25 g per component and says so in the plan's
+assumptions — an estimate is labelled, never a reason for a required analysis
+to not run. Tests: `tests/sim-env-class.test.mjs`.
+
 ## Router runner env knobs (`tools/tscircuit/run_board.mjs`)
 
 Measuring a routing change through the full strategy ladder takes 20–50 min and the

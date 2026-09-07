@@ -71,7 +71,10 @@ function classifyEnv(spec: ProductSpec) {
   const ip = ipMatch ? `IP${ipMatch[1]}` : undefined
   let cls: SimPlan['environment']['class'] = 'consumer'
   if (kw(both, 'automotive', 'vehicle', 'ecu', 'can bus', 'e-mark')) cls = 'automotive'
-  else if (kw(both, 'rugged', 'mil-', 'military', 'defense', 'field', 'drone', 'uav', 'handheld tool')) cls = 'rugged'
+  // 'rugged' needs an explicit rugged/defense signal. A bare 'field' used to
+  // qualify, so "bench/field tool, informal use" became a 70°C MIL-STD-810
+  // defense environment with a REQUIRED drop test (run 0fce3670).
+  else if (kw(both, 'rugged', 'mil-', 'military', 'defense', 'field-deploy', 'field deploy', 'drone', 'uav', 'handheld tool')) cls = 'rugged'
   else if (kw(both, 'industrial', 'din rail', 'factory', 'machine', 'outdoor', 'ip6', 'ip5')) cls = 'industrial'
   else if (kw(both, 'desk', 'indoor', 'ambient', 'home', 'wearable', 'consumer')) cls = 'consumer'
   else cls = 'consumer'
