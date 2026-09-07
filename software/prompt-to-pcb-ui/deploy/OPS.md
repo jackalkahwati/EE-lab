@@ -377,6 +377,19 @@ DRC clearance test itself):
   reads the new value): copy into a fresh `VECTOR2I` before editing. SWIG
   proxies are not identity-stable either: compare items by `m_Uuid`.
 
+- **Layer request as a selection rule** — the best fully-routed rung within the
+  user's layer count is kept as a candidate, poured WITH the closure, and
+  ships when its grounded board is clean, over a cleaner taller board
+  (`pourSelection.layerRequestMetByClosure`). The verdict still names an unmet
+  request. Measured on the STM32 gate board with a 2-layer request: one LQFP
+  ground pin has no legal via spot and no pour path on 2 layers, so it ships
+  4-layer clean and says so.
+- **Unreached ground pad** = not in the main ground cluster (the one holding the
+  most ground pads). "Cluster contains a zone" counted a pad on a pour island
+  as reached and shipped two opens with the targeted retry never fired. The
+  pour and the closure share the definition; the closure also reconnects
+  stranded pads with the same clearance-checked dog-bone / pour-track search.
+
 The pipeline's spawn helper retries a tool that DIED (killed by a signal, or a
 spawn error) up to twice with backoff — a memory-starved host took a zip and
 three cargo builds that way on 2026-09-06, all logged as ordinary failures. A
