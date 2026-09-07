@@ -1,0 +1,128 @@
+{
+    "$schema": "https://schemas.kicad.org/drc.v1.json",
+    "coordinate_units": "mm",
+    "date": "2026-09-06T16:48:16",
+    "ignored_checks": [
+        {
+            "description": "Footprint has no courtyard defined",
+            "key": "missing_courtyard"
+        },
+        {
+            "description": "Track endpoint not centered on via",
+            "key": "track_not_centered_on_via"
+        },
+        {
+            "description": "Tuning profile track geometries",
+            "key": "tuning_profile_track_geometries"
+        },
+        {
+            "description": "Footprint doesn't match symbol's footprint filters",
+            "key": "footprint_filters_mismatch"
+        },
+        {
+            "description": "Footprint component type doesn't match footprint pads",
+            "key": "footprint_type_mismatch"
+        }
+    ],
+    "included_severities": [
+        "error"
+    ],
+    "kicad_version": "10.0.1",
+    "schematic_parity": [],
+    "source": "x.kicad_pcb",
+    "unconnected_items": [],
+    "violations": [
+        {
+            "description": "Clearance violation (rule 'c' clearance 0.0900 mm; actual 0.0841 mm)",
+            "items": [
+                {
+                    "description": "Pad 8 [.U1 > .pin24 to .U1 > .pin36] of U3 on F.Cu",
+                    "pos": {
+                        "x": 111.445,
+                        "y": 67.305
+                    },
+                    "uuid": "76906bfc-6916-dfbc-5b9d-537c4e23c73c"
+                },
+                {
+                    "description": "Track [GND] on F.Cu, length 1.2000 mm",
+                    "pos": {
+                        "x": 110.795,
+                        "y": 67.305
+                    },
+                    "uuid": "a9e950c3-f52e-4a01-92fd-573727f6fa90"
+                }
+            ],
+            "severity": "error",
+            "type": "clearance"
+        },
+        {
+            "description": "Clearance violation (rule 'c' clearance 0.0900 mm; actual 0.0373 mm)",
+            "items": [
+                {
+                    "description": "Track [.U1 > .pin24 to .U1 > .pin36] on F.Cu, length 2.7548 mm",
+                    "pos": {
+                        "x": 109.7993,
+                        "y": 67.6567
+                    },
+                    "uuid": "05741ce0-3a8c-a8a0-6fa5-34605b423fe0"
+                },
+                {
+                    "description": "Pad 2 [GND] of C10 on F.Cu",
+                    "pos": {
+                        "x": 107.61,
+                        "y": 68.96
+                    },
+                    "uuid": "148e34c0-6682-7f7f-4789-35c20a6b14fd"
+                }
+            ],
+            "severity": "error",
+            "type": "clearance"
+        },
+        {
+            "description": "Clearance violation (rule 'c' clearance 0.0900 mm; actual 0.0722 mm)",
+            "items": [
+                {
+                    "description": "Track [GND] on F.Cu, length 1.8000 mm",
+                    "pos": {
+                        "x": 109.312,
+                        "y": 57.35
+                    },
+                    "uuid": "0ce9a78c-fbfa-43b5-9436-13f8ca404f43"
+                },
+                {
+                    "description": "Pad 7 [.U1 > .pin7 to .R10 > .pin1] of U1 on F.Cu",
+                    "pos": {
+                        "x": 109.312,
+                        "y": 57.85
+                    },
+                    "uuid": "2d536020-2d1c-ddc1-7872-e45e1e02a67d"
+                }
+            ],
+            "severity": "error",
+            "type": "clearance"
+        },
+        {
+            "description": "Clearance violation (rule 'c' clearance 0.0900 mm; actual 0.0655 mm)",
+            "items": [
+                {
+                    "description": "Via [.U1 > .pin42 to .R12 > .pin1] on F.Cu - B.Cu",
+                    "pos": {
+                        "x": 110.796592,
+                        "y": 68.292755
+                    },
+                    "uuid": "64699152-25a6-2f8e-504a-0f9239c5b14e"
+                },
+                {
+                    "description": "Via [.U1 > .pin43 to .R11 > .pin1] on F.Cu - B.Cu",
+                    "pos": {
+                        "x": 110.263239,
+                        "y": 68.690816
+                    },
+                    "uuid": "68fda712-2112-19ce-54de-255235319b8e"
+                }
+            ],
+            "severity": "error",
+            "type": "clearance"
+        }
+    ]
+}

@@ -519,15 +519,21 @@ export async function GET(req: Request) {
         send({ type: 'log', stage, text, level })
 
       /** spawn a step, stream its stdout/stderr, resolve exit code */
-      const exec = (
+      // A tool that DIES (killed by a signal — the host's memory pressure has
+      // taken a zip and three cargo builds this way — or a spawn error such as
+      // ENOMEM/EAGAIN) is not a tool that FAILED: every step here is idempotent,
+      // so it is retried with a short backoff before its exit is believed.
+      const EXEC_RETRIES = 2
+      const execOnce = (
         stage: string,
         cmd: string,
         args: string[],
         opts: { cwd?: string; env?: Record<string, string> } = {},
-      ): Promise<{ code: number; out: string }> =>
+      ): Promise<{ code: number; out: string; died: string | null }> =>
         new Promise((resolve) => {
-          if (cancelled) return resolve({ code: -1, out: '' })
+          if (cancelled) return resolve({ code: -1, out: '', died: null })
           let out = ''
+          let died: string | null = null
           child = spawn(cmd, args, {
             cwd: opts.cwd ?? hwDir,
             // KiCad's bundled Python has no CA store; point HTTPS at the system
@@ -552,10 +558,28 @@ export async function GET(req: Request) {
           child.stderr?.on('data', (c: Buffer) => feed(c, 'warn'))
           child.on('error', (err) => {
             log(stage, `spawn failed: ${err.message}`, 'err')
-            resolve({ code: -1, out })
+            died = `spawn: ${err.message}`
+            resolve({ code: -1, out, died })
           })
-          child.on('close', (code) => resolve({ code: code ?? -1, out }))
+          child.on('exit', (code, signal) => {
+            if (code === null && signal && !cancelled) died = `killed by ${signal}`
+          })
+          child.on('close', (code) => resolve({ code: code ?? -1, out, died }))
         })
+      const exec = async (
+        stage: string,
+        cmd: string,
+        args: string[],
+        opts: { cwd?: string; env?: Record<string, string> } = {},
+      ): Promise<{ code: number; out: string; died?: string | null }> => {
+        let last = await execOnce(stage, cmd, args, opts)
+        for (let attempt = 1; attempt <= EXEC_RETRIES && last.died && !cancelled; attempt++) {
+          log(stage, `tool died (${last.died}) — retry ${attempt}/${EXEC_RETRIES} in ${3 * attempt}s`, 'warn')
+          await new Promise((r) => setTimeout(r, 3000 * attempt))
+          last = await execOnce(stage, cmd, args, opts)
+        }
+        return last
+      }
 
       const killTimer = setTimeout(() => {
         cancelled = true
@@ -1947,11 +1971,19 @@ export async function GET(req: Request) {
                   fs.writeFileSync(appPath, filled ?? scaffold)
                   const ab = await exec('firmware', CARGO, ['build', '--release'], { cwd: fwDir, env: fwEnv })
                   appOk = ab.code === 0 || ab.out.includes('Finished')
+                  if (!appOk && ab.died) {
+                    // the compiler never ran to completion: nothing to learn from, nothing to feed the model
+                    log('firmware', `app firmware: the build tool died (${ab.died}) — this attempt is not a compile failure`, 'warn')
+                    lastErr = ''
+                    break
+                  }
+                  // the compiler's own words, so a failed fill is diagnosable from the run log
+                  const errLines = ab.out.split('\n').filter((l) => /^error(\[E\d+\])?:/.test(l.trim())).slice(0, 3)
                   lastErr = ab.out
                   if (appOk)
                     log('firmware', `GATE app firmware: ${provider} control loop compiles, PASS`, 'ok')
                   else
-                    log('firmware', `app firmware: fill attempt ${attempt + 1}/${MAX_ATTEMPTS} did not compile, ${attempt < MAX_ATTEMPTS - 1 ? 'self-repair pass…' : 'reverting to scaffold body'}`, 'warn')
+                    log('firmware', `app firmware: fill attempt ${attempt + 1}/${MAX_ATTEMPTS} did not compile${errLines.length ? ` (${errLines.map((l) => l.trim().slice(0, 100)).join(' | ')})` : ''}, ${attempt < MAX_ATTEMPTS - 1 ? 'self-repair pass…' : 'reverting to scaffold body'}`, 'warn')
                 }
                 if (!appOk) {
                   // restore the scaffold's own body — still a real, compiling loop

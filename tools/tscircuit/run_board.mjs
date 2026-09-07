@@ -95,6 +95,10 @@ const GROUND_PLANE_PY = (() => {
   const p = path.join(HERE, '..', 'kicad', 'ground_plane.py')
   try { return fs.existsSync(p) ? p : null } catch { return null }
 })()
+const DRC_CLOSURE_PY = (() => {
+  const p = path.join(HERE, '..', 'kicad', 'drc_closure.py')
+  try { return fs.existsSync(p) ? p : null } catch { return null }
+})()
 const ADD_MODELS_PY = (() => {
   const p = path.join(HERE, '..', 'kicad', 'add_models.py')
   try { return fs.existsSync(p) ? p : null } catch { return null }
@@ -123,7 +127,55 @@ function attachModels(pcbString, parts) {
  *  KiCad DRC on the grounded board. Returns { assigned, unconnected, errors } —
  *  unconnected = ground pins the plane didn't reach (0 = every ground pin on the
  *  plane), reported honestly. Null if pcbnew/gnd pins are unavailable. */
-async function applyGroundPlane(cj, gndPins, profileKey = 'standard') {
+/** Run kicad-cli DRC on a board file; returns the parsed report or null. One
+ *  retry: under memory pressure kicad-cli has died without writing its report. */
+function runDrcJson(pcbPath, drcJson) {
+  let drcRun = null
+  for (let attempt = 0; attempt < 2 && !fs.existsSync(drcJson); attempt++) {
+    drcRun = spawnSync(KICAD_CLI, ['pcb', 'drc', '--format', 'json', '--output', drcJson, pcbPath], { encoding: 'utf8', timeout: 120000 })
+    if (!fs.existsSync(drcJson)) process.stderr.write(`[t] drc: attempt ${attempt + 1} produced no report (status ${drcRun.status}, signal ${drcRun.signal ?? '-'})${drcRun.stderr ? `: ${String(drcRun.stderr).trim().slice(0, 160)}` : ''}\n`)
+  }
+  return { rep: fs.existsSync(drcJson) ? JSON.parse(fs.readFileSync(drcJson, 'utf8')) : null, drcRun }
+}
+
+/** Summarize a DRC report the way the verdict reads it. */
+function summarizeDrc(rep, pcb, cj) {
+  const all = [...(rep.violations || []), ...(rep.unconnected_items || []), ...(rep.schematic_parity || [])]
+  const { errs, nonElectrical } = classifyDrcErrors(all)
+  const byType = {}
+  for (const v of errs) byType[v.type] = (byType[v.type] || 0) + 1
+  const neTypes = {}
+  for (const v of nonElectrical) neTypes[v.type] = (neTypes[v.type] || 0) + 1
+  const pos = mapDrcPositions(pcb, cj, errs)
+  return {
+    errors: errs.length,
+    errorsAll: errs.length + nonElectrical.length,
+    nonElectrical: { count: nonElectrical.length, types: neTypes, strict: STRICT_NON_ELECTRICAL },
+    warnings: all.filter((v) => v.severity === 'warning').length,
+    errorTypes: byType,
+    sample: errs.slice(0, 6).map((v) => `${v.type}: ${(v.description || '').slice(0, 90)}`),
+    positionsMapped: pos.mapped,
+    violations: pos.points.slice(0, 40),
+  }
+}
+
+/** The fab profile's copper clearance rule (mm), from its DRC rule text. */
+function profileClearanceMm(profileKey) {
+  const m = ((FAB_PROFILES[profileKey] || FAB_PROFILES.standard).rules || '').match(/constraint clearance \(min ([0-9.]+)mm\)/)
+  return m ? Number(m[1]) : 0.09
+}
+
+// DRC closure: repair residual clearance / hole_clearance faults on the grounded
+// board with KiCad's own geometry (tools/kicad/drc_closure.py), up to
+// CLOSURE_ROUNDS rounds, each accepted only if the error count fell and neither
+// KiCad's open count nor the unreached ground pads rose. Every residual
+// sub-rule gap this month came from copper placed by a model that is not the
+// one DRC grades; this step closes them where they are graded. FL_DRC_CLOSURE=0
+// opts out; CLOSURE_MAX_ERRORS keeps it to local-repair territory.
+const CLOSURE_ROUNDS = 2
+const CLOSURE_MAX_ERRORS = 12
+
+async function applyGroundPlane(cj, gndPins, profileKey = 'standard', opts = {}) {
   if (!KICAD_CLI || !KICAD_PY || !GROUND_PLANE_PY || !gndPins?.length) return null
   let dir
   try {
@@ -150,37 +202,52 @@ async function applyGroundPlane(cj, gndPins, profileKey = 'standard') {
       drcRun = spawnSync(KICAD_CLI, ['pcb', 'drc', '--format', 'json', '--output', drcJson, outPcb], { encoding: 'utf8', timeout: 120000 })
       if (!fs.existsSync(drcJson)) process.stderr.write(`[t] groundPlane: DRC attempt ${attempt + 1} produced no report (status ${drcRun.status}, signal ${drcRun.signal ?? '-'})${drcRun.stderr ? `: ${String(drcRun.stderr).trim().slice(0, 160)}` : ''}\n`)
     }
-    // return the grounded .kicad_pcb too (read before the temp dir is cleaned) so
-    // the caller can persist it for the 3D render — the real chip-down board.
-    const pcb = fs.readFileSync(outPcb, 'utf8')
+    // the grounded .kicad_pcb is read before the temp dir is cleaned so the
+    // caller can persist it for the 3D render — the real chip-down board.
     // The grounded board is the one that SHIPS, so its DRC has to be measured
     // the same way realDrc measures the ungrounded one. It wasn't: this read
     // only `rep.violations` and dropped `unconnected_items` — the open-net
     // class — so the pour's own faults were both undercounted and reported
     // separately from the verdict.
     let drcAfter = null
+    let pcb = fs.readFileSync(outPcb, 'utf8')
     if (fs.existsSync(drcJson)) {
-      const rep = JSON.parse(fs.readFileSync(drcJson, 'utf8'))
-      const all = [...(rep.violations || []), ...(rep.unconnected_items || []), ...(rep.schematic_parity || [])]
-      const { errs, nonElectrical } = classifyDrcErrors(all)
-      const byType = {}
-      for (const v of errs) byType[v.type] = (byType[v.type] || 0) + 1
-      const neTypes = {}
-      for (const v of nonElectrical) neTypes[v.type] = (neTypes[v.type] || 0) + 1
-      const pos = mapDrcPositions(pcb, cj, errs)
-      drcAfter = {
-        errors: errs.length,
-        errorsAll: errs.length + nonElectrical.length,
-        nonElectrical: { count: nonElectrical.length, types: neTypes, strict: STRICT_NON_ELECTRICAL },
-        warnings: all.filter((v) => v.severity === 'warning').length,
-        errorTypes: byType,
-        sample: errs.slice(0, 6).map((v) => `${v.type}: ${(v.description || '').slice(0, 90)}`),
-        positionsMapped: pos.mapped,
-        violations: pos.points.slice(0, 40),
+      drcAfter = summarizeDrc(JSON.parse(fs.readFileSync(drcJson, 'utf8')), pcb, cj)
+    }
+    let unconnected = gp.unconnected ?? null
+    let unreachedPads = Array.isArray(gp.unreachedPads) ? gp.unreachedPads : []
+    let closure = null
+    const closable = (d) => d && d.errors > 0 && d.errors <= CLOSURE_MAX_ERRORS
+      && ((d.errorTypes?.clearance || 0) + (d.errorTypes?.hole_clearance || 0)) > 0
+    if (opts.closure !== false && process.env.FL_DRC_CLOSURE !== '0' && DRC_CLOSURE_PY && closable(drcAfter)) {
+      closure = { rounds: [], accepted: 0 }
+      let curPcb = outPcb, curJson = drcJson
+      for (let round = 1; round <= CLOSURE_ROUNDS && closable(drcAfter); round++) {
+        const tC = Date.now()
+        const nextPcb = path.join(dir, `c${round}.kicad_pcb`), nextJson = path.join(dir, `c${round}.json`)
+        fs.writeFileSync(path.join(dir, `c${round}.kicad_dru`), (FAB_PROFILES[profileKey] || FAB_PROFILES.standard).rules)
+        const cr = spawnSync(KICAD_PY, [DRC_CLOSURE_PY, curPcb, nextPcb, curJson, String(profileClearanceMm(profileKey)), hc], { encoding: 'utf8', timeout: 120000 })
+        let cinfo = {}
+        try { cinfo = JSON.parse((cr.stdout || '').trim().split('\n').pop() || '{}') } catch { /* keep defaults */ }
+        if (!fs.existsSync(nextPcb)) { closure.rounds.push({ round, error: `closure produced no board (status ${cr.status})` }); break }
+        const { rep: rep2 } = runDrcJson(nextPcb, nextJson)
+        if (!rep2) { closure.rounds.push({ round, error: 'closure board could not be DRC-checked' }); break }
+        const pcb2 = fs.readFileSync(nextPcb, 'utf8')
+        const d2 = summarizeDrc(rep2, pcb2, cj)
+        const opens2 = rep2.unconnected_items?.length ?? 0
+        const opensBefore = unconnected ?? 0
+        const unreached2 = Array.isArray(cinfo.unreachedPads) ? cinfo.unreachedPads : unreachedPads
+        const better = d2.errors < drcAfter.errors && opens2 <= opensBefore && unreached2.length <= unreachedPads.length
+        closure.rounds.push({ round, ms: Date.now() - tC, attempted: cinfo.attempted ?? null, fixed: cinfo.fixed ?? null, unfixed: cinfo.unfixed ?? null, errors: [drcAfter.errors, d2.errors], opens: [opensBefore, opens2], accepted: better })
+        process.stderr.write(`[t] closure round ${round}: ${drcAfter.errors} → ${d2.errors} error(s), opens ${opensBefore} → ${opens2}, fixed ${JSON.stringify(cinfo.fixed ?? {})}${better ? '' : ' — rejected'}\n`)
+        if (!better) break
+        closure.accepted++
+        pcb = pcb2; drcAfter = d2; unconnected = opens2; unreachedPads = unreached2
+        curPcb = nextPcb; curJson = nextJson
       }
     }
     const drcReason = drcAfter ? null : `kicad-cli drc exited ${drcRun?.status ?? '?'}${drcRun?.signal ? ` (${drcRun.signal})` : ''}${drcRun?.stderr ? `: ${String(drcRun.stderr).trim().slice(0, 120)}` : ''}`
-    return { available: true, assigned: gp.assigned ?? 0, unconnected: gp.unconnected ?? null, stitched: gp.stitched ?? 0, skipped: gp.skipped ?? 0, zoneTracks: gp.zoneTracks ?? 0, unreachedPads: Array.isArray(gp.unreachedPads) ? gp.unreachedPads : [], errors: drcAfter?.errors ?? null, drcAfter, drcReason, pcb }
+    return { available: true, assigned: gp.assigned ?? 0, unconnected, stitched: gp.stitched ?? 0, skipped: gp.skipped ?? 0, zoneTracks: gp.zoneTracks ?? 0, unreachedPads, errors: drcAfter?.errors ?? null, drcAfter, drcReason, pcb, closure }
   } catch (e) {
     return { available: false, reason: String(e).slice(0, 160) }
   } finally {
@@ -2545,7 +2612,7 @@ async function main() {
         for (const c of cands) {
           const cjc = JSON.parse(JSON.stringify(c.cj))
           applyBoardFeatures(cjc, input, c.drc.profileKey || 'standard')
-          const g = await applyGroundPlane(cjc, input.gnd, c.drc.profileKey || 'standard')
+          const g = await applyGroundPlane(cjc, input.gnd, c.drc.profileKey || 'standard', { closure: false })
           const sc = g?.available && g.drcAfter ? drcScore(g.drcAfter, 0) : Infinity
           scored.push({ c, sc, unreached: g?.unreachedPads?.length ?? null, errors: g?.errors ?? null })
         }
@@ -2885,6 +2952,16 @@ async function main() {
         if (gp?.available) {
           if (gp.pcb) kicadPcb = gp.pcb // grounded board (with the GND plane) for the 3D render
           drcRepair.groundPlane = { assigned: gp.assigned, unconnected: gp.unconnected, stitched: gp.stitched, skipped: gp.skipped, errors: gp.errors }
+          if (gp.closure) {
+            drcRepair.closure = gp.closure
+            const acc = gp.closure.rounds.filter((r) => r.accepted)
+            if (acc.length) {
+              const fx = acc.reduce((a, r) => { for (const [k, n] of Object.entries(r.fixed || {})) a[k] = (a[k] || 0) + n; return a }, {})
+              drcRepair.fixes = [...drcRepair.fixes, `DRC closure (KiCad geometry): ${acc[0].errors[0]} → ${acc[acc.length - 1].errors[1]} error(s) in ${acc.length} round(s) — ${Object.entries(fx).filter(([, n]) => n).map(([k, n]) => `${n} ${k}`).join(', ') || 'no edits'}`]
+            } else if (gp.closure.rounds.length) {
+              drcRepair.fixes = [...drcRepair.fixes, `DRC closure tried and rejected (${gp.closure.rounds[0].errors?.join(' → ') ?? gp.closure.rounds[0].error})`]
+            }
+          }
           const stitchNote = gp.stitched ? `, ${gp.stitched} bonded down via tented via-in-pad` : ''
           // append to the accumulated fixes (NOT res.best.fixes) so the loosen
           // note (design↔routing convergence) and any via-legalization note

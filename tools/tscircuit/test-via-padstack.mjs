@@ -20,7 +20,8 @@ new Function('exports',
   cut('function viaClearanceUm', '\n}\n') + '\n}\n' +
   cut('function emitBoardCode', '\n}\n') + '\n}\n' +
   cut('function mergeStackedVias', '\n}\n') + '\n}\n' +
-  'exports.FAB_PROFILES=FAB_PROFILES;exports.setViaClearance=setViaClearance;exports.viaClearanceUm=viaClearanceUm;exports.viaPadstackUm=viaPadstackUm;exports.setDsnTraceRules=setDsnTraceRules;exports.dsnToNLayer=dsnToNLayer;exports.groundChainNets=groundChainNets;exports.gndStubNets=gndStubNets;exports.portPos=portPos;exports.routerViaPadMm=routerViaPadMm;exports.emitBoardCode=emitBoardCode;exports.mergeStackedVias=mergeStackedVias;exports.setViaPadstack=setViaPadstack;exports.inflateThtPadstacks=inflateThtPadstacks;exports.kicadModToFootprint=kicadModToFootprint;'
+  cut('function profileClearanceMm', '\n}\n') + '\n}\n' +
+  'exports.FAB_PROFILES=FAB_PROFILES;exports.setViaClearance=setViaClearance;exports.viaClearanceUm=viaClearanceUm;exports.viaPadstackUm=viaPadstackUm;exports.setDsnTraceRules=setDsnTraceRules;exports.dsnToNLayer=dsnToNLayer;exports.groundChainNets=groundChainNets;exports.gndStubNets=gndStubNets;exports.portPos=portPos;exports.routerViaPadMm=routerViaPadMm;exports.emitBoardCode=emitBoardCode;exports.mergeStackedVias=mergeStackedVias;exports.setViaPadstack=setViaPadstack;exports.inflateThtPadstacks=inflateThtPadstacks;exports.kicadModToFootprint=kicadModToFootprint;exports.profileClearanceMm=profileClearanceMm;'
 )(ns)
 
 const dsn = () => ({
@@ -186,7 +187,15 @@ t('targeted GND retry: one stub per unreached pad to its NEAREST reached ground 
   assert.deepEqual(ns.gndStubNets(cj, ['U1.8', 'U1.47'], ['U1.8', 'U1.47']), [], 'no reached pad to stub to → no retry nets')
   assert.match(src, /only: strat, placeNets: input\.nets/, 'the retry re-runs the winning rung on the original placement')
   assert.match(src, /if \(after < before && sigOpen\(gp2\) <= sigOpen\(gp\)\) \{/, "the retry is accepted only when the shipped-board score improves AND no signal net opens")
-  assert.match(src, /unreachedPads: Array\.isArray\(gp\.unreachedPads\)/, 'the pour must hand the runner the names of the pads it could not reach')
+  assert.match(src, /let unreachedPads = Array\.isArray\(gp\.unreachedPads\)/, 'the pour must hand the runner the names of the pads it could not reach')
+  // DRC closure (KiCad geometry) on the grounded board: bounded rounds, accepted
+  // only when errors fall and neither opens nor unreached ground pads rise; the
+  // pour-selection compare does not pay for it; the profile's own clearance rule
+  assert.match(src, /const CLOSURE_ROUNDS = 2/, 'closure is bounded')
+  assert.match(src, /d2\.errors < drcAfter\.errors && opens2 <= opensBefore && unreached2\.length <= unreachedPads\.length/, 'closure acceptance: fewer errors, no new opens, no new stranded ground pads')
+  assert.match(src, /applyGroundPlane\(cjc, input\.gnd, c\.drc\.profileKey \|\| 'standard', \{ closure: false \}\)/, 'pour-selection candidates skip the closure')
+  assert.equal(ns.profileClearanceMm('standard'), 0.09)
+  assert.equal(ns.profileClearanceMm('hdi'), 0.0635)
 })
 
 t('through-hole padstacks are inflated so copper stays hole_clearance from the HOLE: a 150um ring → +120um at standard, a 2.54mm header (350um ring) already clears the fab rule, SMD pads untouched, rule wired into freerouteReal', () => {

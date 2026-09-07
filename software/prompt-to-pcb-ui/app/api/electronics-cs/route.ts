@@ -827,7 +827,9 @@ async function buildChipScale(
         try {
           grown = await runBoard({ ...payload, ...boardOpts, maxW: rung.maxW, gapLadder: rung.gapLadder }, path.join(dir, svgName), budget, req.signal ?? undefined)
         } catch (e) { growTrail.push({ rung: i + 1, error: String(e).slice(0, 160) }); continue }
-        growTrail.push({ rung: i + 1, maxW: rung.maxW, boardMm: grown?.boardMm ?? null, drc: grown?.drc?.errors ?? null, ok: !!grown?.ok })
+        growTrail.push({ rung: i + 1, maxW: rung.maxW, boardMm: grown?.boardMm ?? null, drc: grown?.drc?.errors ?? null, ok: !!grown?.ok,
+          // the selection below ranks by drcScore (opens weigh more than clearance nits): record what it saw
+          drcScore: typeof grown?.drcScore === 'number' ? grown.drcScore : null, errorTypes: grown?.drc?.errorTypes ?? null, unrouted: grown?.drcRepair?.unrouted ?? null, layers: grown?.layers ?? null })
         if (betterResult(best.result, grown) === 'b') best = { ...cand, result: grown, svgName }
         if (grown?.ok) break // clean route on a bigger board — done, all parts kept
       }

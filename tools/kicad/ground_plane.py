@@ -30,6 +30,9 @@ import json
 import re
 import pcbnew
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from kicad_geom import CopperIndex, seg_shape, circle_shape  # noqa: E402
+
 inp, outp, gndf = sys.argv[1], sys.argv[2], sys.argv[3]
 hole_clearance = float(sys.argv[4]) if len(sys.argv) > 4 else 0.5
 gnd_pins = set(json.load(open(gndf)))
@@ -209,15 +212,20 @@ def clears_tracks(x, y, keep):
     return True
 
 
+# KiCad's own geometry for every clearance decision below. The bounding-box /
+# hand-rolled distance versions of these checks disagreed with DRC on real pad
+# shapes (an LGA-8 dog-bone passed the box test and failed DRC at 0.084mm vs
+# 0.09mm), so the checks are now the same SHAPE.Collide test DRC runs.
+GEOM = CopperIndex(board, GND_CODE)
+
+
 def clears_copper(pos):
-    # nearest distance from the via centre to any other-net PAD's bounding box
-    # AND to any other-net TRACK, compared against the hole-to-copper keep-out.
-    for bb2 in other_pads:
-        dx = max(bb2.GetLeft() - pos.x, 0, pos.x - bb2.GetRight())
-        dy = max(bb2.GetTop() - pos.y, 0, pos.y - bb2.GetBottom())
-        if dx * dx + dy * dy < COPPER_KEEP * COPPER_KEEP:
-            return False
-    return clears_tracks(pos.x, pos.y, COPPER_KEEP)
+    # the via's DRILL must keep hole_clearance from other-net copper on every
+    # layer, and its COPPER must keep the clearance rule on every layer
+    hole = circle_shape(pos, VIA_HOLE_R)
+    if not GEOM.hole_clear(hole, pcbnew.FromMM(hole_clearance)):
+        return False
+    return GEOM.clear_all_layers(circle_shape(pos, VIA_PAD // 2), pcbnew.FromMM(CLEARANCE))
 
 
 stitched = 0
@@ -292,20 +300,11 @@ def seg_rect_d2(a, b, bb):
     return best
 
 
-def track_clears(a, b):
-    # The dog-bone is a SEGMENT and is checked exactly. It used to be 8 sample
-    # points: 0.225mm apart on a 1.8mm track, so a 0.25mm-wide QFN pad beside the
-    # track sat between two samples and passed at 0.031mm actual clearance
-    # (measured: 2 violations on the first board the longer reach produced).
-    keep2 = TRACK_KEEP * TRACK_KEEP
-    for bb in other_pads:
-        if seg_rect_d2(a, b, bb) < keep2:
-            return False
-    for c, d, w in other_tracks:
-        need = TRACK_KEEP + w // 2
-        if seg_seg_d2(a, b, c, d) < need * need:
-            return False
-    return True
+def track_clears(a, b, layer=pcbnew.F_Cu):
+    # The dog-bone is a SEGMENT checked with KiCad's own shapes against every
+    # other-net pad/track/via on its layer, at the fab's clearance rule.
+    return GEOM.clear(seg_shape(a, b, TRACK_W), layer, pcbnew.FromMM(CLEARANCE),
+                      hole_clearance=pcbnew.FromMM(hole_clearance))
 
 
 # Where the via may sit relative to the pad. 0 is via-in-pad; the rest is a
@@ -365,6 +364,7 @@ for pad_i, pos in enumerate(gnd_pads):
     via.SetFrontTentingMode(pcbnew.TENTING_MODE_TENTED)
     via.SetBackTentingMode(pcbnew.TENTING_MODE_TENTED)
     board.Add(via)
+    GEOM.add(via)
     hole_pts.append(at)
     stitched += 1
     if r_mm > 0.0:
@@ -439,15 +439,7 @@ for pos, pad in unreached:
                 return False
         return True
     def _clears(a, b):
-        keep2 = TRACK_KEEP * TRACK_KEEP
-        for bb in pads_l:
-            if seg_rect_d2(a, b, bb) < keep2:
-                return False
-        for c, d, w in tracks_l:
-            need = TRACK_KEEP + w // 2
-            if seg_seg_d2(a, b, c, d) < need * need:
-                return False
-        return True
+        return track_clears(a, b, layer)
     hit = None
     zrej = {'fill': 0, 'copper': 0}
     # Reach further than the via search: the pour retreats several mm from a

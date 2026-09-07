@@ -351,6 +351,38 @@ curl -s -o /dev/null -w '%{http_code}\n' -u "$ONSHAPE_ACCESS_KEY:$ONSHAPE_SECRET
 ```
 
 
+## One geometry model: the pour and the DRC closure (2026-09-06)
+
+Every residual sub-rule clearance fault on a shipped board this month came from
+copper placed or moved by a model that is not the one DRC grades: bounding
+boxes in the pour's dog-bone search, circuit-json pad sizes in the router-side
+legalizers. Two mechanisms now use KiCad's own geometry
+(`tools/kicad/kicad_geom.py`: pcbnew effective shapes + `SHAPE.Collide`, the
+DRC clearance test itself):
+
+- **Prevention** — `ground_plane.py` checks every stitch via (drill vs copper by
+  `hc`, ring vs copper by `c`) and every dog-bone / zone track (copper by `c`,
+  drills by `hc`) with real pad, track and via shapes before placing it.
+- **Repair** — `drc_closure.py` runs on the grounded board when it has 1–12
+  clearance / hole_clearance errors (`applyGroundPlane` in the runner; up to
+  `CLOSURE_ROUNDS` = 2 rounds, `FL_DRC_CLOSURE=0` opts out; the pour-selection
+  compare does not pay for it). Vias first (they are the most boxed-in), then
+  generated GND stubs (re-placed, else restored), then track jogs whose
+  endpoints never move. A round is kept only if the error count fell and
+  neither KiCad's open count nor the unreached ground pads rose; the record is
+  `drcRepair.closure` and a `DRC closure (KiCad geometry): N → M error(s)` line
+  in `fixes`. Regression: `node tools/kicad/test_closure.mjs` repairs run
+  0b84f5be's shipped board (4 faults) to 0 with no opens.
+- pcbnew hands out REFERENCES to live coordinates (`GetEnd()` after `SetEnd()`
+  reads the new value): copy into a fresh `VECTOR2I` before editing. SWIG
+  proxies are not identity-stable either: compare items by `m_Uuid`.
+
+The pipeline's spawn helper retries a tool that DIED (killed by a signal, or a
+spawn error) up to twice with backoff — a memory-starved host took a zip and
+three cargo builds that way on 2026-09-06, all logged as ordinary failures. A
+died build no longer counts as a firmware fill attempt, and a real compile
+failure logs the compiler's first `error[...]` lines.
+
 ## Router runner env knobs (`tools/tscircuit/run_board.mjs`)
 
 Measuring a routing change through the full strategy ladder takes 20–50 min and the
@@ -380,6 +412,7 @@ three times against copper the target rung never produced). Use these:
 - `FL_GND_RETRY=0` opts out of the targeted ground retry (default on): when the pour names ground pads it could not reach, the winning rung is re-run on the SAME placement with one 2-pin stub net per stranded pad to its nearest reached ground pad; kept only if the grounded board's DRC score drops AND no signal net opens. `FL_ROUTE_GND=1` still routes ALL of ground as a chain (opt-in).
 - `FL_POUR_SELECT=0` opts out of post-pour rung selection (default on): the top 3 rungs by pre-pour score are each poured and the one whose GROUNDED board scores best ships (`drcRepair.pourSelection` records the candidates). The pour merges stub/chain nets into GND by NAME (a net between two ground pins), never by geometry.
 
+- `FL_DRC_CLOSURE=0` disables the KiCad-geometry DRC closure on the grounded board (see above).
 - Budgets (2026-09-06): electronics-cs `FIRST_BUILD_WALL_MS` is 600 s (runner `FL_WALL_MS`); the runner's ladder deadline is wall − 150 s with rung ADMISSION by projected time (elapsed + last rung), its inner budget (gap ladder / legalizers / residual nudge) is wall − 60 s unless `FL_BUDGET_MS` is set, the ground retry is admitted on measured cost (winning rung time + pour), pour-selection on 12 s per candidate. The pipeline's fab/firmware wait is 780 s.
 - Verdicts (2026-09-06): in plan mode the fabrication package is cut from the SHIPPED chip-scale board whatever the intermediate variant's DRC says, and the run status (last-run.md) is the shipped board's. A firmware generator refusal (`FIRMWARE: SKIPPED`: a family with no adapter in `scripts/fw_families.py`) fails the EDA firmware stage, and the product job's firmware discipline stage follows that build (no image → failed). The planner's device manifest carries `family` (stm32f1 / rp2040 / esp32c3); the prompt's "N-layer" request is parsed (intent `layer_count` → spec `maxLayers`) and reported against what shipped.
 
