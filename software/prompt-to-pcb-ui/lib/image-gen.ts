@@ -33,7 +33,14 @@ function isUnavailable(status: number, message: string): boolean {
 }
 
 /** Cloudflare Workers AI — FLUX.1-schnell. Free daily quota, FLUX quality. */
-async function cloudflareImage(prompt: string): Promise<ImageResult> {
+// flux-1-schnell rejects prompts over 2048 characters ("Length of '/prompt'
+// must be <= 2048"). The id-render route clamped only its RETRY prompt; a long
+// enough identity brief failed the FIRST render the same way (run d5f4f6c2).
+// The provider boundary is where the provider's limit lives.
+const CF_PROMPT_MAX = 2048
+
+async function cloudflareImage(promptIn: string): Promise<ImageResult> {
+  const prompt = promptIn.length > CF_PROMPT_MAX ? promptIn.slice(0, CF_PROMPT_MAX - 8).replace(/\s+\S*$/, '') : promptIn
   const acct = process.env.CLOUDFLARE_ACCOUNT_ID
   const token = process.env.CLOUDFLARE_API_TOKEN
   if (!acct || !token) return { ok: false, reason: 'unavailable', message: 'no Cloudflare account id / api token' }
