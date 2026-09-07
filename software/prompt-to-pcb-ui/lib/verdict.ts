@@ -49,6 +49,12 @@ export interface BoardFacts {
     layers?: number | null
     layersRequested?: number | null
     layerRequestMet?: boolean | null
+    /** the runner's post-pour selection: what the requested-layer candidate came to */
+    pourSelection?: {
+      layerRequestCandidates?: number | null
+      layerRequestMetByClosure?: boolean | null
+      tried?: { strategy?: string; layers?: number | null; errors?: number | null; unreached?: number | null }[] | null
+    } | null
   } | null
   pinViolations?: string[] | null
 }
@@ -114,7 +120,21 @@ export function boardVerdict(board: BoardFacts | null | undefined): BoardVerdict
   // the user asked for a layer count; a board routed on more layers is an
   // alternative, not the board they asked for
   const lreq = rep?.layersRequested
-  if (lreq && rep?.layerRequestMet === false) reasons.push(`requested ${lreq}-layer board, routed on ${rep?.layers ?? '?'} layers`)
+  if (lreq && rep?.layerRequestMet === false) {
+    // say what the requested-layer board came to, not only that it lost: the
+    // runner pours the best fully-routed candidate within the request and
+    // repairs it; its residual is the reason the taller board shipped
+    const ps = rep?.pourSelection
+    const within = (ps?.tried ?? []).filter((t) => (t.layers ?? 2) <= lreq).sort((a, b) => (a.errors ?? 99) - (b.errors ?? 99))[0]
+    const why = ps == null
+      ? ''
+      : !ps.layerRequestCandidates
+        ? ` — no ${lreq}-layer attempt routed every net`
+        : within
+          ? ` — the best ${lreq}-layer board still had ${within.errors ?? '?'} DRC error(s)${within.unreached ? ` and ${within.unreached} ground pin(s) off the plane` : ''} after repair`
+          : ''
+    reasons.push(`requested ${lreq}-layer board, routed on ${rep?.layers ?? '?'} layers${why}`)
+  }
   const gp = rep?.groundPlane
   if (gp && gp.available === false) reasons.push('the ground plane pass did not run')
   for (const v of pins) reasons.push(String(v))
