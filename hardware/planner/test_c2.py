@@ -5,6 +5,7 @@ import sys
 
 import datasheet_ingest_v2 as dv2
 import datasheet_evidence as m5
+from report_regression_fixtures import c2_artifacts
 
 checks = []
 
@@ -14,9 +15,8 @@ def check(name, ok, detail=""):
     print("  [%s] %s%s" % ("PASS" if ok else "FAIL", name, "  -> " + detail if detail else ""))
 
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-D = os.path.join(HERE, "..", "..", "software", "prompt-to-pcb-ui", "public",
-                 "runs", "fl1-backplane-v1", "data")
+# gen_c2 builds fresh candidate inputs and reports in the isolated snapshot.
+D = c2_artifacts()
 
 
 def art(name):

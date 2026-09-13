@@ -6,6 +6,7 @@ import power_stage as ps
 import rf_rules as rf
 import highspeed_rules as hs
 import reliability_classes as rc
+from report_regression_fixtures import m9_m12_artifacts
 
 checks = []
 
@@ -41,9 +42,8 @@ check("10 M12 space/defense architecture_only, medical blocked",
       and rc.classify_request("implantable pump")[1] == "blocked")
 check("11 M12 commercial standard flow unaffected",
       rc.classify_request("bench power monitor")[0] == "commercial")
-HERE = os.path.dirname(os.path.abspath(__file__))
-D = os.path.join(HERE, "..", "..", "software", "prompt-to-pcb-ui",
-                 "public", "runs", "fl1-backplane-v1", "data")
+# Real rule reports generated from the source producer's explicit demo inputs.
+D = m9_m12_artifacts()
 for i, name in enumerate(["compose-m9-power-stage-rules",
                           "compose-m10-rf-rules",
                           "compose-m11-highspeed-rules",

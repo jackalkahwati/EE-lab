@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 
 checks = []
 
@@ -75,12 +76,18 @@ check("14 board router evidence (16 boards, failures visible, none physical)",
 check("15 CI integration report exists",
       art("flroute-ci-integration-report") is not None)
 # 16: LIVE fast suite under kipython (crash-isolated)
-r = subprocess.run([KIPY, os.path.join(SCRIPTS, "flroute_harness.py"),
-                    "fast", "/tmp/m3a-ci-fast"], capture_output=True,
-                   text=True, timeout=900)
-live = json.load(open("/tmp/m3a-ci-fast/flroute-regression-report.json"))
-check("16 LIVE fast suite green under kipython",
-      live["passed"] == live["fixtures"] == 6)
+with tempfile.TemporaryDirectory(prefix="m3a-ci-fast-") as out_dir:
+    r = subprocess.run([KIPY, os.path.join(SCRIPTS, "flroute_harness.py"),
+                        "fast", out_dir], capture_output=True,
+                       text=True, timeout=900)
+    if r.returncode != 0:
+        check("16 LIVE fast suite green under kipython", False,
+              "exit %s\n%s\n%s" % (r.returncode, r.stdout, r.stderr))
+    else:
+        with open(os.path.join(out_dir, "flroute-regression-report.json")) as f:
+            live = json.load(f)
+        check("16 LIVE fast suite green under kipython",
+              live["passed"] == live["fixtures"] == 6)
 hyg = art("compose-hardening-pause-hygiene-report")
 check("17 pause hygiene: M6 committed first, drafts quarantined",
       "446530a" in hyg["m6_status"]["committed"]

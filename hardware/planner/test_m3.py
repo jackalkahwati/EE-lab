@@ -6,18 +6,20 @@ import sys
 import tempfile
 
 import physical_execution as px
+from report_regression_fixtures import m3_artifacts
 
 checks = []
 
 
 def check(name, ok, detail=""):
     checks.append(ok)
-    print("  [%s] %s%s" % ("PASS" if ok else "FAIL", name, "  -> " + detail if detail else ""))
+    print("  [%s] synthetic-unsigned-input: %s%s" % (
+        "PASS" if ok else "FAIL", name, "  -> " + detail if detail else ""))
 
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-RUNS = os.path.join(HERE, "..", "..", "software", "prompt-to-pcb-ui", "public", "runs")
-LIVE = os.path.join(RUNS, "power-entry-header-2l")
+# LIVE is the executor's baseline synthetic case, NOT a live/historical run.
+# The initial unsigned checklist and empty ledger are explicitly authored inputs.
+LIVE = m3_artifacts()
 
 r = px.execute(LIVE)
 check("1 no signature -> state stays package_ready_with_review",

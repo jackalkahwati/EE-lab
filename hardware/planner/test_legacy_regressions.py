@@ -1,16 +1,15 @@
-"""Expose the legacy script-style regression suite as real pytest items."""
+"""Expose every legacy script as a pytest item in a test-owned source snapshot."""
 import os
 from pathlib import Path
 import subprocess
-import sys
 
 import pytest
 
+from regression_support import CANDIDATE_REPAIRS, LIBRARY_ENV_KEYS, regression_snapshot
 
 HERE = Path(__file__).resolve().parent
-# MUST match conftest._NATIVE_PYTEST_FILES. Two hand-maintained copies of
-# the same set is how a pytest-style file ends up ALSO run as a script:
-# harmless here (it does nothing and exits 0) but it hides the mismatch.
+# Keep the collector's native registry authoritative. Never run pytest-style
+# modules as scripts: a zero exit code would silently lose their assertions.
 from conftest import _NATIVE_PYTEST_FILES as NATIVE_TESTS
 LEGACY_SCRIPTS = sorted(
     path for path in HERE.glob("test_*.py") if path.name not in NATIVE_TESTS
@@ -19,17 +18,15 @@ LEGACY_SCRIPTS = sorted(
 
 @pytest.mark.parametrize("script", LEGACY_SCRIPTS, ids=lambda path: path.stem)
 def test_legacy_script(script):
-    env = os.environ.copy()
-    env["PYTHONUNBUFFERED"] = "1"
+    repo_root = HERE.parents[1]
+    candidates = tuple(path for path in CANDIDATE_REPAIRS if (repo_root / path).is_file())
+    # Explicit CI/toolchain library paths are validated as immutable external
+    # roots. No other caller environment, credentials, or provider CLI survives.
+    libraries = {key: os.environ[key] for key in LIBRARY_ENV_KEYS if os.environ.get(key)}
     try:
-        result = subprocess.run(
-            [sys.executable, str(script)],
-            cwd=str(HERE),
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=900,
-        )
+        with regression_snapshot(repo_root, candidate_files=candidates,
+                                 library_roots=libraries) as snapshot:
+            result = snapshot.run_legacy(script.name, timeout=900)
     except subprocess.TimeoutExpired as exc:
         pytest.fail("%s timed out after %ss\n%s\n%s" % (
             script.name, exc.timeout, exc.stdout or "", exc.stderr or ""))
