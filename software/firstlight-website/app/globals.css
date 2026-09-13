@@ -1543,7 +1543,7 @@ a {
   margin-top: 12px;
 }
 
-.legal-page a {
+.legal-page a:not(.btn) {
   color: var(--amber-text);
   font-weight: 600;
   text-decoration: underline;
