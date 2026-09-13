@@ -454,6 +454,9 @@ print vod_ss vod_pk
 
 def gen_pdn(board):
     n_bulk, n_cer = board.decoupling_caps()
+    total = n_bulk + n_cer
+    if total == 0:
+        return None, "no decoupling caps on the board to model"
     ztarget = (PDN_RIPPLE_FRAC * 3.3) / PDN_ITRAN  # V/A = ohm
     lines = [
         "* FUNCSIM pdn-rail-impedance : 3V3 rail AC sweep",
@@ -498,11 +501,8 @@ def gen_pdn(board):
         "print zmax z_1mhz z_10mhz",
         ".endc", ".end", ""]
     deck = "\n".join(lines)
-    total = n_bulk + n_cer
 
     def ev(vals):
-        if total == 0:
-            return "SKIP", "no decoupling caps on the board to model"
         zmax = vals.get("zmax")
         if zmax is None:
             return "FAIL", "AC sweep produced no Zmax"
