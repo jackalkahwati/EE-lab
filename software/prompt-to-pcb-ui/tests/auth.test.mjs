@@ -51,6 +51,42 @@ test('sessions validate signatures and reject malformed expirations', () => {
   assert.equal(auth.isValidRunId('.'), false)
 })
 
+test('only exact /start is public and its CSP blocks injected scripts', async () => {
+  const capture = await proxy(new NextRequest('https://compose.test/start'))
+  assert.equal(capture.headers.get('x-middleware-next'), '1')
+  assert.equal(capture.headers.get('location'), null)
+  const csp = capture.headers.get('content-security-policy')
+  assert.match(csp, /script-src 'nonce-[A-Za-z0-9+/=]+' 'strict-dynamic'/)
+  assert.doesNotMatch(csp, /unsafe-inline|script-src 'self'|cloudflare/)
+  assert.match(csp, /connect-src 'self'/)
+  assert.equal(capture.headers.get('referrer-policy'), 'no-referrer')
+  assert.match(capture.headers.get('cache-control'), /no-store/)
+  assert.equal(capture.headers.get('x-middleware-request-content-security-policy'), csp)
+  const second = await proxy(new NextRequest('https://compose.test/start'))
+  assert.notEqual(second.headers.get('content-security-policy'), csp)
+  for (const pathname of ['/start/private', '/starter', '/compose', '/runs/private/file.json']) {
+    const gated = await proxy(new NextRequest(`https://compose.test${pathname}`))
+    assert.equal(gated.status, 307)
+    assert.equal(new URL(gated.headers.get('location')).pathname, '/login')
+    assert.equal(gated.headers.get('content-security-policy'), null)
+  }
+  const api = await proxy(new NextRequest('https://compose.test/api/pipeline/run'))
+  assert.equal(api.status, 401)
+  const login = await proxy(new NextRequest('https://compose.test/login?next=%2Fcompose', {
+    headers: { 'x-start-nonce': 'caller-spoof' },
+  }))
+  assert.equal(login.headers.get('x-middleware-next'), '1')
+  assert.equal(login.headers.get('content-security-policy'), null)
+  assert.equal(login.headers.get('x-middleware-request-x-start-nonce'), null)
+  assert.ok(!login.headers.get('x-middleware-override-headers')?.includes('x-start-nonce'))
+  const signed = await proxy(new NextRequest('https://compose.test/compose', {
+    headers: { 'x-start-nonce': 'caller-spoof', cookie: `${auth.SESSION_COOKIE}=${auth.makeSession('alice@example.test')}` },
+  }))
+  assert.equal(signed.headers.get('x-middleware-next'), '1')
+  assert.equal(signed.headers.get('x-middleware-request-x-start-nonce'), null)
+  assert.ok(!signed.headers.get('x-middleware-override-headers')?.includes('x-start-nonce'))
+})
+
 test('production refuses to issue or accept sessions without a configured secret', () => {
   process.env.NODE_ENV = 'production'
   delete process.env.AUTH_SECRET

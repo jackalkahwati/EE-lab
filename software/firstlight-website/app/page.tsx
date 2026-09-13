@@ -3,8 +3,15 @@ import Link from "next/link";
 import { TryCompose } from "./try-compose";
 import { MfgVignette, SourcingVignette, ValidationVignette, EditLoopVignette } from "./vignettes";
 
-const COMPOSE_URL =
-  process.env.NEXT_PUBLIC_COMPOSE_URL || "http://localhost:4500";
+import { COMPOSE_URL } from "../lib/public-config";
+import { pageMetadata } from "../lib/metadata";
+
+export const metadata = pageMetadata({
+  path: "/",
+  title: "FirstLight Compose | Design a real product from a sentence",
+  description:
+    "FirstLight Compose turns a plain-language description into manufacturable measurement and sensor electronics. A routed, DRC-gated board, a fit-checked enclosure, real physics simulation, firmware, and the manufacturing, sourcing, and test plans to build it. Start a free trial.",
+});
 const CONTACT = "jack@thestardrive.com";
 
 const PIPELINE = [
@@ -73,7 +80,7 @@ const FL1_INSTRUMENTS = [
 
 export default function Home() {
   return (
-    <main id="main-content">
+    <>
       {/* Nav */}
       <nav className="nav" aria-label="Primary navigation">
         <div className="container nav-inner">
@@ -98,6 +105,7 @@ export default function Home() {
         </div>
       </nav>
 
+      <main id="main-content" tabIndex={-1}>
       {/* Hero, Compose */}
       <header className="hero" id="top">
         <div className="container hero-grid">
@@ -488,7 +496,7 @@ export default function Home() {
                 controls
                 playsInline
                 preload="none"
-                poster="/media/web-hero.png"
+                poster="/media/web-hero.webp"
                 className="demo-video"
                 aria-label="CAD concept film of the FL-1 performing an autonomous probing run"
               >
@@ -500,7 +508,8 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Footer */}
+      </main>
+
       <footer className="footer">
         <div className="container footer-inner">
           <span className="wordmark small">
@@ -520,7 +529,7 @@ export default function Home() {
           </span>
         </div>
       </footer>
-    </main>
+    </>
   );
 }
 
@@ -539,6 +548,7 @@ function ToolStrip({ tools }: { tools: Tool[] }) {
                 alt={`${name} logo`}
                 width={w}
                 height={h}
+                sizes={slug === "pcbway" ? "58px" : "22px"}
               />
             ) : (
               <span className="tool-glyph" aria-hidden="true">

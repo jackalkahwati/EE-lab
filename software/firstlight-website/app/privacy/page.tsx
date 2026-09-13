@@ -1,10 +1,16 @@
 import Link from "next/link";
 
-export const metadata = { title: "Privacy Policy — FirstLight" };
+import { pageMetadata } from "../../lib/metadata";
+
+export const metadata = pageMetadata({
+  path: "/privacy",
+  title: "Privacy Policy | FirstLight",
+  description: "How StarDrive Inc. collects, uses, and protects information for the FirstLight website, Compose platform, and FL-1 reservations.",
+});
 
 export default function Privacy() {
   return (
-    <main className="legal-page" id="main-content">
+    <main className="legal-page" id="main-content" tabIndex={-1}>
       <div className="container narrow">
         <p className="kicker">StarDrive Inc.</p>
         <h1>Privacy Policy</h1>

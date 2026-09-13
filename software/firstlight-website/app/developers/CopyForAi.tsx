@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 /**
  * The full FirstLight API reference as clean, self-contained markdown — sized to
@@ -54,10 +54,12 @@ or install the firstlight / firstlight-mcp binaries globally from the checkout:
   npm i -g ./software/firstlight-cli
 export FIRSTLIGHT_API_KEY=flk_live_...
 firstlight build "USB-C ambient air quality tile with an SGP40 VOC sensor" --wait   # exits 0 only when every stage passes — gate CI on it
-firstlight status <runId> --watch
-firstlight artifacts <runId>
-firstlight get <runId> step -o enclosure.step
-firstlight get <runId> fab-package -o fab.zip
+# Set RUN_ID to the runId returned by your build
+export RUN_ID="run-..."
+firstlight artifacts "$RUN_ID"
+firstlight get "$RUN_ID" step -o enclosure.step
+firstlight get "$RUN_ID" fab-package -o fab.zip
+firstlight status "$RUN_ID" --watch
 firstlight boards
 # Add --json to any command for machine output. Set FIRSTLIGHT_URL for self-hosted instances.
 
@@ -76,34 +78,79 @@ The API is the same pipeline as the app, with the same gates. A board passes onl
 `;
 
 export function CopyForAi() {
-  const [copied, setCopied] = useState(false);
+  const [status, setStatus] = useState<"idle" | "copying" | "copied" | "manual">("idle");
+  const manualId = useId();
+  const manualRef = useRef<HTMLTextAreaElement>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
+  const busyRef = useRef(false);
+  const copied = status === "copied";
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (timerRef.current !== null) clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (status === "manual") {
+      manualRef.current?.focus();
+      manualRef.current?.select();
+    }
+  }, [status]);
+
   const onClick = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    if (timerRef.current !== null) clearTimeout(timerRef.current);
+    setStatus("copying");
+    let success = false;
     try {
       await navigator.clipboard.writeText(DOC_MD);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2200);
+      success = true;
     } catch {
-      // clipboard blocked (insecure context / permissions) — select-fallback
+      if (!mountedRef.current) return;
+      // Legacy fallback is successful only when execCommand explicitly says so.
+      const previousFocus = document.activeElement;
       const ta = document.createElement("textarea");
       ta.value = DOC_MD;
+      ta.readOnly = true;
+      ta.style.position = "fixed";
+      ta.style.left = "-9999px";
+      ta.style.top = "0";
       document.body.appendChild(ta);
-      ta.select();
       try {
-        document.execCommand("copy");
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2200);
+        ta.focus();
+        ta.select();
+        success = document.execCommand("copy") === true;
       } catch {
-        /* give up silently */
+        success = false;
+      } finally {
+        ta.remove();
+        if (previousFocus instanceof HTMLElement) previousFocus.focus({ preventScroll: true });
       }
-      ta.remove();
+    } finally {
+      busyRef.current = false;
+    }
+    if (!mountedRef.current) return;
+    setStatus(success ? "copied" : "manual");
+    if (success) {
+      timerRef.current = setTimeout(() => {
+        setStatus("idle");
+        timerRef.current = null;
+      }, 2200);
     }
   };
   return (
+    <div className="copy-docs">
     <button
       type="button"
       onClick={onClick}
       className="copy-docs-btn"
-      aria-label="Copy the full API documentation as markdown for your AI tools"
+      aria-disabled={status === "copying"}
+      aria-label="Copy docs for AI: full API documentation as markdown"
     >
       <span className="copy-docs-icon" aria-hidden="true">
         {copied ? (
@@ -139,7 +186,26 @@ export function CopyForAi() {
           </svg>
         )}
       </span>
-      {copied ? "Copied for your AI" : "Copy docs for AI"}
+      {copied ? "Copied for your AI" : status === "copying" ? "Copying docs…" : "Copy docs for AI"}
     </button>
+    <p className="sr-only" role="status" aria-live="polite">
+      {copied ? "API documentation copied to clipboard." : status === "manual" ? "Automatic copy failed. Copy the selected documentation manually." : ""}
+    </p>
+    {status === "manual" && (
+      <div className="copy-docs-manual">
+        <label htmlFor={manualId}>Copy the documentation manually</label>
+        <p id={`${manualId}-hint`}>Automatic copy is unavailable. Press Command+C on Mac or Ctrl+C on Windows and Linux to copy the selected text.</p>
+        <textarea
+          ref={manualRef}
+          id={manualId}
+          aria-describedby={`${manualId}-hint`}
+          readOnly
+          value={DOC_MD}
+          rows={8}
+          onFocus={(event) => event.currentTarget.select()}
+        />
+      </div>
+    )}
+    </div>
   );
 }

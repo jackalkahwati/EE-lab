@@ -1,4 +1,6 @@
-import { Analytics } from '@vercel/analytics/next'
+import { headers } from 'next/headers'
+import { PrivateAnalytics } from '@/components/private-analytics'
+import { START_SCRUB_SCRIPT } from '@/lib/start-draft'
 import type { Metadata, Viewport } from 'next'
 import { Inter, JetBrains_Mono } from 'next/font/google'
 import './globals.css'
@@ -22,21 +24,25 @@ export const viewport: Viewport = {
   themeColor: '#0f0f0f',
 }
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode
 }>) {
+  const nonce = (await headers()).get('x-start-nonce') ?? undefined
   return (
     <html
       lang="en"
       className={`bg-background ${inter.variable} ${jetbrainsMono.variable}`}
     >
+      <head>
+        {nonce && <script nonce={nonce} dangerouslySetInnerHTML={{ __html: START_SCRUB_SCRIPT }} />}
+      </head>
       <body className="font-sans antialiased">
-        <TopNav />
-        <CommandPalette />
+        {!nonce && <TopNav />}
+        {!nonce && <CommandPalette />}
         {children}
-        {process.env.NODE_ENV === 'production' && <Analytics />}
+        {!nonce && process.env.NODE_ENV === 'production' && process.env.VERCEL === '1' && <PrivateAnalytics />}
       </body>
     </html>
   )

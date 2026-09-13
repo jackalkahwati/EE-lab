@@ -12,6 +12,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
+import { acknowledgeStartDraft, readStartDraft, sessionDraftStorage } from '@/lib/start-draft'
 import { loadRealBoard, type RealBoard } from '@/lib/real-board'
 import { ComposeChat } from '@/components/compose-chat'
 import { BoardCanvas } from '@/components/board-canvas'
@@ -341,6 +342,12 @@ export default function Compose2Page() {
   const [runsLoaded, setRunsLoaded] = useState(false)
   // an FL-1 loop ECO gets dropped into the chat as a revision (single-pane flow)
   const [revisePrefill, setRevisePrefill] = useState('')
+  const handoffIdRef = useRef<string | null>(null)
+  const onPrefillConsumed = () => {
+    const id = handoffIdRef.current
+    if (id) acknowledgeStartDraft(sessionDraftStorage(), id)
+    setRevisePrefill('')
+  }
   const stageRef = useRef<HTMLDivElement>(null)
   const toggleFullscreen = () => {
     const el = stageRef.current
@@ -508,10 +515,29 @@ export default function Compose2Page() {
     />
   )
 
+  // /compose is authenticated by the proxy. Peek first, then acknowledge only
+  // when ComposeChat has setTyped + focused. The ref survives StrictMode's
+  // effect replay and keeps a late run-list response from restoring an old run.
+  useEffect(() => {
+    if (handoffIdRef.current) return
+    const draft = readStartDraft(sessionDraftStorage())
+    if (!draft) return
+    handoffIdRef.current = draft.id
+    selectedIdRef.current = ''
+    productSpecRef.current = null
+    setSelectedId(''); setNewDesign(true); setRealBoard(null)
+    setProductSpec(null); setIdBrief(null); setBuiltDisc({})
+    setStage('electronics'); setLeftView('chat'); setDocTabs([])
+    setActiveDoc(null); setBadged({})
+    setRevisePrefill(draft.prompt)
+  }, [])
+
   // load real runs from disk (same source as /compose)
   useEffect(() => {
+    let cancelled = false
     fetch('/api/runs').then((r) => (r.ok ? r.json() : { runs: [] }))
       .then(({ runs: disk }: { runs: Run[] }) => {
+        if (cancelled) return
         if (Array.isArray(disk) && disk.length) {
           mergeRuns(disk)
           // Do NOT auto-select the last run on load — a fresh page open starts on a
@@ -521,13 +547,14 @@ export default function Compose2Page() {
           // ...UNLESS the URL names one. /compose?run=<id> was silently ignored,
           // so a run's URL could not be bookmarked, shared or reloaded back into.
           const want = new URLSearchParams(window.location.search).get('run')
-          if (want && disk.some((r: Run) => r.id === want)) {
+          if (!handoffIdRef.current && want && disk.some((r: Run) => r.id === want)) {
             setSelectedId(want)
             setNewDesign(false)
           }
         }
       }).catch(() => {})
-      .finally(() => setRunsLoaded(true))
+      .finally(() => { if (!cancelled) setRunsLoaded(true) })
+    return () => { cancelled = true }
   }, [])
 
   // Keep the URL pointing at the visible run, so reload/back/bookmark all land
@@ -1117,6 +1144,8 @@ export default function Compose2Page() {
               threads={runs.map((r) => ({ id: r.id, label: r.name || r.id }))}
               activeId=""
               newDesign
+              revisePrefill={revisePrefill}
+              onPrefillConsumed={onPrefillConsumed}
               onSelectThread={(id) => { setSelectedId(id); setNewDesign(false); setIdBrief(null); setProductSpec(null); setStage('electronics'); setBuiltDisc({}) }}
               onNew={() => {}}
               onRunComplete={onRunComplete}
@@ -1191,7 +1220,7 @@ export default function Compose2Page() {
           activeName={selectedRun?.name}
           newDesign={newDesign}
           revisePrefill={revisePrefill}
-          onPrefillConsumed={() => setRevisePrefill('')}
+          onPrefillConsumed={onPrefillConsumed}
           onSelectThread={(id) => { setSelectedId(id); setNewDesign(false); setIdBrief(null); setProductSpec(null); setStage('electronics'); setBuiltDisc({}) }}
           onNew={() => { setNewDesign(true); setBuiltDisc({}); setProductSpec(null); setIdBrief(null) }}
           builtDisciplines={builtDisc}

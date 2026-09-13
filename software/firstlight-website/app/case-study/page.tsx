@@ -1,19 +1,14 @@
-import type { Metadata } from "next";
 import Link from "next/link";
+import { COMPOSE_URL } from "../../lib/public-config";
+import { pageMetadata, FL1_IMAGE } from "../../lib/metadata";
 
-const COMPOSE_URL =
-  process.env.NEXT_PUBLIC_COMPOSE_URL || "https://app.firstlight.build";
-
-export const metadata: Metadata = {
+export const metadata = pageMetadata({
+  path: "/case-study",
   title: "Built with Compose | The FL-1 case study",
   description:
     "We used FirstLight Compose to design, simulate, and iterate FL-1, our precision hardware bring-up machine. The dogfooding story, told honestly, and how it made the product better.",
-  openGraph: {
-    title: "Built with Compose | The FL-1 case study",
-    description:
-      "The machine that tests your product is the next bottleneck. We built ours with Compose.",
-  },
-};
+  image: FL1_IMAGE,
+});
 
 const PIPELINE = [
   ["01 · Design", "Prompt to routed PCBA", "Real parts, a real netlist, routed and checked against a live KiCad DRC at the fab's rule profile. Two to eight copper layers, escalated as density demands."],
@@ -59,7 +54,7 @@ const JOURNEY = [
 
 export default function CaseStudyPage() {
   return (
-    <main id="main-content" className="case-study">
+    <div className="case-study">
       <nav className="nav" aria-label="Primary navigation">
         <div className="container nav-inner">
           <Link href="/" className="wordmark">
@@ -83,6 +78,7 @@ export default function CaseStudyPage() {
         </div>
       </nav>
 
+      <main id="main-content" tabIndex={-1}>
       {/* Hero */}
       <header className="hero" id="top">
         <div className="container narrow">
@@ -263,6 +259,8 @@ export default function CaseStudyPage() {
         </div>
       </section>
 
+      </main>
+
       <footer className="footer">
         <div className="container footer-inner">
           <span className="wordmark small">
@@ -282,7 +280,7 @@ export default function CaseStudyPage() {
           </span>
         </div>
       </footer>
-    </main>
+    </div>
   );
 }
 

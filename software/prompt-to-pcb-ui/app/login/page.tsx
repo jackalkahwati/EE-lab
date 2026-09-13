@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { readStartDraft, safeLoginNext, sessionDraftStorage } from '@/lib/start-draft'
 
 const OAUTH_ERRORS: Record<string, string> = {
   'auth-not-configured': 'Sign-in is not configured on this deployment.',
@@ -26,8 +27,8 @@ export default function LoginPage() {
 
   function nextDest(): string {
     const next = new URLSearchParams(window.location.search).get('next')
-    // only same-origin paths, never an absolute URL from the query string
-    return next && next.startsWith('/') && !next.startsWith('//') ? next : '/'
+    // OAuth errors may drop `next`; the tab's valid draft still belongs in Compose.
+    return safeLoginNext(next, !!readStartDraft(sessionDraftStorage()))
   }
 
   async function submit(e: React.FormEvent) {

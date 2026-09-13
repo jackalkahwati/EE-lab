@@ -20,8 +20,8 @@ browser
   -> data/ + public/runs/                (external USB drive "T9 Backup")
 ```
 
-- App root (working dir): `/Volumes/T9 Backup/EE-lab/software/prompt-to-pcb-ui`
-- Local port: `4500` (`npx next start -p 4500`)
+- App root (working dir): `~/firstlight-prod/software/prompt-to-pcb-ui` (internal disk; verify the installed plist before release)
+- Local port: `127.0.0.1:4500` (`next start -H 127.0.0.1 -p 4500`)
 - Public host: `https://app.firstlight.build`
 - There is **no** dedicated `/health` route; `/` is used as the liveness probe.
 
@@ -83,21 +83,47 @@ ship procedure below removes it, builds, and puts it back.
 
 ## Ship new code
 
-```bash
-PROD=~/firstlight-prod/software/prompt-to-pcb-ui
-launchctl bootout gui/$UID/build.firstlight.compose        # STOP FIRST: a build
-                                                           # rewrites .next under
-                                                           # a live next start
-cd ~/firstlight-prod && git fetch && git checkout -f -B main origin/main
-cd "$PROD"
-pnpm install --frozen-lockfile        # only when package.json/lockfile changed
-rm -f public/runs && mkdir -p public/runs   # symlink breaks the build
-pnpm build                                  # FOREGROUND. A killed background
-                                            # build caused a 13-min outage.
-rmdir public/runs && ln -s "/Volumes/T9 Backup/EE-lab/software/prompt-to-pcb-ui/public/runs" public/runs
-launchctl bootstrap gui/$UID ~/Library/LaunchAgents/build.firstlight.compose.plist
-curl -sI localhost:4500 | head -1                          # expect 307
-```
+Treat this as an operator checklist, not an unattended copy/paste script:
+
+1. Announce the **Mac production** target. Inspect the installed plist, current
+   SHA, working tree, free disk (`df -h`), and active pipeline/generation jobs.
+   Do not interrupt customer work. Preserve uncommitted files and secrets.
+2. Fetch the approved merged revision and review the **entire** production-to-
+   release diff, including commits that predate the release branch. Confirm
+   dependency/toolchain compatibility and passing CI. Never use forced checkout
+   or `git clean` to make deployment succeed.
+3. Record the old SHA and exact `readlink public/runs` target. Verify it is a
+   symlink to an existing directory, not an ordinary directory. The dev and prod
+   symlinks can differ: never substitute one for the other.
+4. Prepare rollback before stopping anything: preserve `.next` outside its build
+   path and preserve compatible dependencies if manifests changed. Record the
+   rollback location. Keep data, `.env.local`, and toolchain binaries in place.
+5. Stop **only** `build.firstlight.compose` with
+   `launchctl bootout gui/$(id -u)/build.firstlight.compose`. A build rewrites
+   `.next`; never build beneath a live server. Fast-forward the checkout to the
+   exact approved revision (`git merge --ff-only <release-sha>`). Install frozen
+   dependencies only if needed.
+6. Unlink only the verified `public/runs` symlink (`unlink`, never recursive
+   removal), create an empty directory in its place, and run `pnpm build` in the
+   foreground. Set a cleanup trap **before unlinking** that restores the recorded
+   symlink on success, error, or interruption; remove the placeholder only with
+   `rmdir`, which fails safely if it is nonempty. Do not delete run artifacts.
+7. Restore the exact run symlink, then bootstrap the installed plist:
+   `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/build.firstlight.compose.plist`.
+   Probe `http://127.0.0.1:4500/` (anonymous 307) and the public login/capture pages.
+   Use read-only requests; `healthcheck.sh` sends alerts/writes state and
+   `scripts/test_frontend.sh` creates accounts, so neither is a passive probe.
+8. On build/start/health failure, keep the website on its previous release.
+   Restore the recorded code revision, compatible dependencies/build and exact
+   symlink, restart the prior app, and verify it. Never restore user data as part
+   of code rollback. Keep the failed build/log for diagnosis if space allows.
+
+For a coordinated website release, deploy Compose first, then the linked Vercel
+website from `software/firstlight-website`. Keep `NEXT_PUBLIC_COMPOSE_URL` aligned
+with the app's OAuth `APP_URL` (`https://app.firstlight.build`): private draft
+storage is same-tab and origin-scoped. Record the previous Vercel deployment.
+If rolling back both, revert the website first because its new `/start` link
+depends on the Compose release. See `docs/deployment.md` for bounded smoke checks.
 
 When tools/ changed, also refresh the pipeline toolchain:
 
