@@ -16,5 +16,9 @@ let pass = 0; const t = (n, f) => { f(); pass++; console.log('  ok  ' + n) }
 t('same positions, swapped pins -> different images', () => { assert.notEqual(ns.flGeomSig(r0, 0, 0), ns.flGeomSig(r180, 0, 0)); assert.notEqual(ns.flGeomSig(r90, 0, 0), ns.flGeomSig(r270, 0, 0)) })
 t('identical parts -> the same image (pad order irrelevant)', () => { assert.equal(ns.flGeomSig(r0, 0, 0), ns.flGeomSig([r0[1], r0[0]], 0, 0)) })
 t('rotated 90 vs 0 -> different images (positions differ)', () => assert.notEqual(ns.flGeomSig(r0, 0, 0), ns.flGeomSig(r90, 0, 0)))
-t('the tracked patch copy carries the same v2 signature', () => assert.ok(fs.readFileSync(new URL('./patches/dsn-converter-index.PATCHED.js', import.meta.url), 'utf8').includes('FL PATCH v2')))
+t('the installed converter matches the tracked v2 patch', () => {
+  const patched = fs.readFileSync(new URL('./patches/dsn-converter-index.PATCHED.js', import.meta.url), 'utf8')
+  assert.ok(src.includes('FL PATCH v2'), 'installed converter must carry the v2 patch')
+  assert.equal(src, patched, 'postinstall must install the complete tracked patch')
+})
 console.log(`${pass} passed`)

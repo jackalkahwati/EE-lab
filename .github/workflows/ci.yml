@@ -20,7 +20,34 @@ jobs:
           cache: pip
           cache-dependency-path: hardware/planner/requirements.txt
       - run: pip install -r hardware/planner/requirements.txt
+      - name: Fetch pinned KiCad library data
+        env:
+          LIBRARY_ROOT: ${{ runner.temp }}/firstlight-kicad
+        run: |
+          set -euo pipefail
+          fetch_library() {
+            name="$1"
+            revision="$2"
+            destination="$LIBRARY_ROOT/$name"
+            git init "$destination"
+            git -C "$destination" remote add origin "https://gitlab.com/kicad/libraries/$name.git"
+            git -C "$destination" fetch --depth=1 origin "$revision"
+            test "$(git -C "$destination" rev-parse FETCH_HEAD)" = "$revision"
+            git -C "$destination" checkout --detach FETCH_HEAD
+          }
+          fetch_library kicad-symbols 7058584a0fbe9aa2f1c9ff2acf7847726ff6922c
+          fetch_library kicad-footprints 3d2b27e687a44c97f02109afb2acfeebbc8dd75f
+          python "$LIBRARY_ROOT/kicad-symbols/tools/kicad_lib_pack.py" \
+            --input "$LIBRARY_ROOT/kicad-symbols" --output "$LIBRARY_ROOT/kicad-symbols/packed"
+      - name: Verify planner library prerequisites
+        env:
+          FL_KICAD_SYMBOLS: ${{ runner.temp }}/firstlight-kicad/kicad-symbols/packed
+          FL_KICAD_FOOTPRINTS: ${{ runner.temp }}/firstlight-kicad/kicad-footprints
+        run: python hardware/planner/ci_toolchain.py
       - run: python -m pytest -q hardware/planner
+        env:
+          FL_KICAD_SYMBOLS: ${{ runner.temp }}/firstlight-kicad/kicad-symbols/packed
+          FL_KICAD_FOOTPRINTS: ${{ runner.temp }}/firstlight-kicad/kicad-footprints
 
   station:
     name: station (pytest)
@@ -59,7 +86,7 @@ jobs:
       - run: pnpm test:enterprise
 
   website:
-    name: website (lint, typecheck)
+    name: website (lint, typecheck, tests, build)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -74,6 +101,8 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
 
   footprints:
     name: Footprint geometry
@@ -83,9 +112,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      # No KiCad, no JVM, no install: the generator is dependency-free, so the
-      # land patterns can be checked on every push while the full golden board
-      # suite stays opt-in.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install pytest==8.4.2
+      # The DSN regression checks the installed converter after our postinstall
+      # patch. These geometry checks do not require KiCad or a CFD solver.
+      - run: npm ci --prefix tools/tscircuit
       - run: node tools/tscircuit/test-footprints.mjs
       - run: node tools/tscircuit/test-via-padstack.mjs
       - run: node tools/tscircuit/test-dsn-patch.mjs

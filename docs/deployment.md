@@ -7,8 +7,10 @@ Two apps, two hosts. Domain `firstlight.build` was purchased through Vercel.
 | Marketing site | `software/firstlight-website` | **Vercel** (stateless) | `firstlight.build` |
 | Compose (product) | `software/prompt-to-pcb-ui` | **Persistent host** (needs disk) | `app.firstlight.build` |
 
-Stripe stays in **test mode** for launch (reserve button works, collects
-email/name via Stripe Checkout, no card is charged). Flip to live keys later.
+Payment mode is an explicit operational decision, not a deployment step. Do not
+change Stripe keys as part of a website release. Verified test-mode returns say
+**test checkout**, not that a real reservation was placed. Live payments,
+refunds, and fulfillment require separate authorization and acceptance testing.
 
 ---
 
@@ -28,10 +30,28 @@ storage. Deploys cleanly on Vercel serverless.
 |---|---|---|
 | `APP_URL` | `https://firstlight.build` | Required in prod — Stripe redirect origin. Reservations fail closed without it. |
 | `NEXT_PUBLIC_COMPOSE_URL` | `https://app.firstlight.build` | Where the "Try Compose" button sends users. Build-time inlined — must be set before/at build. |
-| `STRIPE_SECRET_KEY` | *(test key from `.env.local`)* | Stripe Checkout session creation. |
-| `STRIPE_RESERVATION_PRICE` | *(test price id from `.env.local`)* | The reservation deposit price. |
+| `STRIPE_SECRET_KEY` | *(existing server-side key; never commit)* | Stripe Checkout creation/verification and browser-binding signature. Preserve the selected payment mode. |
+| `STRIPE_RESERVATION_AMOUNT_CENTS` | `250000` (default) | Positive integer USD cents. Shared by Checkout, FL-1 copy, and Terms; price-bearing pages render dynamically. |
 
-That's the whole marketing site. Nothing else is required.
+`STRIPE_RESERVATION_PRICE` is not used: Checkout creates inline price data.
+Verification binds the original amount/currency in a signed, short-lived,
+HttpOnly browser cookie, so changing the configured price during checkout does
+not invalidate that session. `reserved=1` is not proof of payment. A missing or
+expired cookie/session returns an unverified state, not a success or an
+instruction to pay twice.
+
+The shared site origin defaults to `https://firstlight.build`; public Compose
+links default to `https://app.firstlight.build`. Set public origins before the
+build. Keep the marketing handoff origin identical to Compose's OAuth `APP_URL`:
+`/start#prompt=...` stores a short-lived draft in origin-scoped, same-tab
+sessionStorage, scrubs the fragment, and opens a new design after login. It
+never starts generation automatically. Legacy `?prompt=` links are not a private
+transport and should not be published.
+
+For the existing locally linked Vercel project, deploy from
+`software/firstlight-website` with `vercel deploy --prod --yes` after CI and the
+Compose release pass. Do not upload the repository root or environment files.
+Record the previous deployment URL first so it can be promoted on rollback.
 
 ---
 
@@ -91,19 +111,33 @@ Keep the existing `http://localhost:4500/...` entries for local dev.
 
 ---
 
-## 5. Post-deploy smoke test
+## 5. Post-deploy verification
 
-1. `https://firstlight.build` loads; "Try Compose" → `https://app.firstlight.build`.
-2. Reserve button → Stripe Checkout opens (test card `4242 4242 4242 4242`).
-3. `https://app.firstlight.build` → login page.
-4. Sign up → lands in the app (proves `AUTH_SECRET` + persistent disk work).
-5. "Continue with Google" → completes (proves OAuth redirect URI is whitelisted).
-6. Reload after signup → still logged in (proves the session cookie is `Secure` and the store persisted).
+Deploy Compose **before** the website: the new website depends on `/start`.
+For the current Mac service and rollback safeguards, use
+`software/prompt-to-pcb-ui/deploy/OPS.md`, not the alternative-host examples above.
+
+Read-only smoke checks (block telemetry and unapproved requests before browser
+navigation):
+1. Marketing routes, icon, robots, sitemap, and route-specific metadata load.
+2. Unknown routes return HTTP 404 with recovery links.
+3. Keyboard skip goes past navigation; FL-1 Reserve is visible on mobile/tablet.
+4. Public `/start` without a description loads on `app.firstlight.build`; the
+   protected composer redirects anonymous visitors to login.
+5. There are no unexpected runtime errors. Record intentionally blocked requests
+   separately from application failures.
+
+Run synthetic draft/auth and mocked Stripe regressions locally with isolated
+state. Do not create production accounts, submit confidential descriptions,
+start a design, or initiate checkout as part of passive smoke testing. Actual
+OAuth completion, paid generation, payment/refund/fulfillment, alert delivery,
+real-device accessibility, and field Core Web Vitals remain separate acceptance
+gates. Mocked tests do not certify them.
 
 ---
 
 ## Not blocking launch (follow-ups)
 - Compose build emits ~10 non-fatal Turbopack tracing warnings (dynamic artifact paths).
 - `/api/pipeline/run` is a state-changing GET (uses EventSource); move to POST streaming + CSRF later.
-- Flip Stripe to live keys when you want real reservation deposits.
+- Authorize and verify live Stripe payments/refunds and fulfillment separately before accepting real deposits.
 - Longer term: migrate Compose storage (accounts/artifacts) to Postgres + blob storage so it can run on Vercel/serverless.

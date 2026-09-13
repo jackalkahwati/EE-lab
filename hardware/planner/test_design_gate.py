@@ -111,12 +111,74 @@ def test_empty_parts_list_is_gate_fail_1_no_parts(tmp_path):
     assert any("no parts" in l for l in out)
 
 
-def test_empty_parts_list_funcsim_is_skip_0_exit_0_not_pass(tmp_path):
-    spec = write(tmp_path, "noparts.json", {"parts": [], "nets": [], "gnd": []})
-    code, out, _ = run("functional_sim.py", spec)
-    assert code == 0
+@pytest.mark.parametrize("parts", [[], [{"name": "R1", "kind": "resistor"}]],
+                         ids=["empty", "nonempty-no-caps"])
+def test_no_caps_funcsim_is_skip_without_simulator(tmp_path, monkeypatch, parts):
+    monkeypatch.setenv("FL_NGSPICE", str(tmp_path / "missing-ngspice"))
+    spec = write(tmp_path, "nocaps.json", {"parts": parts, "nets": [], "gnd": []})
+    code, out, err = run("functional_sim.py", spec)
+    assert code == 0, (out, err)
     assert verdict(out).startswith("FUNCSIM SKIP 0")
+    assert "SIM pdn-rail-impedance SKIP no decoupling caps on the board to model" in out
     assert not any(l == "FUNCSIM PASS" for l in out)
+    assert "ngspice error" not in "\n".join(out)
+    assert "Traceback" not in err
+
+
+@pytest.mark.parametrize("parts", [[], [{"name": "R1", "kind": "resistor"}]],
+                         ids=["empty", "nonempty-no-caps"])
+def test_no_caps_does_not_generate_or_run_a_deck(tmp_path, monkeypatch, capsys, parts):
+    import functional_sim
+
+    spec = {"parts": parts, "nets": [], "gnd": []}
+    board = functional_sim.Board(spec, {"ics": {}})
+    assert functional_sim.gen_pdn(board) == (
+        None, "no decoupling caps on the board to model")
+
+    def unexpected_run(*args, **kwargs):
+        pytest.fail("a board with no applicable simulations must not invoke run_deck")
+
+    monkeypatch.setattr(functional_sim, "run_deck", unexpected_run)
+    path = write(tmp_path, "nocaps.json", spec)
+    assert functional_sim.main([path]) == 0
+    assert verdict(capsys.readouterr().out.splitlines()).startswith("FUNCSIM SKIP 0")
+
+
+@pytest.mark.parametrize("footprint", ["0402", "0805"], ids=["ceramic", "bulk"])
+def test_capacitor_board_without_simulator_is_error(tmp_path, monkeypatch, footprint):
+    missing = str(tmp_path / "missing-ngspice")
+    monkeypatch.setenv("FL_NGSPICE", missing)
+    spec = write(tmp_path, "capacitor.json", {
+        "parts": [{"name": "C1", "kind": "capacitor", "footprint": footprint}],
+        "nets": [], "gnd": [],
+    })
+    code, out, err = run("functional_sim.py", spec)
+    assert code == 2, (out, err)
+    assert verdict(out) == f"FUNCSIM ERROR ngspice not found at {missing}"
+    assert not any(l == "FUNCSIM PASS" or l.startswith("FUNCSIM SKIP") for l in out)
+    assert "Traceback" not in err
+
+
+@pytest.mark.parametrize("spec,reason", [
+    ({}, "parts"),
+    ({"parts": [], "gnd": None}, "gnd"),
+    ({"parts": [{"kind": "resistor"}]}, "name"),
+])
+def test_malformed_no_caps_spec_is_error_before_simulation(
+        tmp_path, monkeypatch, capsys, spec, reason):
+    import functional_sim
+
+    def unexpected_run(*args, **kwargs):
+        pytest.fail("malformed specs must not invoke run_deck")
+
+    monkeypatch.setattr(functional_sim, "run_deck", unexpected_run)
+    path = write(tmp_path, "malformed.json", spec)
+    assert functional_sim.main([path]) == 2
+    captured = capsys.readouterr()
+    v = verdict(captured.out.splitlines())
+    assert v.startswith("FUNCSIM ERROR ") and reason in v
+    assert "Traceback" not in captured.out + captured.err
+    assert "FUNCSIM SKIP" not in captured.out
 
 
 def test_empty_parts_list_funcwire_adds_0(tmp_path):

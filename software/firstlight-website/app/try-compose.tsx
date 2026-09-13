@@ -1,24 +1,23 @@
 "use client";
 
-const COMPOSE_URL =
-  process.env.NEXT_PUBLIC_COMPOSE_URL || "http://localhost:4500";
+import { COMPOSE_URL } from "../lib/public-config";
 
 export function TryCompose() {
+  const startUrl = new URL("/start", COMPOSE_URL).toString();
   return (
     <form
       className="try-compose"
-      action={COMPOSE_URL}
+      action={startUrl}
       method="get"
       aria-label="Start a PCB design"
       onSubmit={(e) => {
         e.preventDefault();
-        const input = e.currentTarget.elements.namedItem(
-          "prompt",
-        ) as HTMLInputElement;
-        const destination = new URL(COMPOSE_URL, window.location.origin);
-        const prompt = input.value.trim();
-
-        if (prompt) destination.searchParams.set("prompt", prompt);
+        const input = e.currentTarget.querySelector<HTMLInputElement>(
+          "#board-description",
+        );
+        const destination = new URL(startUrl);
+        const prompt = input?.value.trim();
+        if (prompt) destination.hash = new URLSearchParams({ prompt }).toString();
         window.location.assign(destination);
       }}
     >
@@ -27,14 +26,17 @@ export function TryCompose() {
       </label>
       <input
         id="board-description"
-        name="prompt"
         type="text"
+        maxLength={4000}
         placeholder="Describe your board… e.g. solar-powered soil sensor with LoRa"
         autoComplete="off"
       />
       <button type="submit" className="btn">
         Start the design interview &rarr;
       </button>
+      <noscript>
+        <p>Your description will not be submitted without JavaScript. Copy it before continuing, then paste it into Compose after signing in.</p>
+      </noscript>
     </form>
   );
 }

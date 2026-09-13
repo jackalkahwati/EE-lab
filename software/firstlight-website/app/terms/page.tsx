@@ -1,10 +1,20 @@
 import Link from "next/link";
 
-export const metadata = { title: "Terms of Use — FirstLight" };
+import { pageMetadata } from "../../lib/metadata";
+import { getReservationPrice } from "../../lib/reservation";
+
+export const dynamic = "force-dynamic";
+
+export const metadata = pageMetadata({
+  path: "/terms",
+  title: "Terms of Use | FirstLight",
+  description: "Terms for the FirstLight website, Compose platform, and FL-1 reservations, operated by StarDrive Inc.",
+});
 
 export default function Terms() {
+  const { formatted } = getReservationPrice();
   return (
-    <main className="legal-page" id="main-content">
+    <main className="legal-page" id="main-content" tabIndex={-1}>
       <div className="container narrow">
         <p className="kicker">StarDrive Inc.</p>
         <h1>Terms of Use</h1>
@@ -51,7 +61,7 @@ export default function Terms() {
         </p>
         <p>
           <strong>FL-1 reservations.</strong> FirstLight FL-1 is hardware under active
-          development. A reservation deposit (currently $2,500) holds a place in the
+          development. A reservation deposit (currently {formatted}) holds a place in the
           production queue and, where stated at checkout, locks a founding price. A
           reservation is not a completed sale and does not guarantee delivery by any
           particular date. FL-1&rsquo;s specifications, price, availability, and

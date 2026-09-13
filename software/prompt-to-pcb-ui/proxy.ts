@@ -218,13 +218,39 @@ async function enforceRateLimit(req: NextRequest, pathname: string): Promise<Nex
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl
+  const requestHeaders = new Headers(req.headers)
+  // This marker is server-owned, never a route identity supplied by a caller.
+  requestHeaders.delete('x-start-nonce')
+
+  // Only this exact public route can capture a fragment. Nonces allow Next's
+  // own scripts but not Cloudflare's injected beacon or same-origin scripts.
+  if (pathname === '/start') {
+    const nonce = btoa(crypto.randomUUID())
+    const csp = [
+      `script-src 'nonce-${nonce}' 'strict-dynamic'${process.env.NODE_ENV === 'production' ? '' : " 'unsafe-eval'"}`,
+      "object-src 'none'",
+      "base-uri 'none'",
+      "frame-ancestors 'none'",
+      "form-action 'self'",
+      "connect-src 'self'",
+    ].join('; ')
+    const headers = requestHeaders
+    headers.set('x-start-nonce', nonce)
+    headers.set('Content-Security-Policy', csp)
+    const response = NextResponse.next({ request: { headers } })
+    response.headers.set('Content-Security-Policy', csp)
+    response.headers.set('Referrer-Policy', 'no-referrer')
+    response.headers.set('Cache-Control', 'no-store, must-revalidate')
+    response.headers.set('X-Robots-Tag', 'noindex, nofollow')
+    return response
+  }
 
   // Rate-limit the expensive/abuse-prone routes BEFORE the public-pattern
   // bypass below (the auth routes are public but must still be throttled).
   const limited = await enforceRateLimit(req, pathname)
   if (limited) return limited
 
-  if (PUBLIC_PATTERNS.some((p) => p.test(pathname))) return NextResponse.next()
+  if (PUBLIC_PATTERNS.some((p) => p.test(pathname))) return NextResponse.next({ request: { headers: requestHeaders } })
 
   const email = await validSession(req.cookies.get('fl_session')?.value)
   if (email) {
@@ -257,7 +283,7 @@ export async function proxy(req: NextRequest) {
     // over TLS to a plain-HTTP port and every artifact 500'd. Falling through
     // to a real route keeps the ownership checks above and has no origin to
     // mismatch.
-    return NextResponse.next()
+    return NextResponse.next({ request: { headers: requestHeaders } })
   }
 
   // APIs answer 401 (EventSource/fetch callers need a status, not a redirect)

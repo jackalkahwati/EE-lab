@@ -159,7 +159,7 @@ strong {
   border: 0;
 }
 
-:where(a, button, input, summary, [tabindex]):focus-visible {
+:where(a, button, input, textarea, summary, [tabindex]):focus-visible {
   outline: var(--focus);
   outline-offset: 2px;
 }
@@ -1543,7 +1543,7 @@ a {
   margin-top: 12px;
 }
 
-.legal-page a {
+.legal-page a:not(.btn) {
   color: var(--amber-text);
   font-weight: 600;
   text-decoration: underline;
@@ -1714,6 +1714,39 @@ a {
   font-size: var(--text-small);
   line-height: 1.45;
   color: var(--ink-2);
+}
+
+.copy-docs {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.copy-docs-manual {
+  margin-top: 16px;
+  max-width: 64ch;
+}
+
+.copy-docs-manual label {
+  display: block;
+  font-weight: 600;
+}
+
+.copy-docs-manual p {
+  margin: 8px 0;
+  font-size: var(--text-small);
+}
+
+.copy-docs-manual textarea {
+  display: block;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--ground-2);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: var(--text-small);
+  resize: vertical;
 }
 
 .copy-docs-btn {

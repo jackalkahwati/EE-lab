@@ -1,32 +1,18 @@
-import type { Metadata } from "next";
 import Link from "next/link";
 import { CopyForAi } from "./CopyForAi";
+import { COMPOSE_URL } from "../../lib/public-config";
+import { pageMetadata } from "../../lib/metadata";
 
-const COMPOSE_URL =
-  process.env.NEXT_PUBLIC_COMPOSE_URL ?? "https://app.firstlight.build";
-
-export const metadata: Metadata = {
+export const metadata = pageMetadata({
+  path: "/developers",
   title: "FirstLight Developers | API, CLI and MCP",
   description:
     "Drive the FirstLight Compose pipeline programmatically. REST API for builds and artifacts, a CLI for CI, and an MCP server so any AI agent can design real hardware.",
-  openGraph: {
-    title: "FirstLight Developers | API, CLI and MCP",
-    description:
-      "A prompt goes in over REST. A routed, DRC-gated PCBA, a real CAD enclosure, simulations, firmware, and manufacturing docs come out. Drive it from CI or hand it to an AI agent as MCP tools.",
-    images: [
-      {
-        url: "/media/fl1-front.png",
-        width: 1402,
-        height: 1122,
-        alt: "FirstLight FL-1 autonomous PCB bring-up station",
-      },
-    ],
-  },
-};
+});
 
 export default function Developers() {
   return (
-    <main id="main-content">
+    <>
       {/* Nav */}
       <nav className="nav" aria-label="Primary navigation">
         <div className="container nav-inner">
@@ -53,6 +39,7 @@ export default function Developers() {
         </div>
       </nav>
 
+      <main id="main-content" tabIndex={-1}>
       <header className="hero hero-compact">
         <div className="container">
           <div className="hero-copy">
@@ -148,7 +135,9 @@ curl -X POST https://app.firstlight.build/api/v1/boards \\
               The enterprise board portfolio visible to this key.
             </Endpoint>
           </div>
-          <CodeBlock title="poll until complete">{`curl -s https://app.firstlight.build/api/v1/runs/$RUN_ID \\
+          <CodeBlock title="poll until complete">{`# Set RUN_ID to the runId returned by your build
+export RUN_ID="run-..."
+curl -s "https://app.firstlight.build/api/v1/runs/$RUN_ID" \\
   -H "Authorization: Bearer $FIRSTLIGHT_API_KEY"
 
 # { "status": "running",
@@ -264,10 +253,12 @@ npm i -g ./software/firstlight-cli`}</CodeBlock>
 #   running (pipeline)  ✓ electronics  … mechanical  … firmware …
 #   complete  ✓ electronics ✓ mechanical ✓ simulation ✓ firmware ✓ manufacturing ✓ supplyChain ✓ validation
 
-firstlight artifacts &lt;runId&gt;
-firstlight get &lt;runId&gt; step -o enclosure.step
-firstlight get &lt;runId&gt; fab-package -o fab.zip
-firstlight status &lt;runId&gt; --watch
+# Set RUN_ID to the runId returned by your build
+export RUN_ID="run-..."
+firstlight artifacts "$RUN_ID"
+firstlight get "$RUN_ID" step -o enclosure.step
+firstlight get "$RUN_ID" fab-package -o fab.zip
+firstlight status "$RUN_ID" --watch
 firstlight boards`}</CodeBlock>
           <p>
             Add <code>--json</code> to any command for machine output. Set{" "}
@@ -337,7 +328,8 @@ firstlight boards`}</CodeBlock>
         </div>
       </section>
 
-      {/* Footer */}
+      </main>
+
       <footer className="footer">
         <div className="container footer-inner">
           <span className="wordmark small">
@@ -355,7 +347,7 @@ firstlight boards`}</CodeBlock>
           </span>
         </div>
       </footer>
-    </main>
+    </>
   );
 }
 

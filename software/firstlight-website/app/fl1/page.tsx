@@ -1,27 +1,20 @@
-import type { Metadata } from "next";
 import { Fragment } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { ReserveButton } from "../reserve-button";
+import { pageMetadata, FL1_IMAGE } from "../../lib/metadata";
+import { getReservationPrice } from "../../lib/reservation";
 
-export const metadata: Metadata = {
+// Read the same runtime price used by checkout, rather than freezing it at build time.
+export const dynamic = "force-dynamic";
+
+export const metadata = pageMetadata({
+  path: "/fl1",
   title: "FirstLight FL-1 | Autonomous hardware bring-up",
   description:
     "FL-1 is a single platform that grows with your lab. Bring-up, test, and validation in the box, expandable with tool heads and software packs. Reserve yours.",
-  openGraph: {
-    title: "FirstLight FL-1 | Autonomous hardware bring-up",
-    description:
-      "Insert an assembled PCB. FL-1 powers it up, probes it, and produces an evidence-based diagnosis.",
-    images: [
-      {
-        url: "/media/fl1-front.png",
-        width: 1402,
-        height: 1122,
-        alt: "FirstLight FL-1 autonomous PCB bring-up station",
-      },
-    ],
-  },
-};
+  image: FL1_IMAGE,
+});
 
 const BASE_DOES = [
   ["Bring-up", "Safe power sequencing, rail validation, current limiting, automated startup."],
@@ -70,18 +63,21 @@ const ROI = [
 ];
 
 export default function FL1Page() {
+  const { formatted } = getReservationPrice();
   return (
-    <main id="main-content">
+    <>
       <nav className="nav" aria-label="Primary navigation">
         <div className="container nav-inner">
           <Link href="/" className="wordmark">
             <Starburst /> Firstlight
           </Link>
-          <div className="nav-links">
+          <div className="nav-center">
             <Link href="/#how">Compose</Link>
             <Link href="/#pricing">Pricing</Link>
-            <Link href="/fl1">FL-1 machine</Link>
+            <Link href="/fl1" aria-current="page">FL-1 machine</Link>
             <Link href="/developers">Developers</Link>
+          </div>
+          <div className="nav-actions">
             <a href="#reserve" className="btn btn-small">
               Reserve
             </a>
@@ -89,6 +85,7 @@ export default function FL1Page() {
         </div>
       </nav>
 
+      <main id="main-content" tabIndex={-1}>
       {/* Hero */}
       <header className="hero fl1-hero band-dark" id="top">
         <div className="container hero-grid">
@@ -261,12 +258,12 @@ export default function FL1Page() {
           <h2>Hold your place in line for the first production units.</h2>
           <p>
             FL-1 is in engineering validation. A fully refundable{" "}
-            <strong>$2,500 deposit</strong> reserves an early production slot and
+            <strong>{formatted} deposit</strong> reserves an early production slot and
             locks the founding price. The deposit is applied to your purchase and
             refundable any time before your unit ships.
           </p>
           <div className="reserve-cta">
-            <ReserveButton label="Reserve an FL-1, $2,500 refundable" />
+            <ReserveButton label={`Reserve an FL-1, ${formatted} refundable`} />
           </div>
           <p className="reserve-fine">
             Founding price from $49,500, including 12 months of Compose Team ·
@@ -274,6 +271,8 @@ export default function FL1Page() {
           </p>
         </div>
       </section>
+
+      </main>
 
       <footer className="footer">
         <div className="container footer-inner">
@@ -294,7 +293,7 @@ export default function FL1Page() {
           </span>
         </div>
       </footer>
-    </main>
+    </>
   );
 }
 
