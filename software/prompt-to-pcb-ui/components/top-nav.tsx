@@ -18,7 +18,7 @@ const LINKS: NavLink[] = [
   // front door), so it only makes sense for enterprise customers — hidden for
   // free/pro/studio, who just use Compose. Gated on the real plan from
   // /api/auth/me, not merely hidden with CSS.
-  { href: '/', label: 'Programs', hint: 'board-program portfolio', enterpriseOnly: true },
+  { href: '/enterprise', label: 'Programs', hint: 'board-program portfolio', enterpriseOnly: true },
   { href: '/compose', label: 'Compose', hint: 'design tool' },
 ]
 
@@ -39,12 +39,11 @@ export function TopNav() {
 
   const links = LINKS.filter((l) => !l.enterpriseOnly || isEnterprise)
 
-  // Programs also lights up on the enterprise console ('/' redirects there) —
-  // both are portfolio surfaces; /programs is the nav's canonical target.
+  const matches = (path: string) => pathname === path || pathname.startsWith(`${path}/`)
   const active = (href: string) =>
-    href === '/programs'
-      ? pathname.startsWith('/programs') || pathname === '/' || pathname.startsWith('/enterprise')
-      : pathname.startsWith(href)
+    href === '/enterprise'
+      ? matches('/enterprise') || matches('/programs') || pathname === '/'
+      : matches(href)
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur">
@@ -59,6 +58,7 @@ export function TopNav() {
             <Link
               key={l.href}
               href={l.href}
+              aria-current={active(l.href) ? 'page' : undefined}
               className={cn(
                 'flex h-full items-center px-2.5 text-[11.5px]',
                 active(l.href)

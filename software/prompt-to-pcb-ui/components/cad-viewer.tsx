@@ -10,6 +10,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Loader2, Plus, Minus, Maximize, Scissors } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import type { Mesh, MeshStandardMaterial } from 'three'
+import { createViewerLifetime } from './board-3d'
 
 export function CadViewer({ url }: { url: string }) {
   const mountRef = useRef<HTMLDivElement>(null)
@@ -21,9 +23,13 @@ export function CadViewer({ url }: { url: string }) {
   const [clipAxis, setClipAxis] = useState(0) // 0=X 1=Y 2=Z
 
   useEffect(() => {
-    let disposed = false
-    let renderer: any = null
+    const lifetime = createViewerLifetime()
+    const mount = mountRef.current
+    const stale = () => lifetime.disposed || !mount || mountRef.current !== mount
+    let viewerApi: typeof apiRef.current = null
     let raf = 0
+    lifetime.defer(() => { if (apiRef.current === viewerApi) apiRef.current = null })
+    lifetime.defer(() => cancelAnimationFrame(raf))
     setPhase('loading'); setErr('')
 
     ;(async () => {
@@ -33,37 +39,43 @@ export function CadViewer({ url }: { url: string }) {
           import('three/examples/jsm/loaders/GLTFLoader.js'),
           import('three/examples/jsm/controls/OrbitControls.js'),
         ])
-        const res = await fetch(url)
+        if (stale() || !mount) return
+        const res = await fetch(url, { signal: lifetime.abort.signal })
+        if (stale()) return
         if (!res.ok) throw new Error(`CAD model HTTP ${res.status}`)
         const buf = await res.arrayBuffer()
-        const mount = mountRef.current
-        if (disposed || !mount) return
+        if (stale()) return
 
         const scene = new THREE.Scene()
         scene.background = new THREE.Color(0x0f0f0f)
 
+        lifetime.defer(() => lifetime.trackObject(scene))
         const gltf = await new GLTFLoader().parseAsync(buf, '')
+        gltf.scenes.forEach(lifetime.trackObject)
+        if (stale()) return
         const part = gltf.scene
         // Uniform neutral part shading, like a CAD package's default material.
         // Onshape's per-part appearances arrive as blown-out whites and its
         // default pale blue (unset parts) — on a dark scene they read as glare,
         // and no per-material normalization handled both (verified in a live
         // harness). One matte grey is deterministic and reads like a product.
-        const neutral = new THREE.MeshStandardMaterial({ color: 0x9a9da3, roughness: 0.6, metalness: 0.05 })
+        const neutral = lifetime.own(new THREE.MeshStandardMaterial({ color: 0x9a9da3, roughness: 0.6, metalness: 0.05 }))
         // Respect CLEAN per-vertex colors when the model carries them (our FL-1
         // assembly colours the machine steel-blue + the boards PCB-green so they
         // read); fall back to one matte grey for Onshape-appearance models whose
         // per-part colours arrive as blown-out whites.
-        const clipMaterials: any[] = []
-        part.traverse((o: any) => {
+        const clipMaterials: MeshStandardMaterial[] = []
+        part.traverse((object) => {
+          const o = object as Mesh
           if (o.isMesh) {
             o.castShadow = true; o.receiveShadow = true
             const hasVColor = !!o.geometry?.attributes?.color
-            o.material = hasVColor
-              ? new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.05 })
+            const material = hasVColor
+              ? lifetime.own(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.05 }))
               : neutral
-            o.material.clippingShadows = true
-            clipMaterials.push(o.material)
+            o.material = material
+            material.clipShadows = true
+            clipMaterials.push(material)
           }
         })
         scene.add(part)
@@ -74,7 +86,8 @@ export function CadViewer({ url }: { url: string }) {
         const span = Math.max(sz.x, sz.y, sz.z) || 1
 
         const camera = new THREE.PerspectiveCamera(40, mount.clientWidth / Math.max(1, mount.clientHeight), span / 100, span * 40)
-        renderer = new THREE.WebGLRenderer({ antialias: true })
+        const renderer = lifetime.own(new THREE.WebGLRenderer({ antialias: true }))
+        lifetime.defer(() => renderer.domElement.remove())
         renderer.localClippingEnabled = true // cross-section support
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
         renderer.setSize(mount.clientWidth, mount.clientHeight)
@@ -87,17 +100,27 @@ export function CadViewer({ url }: { url: string }) {
 
         try {
           const { RoomEnvironment } = await import('three/examples/jsm/environments/RoomEnvironment.js')
+          if (stale()) return
           const pmrem = new THREE.PMREMGenerator(renderer)
-          scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
-          ;(scene as any).environmentIntensity = 0.12
+          const room = new RoomEnvironment()
+          try {
+            const environment = lifetime.own(pmrem.fromScene(room, 0.04))
+            scene.environment = environment.texture
+            lifetime.defer(() => { scene.environment = null })
+            scene.environmentIntensity = 0.12
+          } finally {
+            room.dispose()
+            pmrem.dispose()
+          }
         } catch { /* analytic lights alone still render */ }
+        if (stale()) return
 
         scene.add(new THREE.AmbientLight(0xffffff, 0.35))
         const key = new THREE.DirectionalLight(0xffffff, 2.0)
         key.position.set(center.x + span, center.y + span * 1.4, center.z + span * 0.7)
         key.target.position.copy(center); key.castShadow = true
         key.shadow.mapSize.set(2048, 2048); key.shadow.bias = -0.0004
-        const scam: any = key.shadow.camera; const d = span * 0.9
+        const scam = key.shadow.camera; const d = span * 0.9
         scam.left = -d; scam.right = d; scam.top = d; scam.bottom = -d; scam.near = span * 0.05; scam.far = span * 8; scam.updateProjectionMatrix()
         scene.add(key, key.target)
         const fill = new THREE.DirectionalLight(0xbfd4ff, 0.45)
@@ -112,7 +135,7 @@ export function CadViewer({ url }: { url: string }) {
         grid.position.set(center.x, floorY, center.z)
         scene.add(grid)
 
-        const controls = new OrbitControls(camera, renderer.domElement)
+        const controls = lifetime.own(new OrbitControls(camera, renderer.domElement))
         // Wheel-over the viewer should scroll the PAGE, not zoom the scene —
         // zoom arms on click (pointerdown) and disarms when the cursor leaves,
         // so the tab stays scrollable without hunting for a gutter.
@@ -121,6 +144,10 @@ export function CadViewer({ url }: { url: string }) {
         const disarmZoom = () => { controls.enableZoom = false }
         renderer.domElement.addEventListener('pointerdown', armZoom)
         renderer.domElement.addEventListener('mouseleave', disarmZoom)
+        lifetime.defer(() => {
+          renderer.domElement.removeEventListener('pointerdown', armZoom)
+          renderer.domElement.removeEventListener('mouseleave', disarmZoom)
+        })
         controls.target.copy(center); controls.enableDamping = true; controls.dampingFactor = 0.08
         controls.minDistance = span * 0.15; controls.maxDistance = span * 6
         const sphere = box.getBoundingSphere(new THREE.Sphere())
@@ -129,7 +156,7 @@ export function CadViewer({ url }: { url: string }) {
         camera.lookAt(center); controls.update()
 
         // Zoom buttons (same capability as wheel-zoom, no click-arming needed)
-        apiRef.current = {
+        viewerApi = {
           zoom: (f: number) => {
             const dir = camera.position.clone().sub(controls.target)
             const len = Math.min(Math.max(dir.length() * f, controls.minDistance), controls.maxDistance)
@@ -153,38 +180,34 @@ export function CadViewer({ url }: { url: string }) {
         }
         const clipPlane = new THREE.Plane(new THREE.Vector3(1, 0, 0), -box.min.x)
 
-        setPhase('ready')
-        const loop = () => { if (disposed) return; controls.update(); renderer.render(scene, camera); raf = requestAnimationFrame(loop) }
+        const loop = () => { if (stale()) return; controls.update(); renderer.render(scene, camera); raf = requestAnimationFrame(loop) }
         loop()
 
         const onResize = () => {
-          if (!mount) return
-          camera.aspect = mount.clientWidth / Math.max(1, mount.clientHeight); camera.updateProjectionMatrix()
+          if (stale() || !mount.clientWidth || !mount.clientHeight) return
+          camera.aspect = mount.clientWidth / mount.clientHeight; camera.updateProjectionMatrix()
           renderer.setSize(mount.clientWidth, mount.clientHeight)
         }
-        window.addEventListener('resize', onResize)
-        ;(mount as any).__cleanup = () => {
-          window.removeEventListener('resize', onResize)
-          renderer.domElement?.removeEventListener('pointerdown', armZoom)
-          renderer.domElement?.removeEventListener('mouseleave', disarmZoom)
-        }
-      } catch (e) { if (!disposed) { setErr(String(e)); setPhase('error') } }
+        const ro = new ResizeObserver(onResize)
+        lifetime.defer(() => ro.disconnect())
+        ro.observe(mount)
+        onResize()
+        apiRef.current = viewerApi
+        setPhase('ready')
+      } catch (e) {
+        if (!stale()) { setErr(String(e)); setPhase('error') }
+        lifetime.dispose()
+      }
     })()
 
-    return () => {
-      disposed = true
-      cancelAnimationFrame(raf)
-      const mount = mountRef.current as any
-      mount?.__cleanup?.()
-      if (renderer) { try { renderer.dispose(); renderer.domElement?.remove() } catch { /* */ } }
-    }
+    return () => lifetime.dispose()
   }, [url])
 
   // apply the cross-section whenever its controls change (and once the view is ready)
   useEffect(() => { apiRef.current?.setClip(clipOn, clipT, clipAxis) }, [clipOn, clipT, clipAxis, phase])
 
   return (
-    <div className="relative h-full w-full">
+    <div data-viewer="cad" data-viewer-phase={phase} className="relative h-full w-full">
       <div ref={mountRef} className="h-full w-full" />
       <div className="absolute right-2 top-2 flex items-center gap-1">
         {[

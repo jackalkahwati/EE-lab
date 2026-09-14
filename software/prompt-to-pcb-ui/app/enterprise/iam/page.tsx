@@ -7,8 +7,8 @@
  * store. Role assignment is gated by manage_members through the audited
  * dispatcher; this view is read-first.
  */
-import { useCallback, useEffect, useState } from 'react'
-import { AccessGate } from '@/components/access-gate'
+import { useState } from 'react'
+import { EnterpriseReadState, useEnterpriseRead } from '@/components/enterprise-read-state'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
 import { enterpriseAction } from '@/lib/enterprise-actions'
@@ -32,38 +32,35 @@ const RoleBadge = ({ r }: { r: string }) => (
 )
 
 export default function IamPage() {
-  const [db, setDb] = useState<Any | null>(null)
+  const { db, error, refresh } = useEnterpriseRead()
   const [tab, setTab] = useState<(typeof TABS)[number]>('Users')
   const [busy, setBusy] = useState<string | null>(null)
   const [msg, setMsg] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null)
   const [newEmail, setNewEmail] = useState('')
   const [newRole, setNewRole] = useState('viewer')
 
-  const refresh = useCallback(() => {
-    fetch('/api/enterprise', { cache: 'no-store' })
-      .then((r) => r.json()).then(setDb).catch(() => {})
-  }, [])
-  useEffect(() => { refresh() }, [refresh])
-
   async function run(key: string, action: string, params: Record<string, any>, okText: string) {
     setBusy(key); setMsg(null)
     const r = await enterpriseAction(action, params)
     setBusy(null)
-    if (r.error) setMsg({ tone: 'err', text: `${r.error}${r.detail ? ` — ${r.detail}` : ''}` })
-    else { setMsg({ tone: 'ok', text: okText }); refresh() }
+    if (r.error) {
+      setMsg({ tone: 'err', text: `${r.error}${r.detail ? ` — ${r.detail}` : ''}` })
+      return false
+    }
+    setMsg({ tone: 'ok', text: okText }); refresh()
+    return true
   }
   const changeRole = (actor_name: string, role: string) =>
     run(actor_name, 'set_member_role', { actor_name, role }, `${actor_name} → ${role}`)
   async function addMember() {
-    if (!newEmail) return
-    await run('add', 'set_member_role', { actor_name: newEmail.trim(), role: newRole }, `added ${newEmail.trim()}`)
-    setNewEmail('')
+    if (!newEmail.trim() || busy) return
+    const succeeded = await run('add', 'set_member_role', { actor_name: newEmail.trim(), role: newRole }, `added ${newEmail.trim()}`)
+    if (succeeded) setNewEmail('')
   }
   const removeMember = (actor_name: string) =>
     run(actor_name, 'remove_member', { actor_name }, `removed ${actor_name}`)
 
-  if (!db) return <div className="p-6 text-xs text-muted-foreground">Loading IAM…</div>
-  if (db.error) return <AccessGate error={db.error} />
+  if (!db) return <EnterpriseReadState error={error} retry={refresh} label="identity and access" />
 
   const org = db.organizations?.[0]
   const members: Any[] = db.members ?? []
@@ -121,13 +118,13 @@ export default function IamPage() {
           </div>
           <div className="flex flex-wrap items-center gap-2 border-b border-border bg-card/30 px-3 py-2">
             <span className="text-[11px] font-medium">Add member</span>
-            <input value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="email"
+            <input aria-label="Member email" disabled={!!busy} value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="email"
               className="w-52 rounded-sm border border-border bg-background px-1.5 py-1 text-[11px]" />
-            <select value={newRole} onChange={(e) => setNewRole(e.target.value)}
+            <select aria-label="New member role" disabled={!!busy} value={newRole} onChange={(e) => setNewRole(e.target.value)}
               className="rounded-sm border border-border bg-background px-1.5 py-1 font-mono text-[10px]">
               {roles.map((r) => <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>)}
             </select>
-            <button type="button" disabled={busy === 'add' || !newEmail} onClick={addMember}
+            <button type="button" disabled={!!busy || !newEmail.trim()} onClick={addMember}
               className="rounded-sm border border-primary/40 bg-primary/10 px-2.5 py-1 text-[11px] text-primary hover:bg-primary/20 disabled:opacity-50">
               Add
             </button>
@@ -148,14 +145,14 @@ export default function IamPage() {
                   </span>
                   <span className="truncate text-xs font-medium">{m.actor}</span>
                 </span>
-                <select value={m.role} disabled={busy === m.actor}
+                <select value={m.role} disabled={!!busy}
                   onChange={(e) => changeRole(m.actor, e.target.value)}
                   className="rounded-sm border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] disabled:opacity-50">
                   {roles.map((r) => <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>)}
                 </select>
                 <span className="text-right font-mono text-[11px] text-muted-foreground">{activityOf(m.actor)} run(s)</span>
                 <span className="text-right font-mono text-[9px] text-muted-foreground">{m.granted_by}</span>
-                <button type="button" disabled={busy === m.actor} title="remove member"
+                <button type="button" disabled={!!busy} title="remove member"
                   onClick={() => removeMember(m.actor)}
                   className="rounded-sm border border-destructive/40 bg-destructive/10 px-1.5 py-0.5 text-[10px] text-destructive hover:bg-destructive/20 disabled:opacity-50">
                   ✕

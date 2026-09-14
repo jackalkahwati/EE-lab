@@ -11,7 +11,7 @@
  * (see llmHeaders). Plan enforcement is server-side (lib/plan-llm.ts); this is
  * only the picker.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { LS_MODEL } from '@/components/llm-settings'
 
 interface ModelOpt {
@@ -24,12 +24,19 @@ interface ModelOpt {
 }
 
 export function ModelSelector() {
+  const selectId = useId()
   const [models, setModels] = useState<ModelOpt[]>([])
   const [sel, setSel] = useState('')
   const [plan, setPlan] = useState<string>('free')
+  const [storageNote, setStorageNote] = useState<string | null>(null)
 
   useEffect(() => {
-    setSel(localStorage.getItem(LS_MODEL)?.trim() || '')
+    try {
+      setSel(localStorage.getItem(LS_MODEL)?.trim() || '')
+    } catch {
+      setSel('')
+      setStorageNote('Browser storage unavailable. Showing Auto because the saved model could not be read.')
+    }
     fetch('/api/auth/me')
       .then((r) => r.json())
       .then((d) => {
@@ -42,20 +49,34 @@ export function ModelSelector() {
   if (!models.length) return null
 
   function pick(id: string) {
-    setSel(id)
-    if (id) localStorage.setItem(LS_MODEL, id)
-    else localStorage.removeItem(LS_MODEL)
+    try {
+      if (id) localStorage.setItem(LS_MODEL, id)
+      else localStorage.removeItem(LS_MODEL)
+      setSel(id)
+      setStorageNote(null)
+    } catch {
+      // Run routing reads storage, so never display an unsaved choice as active.
+      try {
+        setSel(localStorage.getItem(LS_MODEL)?.trim() || '')
+        setStorageNote('Model choice not saved. Browser storage could not be updated; showing the saved selection.')
+      } catch {
+        setSel('')
+        setStorageNote('Model choice not saved. Browser storage unavailable; showing Auto because the saved model could not be read.')
+      }
+    }
   }
 
   const locked = models.filter((m) => !m.allowed)
 
   return (
-    <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-      <span title="Model used for design steps">Model</span>
+    <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+      <label htmlFor={selectId} title="Model used for design steps">Model</label>
       <select
+        id={selectId}
         value={sel}
+        aria-describedby={storageNote ? `${selectId}-storage` : undefined}
         onChange={(e) => pick(e.target.value)}
-        className="max-w-[200px] rounded border border-border bg-transparent px-1.5 py-0.5 text-[11px] outline-none"
+        className="max-w-[200px] rounded border border-border bg-transparent px-1.5 py-0.5 text-[11px] focus-visible:outline-2 focus-visible:outline-primary"
       >
         <option value="">Auto ({plan} default)</option>
         {models.map((m) => (
@@ -67,12 +88,17 @@ export function ModelSelector() {
       </select>
       {locked.length > 0 && (
         <a
-          href="/account"
+          href="/pricing"
           className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary hover:bg-primary/20"
           title="Frontier models need Pro/Enterprise, or add your own API key"
         >
           Unlock
         </a>
+      )}
+      {storageNote && (
+        <span id={`${selectId}-storage`} role="status" className="basis-full">
+          {storageNote}
+        </span>
       )}
     </div>
   )

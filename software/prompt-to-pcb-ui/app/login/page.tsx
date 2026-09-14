@@ -33,18 +33,24 @@ export default function LoginPage() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
+    if (busy) return
     setBusy(true)
     setError('')
-    const res = await fetch(mode === 'signin' ? '/api/auth/login' : '/api/auth/signup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    })
-    if (res.ok) {
-      window.location.href = nextDest()
-    } else {
-      const d = await res.json().catch(() => ({}))
-      setError(d.error ?? 'something went wrong')
+    try {
+      const res = await fetch(mode === 'signin' ? '/api/auth/login' : '/api/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      })
+      if (res.ok) {
+        window.location.href = nextDest()
+      } else {
+        const d = await res.json().catch(() => ({}))
+        setError(typeof d.error === 'string' ? d.error : 'Sign-in failed. Please try again.')
+      }
+    } catch {
+      setError('Could not connect. Your details are still here. Please try again.')
+    } finally {
       setBusy(false)
     }
   }
@@ -58,7 +64,6 @@ export default function LoginPage() {
     color: '#eceae4',
     fontSize: 14,
     marginBottom: 12,
-    outline: 'none',
     boxSizing: 'border-box',
   }
 
@@ -163,6 +168,7 @@ export default function LoginPage() {
         </div>
         <button
           type="button"
+          disabled={busy}
           onClick={() => {
             window.location.href = `/api/auth/google?next=${encodeURIComponent(nextDest())}`
           }}
@@ -197,6 +203,7 @@ export default function LoginPage() {
         )}
         <button
           type="button"
+          disabled={busy}
           onClick={() => {
             setMode(mode === 'signin' ? 'signup' : 'signin')
             setError('')

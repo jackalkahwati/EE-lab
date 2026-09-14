@@ -7,7 +7,7 @@
  * rendered vs failed. Advisory CAD, not a tolerance-validated part. Generic:
  * nothing here is earbud-specific.
  */
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import { Loader2, Box, Download, ExternalLink } from 'lucide-react'
 import { llmHeaders } from '@/components/llm-settings'
@@ -17,6 +17,7 @@ import type { ProductSpec } from '@/lib/product-spec'
 
 type Result = {
   ok: boolean
+  imported?: boolean
   part?: string
   previewUrl?: string | null
   stepUrl?: string | null
@@ -35,35 +36,131 @@ type Result = {
   error?: string
 }
 
-export function MechanicalStage({ spec, runId, onBuilt }: { spec: ProductSpec | null; runId?: string; onBuilt?: () => void }) {
-  const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
+function validResult(value: unknown): value is Result {
+  if (!value || typeof value !== 'object') return false
+  const d = value as Record<string, unknown>
+  if (typeof d.part !== 'string' || !d.part.trim() || (d.ok !== undefined && d.ok !== true)) return false
+  for (const key of ['previewUrl', 'stepUrl', 'gltfUrl', 'onshapeUrl']) {
+    if (d[key] != null && typeof d[key] !== 'string') return false
+  }
+  if (d.opsRendered !== undefined && (!Array.isArray(d.opsRendered) || !d.opsRendered.every((op) => typeof op === 'string'))) return false
+  if (d.opsFailed !== undefined && (!Array.isArray(d.opsFailed) || !d.opsFailed.every((op: unknown) => {
+    if (!op || typeof op !== 'object') return false
+    const failed = op as Record<string, unknown>
+    return typeof failed.op === 'string' && typeof failed.error === 'string'
+  }))) return false
+  if (d.fitCheck != null) {
+    if (typeof d.fitCheck !== 'object') return false
+    const fc = d.fitCheck as Record<string, unknown>
+    const dimensions = (v: unknown) => {
+      if (!v || typeof v !== 'object') return false
+      const mm = v as Record<string, unknown>
+      return typeof mm.w === 'number' && Number.isFinite(mm.w) && typeof mm.h === 'number' && Number.isFinite(mm.h)
+    }
+    if (typeof fc.fits !== 'boolean' || !dimensions(fc.enclosureMm) || !dimensions(fc.pcbMm)) return false
+    if (fc.cavityMm != null && !dimensions(fc.cavityMm)) return false
+    if (fc.verdict !== undefined && !['fits', 'does_not_fit', 'unknown'].includes(String(fc.verdict))) return false
+    if (fc.problems !== undefined && (!Array.isArray(fc.problems) || !fc.problems.every((p) => typeof p === 'string'))) return false
+  }
+  return true
+}
+
+type Props = {
+  spec: ProductSpec | null; runId?: string; onBuilt?: () => void
+  onBuildStart?: () => boolean | void | Promise<boolean | void>; generationDisabled?: boolean
+  onBuildSettled?: (result: { status: 'passed' | 'failed' | 'unknown'; detail?: string; artifactAvailable?: boolean }) => void | Promise<void>
+}
+
+export function MechanicalStage(props: Props) {
+  return <MechanicalArtifactView key={props.runId ?? 'draft'} {...props} />
+}
+
+function MechanicalArtifactView({ spec, runId, onBuilt, onBuildStart, onBuildSettled, generationDisabled }: Props) {
+  const [state, setState] = useState<'idle' | 'loading' | 'generating' | 'missing' | 'done' | 'error'>(runId ? 'loading' : 'idle')
   const [res, setRes] = useState<Result | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [retry, setRetry] = useState(0)
+  const [operation, setOperation] = useState<'read' | 'generate'>('read')
+  const request = useRef({ version: 0, generating: false })
+  const readController = useRef<AbortController | null>(null)
 
-  // Load a persisted enclosure result on mount (written by /api/mechanical) so the
-  // orchestrator's run shows without re-generating the CAD.
+  // Saved artifacts are reads, not permission to regenerate CAD.
   useEffect(() => {
-    if (!runId) return
-    let off = false
-    fetch(`/runs/${runId}/mechanical/mechanical.json`, { cache: 'no-store' })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (!off && d && d.part) { setRes({ ok: true, ...d }); setState('done') } })
-      .catch(() => {})
-    return () => { off = true }
-  }, [runId])
+    const scope = request.current
+    const token = ++scope.version
+    const controller = new AbortController()
+    readController.current = controller
+    setRes(null); setErr(null); setOperation('read')
+    setState(runId ? 'loading' : 'idle')
+    if (runId) {
+      fetch(`/runs/${runId}/mechanical/mechanical.json`, { cache: 'no-store', signal: controller.signal })
+        .then(async (r) => {
+          if (r.status === 404) return null
+          if (!r.ok) throw new Error(`Could not load enclosure (${r.status}).`)
+          const d: unknown = await r.json()
+          if (d && typeof d === 'object' && 'imported' in d && d.imported === true && 'source' in d && d.source === 'manual-import'
+            && 'manualImport' in d && d.manualImport && typeof d.manualImport === 'object' && 'kind' in d.manualImport && d.manualImport.kind === 'step') {
+            return { ok: true, imported: true, part: 'Imported CAD assembly', stepUrl: `/runs/${runId}/mechanical/enclosure.step` }
+          }
+          if (!validResult(d)) throw new Error('The saved enclosure artifact is invalid.')
+          return { ...d, ok: true }
+        })
+        .then((d) => {
+          if (scope.version !== token || controller.signal.aborted) return
+          setRes(d); setState(d ? 'done' : 'missing')
+        })
+        .catch((e: unknown) => {
+          if (scope.version !== token || controller.signal.aborted) return
+          setErr(String(e)); setState('error')
+        })
+    }
+    // Closing a panel stops observation, not paid server work.
+    return () => { ++scope.version; controller.abort() }
+  }, [runId, retry])
 
   async function run() {
-    if (!spec || !runId) return
-    setState('loading'); setErr(null)
+    if (!spec || !runId || generationDisabled || request.current.generating) return
+    const scope = request.current
+    const token = ++scope.version
+    scope.generating = true
+    const start = onBuildStart
+    const settled = onBuildSettled
+    let submitted = false
+    let outcome: Parameters<NonNullable<Props['onBuildSettled']>>[0] = { status: 'unknown', detail: 'CAD request outcome unknown. Server work may continue.' }
+    readController.current?.abort()
+    setState('generating'); setErr(null); setOperation('generate')
     try {
+      const permission = start?.()
+      const allowed = permission && typeof (permission as Promise<unknown>).then === 'function' ? await permission : permission
+      if (allowed === false || !(scope.version === token)) {
+        outcome = { status: 'unknown', detail: 'Generation was not submitted.' }
+        if (scope.version === token) { setErr('Generation was not started. Another action or history persistence prevented it.'); setState('error') }
+        return
+      }
+      submitted = true
       const r = await fetch('/api/mechanical', {
         method: 'POST', headers: { 'content-type': 'application/json', ...llmHeaders() },
         body: JSON.stringify({ spec, runId }),
       })
-      const d = await r.json()
-      if (d.ok) { setRes(d); setState('done'); onBuilt?.() }
-      else { setErr(d.error || 'enclosure build failed'); setRes(d); setState('error') }
-    } catch (e) { setErr(String(e)); setState('error') }
+      const d: unknown = await r.json()
+      if (d && typeof d === 'object' && 'error' in d && typeof d.error === 'string') outcome = { status: 'failed', detail: d.error }
+      if (!r.ok || !validResult(d)) {
+        const message = d && typeof d === 'object' && 'error' in d && typeof d.error === 'string' ? d.error : `Enclosure build failed (${r.status}).`
+        throw new Error(message)
+      }
+      outcome = { status: d.fitCheck?.fits === false && d.fitCheck.verdict !== 'unknown' || d.opsFailed?.length ? 'failed' : d.ok === true ? 'passed' : 'unknown', detail: 'CAD generation returned an artifact; inspect fit and failed operations. This is not manufacturing approval.', artifactAvailable: true }
+      if (scope.version !== token) return
+      setRes({ ...d, ok: true }); setState('done')
+    } catch (e: unknown) {
+      if (scope.version !== token) return
+      setErr(String(e)); setState('error')
+    } finally {
+      if (!submitted) outcome = { status: 'unknown', detail: 'Generation was not submitted.' }
+      try { await settled?.(outcome) } catch (e) {
+        if (scope.version === token) { setErr(`Could not record generation outcome: ${String(e)}`); setState('error') }
+      } finally { scope.generating = false }
+      if (submitted && scope.version === token) onBuilt?.()
+    }
   }
 
   const canRun = !!spec && !!runId
@@ -72,10 +169,10 @@ export function MechanicalStage({ spec, runId, onBuilt }: { spec: ProductSpec | 
     <div className="flex h-full flex-col overflow-y-auto p-5">
       <div className="mb-3 flex items-center gap-2">
         <span className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">mechanical · CAD</span>
-        <button type="button" onClick={run} disabled={!canRun || state === 'loading'}
+        <button type="button" onClick={run} disabled={!canRun || generationDisabled || state === 'generating'} title={generationDisabled ? 'Generation is managed by the active pipeline.' : undefined}
           className="ml-auto flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
-          {state === 'loading' ? <Loader2 className="size-3 animate-spin" /> : <Box className="size-3" />}
-          {res?.ok ? 'Regenerate' : 'Generate enclosure'}
+          {state === 'generating' ? <Loader2 className="size-3 animate-spin" /> : <Box className="size-3" />}
+          {state === 'generating' ? 'Generating…' : state === 'error' && operation === 'generate' ? 'Retry generation' : res?.ok ? 'Regenerate' : 'Generate enclosure'}
         </button>
       </div>
 
@@ -85,18 +182,23 @@ export function MechanicalStage({ spec, runId, onBuilt }: { spec: ProductSpec | 
           The product engine emits a mechanical build plan sized to the real board; the Onshape executor renders it and exports STEP. Advisory CAD — a first-pass parametric part, not a tolerance-validated design.
         </p>
       )}
-      {state === 'loading' && <p className="mt-4 flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" /> generating CAD in Onshape (30–90s)…</p>}
-      {state === 'error' && <div className="mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px] text-destructive">Enclosure build failed: {err}</div>}
+      {state === 'loading' && <p role="status" className="text-sm text-muted-foreground">Loading saved enclosure…</p>}
+      {state === 'generating' && <p role="status" className="mt-4 flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" /> generating CAD in Onshape (30–90s)…</p>}
+      {state === 'missing' && <p role="status" className="text-sm text-muted-foreground">No saved enclosure for this run.</p>}
+      {state === 'error' && <div role="alert" className="mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px] text-destructive">{err}</div>}
+      {(state === 'missing' || (state === 'error' && operation === 'read')) && (
+        <button type="button" onClick={() => setRetry((n) => n + 1)} className="mt-2 self-start rounded-md border border-border px-3 py-1 text-xs">Retry loading enclosure</button>
+      )}
 
       {res?.ok && state === 'done' && (
         <div className="space-y-4">
           <div className="text-[13px] font-semibold text-foreground">{res.part}</div>
-          {runId && (
+          {runId && !res.imported && (
             <div>
               <div className="mb-1 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">
                 {res.gltfUrl
-                  ? 'final assembly — real board seated in the real enclosure, seating depth approximate (drag to rotate)'
-                  : 'final assembly — populated board in an approximate shell (drag to rotate)'}
+                  ? 'assembly preview — approximate placement; fit not verified by this view'
+                  : 'assembly preview — approximate shell; fit not verified by this view'}
               </div>
               <div className="mx-auto h-[32vh] max-w-2xl overflow-hidden rounded-md border border-border bg-[#0a0a0a]">
                 <MechanicalAssembly basePath={`/runs/${runId}/board`} enclosureUrl={res.gltfUrl}
@@ -106,7 +208,7 @@ export function MechanicalStage({ spec, runId, onBuilt }: { spec: ProductSpec | 
           )}
           {res.gltfUrl ? (
             <div>
-              <div className="mb-1 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">enclosure CAD — real Onshape geometry (drag to rotate)</div>
+              <div className="mb-1 font-mono text-[9px] uppercase tracking-wide text-muted-foreground">enclosure model preview (drag to rotate)</div>
               <div className="mx-auto h-[32vh] max-w-2xl overflow-hidden rounded-md border border-border bg-[#0f0f0f]">
                 <CadViewer url={res.gltfUrl} />
               </div>
@@ -154,7 +256,7 @@ export function MechanicalStage({ spec, runId, onBuilt }: { spec: ProductSpec | 
             ) : null}
           </div>
           <div className="rounded-md border border-border px-3 py-2 text-[11px] text-muted-foreground">
-            Advisory CAD: a generated parametric part sized to the real board — not fit/tolerance-validated for production.
+            {res.imported ? 'Imported STEP geometry retained. A rendered preview and fit analysis are not available for this import; no CAD generation is started by opening this view.' : 'Advisory CAD: a generated parametric part sized to the real board — not fit/tolerance-validated for production.'}
           </div>
         </div>
       )}

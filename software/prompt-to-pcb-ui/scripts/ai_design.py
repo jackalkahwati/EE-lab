@@ -19,6 +19,8 @@ import re
 import sys
 import urllib.request
 
+from llm_json import assert_python_inference_allowed
+
 PROMPT = sys.argv[1] if len(sys.argv) > 1 else ""
 OUT = sys.argv[2] if len(sys.argv) > 2 else "design_spec.json"
 
@@ -121,6 +123,7 @@ def heuristic_spec(prompt):
 
 
 def call_claude(prompt):
+    assert_python_inference_allowed()
     key = os.environ.get("ANTHROPIC_API_KEY")
     if not key:
         raise RuntimeError("ANTHROPIC_API_KEY not set")
@@ -150,6 +153,8 @@ def call_claude(prompt):
 
 
 def main():
+    # Fail before the local heuristic can turn unsupported inference into success.
+    assert_python_inference_allowed()
     print("ai_design: interpreting prompt with {}".format(MODEL))
     if PROMPT:
         print("ai_design: prompt = {}".format(PROMPT[:160]))

@@ -7,11 +7,12 @@
  * physically_validated. Physical evidence is accepted ONLY by a reviewer's
  * explicit decision, and the ledger stays empty until that happens.
  */
-import { useCallback, useEffect, useState } from 'react'
-import { AccessGate } from '@/components/access-gate'
+import { useEffect, useState } from 'react'
+import { EnterpriseReadState, useEnterpriseRead } from '@/components/enterprise-read-state'
 import { cn } from '@/lib/utils'
 import { currentActor, enterpriseAction } from '@/lib/enterprise-actions'
 
+// Existing enterprise dispatcher records are heterogeneous; retain their API shape.
 type Any = Record<string, any>
 
 const STATUS_STYLE: Record<string, string> = {
@@ -34,7 +35,7 @@ const EVIDENCE_TYPES = [
 ]
 
 export default function ValidationPage() {
-  const [db, setDb] = useState<Any | null>(null)
+  const { db, error, refresh } = useEnterpriseRead()
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null)
   // plan-session form
@@ -48,10 +49,11 @@ export default function ValidationPage() {
   const [eFile, setEFile] = useState<File | null>(null)
   const [me, setMe] = useState('')
 
-  const refresh = useCallback(() => {
-    fetch('/api/enterprise', { cache: 'no-store' }).then((r) => r.json()).then(setDb).catch(() => {})
+  useEffect(() => {
+    let current = true
+    currentActor().then(actor => { if (current) setMe(actor) })
+    return () => { current = false }
   }, [])
-  useEffect(() => { refresh(); currentActor().then(setMe) }, [refresh])
 
   async function run(action: string, params: Any, okText: string) {
     setBusy(true); setMsg(null)
@@ -78,8 +80,7 @@ export default function ValidationPage() {
     setBusy(false)
   }
 
-  if (!db) return <div className="p-6 text-xs text-muted-foreground">Loading validation…</div>
-  if (db.error) return <AccessGate error={db.error} />
+  if (!db) return <EnterpriseReadState error={error} retry={refresh} label="validation" />
 
   const org = db.organizations?.[0]
   const boards: Any[] = db.boards ?? []

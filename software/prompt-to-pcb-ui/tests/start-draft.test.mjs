@@ -127,8 +127,11 @@ test('capture has visible storage recovery and composer uses acknowledged prefil
   assert.match(capture, /delete capture\.__firstlightStartFragment/)
   assert.doesNotMatch(capture, /fetch\(|searchParams/)
   const compose = source('../app/compose/page.tsx')
-  assert.equal((compose.match(/onPrefillConsumed=\{onPrefillConsumed\}/g) ?? []).length, 2)
-  assert.equal((compose.match(/revisePrefill=\{revisePrefill\}/g) ?? []).length, 2)
+  // A single workspace shell keeps the same chat mounted before and after a run.
+  // Both privacy props must still reach that sole instance; do not remove the handshake.
+  assert.equal((compose.match(/<ComposeChat\b/g) ?? []).length, 1)
+  assert.equal((compose.match(/onPrefillConsumed=\{onPrefillConsumed\}/g) ?? []).length, 1)
+  assert.equal((compose.match(/revisePrefill=\{revisePrefill\}/g) ?? []).length, 1)
   assert.match(compose, /if \(!handoffIdRef\.current && want/)
   const handoff = compose.slice(compose.indexOf('const draft = readStartDraft'), compose.indexOf('// load real runs from disk'))
   assert.match(handoff, /setNewDesign\(true\)/)

@@ -6,11 +6,12 @@
  * "order / spend money" step. Compose prepares packets and ingests evidence;
  * it never places an order or submits a quote automatically.
  */
-import { useCallback, useEffect, useState } from 'react'
-import { AccessGate } from '@/components/access-gate'
+import { useState } from 'react'
+import { EnterpriseReadState, useEnterpriseRead } from '@/components/enterprise-read-state'
 import { cn } from '@/lib/utils'
 import { enterpriseAction } from '@/lib/enterprise-actions'
 
+// Existing enterprise dispatcher records are heterogeneous; retain their API shape.
 type Any = Record<string, any>
 
 const STATE_STYLE: Record<string, string> = {
@@ -40,18 +41,13 @@ const NEXT: Record<string, string[]> = {
 const APPROVAL_GATED = new Set(['approved_for_quote', 'approved_for_order'])
 
 export default function QuotesPage() {
-  const [db, setDb] = useState<Any | null>(null)
+  const { db, error, refresh } = useEnterpriseRead()
   const [busy, setBusy] = useState(false)
   const [pick, setPick] = useState('')
   const [msg, setMsg] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null)
 
-  const refresh = useCallback(() => {
-    fetch('/api/enterprise', { cache: 'no-store' }).then((r) => r.json()).then(setDb).catch(() => {})
-  }, [])
-  useEffect(() => { refresh() }, [refresh])
 
-  if (!db) return <div className="p-6 text-xs text-muted-foreground">Loading quotes…</div>
-  if (db.error) return <AccessGate error={db.error} />
+  if (!db) return <EnterpriseReadState error={error} retry={refresh} label="quotes" />
 
   const boards: Any[] = db.boards ?? []
   const boardName = (id: string) => boards.find((b) => b.board_id === id)?.name ?? id

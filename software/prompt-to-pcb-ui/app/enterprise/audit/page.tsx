@@ -5,19 +5,17 @@
  * tamper-evident (hash-chained) audit trail. DENIED actions are flagged; the
  * chain-verification status is shown so a viewer knows the log is intact.
  */
-import { useEffect, useMemo, useState } from 'react'
-import { AccessGate } from '@/components/access-gate'
+import { useMemo, useState } from 'react'
+import { EnterpriseReadState, useEnterpriseRead } from '@/components/enterprise-read-state'
 import { cn } from '@/lib/utils'
 
+// Existing enterprise dispatcher records are heterogeneous; retain their API shape.
 type Any = Record<string, any>
 
 export default function AuditPage() {
-  const [db, setDb] = useState<Any | null>(null)
+  const { db, error, refresh } = useEnterpriseRead()
   const [q, setQ] = useState('')
   const [deniedOnly, setDeniedOnly] = useState(false)
-  useEffect(() => {
-    fetch('/api/enterprise', { cache: 'no-store' }).then((r) => r.json()).then(setDb).catch(() => {})
-  }, [])
 
   const rows = useMemo(() => {
     const tail: Any[] = db?.audit_tail ?? []
@@ -30,8 +28,7 @@ export default function AuditPage() {
     })
   }, [db, q, deniedOnly])
 
-  if (!db) return <div className="p-6 text-xs text-muted-foreground">Loading audit log…</div>
-  if (db.error) return <AccessGate error={db.error} />
+  if (!db) return <EnterpriseReadState error={error} retry={refresh} label="audit log" />
 
   const chainOk = db.audit_chain?.ok
   const denied = (db.audit_tail ?? []).filter((a: Any) => String(a.action).startsWith('DENIED')).length

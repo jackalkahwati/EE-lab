@@ -13,8 +13,11 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { Run, StageId, StageState, RunStatus } from '@/lib/firstlight'
-import { getUser, sessionEmail } from '@/lib/auth'
+import { getUser, sessionEmail, isValidRunId, runAccess } from '@/lib/auth'
 import { cacheRun, cachedRun, persistRunsIndex, retainRuns } from '@/lib/runs-cache'
+import { astraConfigured, authorizeAstra, astraWorkspace, astraErrorResponse } from '@/lib/astra-beta'
+import { readAstraFile, readAstraManifest } from '@/lib/astra-artifacts'
+import { buildAstraRunView, type AstraRunView } from '@/lib/astra-run-view'
 
 export const dynamic = 'force-dynamic'
 
@@ -184,7 +187,41 @@ function buildRun(runsDir: string, id: string): Run | null {
   }
 }
 
+/** Astra never walks the shared store, hydrates the legacy cache, or reads board.json. */
+async function astraRuns(req: Request): Promise<Response> {
+  try {
+    // authorizeAstra validates the workspace before consulting the operator store.
+    // Nothing in the legacy GET path may run before this fail-closed boundary.
+    const owner = authorizeAstra(req)
+    const { root } = astraWorkspace()
+    const ids = getUser(owner)?.runIds ?? []
+    const runs: AstraRunView[] = []
+    for (const id of new Set(ids)) {
+      if (typeof id !== 'string' || !isValidRunId(id) || !id.startsWith('run-') || runAccess(req, id).access !== 'owner') continue
+      let readableMetadata = false
+      const metadata = async (relative: string): Promise<unknown> => {
+        try {
+          const buffer = await readAstraFile(root, id, relative)
+          readableMetadata = true
+          return JSON.parse(buffer.toString('utf8'))
+        } catch { return null }
+      }
+      // Publication is last. Missing or invalid manifest does not hide an owned
+      // partial run; every individual metadata read still uses the safe reader.
+      const [policy, timing, spec, manifest] = await Promise.all([
+        metadata('astra-policy.json'), metadata('timing.json'), metadata('product-spec.json'),
+        readAstraManifest(root, id).catch(() => null),
+      ])
+      if (!readableMetadata && !manifest) continue // removed run, symlink, or no persisted evidence
+      runs.push(buildAstraRunView({ runId: id, policy, timing, spec, manifest }))
+    }
+    runs.sort((a, b) => b.timestamp.localeCompare(a.timestamp) || b.id.localeCompare(a.id))
+    return Response.json({ runs }, { headers: { 'cache-control': 'no-store' } })
+  } catch (error) { return astraErrorResponse(error) }
+}
+
 export async function GET(req: Request) {
+  if (astraConfigured()) return astraRuns(req)
   // per-account history: a signed-in user sees their own runs plus the
   // unowned demo/showcase runs; runs owned by OTHER accounts stay private.
   const email = sessionEmail(req)

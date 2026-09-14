@@ -36,7 +36,7 @@ function StatusPill({ status }: { status: Run['status'] }) {
 
 function MiniProgress({ run }: { run: Run }) {
   return (
-    <div className="flex gap-0.5" aria-hidden="true">
+    <span className="flex w-full gap-0.5" aria-hidden="true">
       {run.stages.map((s) => (
         <span
           key={s.id}
@@ -49,7 +49,7 @@ function MiniProgress({ run }: { run: Run }) {
           )}
         />
       ))}
-    </div>
+    </span>
   )
 }
 
@@ -188,20 +188,20 @@ export function RunHistory({
           {visible.map((run) => (
             <li key={run.id} className="group">
               <div
-                role="button"
-                tabIndex={0}
-                onClick={() => onSelect(run.id)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') onSelect(run.id)
-                }}
                 className={cn(
-                  'flex w-full cursor-pointer flex-col gap-1.5 rounded-sm border px-2.5 py-2 text-left transition-colors',
+                  'relative flex w-full rounded-sm border text-left transition-colors',
                   run.id === selectedId
                     ? 'border-primary/40 bg-primary/5'
                     : 'border-transparent hover:border-border hover:bg-secondary',
                 )}
               >
-                <div className="flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => onSelect(run.id)}
+                  aria-current={run.id === selectedId ? 'true' : undefined}
+                  className="flex min-w-0 flex-1 flex-col gap-1.5 rounded-sm px-2.5 py-2 text-left focus-visible:outline-2 focus-visible:outline-primary"
+                >
+                <span className="flex w-full items-center justify-between gap-2">
                   <span className="flex min-w-0 items-center gap-1 truncate text-xs font-medium text-foreground">
                     {run.parentId && (
                       <GitBranch
@@ -213,27 +213,23 @@ export function RunHistory({
                       {run.name}
                     </span>
                   </span>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <StatusPill status={run.status} />
-                    {run.status !== 'RUNNING' && runs.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          onDelete(run.id)
-                        }}
-                        className="rounded-sm p-0.5 text-muted-foreground opacity-0 transition hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
-                        aria-label={`Delete ${run.name}`}
-                      >
-                        <X className="size-3" />
-                      </button>
-                    )}
-                  </div>
-                </div>
+                  <StatusPill status={run.status} />
+                </span>
                 <span className="font-mono text-[10px] text-muted-foreground" title={run.id}>
                   {run.timestamp}
                 </span>
                 <MiniProgress run={run} />
+                </button>
+                {run.status !== 'RUNNING' && runs.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => onDelete(run.id)}
+                    className="my-1 mr-1 self-start rounded-sm p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:outline-2 focus-visible:outline-primary"
+                    aria-label={`Delete ${run.name}`}
+                  >
+                    <X className="size-3" />
+                  </button>
+                )}
               </div>
             </li>
           ))}

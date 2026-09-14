@@ -10,6 +10,8 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { Loader2, Plus, Minus, Maximize } from 'lucide-react'
+import type { Mesh } from 'three'
+import { createViewerLifetime } from './board-3d'
 
 export function MechanicalAssembly({ basePath, enclosureUrl, hasBattery }: {
   basePath: string
@@ -22,9 +24,13 @@ export function MechanicalAssembly({ basePath, enclosureUrl, hasBattery }: {
   const apiRef = useRef<{ zoom: (f: number) => void; fit: () => void } | null>(null)
 
   useEffect(() => {
-    let disposed = false
-    let renderer: any = null
+    const lifetime = createViewerLifetime()
+    const mount = mountRef.current
+    const stale = () => lifetime.disposed || !mount || mountRef.current !== mount
+    let viewerApi: typeof apiRef.current = null
     let raf = 0
+    lifetime.defer(() => { if (apiRef.current === viewerApi) apiRef.current = null })
+    lifetime.defer(() => cancelAnimationFrame(raf))
     setPhase('loading'); setErr('')
 
     ;(async () => {
@@ -34,18 +40,29 @@ export function MechanicalAssembly({ basePath, enclosureUrl, hasBattery }: {
           import('three/examples/jsm/loaders/GLTFLoader.js'),
           import('three/examples/jsm/controls/OrbitControls.js'),
         ])
-        const res = await fetch(`/api/board3d?base=${encodeURIComponent(basePath)}`)
-        if (!res.ok) throw new Error(await res.json().then((j) => j.error).catch(() => `HTTP ${res.status}`))
+        if (stale() || !mount) return
+        const res = await fetch(`/api/board3d?base=${encodeURIComponent(basePath)}`, { signal: lifetime.abort.signal })
+        if (stale()) return
+        if (!res.ok) {
+          const message = await res.json().then((j) => j.error).catch(() => `HTTP ${res.status}`)
+          if (stale()) return
+          throw new Error(message)
+        }
         const buf = await res.arrayBuffer()
-        const mount = mountRef.current
-        if (disposed || !mount) return
+        if (stale()) return
 
         const scene = new THREE.Scene()
         scene.background = new THREE.Color(0x0a0a0a)
 
+        lifetime.defer(() => lifetime.trackObject(scene))
         const gltf = await new GLTFLoader().parseAsync(buf, '')
+        gltf.scenes.forEach(lifetime.trackObject)
+        if (stale()) return
         const boardGrp = gltf.scene
-        boardGrp.traverse((o: any) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true } })
+        boardGrp.traverse((object) => {
+          const o = object as Mesh
+          if (o.isMesh) { o.castShadow = true; o.receiveShadow = true }
+        })
 
         // board bbox (KiCad GLB is Y-up: X,Z = footprint, Y = height/components).
         // NB: kicad-cli exports GLB in METERS (glTF convention) — a 20 mm board
@@ -61,6 +78,7 @@ export function MechanicalAssembly({ basePath, enclosureUrl, hasBattery }: {
         const gap = foot * 0.03                                   // component/cell clearance
 
         const asm = new THREE.Group()
+        scene.add(asm)
         asm.add(boardGrp)
 
         // Battery: drawn ONLY when the spec actually includes one — inventing
@@ -85,16 +103,23 @@ export function MechanicalAssembly({ basePath, enclosureUrl, hasBattery }: {
           // (seating depth approximate — the plan's boss heights aren't in the
           // exported mesh).
           try {
-            const encRes = await fetch(enclosureUrl)
+            const encRes = await fetch(enclosureUrl, { signal: lifetime.abort.signal })
+            if (stale()) return
             if (!encRes.ok) throw new Error(`enclosure HTTP ${encRes.status}`)
             const encBuf = await encRes.arrayBuffer()
+            if (stale()) return
             const encGltf = await new GLTFLoader().parseAsync(encBuf, '')
+            encGltf.scenes.forEach(lifetime.trackObject)
+            if (stale()) return
             const enc = encGltf.scene
-            const encMat = new THREE.MeshPhysicalMaterial({
+            const encMat = lifetime.own(new THREE.MeshPhysicalMaterial({
               color: 0x93a0ae, transparent: true, opacity: 0.22,
               roughness: 0.3, metalness: 0, side: THREE.DoubleSide, depthWrite: false,
+            }))
+            enc.traverse((object) => {
+              const o = object as Mesh
+              if (o.isMesh) { o.material = encMat; o.castShadow = false; o.renderOrder = 2 }
             })
-            enc.traverse((o: any) => { if (o.isMesh) { o.material = encMat; o.castShadow = false; o.renderOrder = 2 } })
             const encBox = new THREE.Box3().setFromObject(enc)
             const encSz = encBox.getSize(new THREE.Vector3())
             const encC = encBox.getCenter(new THREE.Vector3())
@@ -103,7 +128,11 @@ export function MechanicalAssembly({ basePath, enclosureUrl, hasBattery }: {
             enc.position.y += (contentBottom - encSz.y * 0.15) - encBox.min.y
             asm.add(enc)
             realEnclosure = true
-          } catch { /* fall through to the approximate shell below */ }
+          } catch (error) {
+            if (stale()) return
+            // A failed real export is not evidence for an invented legacy shell.
+            throw error
+          }
         }
 
         if (!realEnclosure) {
@@ -124,13 +153,11 @@ export function MechanicalAssembly({ basePath, enclosureUrl, hasBattery }: {
           asm.add(shell)
           // crisp edge lines so the enclosure reads clearly through the translucency
           const edges = new THREE.LineSegments(
-            new THREE.EdgesGeometry(new THREE.BoxGeometry(encW, encH, encD)),
+            new THREE.EdgesGeometry(shell.geometry),
             new THREE.LineBasicMaterial({ color: 0xbcd0e6, transparent: true, opacity: 0.5 }))
           edges.position.copy(shell.position)
           asm.add(edges)
         }
-
-        scene.add(asm)
 
         // frame the whole assembly
         const abox = new THREE.Box3().setFromObject(asm)
@@ -139,7 +166,8 @@ export function MechanicalAssembly({ basePath, enclosureUrl, hasBattery }: {
         const span = Math.max(asz.x, asz.y, asz.z)
 
         const camera = new THREE.PerspectiveCamera(40, mount.clientWidth / Math.max(1, mount.clientHeight), span / 100, span * 40)
-        renderer = new THREE.WebGLRenderer({ antialias: true })
+        const renderer = lifetime.own(new THREE.WebGLRenderer({ antialias: true }))
+        lifetime.defer(() => renderer.domElement.remove())
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
         renderer.setSize(mount.clientWidth, mount.clientHeight)
         renderer.shadowMap.enabled = true
@@ -150,16 +178,26 @@ export function MechanicalAssembly({ basePath, enclosureUrl, hasBattery }: {
 
         try {
           const { RoomEnvironment } = await import('three/examples/jsm/environments/RoomEnvironment.js')
+          if (stale()) return
           const pmrem = new THREE.PMREMGenerator(renderer)
-          scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
+          const room = new RoomEnvironment()
+          try {
+            const environment = lifetime.own(pmrem.fromScene(room, 0.04))
+            scene.environment = environment.texture
+            lifetime.defer(() => { scene.environment = null })
+          } finally {
+            room.dispose()
+            pmrem.dispose()
+          }
         } catch { /* analytic lights alone still render */ }
+        if (stale()) return
 
         scene.add(new THREE.AmbientLight(0xffffff, 0.3))
         const key = new THREE.DirectionalLight(0xffffff, 2.6)
         key.position.set(acenter.x + span, acenter.y + span * 1.4, acenter.z + span * 0.7)
         key.target.position.copy(acenter); key.castShadow = true
         key.shadow.mapSize.set(2048, 2048); key.shadow.bias = -0.0004
-        const scam: any = key.shadow.camera; const d = span * 0.9
+        const scam = key.shadow.camera; const d = span * 0.9
         scam.left = -d; scam.right = d; scam.top = d; scam.bottom = -d; scam.near = span * 0.05; scam.far = span * 8; scam.updateProjectionMatrix()
         scene.add(key, key.target)
         // NB: three.js makes Object3D.position read-only (defineProperties, no
@@ -176,7 +214,7 @@ export function MechanicalAssembly({ basePath, enclosureUrl, hasBattery }: {
         grid.position.set(acenter.x, floorY, acenter.z)
         scene.add(grid)
 
-        const controls = new OrbitControls(camera, renderer.domElement)
+        const controls = lifetime.own(new OrbitControls(camera, renderer.domElement))
         // Wheel-over the viewer should scroll the PAGE, not zoom the scene —
         // zoom arms on click (pointerdown) and disarms when the cursor leaves,
         // so the tab stays scrollable without hunting for a gutter.
@@ -185,6 +223,10 @@ export function MechanicalAssembly({ basePath, enclosureUrl, hasBattery }: {
         const disarmZoom = () => { controls.enableZoom = false }
         renderer.domElement.addEventListener('pointerdown', armZoom)
         renderer.domElement.addEventListener('mouseleave', disarmZoom)
+        lifetime.defer(() => {
+          renderer.domElement.removeEventListener('pointerdown', armZoom)
+          renderer.domElement.removeEventListener('mouseleave', disarmZoom)
+        })
         controls.target.copy(acenter); controls.enableDamping = true; controls.dampingFactor = 0.08
         controls.minDistance = span * 0.15; controls.maxDistance = span * 6
         const sphere = abox.getBoundingSphere(new THREE.Sphere())
@@ -193,7 +235,7 @@ export function MechanicalAssembly({ basePath, enclosureUrl, hasBattery }: {
         camera.lookAt(acenter); controls.update()
 
         // Zoom buttons (same capability as wheel-zoom, no click-arming needed)
-        apiRef.current = {
+        viewerApi = {
           zoom: (f: number) => {
             const dir = camera.position.clone().sub(controls.target)
             const len = Math.min(Math.max(dir.length() * f, controls.minDistance), controls.maxDistance)
@@ -207,35 +249,31 @@ export function MechanicalAssembly({ basePath, enclosureUrl, hasBattery }: {
           },
         }
 
-        setPhase('ready')
-        const loop = () => { if (disposed) return; controls.update(); renderer.render(scene, camera); raf = requestAnimationFrame(loop) }
+        const loop = () => { if (stale()) return; controls.update(); renderer.render(scene, camera); raf = requestAnimationFrame(loop) }
         loop()
 
         const onResize = () => {
-          if (!mount) return
-          camera.aspect = mount.clientWidth / Math.max(1, mount.clientHeight); camera.updateProjectionMatrix()
+          if (stale() || !mount.clientWidth || !mount.clientHeight) return
+          camera.aspect = mount.clientWidth / mount.clientHeight; camera.updateProjectionMatrix()
           renderer.setSize(mount.clientWidth, mount.clientHeight)
         }
-        window.addEventListener('resize', onResize)
-        ;(mount as any).__cleanup = () => {
-          window.removeEventListener('resize', onResize)
-          renderer.domElement?.removeEventListener('pointerdown', armZoom)
-          renderer.domElement?.removeEventListener('mouseleave', disarmZoom)
-        }
-      } catch (e) { if (!disposed) { setErr(String(e)); setPhase('error') } }
+        const ro = new ResizeObserver(onResize)
+        lifetime.defer(() => ro.disconnect())
+        ro.observe(mount)
+        onResize()
+        apiRef.current = viewerApi
+        setPhase('ready')
+      } catch (e) {
+        if (!stale()) { setErr(String(e)); setPhase('error') }
+        lifetime.dispose()
+      }
     })()
 
-    return () => {
-      disposed = true
-      cancelAnimationFrame(raf)
-      const mount = mountRef.current as any
-      mount?.__cleanup?.()
-      if (renderer) { try { renderer.dispose(); renderer.domElement?.remove() } catch { /* */ } }
-    }
+    return () => lifetime.dispose()
   }, [basePath, enclosureUrl, hasBattery])
 
   return (
-    <div className="relative h-full w-full">
+    <div data-viewer="assembly" data-viewer-phase={phase} className="relative h-full w-full">
       <div ref={mountRef} className="h-full w-full" />
       <div className="absolute right-2 top-2 flex items-center gap-1">
         {[

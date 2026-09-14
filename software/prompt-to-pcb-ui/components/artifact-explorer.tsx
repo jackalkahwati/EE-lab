@@ -10,7 +10,7 @@
  * existing /runs/<id>/<path> live-file route.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronDown, ChevronLeft, ChevronRight, Download, File, FileCode, FileJson, FileText,
   FileSpreadsheet, Folder, FolderOpen, Image as ImageIcon, RefreshCw,
@@ -50,7 +50,23 @@ function iconFor(n: FileNode, open: boolean) {
 }
 
 // ---- tiny markdown renderer (escape first — output is trusted-safe) --------
-const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+
+// Tokenize before emitting HTML: formatting must never insert markup into href.
+function inlineMarkdown(raw: string): string {
+  const pattern = /`([^`]+)`|\[([^\]]+)\]\((https?:[^)\s]+)\)|\*\*([^*]+)\*\*/g
+  let html = ''
+  let end = 0
+  for (const match of raw.matchAll(pattern)) {
+    html += esc(raw.slice(end, match.index))
+    const [, code, label, url, strong] = match
+    if (code !== undefined) html += `<code class="ae-inline">${esc(code)}</code>`
+    else if (url !== undefined) html += `<a href="${esc(url)}" target="_blank" rel="noreferrer" class="underline">${inlineMarkdown(label)}</a>`
+    else html += `<strong>${inlineMarkdown(strong)}</strong>`
+    end = match.index + match[0].length
+  }
+  return html + esc(raw.slice(end))
+}
 
 function mdToHtml(src: string): string {
   const lines = src.split('\n')
@@ -66,10 +82,7 @@ function mdToHtml(src: string): string {
       continue
     }
     if (inCode) { out.push(esc(raw) + '\n'); continue }
-    const line = esc(raw)
-      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-      .replace(/`([^`]+)`/g, '<code class="ae-inline">$1</code>')
-      .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer" class="underline">$1</a>')
+    const line = inlineMarkdown(raw)
     const h = /^(#{1,4})\s+(.*)$/.exec(line)
     if (h) { closeList(); out.push(`<h${h[1].length + 2} class="ae-h">${h[2]}</h${h[1].length + 2}>`); continue }
     const li = /^\s*[-*]\s+(.*)$/.exec(line)
@@ -123,8 +136,12 @@ function Tree({ nodes, sel, onSel, openDirs, toggle, depth = 0 }: {
         return (
           <div key={n.path}>
             <button
+              type="button"
+              aria-label={`${n.dir ? (open ? 'Collapse' : 'Expand') : 'Preview'} ${n.path}`}
+              aria-expanded={n.dir ? open : undefined}
+              aria-current={!n.dir && sel === n.path ? 'true' : undefined}
               onClick={() => (n.dir ? toggle(n.path) : onSel(n))}
-              className={`flex w-full items-center gap-1.5 rounded px-1.5 py-[3px] text-left text-xs hover:bg-accent/50 ${sel === n.path ? 'bg-accent text-accent-foreground' : 'text-muted-foreground'}`}
+              className={`flex w-full items-center gap-1.5 rounded px-1.5 py-[3px] text-left text-xs hover:bg-accent/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring ${sel === n.path ? 'bg-accent text-accent-foreground' : 'text-muted-foreground'}`}
               style={{ paddingLeft: `${6 + depth * 14}px` }}
             >
               {n.dir ? (
@@ -147,47 +164,143 @@ function Tree({ nodes, sel, onSel, openDirs, toggle, depth = 0 }: {
 }
 
 
-/** Full-pane preview of one run file — used by the explorer's two-pane mode
- *  AND by the compose page's CENTER pane (IDE-style: tree left, content
- *  center). Fetches text itself; images load via <img>. */
-export function FilePreview({ runId, file, onClose }: {
+const REQUEST_TIMEOUT = 15_000
+const controlClass = 'rounded border border-border/60 px-2 py-1 text-xs hover:bg-accent/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring'
+
+class PreviewTooLarge extends Error {}
+
+/** Bound bytes actually read, even when the listing/Content-Length is stale. */
+async function readPreviewText(response: Response): Promise<string> {
+  if (Number(response.headers.get('content-length')) > MAX_PREVIEW) {
+    void response.body?.cancel().catch(() => {})
+    throw new PreviewTooLarge()
+  }
+  if (!response.body) return ''
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let bytes = 0
+  let text = ''
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      bytes += value.byteLength
+      if (bytes > MAX_PREVIEW) {
+        void reader.cancel().catch(() => {})
+        throw new PreviewTooLarge()
+      }
+      text += decoder.decode(value, { stream: true })
+    }
+    return text + decoder.decode()
+  } finally {
+    reader.releaseLock()
+  }
+}
+
+type PreviewProps = {
+  revision?: number
   runId: string
   file: { name: string; path: string; size?: number }
   onClose?: () => void
-}) {
-  const [body, setBody] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
+}
+type PreviewState =
+  | { kind: 'loading' | 'image' | 'binary' | 'oversize' }
+  | { kind: 'text'; body: string }
+  | { kind: 'error'; message: string }
+
+/** Identity keys clear old content before paint, not just after an effect runs. */
+export function FilePreview(props: PreviewProps) {
+  return <PreviewSession key={JSON.stringify([props.runId, props.file.path, props.file.name, props.file.size, props.revision])} {...props} />
+}
+
+function PreviewSession(props: PreviewProps) {
+  const [attempt, setAttempt] = useState(0)
+  return <PreviewAttempt key={attempt} {...props} attempt={attempt} onRetry={() => setAttempt((n) => n + 1)} />
+}
+
+/** Full-pane preview shared by the explorer and the compose center pane. */
+function PreviewAttempt({ runId, file, onClose, attempt, onRetry, revision = 0 }: PreviewProps & { attempt: number; onRetry: () => void }) {
   const e = ext(file.name)
-  const url = `/runs/${runId}/${file.path}`
+  const image = IMG_EXT.has(e) || e === 'svg'
+  const initialKind = (file.size ?? 0) > MAX_PREVIEW ? 'oversize' : image || TEXT_EXT.has(e) ? 'loading' : 'binary'
+  const [state, setState] = useState<PreviewState>({ kind: initialKind })
+  const imageDone = useRef<((error?: string) => void) | null>(null)
+  const imageElement = useRef<HTMLImageElement | null>(null)
+  const url = `/runs/${encodeURIComponent(runId)}/${file.path.split('/').map(encodeURIComponent).join('/')}`
+  const imageUrl = revision ? `${url}?previewRetry=${attempt}&revision=${revision}` : attempt ? `${url}?previewRetry=${attempt}` : url
   useEffect(() => {
-    setBody(null)
-    if (IMG_EXT.has(e)) return
-    if (!TEXT_EXT.has(e) || (file.size ?? 0) > MAX_PREVIEW) return
-    setLoading(true)
-    fetch(url, { cache: 'no-store' })
-      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then(setBody)
-      .catch((er) => setBody(`⚠ could not load: ${String(er)}`))
-      .finally(() => setLoading(false))
-  }, [url, e, file.size])
+    if (initialKind !== 'loading') return
+    const controller = new AbortController()
+    let active = true
+    const finish = (next: PreviewState) => {
+      if (!active) return
+      active = false
+      clearTimeout(timer)
+      setState(next)
+    }
+    const timer = setTimeout(() => {
+      finish({ kind: 'error', message: 'Preview timed out. Try again or download the file.' })
+      controller.abort()
+    }, REQUEST_TIMEOUT)
+    if (image) {
+      imageDone.current = (error) => finish(error ? { kind: 'error', message: error } : { kind: 'image' })
+      // Cached images can settle before the passive effect installs the handler.
+      const element = imageElement.current
+      if (element?.complete) imageDone.current(element.naturalWidth > 0 ? undefined : 'Image could not be loaded.')
+    } else {
+      void (async () => {
+        try {
+          const response = await fetch(url, { cache: 'no-store', signal: controller.signal })
+          if (!active) { void response.body?.cancel().catch(() => {}); return }
+          if (!response.ok) throw new Error(`HTTP ${response.status}`)
+          const body = await readPreviewText(response)
+          finish(body.includes('\0') ? { kind: 'binary' } : { kind: 'text', body })
+        } catch (error) {
+          finish(error instanceof PreviewTooLarge ? { kind: 'oversize' } : { kind: 'error', message: error instanceof Error ? error.message : 'Request failed.' })
+        }
+      })()
+    }
+    return () => {
+      active = false
+      imageDone.current = null
+      clearTimeout(timer)
+      controller.abort()
+    }
+  }, [url, image, initialKind])
+  const body = state.kind === 'text' ? state.body : null
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center gap-2 border-b border-border/60 px-3 py-1.5">
         {onClose && (
-          <button onClick={onClose} className="rounded p-0.5 hover:bg-accent/50" title="Close">
+          <button type="button" onClick={onClose} className={controlClass} title="Close preview" aria-label="Close file preview">
             <ChevronLeft className="h-3.5 w-3.5" />
           </button>
         )}
         <span className="truncate font-mono text-xs text-foreground">{file.path}</span>
         <span className="text-[10px] text-muted-foreground">{fmtSize(file.size)}</span>
-        <a href={url} download className="ml-auto flex items-center gap-1 rounded border border-border/60 px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-accent/50">
+        <a href={url} download aria-label={`Download ${file.path}`} className={`ml-auto flex items-center gap-1 text-muted-foreground ${controlClass}`}>
           <Download className="h-3 w-3" /> Download
         </a>
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-3">
-        {loading && <div className="text-xs text-muted-foreground">Loading…</div>}
-        {IMG_EXT.has(e) && <img src={url} alt={file.name} className="max-w-full rounded border border-border/40" />}
-        {e === 'svg' && <img src={url} alt={file.name} className="max-w-full rounded border border-border/40 bg-white/5" />}
+        {state.kind === 'loading' && <div role="status" className="text-xs text-muted-foreground">Loading preview…</div>}
+        {state.kind === 'error' && (
+          <div role="alert" className="space-y-2 text-xs text-destructive">
+            <p>Could not load preview: {state.message}</p>
+            <button type="button" onClick={onRetry} className={controlClass}>Retry preview</button>
+          </div>
+        )}
+        {image && (state.kind === 'loading' || state.kind === 'image') && (
+          <img
+            ref={imageElement}
+            src={imageUrl}
+            alt={file.name}
+            onLoad={() => imageDone.current?.()}
+            onError={() => imageDone.current?.('Image could not be loaded.')}
+            className={`max-w-full rounded border border-border/40 ${e === 'svg' ? 'bg-white/5' : ''} ${state.kind === 'loading' ? 'invisible' : ''}`}
+          />
+        )}
+        {body === '' && <div role="status" className="text-xs text-muted-foreground">This file is empty.</div>}
         {e === 'md' && body && (
           <div
             className="max-w-3xl text-[13px] leading-relaxed text-foreground/90 [&_.ae-h]:mt-4 [&_.ae-h]:mb-1 [&_.ae-h]:font-semibold [&_.ae-h]:text-foreground [&_.ae-p]:my-1 [&_.ae-ul]:my-1 [&_.ae-ul]:list-disc [&_.ae-ul]:pl-5 [&_.ae-gap]:h-2 [&_.ae-code]:my-2 [&_.ae-code]:overflow-auto [&_.ae-code]:rounded [&_.ae-code]:bg-black/30 [&_.ae-code]:p-2 [&_.ae-code]:font-mono [&_.ae-code]:text-xs [&_.ae-inline]:rounded [&_.ae-inline]:bg-black/30 [&_.ae-inline]:px-1 [&_.ae-inline]:font-mono [&_.ae-inline]:text-xs [&_.ae-row]:whitespace-pre [&_.ae-row]:font-mono [&_.ae-row]:text-xs"
@@ -203,11 +316,11 @@ export function FilePreview({ runId, file, onClose }: {
         {!IMG_EXT.has(e) && !['md', 'json', 'csv', 'svg'].includes(e) && body && (
           <pre className="overflow-auto rounded bg-black/30 p-2 font-mono text-xs text-foreground/90">{body}</pre>
         )}
-        {!loading && body == null && !IMG_EXT.has(e) && e !== 'svg' && (
-          <div className="text-xs text-muted-foreground">
-            {(file.size ?? 0) > MAX_PREVIEW
-              ? `Too large to preview inline (${fmtSize(file.size)}) — use Download.`
-              : 'Binary file — use Download (boards open in KiCad, .step/.glb in a CAD viewer).'}
+        {(state.kind === 'oversize' || state.kind === 'binary') && (
+          <div role="status" className="text-xs text-muted-foreground">
+            {state.kind === 'oversize'
+              ? `Too large to preview inline (limit ${fmtSize(MAX_PREVIEW)}) — use Download.`
+              : 'Binary or unsupported file — use Download (boards open in KiCad, .step/.glb in a CAD viewer).'}
           </div>
         )}
       </div>
@@ -215,31 +328,94 @@ export function FilePreview({ runId, file, onClose }: {
   )
 }
 
-export function ArtifactExplorer({ runId, compact, onOpen }: {
+type ExplorerProps = {
+  revision?: number
   runId: string | null
   compact?: boolean
   /** when set, file clicks open in the HOST's pane (IDE center) — no inline preview */
   onOpen?: (f: { name: string; path: string; size?: number }) => void
-}) {
-  const [tree, setTree] = useState<FileNode[] | null>(null)
-  const [count, setCount] = useState(0)
-  const [err, setErr] = useState<string | null>(null)
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+function validNodes(value: unknown, depth = 0): value is FileNode[] {
+  return depth <= 16 && Array.isArray(value) && value.every((node: unknown) => {
+    if (!isRecord(node) || typeof node.name !== 'string' || !node.name || typeof node.path !== 'string' || !node.path || typeof node.dir !== 'boolean') return false
+    if (node.path.split('/').some((part) => !part || part === '.' || part === '..')) return false
+    if (node.size !== undefined && (typeof node.size !== 'number' || !Number.isFinite(node.size) || node.size < 0)) return false
+    if (node.mtime !== undefined && typeof node.mtime !== 'string') return false
+    return node.dir ? validNodes(node.children, depth + 1) : node.children === undefined
+  })
+}
+
+type TreeState =
+  | { kind: 'loading' }
+  | { kind: 'error'; message: string }
+  | { kind: 'ready'; tree: FileNode[]; count: number }
+
+export function ArtifactExplorer(props: ExplorerProps) {
+  return <ExplorerSession key={props.runId} {...props} />
+}
+
+function ExplorerSession(props: ExplorerProps) {
+  const [attempt, setAttempt] = useState(0)
+  return <ExplorerAttempt key={attempt} {...props} onReload={() => setAttempt((n) => n + 1)} />
+}
+
+function ExplorerAttempt({ runId, compact, onOpen, onReload, revision = 0 }: ExplorerProps & { onReload: () => void }) {
+  const [state, setState] = useState<TreeState>({ kind: 'loading' })
   const [openDirs, setOpenDirs] = useState<Set<string>>(new Set(['data', 'disciplines', 'id']))
   const [sel, setSel] = useState<FileNode | null>(null)
 
-  const load = useCallback(() => {
+  useEffect(() => {
     if (!runId) return
-    setErr(null)
-    fetch(`/api/runs/files?run=${encodeURIComponent(runId)}`, { cache: 'no-store' })
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.error) setErr(String(d.error))
-        else { setTree(d.tree); setCount(d.files) }
-      })
-      .catch((e) => setErr(String(e)))
-  }, [runId])
-
-  useEffect(() => { setTree(null); setSel(null); load() }, [load])
+    setState({ kind: 'loading' })
+    const controller = new AbortController()
+    let active = true
+    const finish = (next: TreeState) => {
+      if (!active) return
+      active = false
+      clearTimeout(timer)
+      setState(next)
+    }
+    const timer = setTimeout(() => {
+      finish({ kind: 'error', message: 'File listing timed out. Try again.' })
+      controller.abort()
+    }, REQUEST_TIMEOUT)
+    void (async () => {
+      try {
+        const response = await fetch(`/api/runs/files?run=${encodeURIComponent(runId)}`, { cache: 'no-store', signal: controller.signal })
+        if (!active) return
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        const data: unknown = await response.json()
+        if (isRecord(data) && typeof data.error === 'string' && data.error) throw new Error(data.error)
+        if (!isRecord(data) || data.runId !== runId || !validNodes(data.tree) || typeof data.files !== 'number' || !Number.isSafeInteger(data.files) || data.files < 0) {
+          throw new Error('Invalid file listing response.')
+        }
+        const countFiles = (nodes: FileNode[]): number => nodes.reduce((total, node) => total + (node.dir ? countFiles(node.children ?? []) : 1), 0)
+        if (countFiles(data.tree) !== data.files) throw new Error('Invalid file count in listing response.')
+        if (!active) return
+        const findFile = (nodes: FileNode[], path: string): FileNode | null => {
+          for (const node of nodes) {
+            if (!node.dir && node.path === path) return node
+            const found = node.children && findFile(node.children, path)
+            if (found) return found
+          }
+          return null
+        }
+        setSel((previous) => previous ? findFile(data.tree as FileNode[], previous.path) : null)
+        finish({ kind: 'ready', tree: data.tree, count: data.files })
+      } catch (error) {
+        finish({ kind: 'error', message: error instanceof Error ? error.message : 'Request failed.' })
+      }
+    })()
+    return () => {
+      active = false
+      clearTimeout(timer)
+      controller.abort()
+    }
+  }, [runId, revision])
 
   const openFile = useCallback((n: FileNode) => {
     setSel(n)
@@ -255,8 +431,14 @@ export function ArtifactExplorer({ runId, compact, onOpen }: {
     })
 
   if (!runId) return <div className="p-4 text-xs text-muted-foreground">No run selected — build a product first.</div>
-  if (err) return <div className="p-4 text-xs text-red-400">Could not list files: {err}</div>
-  if (!tree) return <div className="p-4 text-xs text-muted-foreground">Loading file tree…</div>
+  if (state.kind === 'error') return (
+    <div role="alert" className="space-y-2 p-4 text-xs text-destructive">
+      <p>Could not list files: {state.message}</p>
+      <button type="button" onClick={onReload} className={controlClass}>Retry file listing</button>
+    </div>
+  )
+  if (state.kind === 'loading') return <div role="status" className="p-4 text-xs text-muted-foreground">Loading file tree…</div>
+  const { tree, count } = state
 
   return (
     <div className="flex h-full min-h-0 text-sm">
@@ -266,25 +448,26 @@ export function ArtifactExplorer({ runId, compact, onOpen }: {
         : 'flex w-64 shrink-0 flex-col border-r border-border/60'}>
         <div className="flex items-center justify-between border-b border-border/60 px-2 py-1.5 text-[11px] text-muted-foreground">
           <span>{count} files</span>
-          <button onClick={load} className="rounded p-1 hover:bg-accent/50" title="Refresh">
+          <button type="button" onClick={onReload} className={controlClass} title="Refresh files" aria-label="Refresh file listing">
             <RefreshCw className="h-3 w-3" />
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-auto py-1">
+          {count === 0 && <p role="status" className="p-3 text-xs text-muted-foreground">No files generated for this run yet.</p>}
           <Tree nodes={tree} sel={sel?.path ?? null} onSel={openFile} openDirs={openDirs} toggle={toggle} />
         </div>
       </div>
       {/* preview pane (hosts without onOpen only — onOpen mode is tree-only) */}
-      <div className={(compact && !sel) || onOpen ? 'hidden' : 'min-w-0 flex-1 overflow-auto'}>
+      {!onOpen && <div className={compact && !sel ? 'hidden' : 'min-w-0 flex-1 overflow-auto'}>
         {!sel ? (
           <div className="p-6 text-xs text-muted-foreground">
             Every file this run generated, live from disk. Select one to preview — markdown, JSON,
             CSV and images render inline; CAD/board binaries download.
           </div>
         ) : (
-          <FilePreview runId={runId} file={sel} onClose={compact ? () => setSel(null) : undefined} />
+          <FilePreview revision={revision} runId={runId} file={sel} onClose={compact ? () => setSel(null) : undefined} />
         )}
-      </div>
+      </div>}
     </div>
   )
 }

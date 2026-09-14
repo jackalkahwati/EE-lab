@@ -64,46 +64,78 @@ async function rasterizeScaffold(): Promise<string | null> {
 }
 
 export function IdStageView({
-  brief, boardMm, runId,
+  brief, boardMm, runId, generationDisabled = false, onBuildStart, onBuildSettled,
 }: {
+  generationDisabled?: boolean
+  onBuildStart?: () => boolean | void | Promise<boolean | void>
+  onBuildSettled?: (result: { status: 'passed' | 'failed' | 'unknown'; detail?: string; artifactAvailable?: boolean }) => void | Promise<void>
   brief: IdBrief; boardMm?: { wMm: number; hMm: number }; runId?: string
 }) {
   const [render, setRender] = useState<RenderState>({ status: 'idle' })
   const [showScaffold, setShowScaffold] = useState(false)
-  const autoTried = useRef<string | null>(null)
+  const requestEpoch = useRef(0)
+  const busyRef = useRef(false)
+  const readController = useRef<AbortController | null>(null)
 
-  // Auto-render: load a persisted render on mount, else generate one once (the
-  // render then persists, so opening Design shows a real photorealistic render by
-  // default instead of the wireframe scaffold). Guarded to once per run.
+  // Load persisted renders only. Opening a stage must never purchase a render.
   useEffect(() => {
+    requestEpoch.current += 1
+    setRender({ status: 'idle' }); setShowScaffold(false)
     if (!runId) return
     let off = false
-    fetch(`/runs/${runId}/id/render.json`, { cache: 'no-store' })
+    const epoch = requestEpoch.current
+    const controller = new AbortController()
+    readController.current = controller
+    fetch(`/runs/${runId}/id/render.json`, { cache: 'no-store', signal: controller.signal })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        if (off) return
+        if (off || controller.signal.aborted || epoch !== requestEpoch.current) return
         if (d && d.url) { setRender({ status: 'done', url: `${d.url}?t=${runId}`, provider: d.provider }); return }
-        if (autoTried.current !== runId) { autoTried.current = runId; generate() }
       })
       .catch(() => {})
-    return () => { off = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => { off = true; controller.abort(); requestEpoch.current += 1 }
   }, [runId])
 
   async function generate() {
+    if (!runId || generationDisabled || busyRef.current) return
+    busyRef.current = true
+    const epoch = ++requestEpoch.current
+    const start = onBuildStart
+    const settled = onBuildSettled
+    let submitted = false
+    let outcome: Parameters<NonNullable<typeof onBuildSettled>>[0] = { status: 'unknown', detail: 'Image request outcome unknown. Server work may continue.' }
+    readController.current?.abort()
     setRender({ status: 'loading' })
-    const scaffoldPng = await rasterizeScaffold()
     try {
+      const permission = start?.()
+      const allowed = permission && typeof (permission as Promise<unknown>).then === 'function' ? await permission : permission
+      if (allowed === false || !(epoch === requestEpoch.current)) {
+        outcome = { status: 'unknown', detail: 'Generation was not submitted.' }
+        if (epoch === requestEpoch.current) { setRender({ status: 'error', message: 'Generation was not started. Another action or history persistence prevented it.' }) }
+        return
+      }
+      const scaffoldPng = await rasterizeScaffold()
+      if (epoch !== requestEpoch.current) return
+      submitted = true
       const r = await fetch('/api/id-render', {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ brief, boardMm, runId, scaffoldPng: scaffoldPng ?? undefined }),
       })
       const d = await r.json()
-      if (d.ok) setRender({ status: 'done', url: d.url, provider: d.provider })
+      const valid = r.ok && d.ok === true && typeof d.url === 'string' && d.url.length > 0
+      outcome = valid ? { status: 'passed', detail: 'Illustrative concept image returned, not geometry validation.', artifactAvailable: true }
+        : d.ok === false || d.reason === 'unavailable' ? { status: 'failed', detail: d.message || 'Image generation unavailable or failed.' } : outcome
+      if (epoch !== requestEpoch.current) return
+      if (valid) setRender({ status: 'done', url: d.url, provider: d.provider })
       else if (d.reason === 'unavailable') setRender({ status: 'unavailable', message: d.message || 'image generation is unavailable' })
       else setRender({ status: 'error', message: d.message || 'render failed' })
     } catch (e) {
-      setRender({ status: 'error', message: String(e) })
+      if (epoch === requestEpoch.current) setRender({ status: 'error', message: String(e) })
+    } finally {
+      if (!submitted) outcome = { status: 'unknown', detail: 'Generation was not submitted.' }
+      try { await settled?.(outcome) } catch (e) {
+        if (epoch === requestEpoch.current) { setRender({ status: 'error', message: `Could not record generation outcome: ${String(e)}` }) }
+      } finally { busyRef.current = false }
     }
   }
 
@@ -112,7 +144,7 @@ export function IdStageView({
   // unavailable/errored, or when the user explicitly toggles it on a done render.
   // In idle/loading we show a neutral placeholder instead (not the wireframe).
   const scaffoldIsFallback =
-    render.status === 'unavailable' || render.status === 'error' || (render.status === 'done' && showScaffold)
+    render.status === 'idle' || render.status === 'unavailable' || render.status === 'error' || (render.status === 'done' && showScaffold)
 
   return (
     <div className="flex h-full flex-col overflow-y-auto p-5">
@@ -131,7 +163,7 @@ export function IdStageView({
               <Box className="size-3" /> {showScaffold ? 'Show render' : 'Show scaffold'}
             </button>
           )}
-          <button type="button" onClick={generate} disabled={render.status === 'loading'}
+          <button type="button" onClick={generate} disabled={!runId || generationDisabled || render.status === 'loading'}
             className="flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
             {render.status === 'loading' ? <Loader2 className="size-3 animate-spin" /> : <ImageIcon className="size-3" />}
             {render.status === 'done' ? 'Regenerate' : 'Generate render'}
@@ -175,6 +207,8 @@ export function IdStageView({
         )}
       </div>
 
+      {/* The scaffold is inspectable without generating or purchasing an image. */}
+      {render.status === 'idle' && <p className="mt-2 text-xs text-muted-foreground">Dimensioned concept scaffold. No saved image render. Generate render is optional and runs only when you choose it.</p>}
       {/* render status line */}
       {render.status === 'unavailable' && (
         <div className="mt-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-700 dark:text-amber-400">

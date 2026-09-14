@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server.js'
 import fs from 'node:fs'
 import path from 'node:path'
 import { checkRateLimit, clientIpFromHeaders, envInt, rateLimitDisabled } from './lib/rate-limit.ts'
+import { astraApiAllowed } from './lib/astra-request-policy.ts'
+import { astraWorkspace } from './lib/astra-beta'
+import { astraRequestOriginAllowed } from './lib/astra-origin'
 
 /**
  * Account gate: every page and API (and all run artifacts — they're user
@@ -218,6 +221,20 @@ async function enforceRateLimit(req: NextRequest, pathname: string): Promise<Nex
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl
+  const beta = !!process.env.FL_ASTRA_ROOT || (process.env.FL_ASTRA_BETA !== undefined && process.env.FL_ASTRA_BETA !== '0')
+  if (beta) {
+    try { astraWorkspace() } catch {
+      return NextResponse.json({ error: 'Astra beta workspace is not isolated.' }, { status: 403 })
+    }
+    // Next canonicalizes loopback URLs; require the original numeric Host as
+    // well as workspace isolation. Neither Host nor forwarded headers grant auth.
+    if (!astraRequestOriginAllowed(req, process.env.FL_ASTRA_ORIGIN ?? '', true)) {
+      return NextResponse.json({ error: 'Astra beta requires a same-origin request.' }, { status: 403 })
+    }
+    if (pathname.startsWith('/api/') && !astraApiAllowed(pathname, req.method)) {
+      return NextResponse.json({ error: 'Not run: this API is unsupported in the electronics-only Astra beta.' }, { status: 409 })
+    }
+  }
   const requestHeaders = new Headers(req.headers)
   // This marker is server-owned, never a route identity supplied by a caller.
   requestHeaders.delete('x-start-nonce')

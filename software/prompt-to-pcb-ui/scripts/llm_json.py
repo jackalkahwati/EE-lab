@@ -20,13 +20,41 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from digikey import load_env  # .env.local loader
 import toolchain  # toolchain path resolver (env-overridable, macOS defaults)
 
 ANTHROPIC_MODEL = "claude-opus-4-8"
 
 
+class AstraPythonInferenceUnsupported(SystemExit):
+    """Terminal policy failure, never a recoverable provider/fallback error."""
+
+
+def assert_python_inference_allowed():
+    """Beta inference belongs to the server-owned TS budget, not Python.
+
+    Any nonempty beta value other than "0" fails closed. Policy or isolation-root
+    presence also blocks native children, even for empty/malformed values or a
+    beta flag disabled mid-run. Do not add a Python counter or CLI fallback:
+    neither shares the TS budget.
+    """
+    if (os.environ.get("FL_ASTRA_BETA", "") not in ("", "0")
+            or "FL_ASTRA_EXECUTION_POLICY" in os.environ
+            or "FL_ASTRA_ROOT" in os.environ):
+        raise AstraPythonInferenceUnsupported(
+            "Astra beta Python inference requires the server-owned shared call budget; "
+            "this path is unsupported")
+
+
+def load_env():
+    # Delay DigiKey's import-time CA discovery as well as .env.local reads until
+    # after policy validation. Keep the existing helper available to callers.
+    assert_python_inference_allowed()
+    from digikey import load_env as load_local_env
+    load_local_env()
+
+
 def _openai(system, user):
+    assert_python_inference_allowed()
     key = os.environ.get("OPENAI_API_KEY")
     if not key:
         raise RuntimeError("OPENAI_API_KEY not set")
@@ -45,6 +73,7 @@ def _openai(system, user):
 
 
 def _anthropic(system, user):
+    assert_python_inference_allowed()
     import anthropic
     client = anthropic.Anthropic()  # ANTHROPIC_API_KEY from env (load_env)
     with client.messages.stream(
@@ -69,6 +98,7 @@ def _claude_cli(system, user):
     lib/llm.ts claudeCodeCall, honored when USE_CLAUDE_CODE_CLI=1). Burns no
     API credits, which is exactly what saved the pipeline when both metered
     keys ran dry."""
+    assert_python_inference_allowed()
     import subprocess
     bin_path = toolchain.claude_bin()
     prompt = (system + "\nOutput ONLY one JSON object — no prose, no markdown "
@@ -91,7 +121,10 @@ def _claude_cli(system, user):
 def complete_json(system, user):
     """system + user -> parsed JSON object. Provider chain: OpenAI ->
     Anthropic API -> local Claude Code CLI (Max subscription, no credits)."""
+    assert_python_inference_allowed()
     load_env()
+    # The local env loader may itself have introduced beta policy.
+    assert_python_inference_allowed()
     errs = []
     # Order is env-configurable (FL_LLM_ORDER, comma list). Default is
     # anthropic-first: the whole pipeline is Claude/Opus-tuned, so the funded

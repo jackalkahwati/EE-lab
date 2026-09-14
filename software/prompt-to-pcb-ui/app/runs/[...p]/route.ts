@@ -21,6 +21,8 @@
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { astraConfigured, astraErrorResponse } from '@/lib/astra-beta'
+import { publishedAstraFile } from '@/lib/astra-artifacts'
 
 export const dynamic = 'force-dynamic'
 
@@ -53,6 +55,24 @@ export async function GET(_req: Request, ctx: { params: Promise<{ p: string[] }>
   }
   if (segs.some((s) => !s || s === '.' || s === '..' || s.includes('/') || s.includes('\\') || s.includes('\0'))) {
     return Response.json({ error: 'invalid path' }, { status: 400 })
+  }
+  if (astraConfigured()) {
+    try {
+      const relative = segs.slice(1).join('/')
+      const buffer = await publishedAstraFile(_req, segs[0], relative)
+      const extension = path.extname(relative).toLowerCase()
+      return new Response(new Uint8Array(buffer), { headers: {
+        'content-type': MIME[extension] ?? 'application/octet-stream',
+        'content-length': String(buffer.length),
+        'cache-control': 'private, no-store',
+        'x-content-type-options': 'nosniff',
+        'content-security-policy': "default-src 'none'; sandbox; style-src 'unsafe-inline'",
+        ...(extension === '.kicad_pcb' ? { 'content-disposition': 'attachment; filename="chipscale.kicad_pcb"' } : {}),
+      } })
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return Response.json({ error: 'Artifact not yet published.' }, { status: 404 })
+      return astraErrorResponse(error)
+    }
   }
   const base = path.resolve(process.cwd(), 'public', 'runs')
   const fp = path.resolve(base, ...segs)

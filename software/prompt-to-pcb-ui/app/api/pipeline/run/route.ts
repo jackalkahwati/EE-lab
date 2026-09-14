@@ -37,6 +37,8 @@ import { v1Auth } from '@/app/api/v1/_lib'
 import { runDesignGate, runFunctionalWire } from '@/lib/design-gate'
 import { resolvePlanModel } from '@/lib/plan-llm'
 import { kicadCli, kicadPython } from '@/lib/toolchain'
+import { astraConfigured } from '@/lib/astra-beta'
+import { astraPipeline } from '@/lib/astra-pipeline'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 1800
@@ -250,6 +252,8 @@ function csrfRejection(req: Request): Response | null {
 export async function GET(req: Request) {
   const csrf = csrfRejection(req)
   if (csrf) return csrf
+  if (astraConfigured()) return astraPipeline(req, electronicsCsBuild)
+  if (req.headers.has('x-fl-astra-workflow') || new URL(req.url).searchParams.has('astraWorkflow')) return Response.json({ error: 'Astra beta is not enabled; this request cannot use another provider.' }, { status: 409 })
   // Live pipeline execution needs the lab workstation (KiCad CLI, flroute
   // binary, Python toolchain). On a cloud deploy those don't exist, fail
   // clean instead of spawning into nothing.

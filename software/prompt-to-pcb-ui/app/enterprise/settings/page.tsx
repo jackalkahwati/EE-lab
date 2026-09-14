@@ -8,8 +8,8 @@
  * an admin. Read-honest: nothing shown implies physical validation or spend
  * that did not occur.
  */
-import { useEffect, useState } from 'react'
-import { AccessGate } from '@/components/access-gate'
+import { useState } from 'react'
+import { EnterpriseReadState, useEnterpriseRead } from '@/components/enterprise-read-state'
 import { cn } from '@/lib/utils'
 
 type Any = Record<string, any>
@@ -27,7 +27,7 @@ const ROLE_STYLE: Record<string, string> = {
 function RoleBadge({ r }: { r: string }) {
   return (
     <span className={cn(
-      'rounded-sm border px-1.5 py-0.5 font-mono text-[10px]',
+      'min-w-0 break-words rounded-sm border px-1.5 py-0.5 font-mono text-[10px] [overflow-wrap:anywhere]',
       ROLE_STYLE[r] ?? 'border-border bg-muted/30 text-muted-foreground')}>
       {r.replace(/_/g, ' ')}
     </span>
@@ -35,16 +35,10 @@ function RoleBadge({ r }: { r: string }) {
 }
 
 export default function SettingsPage() {
-  const [db, setDb] = useState<Any | null>(null)
+  const { db, error, refresh } = useEnterpriseRead()
   const [tab, setTab] = useState<(typeof TABS)[number]>('Members')
 
-  useEffect(() => {
-    fetch('/api/enterprise', { cache: 'no-store' })
-      .then((r) => r.json()).then(setDb).catch(() => {})
-  }, [])
-
-  if (!db) return <div className="p-6 text-xs text-muted-foreground">Loading settings…</div>
-  if (db.error) return <AccessGate error={db.error} />
+  if (!db) return <EnterpriseReadState error={error} retry={refresh} label="settings" />
 
   const org = db.organizations?.[0]
   const members: Any[] = db.members ?? []
@@ -67,14 +61,14 @@ export default function SettingsPage() {
   }, {})
 
   return (
-    <div className="min-h-screen bg-background p-4 text-xs text-foreground">
-      <div className="mb-4 flex items-center gap-3">
+    <div className="min-h-screen min-w-0 bg-background p-4 text-xs text-foreground">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
         <h1 className="text-base font-semibold">Workspace settings</h1>
         {org && (
-          <span className="text-muted-foreground">
+          <span className="min-w-0 break-words text-muted-foreground [overflow-wrap:anywhere]">
             {org.name} · plan: <span className="font-mono">{org.plan}</span>
             {org.security_settings?.demo && (
-              <span className="ml-2 rounded-sm border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-500">
+              <span className="ml-2 inline-block rounded-sm border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-500">
                 SYNTHETIC DEMO DATA
               </span>
             )}
@@ -82,7 +76,7 @@ export default function SettingsPage() {
         )}
       </div>
 
-      <div className="mb-4 flex gap-1 border-b border-border">
+      <div className="mb-4 flex min-w-0 flex-wrap gap-1 border-b border-border">
         {TABS.map((t) => (
           <button
             key={t}
@@ -98,9 +92,9 @@ export default function SettingsPage() {
       </div>
 
       {tab === 'Members' && (
-        <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
-          <div className="rounded-md border border-border">
-            <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+        <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="min-w-0 rounded-md border border-border">
+            <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
               <span className="text-xs font-semibold">Team members</span>
               <span className="font-mono text-[10px] text-muted-foreground">{members.length}</span>
               <span className="ml-auto font-mono text-[9px] text-muted-foreground">
@@ -128,21 +122,21 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          <div className="rounded-md border border-border">
+          <div className="min-w-0 rounded-md border border-border">
             <div className="border-b border-border px-3 py-2 text-xs font-semibold">
               Role catalog ({roles.length})
             </div>
             <div className="max-h-[28rem] divide-y divide-border overflow-y-auto">
               {roles.map((r) => (
                 <div key={r} className="px-3 py-2">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <RoleBadge r={r} />
                     <span className="ml-auto font-mono text-[9px] text-muted-foreground">
                       {(rolePerms[r] ?? []).length} permission(s)
                     </span>
                   </div>
                   {(rolePerms[r] ?? []).length > 0 && (
-                    <p className="mt-1 text-[10px] leading-snug text-muted-foreground">
+                    <p className="mt-1 break-words text-[10px] leading-snug text-muted-foreground [overflow-wrap:anywhere]">
                       {(rolePerms[r] ?? []).slice(0, 6).map((p) => p.replace(/_/g, ' ')).join(' · ')}
                       {(rolePerms[r] ?? []).length > 6 && ' …'}
                     </p>
@@ -183,25 +177,25 @@ export default function SettingsPage() {
           </div>
 
           <div className="grid gap-4 lg:grid-cols-2">
-            <div className="rounded-md border border-border">
+            <div className="min-w-0 rounded-md border border-border">
               <div className="border-b border-border px-3 py-2 text-xs font-semibold">Usage by member</div>
               <div className="divide-y divide-border">
                 {Object.entries(byUser).sort((a, b) => b[1] - a[1]).map(([u, c]) => (
-                  <div key={u} className="flex items-center justify-between px-3 py-1.5">
-                    <span className="text-xs">{u}</span>
-                    <span className="font-mono text-[11px] text-muted-foreground">{c} cr</span>
+                  <div key={u} className="flex items-center justify-between gap-2 px-3 py-1.5">
+                    <span className="min-w-0 break-words text-xs [overflow-wrap:anywhere]">{u}</span>
+                    <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{c} cr</span>
                   </div>
                 ))}
                 {!Object.keys(byUser).length && <p className="px-3 py-2 text-muted-foreground">No usage.</p>}
               </div>
             </div>
-            <div className="rounded-md border border-border">
+            <div className="min-w-0 rounded-md border border-border">
               <div className="border-b border-border px-3 py-2 text-xs font-semibold">Usage by program</div>
               <div className="divide-y divide-border">
                 {Object.entries(byProgram).sort((a, b) => b[1] - a[1]).map(([p, c]) => (
-                  <div key={p} className="flex items-center justify-between px-3 py-1.5">
-                    <span className="truncate text-xs">{progName(p)}</span>
-                    <span className="font-mono text-[11px] text-muted-foreground">{c} cr</span>
+                  <div key={p} className="flex items-center justify-between gap-2 px-3 py-1.5">
+                    <span className="min-w-0 truncate text-xs">{progName(p)}</span>
+                    <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{c} cr</span>
                   </div>
                 ))}
                 {!Object.keys(byProgram).length && <p className="px-3 py-2 text-muted-foreground">No usage.</p>}
@@ -209,17 +203,17 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          <div className="rounded-md border border-border">
+          <div className="min-w-0 rounded-md border border-border">
             <div className="border-b border-border px-3 py-2 text-xs font-semibold">
               Usage ledger <span className="font-mono text-[10px] text-muted-foreground">{usage.length} entries</span>
             </div>
             <div className="max-h-72 divide-y divide-border overflow-y-auto">
               {usage.map((u, i) => (
-                <div key={i} className="flex items-center gap-3 px-3 py-1.5">
-                  <span className="w-40 shrink-0 font-mono text-[10px] text-muted-foreground">{u.usage_type}</span>
-                  <span className="w-14 shrink-0 font-mono text-[11px]">{u.credits} cr</span>
-                  <span className="shrink-0 text-[11px] text-muted-foreground">{u.user}</span>
-                  <span className="truncate text-[11px] text-muted-foreground">{progName(u.program_id)}</span>
+                <div key={i} className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 px-3 py-1.5">
+                  <span className="min-w-0 break-words font-mono text-[10px] text-muted-foreground [overflow-wrap:anywhere] sm:w-40">{u.usage_type}</span>
+                  <span className="shrink-0 font-mono text-[11px]">{u.credits} cr</span>
+                  <span className="min-w-0 break-words text-[11px] text-muted-foreground [overflow-wrap:anywhere]">{u.user}</span>
+                  <span className="min-w-0 truncate text-[11px] text-muted-foreground">{progName(u.program_id)}</span>
                   <span className="ml-auto shrink-0 font-mono text-[9px] text-muted-foreground">
                     {String(u.timestamp).slice(0, 16).replace('T', ' ')}
                   </span>
@@ -232,7 +226,7 @@ export default function SettingsPage() {
 
       {tab === 'Security' && (
         <div className="grid gap-4 lg:grid-cols-2">
-          <div className="rounded-md border border-border">
+          <div className="min-w-0 rounded-md border border-border">
             <div className="border-b border-border px-3 py-2 text-xs font-semibold">Authentication & policies</div>
             <div className="space-y-2 p-3">
               <Row k="Auth" v={org?.security_settings?.auth ?? 'session'} />
@@ -242,7 +236,7 @@ export default function SettingsPage() {
               <Row k="Demo mode" v={org?.security_settings?.demo ? 'on (synthetic data)' : 'off'} />
             </div>
           </div>
-          <div className="rounded-md border border-border">
+          <div className="min-w-0 rounded-md border border-border">
             <div className="border-b border-border px-3 py-2 text-xs font-semibold">Audit trail</div>
             <div className="space-y-2 p-3">
               <Row k="Audit chain"
@@ -256,11 +250,11 @@ export default function SettingsPage() {
               </p>
               <div className="mt-1 max-h-40 space-y-1 overflow-y-auto rounded-sm border border-border bg-background p-2">
                 {(db.audit_tail ?? []).slice(-8).reverse().map((a: Any, i: number) => (
-                  <div key={i} className="flex items-center gap-2 font-mono text-[9px] text-muted-foreground">
-                    <span className={cn('shrink-0', String(a.action).startsWith('DENIED') && 'text-destructive')}>
+                  <div key={i} className="flex min-w-0 flex-wrap items-center gap-2 break-words font-mono text-[9px] text-muted-foreground [overflow-wrap:anywhere]">
+                    <span className={cn('min-w-0', String(a.action).startsWith('DENIED') && 'text-destructive')}>
                       {a.action}
                     </span>
-                    <span className="ml-auto shrink-0">{a.actor}</span>
+                    <span className="ml-auto min-w-0">{a.actor}</span>
                   </div>
                 ))}
               </div>
@@ -276,9 +270,9 @@ function Row({ k, v, muted, tone, note }: {
   k: string; v: string; muted?: boolean; tone?: string; note?: string
 }) {
   return (
-    <div className="flex items-baseline justify-between gap-2 border-b border-border/60 pb-1.5 last:border-0">
+    <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-2 border-b border-border/60 pb-1.5 last:border-0">
       <span className="text-[11px] text-muted-foreground">{k}</span>
-      <span className="text-right">
+      <span className="min-w-0 break-words text-right [overflow-wrap:anywhere]">
         <span className={cn('font-mono text-[11px]',
           muted && 'text-muted-foreground',
           tone === 'emerald' && 'text-emerald-500',

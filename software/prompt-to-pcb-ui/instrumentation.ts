@@ -14,6 +14,9 @@
  * The constructor-from-instance trick keeps us version-agnostic.
  */
 export async function register() {
+  // The isolated beta owns explicit request deadlines. Never make a bootstrap
+  // network probe (or initialize unrelated telemetry) in that workspace.
+  if (process.env.FL_ASTRA_BETA === '1') return
   if (process.env.NEXT_RUNTIME && process.env.NEXT_RUNTIME !== 'nodejs') return
   try {
     // touch fetch so undici materializes its global dispatcher

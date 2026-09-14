@@ -2,16 +2,10 @@ import { headers } from 'next/headers'
 import { PrivateAnalytics } from '@/components/private-analytics'
 import { START_SCRUB_SCRIPT } from '@/lib/start-draft'
 import type { Metadata, Viewport } from 'next'
-import { Inter, JetBrains_Mono } from 'next/font/google'
+import { appFontClasses, appFontStyle } from 'firstlight-app-fonts'
 import './globals.css'
 import { TopNav } from '@/components/top-nav'
 import { CommandPalette } from '@/components/command-palette'
-
-const inter = Inter({ variable: '--font-inter', subsets: ['latin'] })
-const jetbrainsMono = JetBrains_Mono({
-  variable: '--font-jetbrains-mono',
-  subsets: ['latin'],
-})
 
 export const metadata: Metadata = {
   title: 'Firstlight, Prompt to PCBA',
@@ -33,7 +27,8 @@ export default async function RootLayout({
   return (
     <html
       lang="en"
-      className={`bg-background ${inter.variable} ${jetbrainsMono.variable}`}
+      className={`bg-background ${appFontClasses}`}
+      style={appFontStyle}
     >
       <head>
         {nonce && <script nonce={nonce} dangerouslySetInnerHTML={{ __html: START_SCRUB_SCRIPT }} />}
@@ -42,7 +37,7 @@ export default async function RootLayout({
         {!nonce && <TopNav />}
         {!nonce && <CommandPalette />}
         {children}
-        {!nonce && process.env.NODE_ENV === 'production' && process.env.VERCEL === '1' && <PrivateAnalytics />}
+        {!nonce && process.env.FL_ASTRA_BETA !== '1' && process.env.NODE_ENV === 'production' && process.env.VERCEL === '1' && <PrivateAnalytics />}
       </body>
     </html>
   )

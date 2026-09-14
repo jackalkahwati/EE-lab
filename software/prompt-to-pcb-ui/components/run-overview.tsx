@@ -37,8 +37,20 @@ function Icon({ s }: { s: S }) {
   return <AlertTriangle className="size-3.5" />
 }
 
-export function RunOverview({ runId, run }: { runId: string | null; run?: Run | null }) {
+type Props = { runId: string | null; run?: Run | null; refreshKey?: string | number }
+
+export function RunOverview(props: Props) {
+  // A new selection or completion signature cannot render even one frame of the
+  // preceding artifact set. Metadata-only parent renders do not restart reads.
+  const identity = JSON.stringify([props.runId, props.run?.status,
+    props.run?.stages?.map((s) => `${s.id}:${s.state}`).join(','), props.refreshKey])
+  return <RunOverviewArtifacts key={identity} {...props} />
+}
+
+function RunOverviewArtifacts({ runId, run }: Props) {
   const [a, setA] = useState<Record<string, any> | null | undefined>(undefined)
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  const [retry, setRetry] = useState(0)
   const [promptOpen, setPromptOpen] = useState(false)
 
   useEffect(() => {
@@ -46,7 +58,8 @@ export function RunOverview({ runId, run }: { runId: string | null; run?: Run | 
       setA(null)
       return
     }
-    let off = false
+    const controller = new AbortController()
+    setA(undefined); setErrors({})
     const base = `/runs/${runId}/data`
     const files = [
       'last-run.json', 'drc.json', 'recovery-loop.json', 'recovery.json',
@@ -54,33 +67,35 @@ export function RunOverview({ runId, run }: { runId: string | null; run?: Run | 
       'assembly-readiness.json', 'fl1-validation.json', 'constraints.json',
       'mcu-selection.json',
     ]
-    Promise.all([
-      ...files.map((f) =>
-        fetch(`${base}/${f}`, { cache: 'no-store' })
-          .then((r) => (r.ok ? r.json() : null))
-          .then((d) => [f.replace('.json', ''), d] as const)
-          .catch(() => [f.replace('.json', ''), null] as const),
-      ),
-      // the bespoke chip-scale board (the real chip-down design), so the headline
-      // describes THAT, not the flroute reference board
-      fetch(`/runs/${runId}/electronics/chipscale-board.json`, { cache: 'no-store' })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d) => ['chipscale', d] as const)
-        .catch(() => ['chipscale', null] as const),
-    ]).then((pairs) => {
-      if (!off) setA(Object.fromEntries(pairs))
-    })
-    return () => {
-      off = true
+    async function read(key: string, url: string) {
+      try {
+        const r = await fetch(url, { cache: 'no-store', signal: controller.signal })
+        if (r.status === 404) return { key, data: null, error: null }
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        const data = await r.json()
+        if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Invalid artifact')
+        return { key, data, error: null }
+      } catch (e) {
+        return { key, data: null, error: String(e) }
+      }
     }
-    // Re-read when the pipeline moves: the artefacts this panel describes are
-    // written stage by stage, and a fetch at run start (before any exist) used to
-    // leave every tile at "not generated" for the life of the page.
-  }, [runId, run?.status, run?.stages?.map((s) => `${s.id}:${s.state}`).join(',')])
+    Promise.all([
+      ...files.map((f) => read(f.replace('.json', ''), `${base}/${f}`)),
+      read('chipscale', `/runs/${runId}/electronics/chipscale-board.json`),
+    ]).then((results) => {
+      if (controller.signal.aborted) return
+      setA(Object.fromEntries(results.map(({ key, data }) => [key, data])))
+      setErrors(Object.fromEntries(results.filter((r) => r.error).map(({ key, error }) => [key, error!])))
+    })
+    return () => controller.abort()
+  }, [runId, retry])
 
   if (!runId || a === null)
     return <div className="p-4 text-xs text-muted-foreground">Select a run to see its overview.</div>
-  if (a === undefined) return <div className="p-4 text-xs text-muted-foreground">Loading…</div>
+  if (a === undefined) return <div role="status" className="p-4 text-xs text-muted-foreground">Loading overview artifacts…</div>
+
+  const failedReads = Object.keys(errors)
+  const hasArtifacts = Object.values(a).some((artifact) => artifact !== null)
 
   const drc = a['drc']
   const hardViol = drc
@@ -106,12 +121,14 @@ export function RunOverview({ runId, run }: { runId: string | null; run?: Run | 
   if (verdict === 'passed' && rec?.final_status === 'recovered_and_passed') verdict = 'recovered'
   // Runs with no chip-scale artifact at all still fall back to the recorded
   // last-run status so old boards keep their row.
-  if (bv.state === 'not_built') {
+  if (bv.state === 'not_built' && !errors.chipscale) {
     if (rec?.final_status === 'recovered_and_passed') verdict = 'recovered'
     else if (status === 'PASSED') verdict = 'passed'
     else if (status === 'GATE FAILED') verdict = 'failed'
     else if (status) verdict = 'needs_review'
   }
+
+  if (errors.chipscale || (bv.state === 'not_built' && (errors['last-run'] || errors['recovery-loop']))) verdict = 'needs_review'
 
   // DRC + Routing tiles read the SHIPPED board's numbers straight off the same
   // verdict, so a tile can never disagree with the headline above it. The
@@ -195,6 +212,22 @@ export function RunOverview({ runId, run }: { runId: string | null; run?: Run | 
     ],
   ]
 
+  // A failed read is unknown, not proof that its output was never generated.
+  const rowSources: Record<string, string[]> = {
+    'Final verdict': ['chipscale', ...(bv.state === 'not_built' ? ['last-run', 'recovery-loop'] : [])],
+    Routing: ['chipscale', ...(chipUnrouted === null ? ['drc'] : [])],
+    DRC: ['chipscale', ...(chipDrcErrors === null ? ['drc'] : [])],
+    Recovery: ['recovery-loop'],
+    'Advanced routing': ['advanced-routing-report'],
+    Sourcing: ['sourcing-report'],
+    'Assembly readiness': ['assembly-readiness'],
+    'FL-1 validation package': ['fl1-validation'],
+  }
+  const visibleRows = rows.map(([label, state, detail]): [string, S, string] => {
+    const unavailable = rowSources[label]?.filter((key) => errors[key]) ?? []
+    return unavailable.length ? [label, 'needs_review', `Could not load ${unavailable.join(', ')}. Retry loading.`] : [label, state, detail]
+  })
+
   // ---- board description (title + what this board is), from last-run.json ----
   const lr = a['last-run']
   const spec = lr?.composeSpec
@@ -238,6 +271,15 @@ export function RunOverview({ runId, run }: { runId: string | null; run?: Run | 
 
   return (
     <div className="h-full space-y-4 overflow-y-auto p-4 text-xs">
+      {(failedReads.length > 0 || !hasArtifacts) && (
+        <div role={failedReads.length ? 'alert' : 'status'} className="rounded-md border border-border p-3 text-muted-foreground">
+          <p>{failedReads.length
+            ? `${hasArtifacts ? 'Partial overview. ' : ''}Could not load ${failedReads.length} artifact(s). This is not a board verdict.`
+            : 'No overview artifacts have been saved for this run yet.'}</p>
+          {failedReads.length > 0 && <p className="mt-1">{failedReads.join(', ')}</p>}
+          <button type="button" onClick={() => setRetry((n) => n + 1)} className="mt-2 rounded-md border border-border px-3 py-1 text-xs">Retry loading overview</button>
+        </div>
+      )}
       <div className="rounded-md border border-border bg-muted/20 p-3">
         <p className="text-sm font-semibold text-foreground">{title}</p>
         {purpose && (
@@ -272,7 +314,7 @@ export function RunOverview({ runId, run }: { runId: string | null; run?: Run | 
           overlapped. auto-fit sizes by actual container space, and flex-wrap lets a
           badge drop below its label instead of colliding when a tile is still tight. */}
       <div className="grid gap-1.5 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
-        {rows.map(([label, s, detail]) => (
+        {visibleRows.map(([label, s, detail]) => (
           <div
             key={label}
             className="flex min-w-0 flex-col gap-1 rounded-md border border-border px-3 py-2"

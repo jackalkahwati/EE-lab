@@ -64,12 +64,53 @@ export interface RealBoard {
   ato: AtoFile[] | null
 }
 
-async function fetchJson<T>(url: string): Promise<T | null> {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isCount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+}
+
+function isMeasurement(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+}
+
+function isStringList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string')
+}
+
+/** This legacy view needs a complete analysis, not merely a retained PCB file.
+ * Null means reports unavailable; filling gaps would invent clean checks and
+ * physical dimensions. Imported designs use their dedicated artifact views,
+ * not this FL-1 run's generated-design / firmware / routing-history claims. */
+function isAnalyzedBoard(value: unknown): value is RealBoardJson {
+  if (!isRecord(value) || value.imported === true || value.source === 'manual-import' || value.analysisError) return false
+  const { boardSize, placement, drc } = value
+  return typeof value.source === 'string' && value.source.trim().length > 0
+    && isRecord(boardSize) && isMeasurement(boardSize.wMm) && boardSize.wMm > 0
+    && isMeasurement(boardSize.hMm) && boardSize.hMm > 0
+    && isCount(value.layers) && value.layers > 0
+    && isCount(value.components) && isCount(value.netsTotal) && isCount(value.netsRouted)
+    && value.netsRouted <= value.netsTotal
+    && isCount(value.tracks) && isCount(value.vias) && isMeasurement(value.hpwlMm)
+    && isStringList(value.unroutedNets) && isStringList(value.zoneServedNets)
+    && isRecord(placement) && isCount(placement.overlaps)
+    && isStringList(placement.overlapPairs) && isStringList(placement.offBoard)
+    && isRecord(drc) && isCount(drc.violations) && isCount(drc.unconnectedItems)
+    && typeof drc.kicadVersion === 'string' && typeof drc.date === 'string'
+    && Array.isArray(drc.violationSummaries) && drc.violationSummaries.every((item) =>
+      isRecord(item) && typeof item.type === 'string' && typeof item.description === 'string')
+}
+
+async function fetchJson<T>(url: string, onReadError?: () => void): Promise<T | null> {
   try {
-    const res = await fetch(url)
-    if (!res.ok) return null
+    const res = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(15000) })
+    if (res.status === 404) return null
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
     return (await res.json()) as T
   } catch {
+    onReadError?.()
     return null
   }
 }
@@ -171,10 +212,13 @@ export const SHIPPED_BOARD = 'shipped board (chip-down)'
  * chip-scale artifact — reported failures on the board that actually ships.
  * This puts the shipped board's referee result in the same list, first.
  */
-function chipReport(chip: ChipScaleJson | null): GateReport | null {
-  if (!chip?.drc?.available) return null
-  const errors = chip.drc.errors ?? 0
-  const types = chip.drc.errorTypes ?? {}
+function chipReport(chip: unknown): GateReport | null {
+  if (!isRecord(chip) || chip.imported === true || chip.boardSource === 'manual-import'
+    || !isRecord(chip.drc) || chip.drc.available !== true
+    || !isCount(chip.drc.errors) || !isRecord(chip.drc.errorTypes)
+    || !Object.values(chip.drc.errorTypes).every(isCount)) return null
+  const errors = chip.drc.errors
+  const types = chip.drc.errorTypes as Record<string, number>
   const electrical =
     (types.shorting_items ?? 0) + (types.tracks_crossing ?? 0) + (types.unconnected_items ?? 0)
   const named = Object.entries(types)
@@ -196,11 +240,9 @@ function chipReport(chip: ChipScaleJson | null): GateReport | null {
         measured: errors === 0 ? '0 errors' : `${errors}: ${named}`,
         pass: errors === 0,
       },
-      {
-        rule: 'fab rule profile',
-        measured: chip.drc.ruleProfile ?? 'unknown',
-        pass: true,
-      },
+      ...(typeof chip.drc.ruleProfile === 'string' && chip.drc.ruleProfile.trim()
+        ? [{ rule: 'fab rule profile', measured: chip.drc.ruleProfile, pass: true }]
+        : []),
     ],
   }
 }
@@ -280,23 +322,31 @@ function buildReports(b: RealBoardJson): GateReport[] {
   ]
 }
 
-export async function loadRealBoard(base = ''): Promise<RealBoard | null> {
+export async function loadRealBoard(base = '', onReadError?: () => void): Promise<RealBoard | null> {
   // base '' = shared latest artifacts (/data); '/runs/<id>' = a run's own snapshot
-  const board = await fetchJson<RealBoardJson>(`${base}/data/board.json`)
-  if (!board) return null
-  const [bom, ato, chip] = await Promise.all([
-    fetchJson<BomLine[]>(`${base}/data/bom.json`),
-    fetchJson<AtoFile[]>(`${base}/data/ato.json`),
+  const board = await fetchJson<unknown>(`${base}/data/board.json`, onReadError)
+  if (!isAnalyzedBoard(board)) return null
+  const [bomJson, atoJson, chip] = await Promise.all([
+    fetchJson<unknown>(`${base}/data/bom.json`, onReadError),
+    fetchJson<unknown>(`${base}/data/ato.json`, onReadError),
     // the bespoke chip-scale board (the real chip-down design)
-    base ? fetchJson<ChipScaleJson>(`${base}/electronics/chipscale-board.json`) : Promise.resolve(null),
+    base ? fetchJson<unknown>(`${base}/electronics/chipscale-board.json`, onReadError) : Promise.resolve(null),
   ])
+  const bom = Array.isArray(bomJson) && bomJson.every((line): line is BomLine =>
+    isRecord(line) && typeof line.ref === 'string' && typeof line.part === 'string'
+    && typeof line.lcsc === 'string' && isCount(line.qty) && isMeasurement(line.unitPrice)
+    && (line.lineType === 'ordered' || line.lineType === 'buyer-furnished')) ? bomJson : null
+  const ato = Array.isArray(atoJson) && atoJson.every((file): file is AtoFile =>
+    isRecord(file) && typeof file.name === 'string' && typeof file.content === 'string') ? atoJson : null
   // When the chip-scale board exists, the headline size + part count should be
   // ITS numbers (the small chip-down board that goes in the enclosure and now
   // renders in 3D) — not the flroute reference board. DRC/BOM still come from the
   // flroute board.json until those are repointed too.
-  if (chip?.boardMm?.w && chip?.boardMm?.h) {
+  if (isRecord(chip) && chip.imported !== true && chip.boardSource !== 'manual-import'
+    && isRecord(chip.boardMm) && isMeasurement(chip.boardMm.w) && chip.boardMm.w > 0
+    && isMeasurement(chip.boardMm.h) && chip.boardMm.h > 0) {
     board.boardSize = { wMm: chip.boardMm.w, hMm: chip.boardMm.h }
-    if (chip.components) board.components = chip.components
+    if (isCount(chip.components)) board.components = chip.components
     board.source = 'chip-scale chip-down board'
   }
   // The shipped board's referee result leads; the reference variant's reports
