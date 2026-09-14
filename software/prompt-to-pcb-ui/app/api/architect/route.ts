@@ -17,6 +17,11 @@ import { MODEL } from '@/lib/model-tiers'
 import { PRODUCT_SPEC_SCHEMA, normalizeSpec } from '@/lib/product-spec'
 import { idBriefSummary, normalizeIdBrief, type IdBrief } from '@/lib/id-brief'
 import { withKeepalive } from '@/lib/keepalive'
+import { astraConfigured, astraErrorResponse, inAstraWorkflow } from '@/lib/astra-beta'
+import { AstraError, assertAstraActive, isAstraError } from '@/lib/astra-execution'
+import { ASTRA_ARCHITECT_SYSTEM, validateAstraArchitectRequest, validateAstraSpecification } from '@/lib/astra-design-contract'
+import { preflightAstraElectronics } from '@/lib/astra-local-parts'
+import { readAstraBody } from '@/lib/astra-body'
 
 export const dynamic = 'force-dynamic'
 
@@ -124,6 +129,7 @@ async function callLLM(userMsg: string, force: boolean, override?: LLMOverride, 
       )
       return { out: JSON.parse(firstJsonObject(text)), provider }
     } catch (e) {
+      if (isAstraError(e)) throw e
       lastErr = e
     }
   }
@@ -176,6 +182,37 @@ function firstJsonObject(text: string): string {
  * withKeepalive returns fast responses untouched. See lib/keepalive.ts.
  */
 export async function POST(req: Request): Promise<Response> {
+  if (astraConfigured()) {
+    try {
+      return await inAstraWorkflow(req, 'interview', async (workflow) => {
+        await preflightAstraElectronics()
+        const request = validateAstraArchitectRequest(await readAstraBody(req))
+        assertAstraActive(workflow.execution)
+        // The selected template constrains the actual model output. Do not send
+        // arbitrary product intent into the generic architect and silently turn
+        // its response into the supported breakout through normalization.
+        const { text, provider } = await callLLMText(ASTRA_ARCHITECT_SYSTEM, JSON.stringify(request))
+        assertAstraActive(workflow.execution)
+        let raw: unknown
+        try { raw = JSON.parse(firstJsonObject(text)) }
+        catch { throw new AstraError('output', 'Astra architect returned invalid JSON. No repair call was submitted.') }
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)
+          || Object.keys(raw).length !== 2 || !Object.hasOwn(raw, 'enough') || !Object.hasOwn(raw, 'spec')
+          || (raw as { enough?: unknown }).enough !== true) {
+          throw new AstraError('output', 'Astra architect must return one finalized specification for the selected template.')
+        }
+        const spec = validateAstraSpecification((raw as { spec: unknown }).spec, request.templateId)
+        assertAstraActive(workflow.execution)
+        workflow.templateId = request.templateId
+        workflow.spec = spec
+        workflow.phase = 'ready'
+        return Response.json({ type: 'spec', spec, request: request.request, provider })
+      })
+    } catch (error) {
+      return astraErrorResponse(isAstraError(error) ? error : new AstraError('policy', 'Astra template request or generated specification is unsupported. No alternate provider or repair call was submitted.'))
+    }
+  }
+  if (req.headers.has('x-fl-astra-workflow') || new URL(req.url).searchParams.has('astraWorkflow')) return Response.json({ error: 'Astra beta is not enabled; no alternate provider was called.' }, { status: 409 })
   return withKeepalive(handlePost(req))
 }
 
@@ -236,6 +273,7 @@ async function handlePost(req: Request) {
       provider,
     })
   } catch (err) {
+    if (isAstraError(err)) throw err
     return Response.json({ error: String(err) }, { status: 500 })
   }
 }

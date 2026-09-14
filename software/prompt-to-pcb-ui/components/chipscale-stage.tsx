@@ -7,7 +7,8 @@
  * than the standard flroute pipeline. Its dimensions flow into the mechanical
  * fit-check + redesign loop. Honest: only "routed" with traces AND zero errors.
  */
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { boardVerdict } from '@/lib/verdict'
 import { cn } from '@/lib/utils'
 import { Loader2, CircuitBoard } from 'lucide-react'
 import { llmHeaders } from '@/components/llm-settings'
@@ -16,6 +17,7 @@ import { Board3D } from '@/components/board-3d'
 
 type Result = {
   ok: boolean
+  imported?: boolean
   boardMm?: { w: number; h: number } | null
   areaMm2?: number | null
   components?: number
@@ -58,8 +60,29 @@ type Result = {
   error?: string
 }
 
-export function ChipScaleStage({ spec, runId, asElectronics }: { spec: any; runId?: string; asElectronics?: boolean }) {
-  const [state, setState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
+function importedBoard(d: any): boolean {
+  return d?.imported === true && d.boardSource === 'manual-import' && d.manualImport?.kind === 'pcb'
+}
+
+function validBoard(d: any): d is Result {
+  return d && Number.isFinite(d.boardMm?.w) && d.boardMm.w > 0
+    && Number.isFinite(d.boardMm?.h) && d.boardMm.h > 0
+}
+
+type Props = {
+  spec: any; runId?: string; asElectronics?: boolean; generationDisabled?: boolean
+  onBuildStart?: () => boolean | void | Promise<boolean | void>
+  onBuildSettled?: (result: { status: 'passed' | 'failed' | 'unknown'; detail?: string; artifactAvailable?: boolean }) => void | Promise<void>
+  /** Invalidates persisted facts after an explicit attempt settles, even on error. */
+  onBuilt?: () => void
+}
+
+export function ChipScaleStage(props: Props) {
+  return <ChipScaleArtifactView key={props.runId ?? 'draft'} {...props} />
+}
+
+function ChipScaleArtifactView({ spec, runId, asElectronics, generationDisabled, onBuildStart, onBuildSettled, onBuilt }: Props) {
+  const [state, setState] = useState<'idle' | 'loading' | 'generating' | 'missing' | 'done' | 'error'>(runId ? 'loading' : 'idle')
   const [res, setRes] = useState<Result | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [showCode, setShowCode] = useState(false)
@@ -67,53 +90,101 @@ export function ChipScaleStage({ spec, runId, asElectronics }: { spec: any; runI
   // routed layout, the schematic, or the build report (DRC + redesign loop).
   const [view, setView] = useState<'pcba' | 'layout' | 'schematic' | 'report'>('pcba')
 
-  // Load the already-built chip-scale board on mount (persisted by /api/electronics-cs
-  // as chipscale-board.json) so the stage shows the real board when the full-pipeline
-  // orchestrator built it via the API — before, the stage only reflected a board when
-  // ITS OWN button was clicked, so after an auto-run this view sat empty.
+  const [retry, setRetry] = useState(0)
+  const [operation, setOperation] = useState<'read' | 'generate'>('read')
+  const [keepCapabilities, setKeepCapabilities] = useState(false)
+  const request = useRef({ version: 0, generating: false })
+  const readController = useRef<AbortController | null>(null)
+
   useEffect(() => {
-    if (!runId) return
-    let off = false
-    fetch(`/runs/${runId}/electronics/chipscale-board.json`, { cache: 'no-store' })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (off || !d?.boardMm?.w) return
-        setRes({
-          ok: (d.drc?.errors ?? 1) === 0,
-          boardMm: d.boardMm, areaMm2: d.areaMm2, components: d.components,
-          routedTraces: d.routedTraces, realFootprints: d.realFootprints,
-          drc: d.drc ?? null, drcRepair: d.drcRepair ?? null,
-          svgUrl: `/runs/${runId}/electronics/chipscale.svg?t=${runId}`,
+    const scope = request.current
+    const token = ++scope.version
+    const controller = new AbortController()
+    readController.current = controller
+    setRes(null); setErr(null); setOperation('read')
+    setState(runId ? 'loading' : 'idle')
+    if (runId) {
+      fetch(`/runs/${runId}/electronics/chipscale-board.json`, { cache: 'no-store', signal: controller.signal })
+        .then(async (r) => {
+          if (r.status === 404) return null
+          if (!r.ok) throw new Error(`Could not load board (${r.status}).`)
+          const d = await r.json()
+          if (importedBoard(d)) {
+            const mm = d.boardMm
+            return { ok: true, imported: true, components: Number.isFinite(d.components) ? d.components : undefined,
+              boardMm: Array.isArray(mm) && mm.length === 2 && mm.every((n: unknown) => typeof n === 'number' && Number.isFinite(n) && n > 0) ? { w: mm[0], h: mm[1] } : null }
+          }
+          if (!validBoard(d)) throw new Error('The saved board artifact is invalid.')
+          return { ...d, svgUrl: `/runs/${runId}/electronics/chipscale.svg?t=${runId}` }
         })
-        setState('done')
-      })
-      .catch(() => {})
-    return () => { off = true }
-  }, [runId])
+        .then((d) => {
+          if (scope.version !== token || controller.signal.aborted) return
+          setRes(d); setState(d ? 'done' : 'missing')
+        })
+        .catch((e) => {
+          if (scope.version !== token || controller.signal.aborted) return
+          setErr(String(e)); setState('error')
+        })
+    }
+    // Do not cancel paid generation when a panel closes. Ignore its response.
+    return () => { ++scope.version; controller.abort() }
+  }, [runId, retry])
 
   async function run(opts?: { keepCapabilities?: boolean }) {
-    if (!spec || !runId) return
-    setState('loading'); setErr(null)
+    if (!spec || !runId || generationDisabled || request.current.generating) return
+    const scope = request.current
+    const token = ++scope.version
+    scope.generating = true
+    const start = onBuildStart
+    const settled = onBuildSettled
+    let submitted = false
+    let outcome: Parameters<NonNullable<Props['onBuildSettled']>>[0] = { status: 'unknown', detail: 'Board request outcome unknown. Server work may continue.' }
+    readController.current?.abort()
+    setState('generating'); setErr(null); setOperation('generate')
+    setKeepCapabilities(opts?.keepCapabilities === true)
     try {
+      const permission = start?.()
+      const allowed = permission && typeof (permission as Promise<unknown>).then === 'function' ? await permission : permission
+      if (allowed === false || !(scope.version === token)) {
+        outcome = { status: 'unknown', detail: 'Generation was not submitted.' }
+        if (scope.version === token) { setErr('Generation was not started. Another action or history persistence prevented it.'); setState('error') }
+        return
+      }
+      submitted = true
       const r = await fetch('/api/electronics-cs', {
         method: 'POST', headers: { 'content-type': 'application/json', ...llmHeaders() },
         body: JSON.stringify({ spec, runId, keepCapabilities: opts?.keepCapabilities === true }),
       })
       const d = await r.json()
-      if (d.error && !d.boardMm) throw new Error(d.error)
+      if (d?.error) outcome = { status: 'failed', detail: String(d.error) }
+      if (!r.ok || (d.error && !d.boardMm)) throw new Error(d.error || `Generation failed (${r.status}).`)
+      if (!validBoard(d)) throw new Error('The generated board artifact is invalid.')
+      const verdict = boardVerdict(d)
+      outcome = { status: verdict.state === 'passed' ? 'passed' : verdict.state === 'failed' ? 'failed' : 'unknown', detail: verdict.detail, artifactAvailable: true }
+      if (scope.version !== token) return
       setRes(d); setState('done')
-    } catch (e) { setErr(String(e)); setState('error') }
+    } catch (e) {
+      if (scope.version !== token) return
+      setErr(String(e)); setState('error')
+    } finally {
+      if (!submitted) outcome = { status: 'unknown', detail: 'Generation was not submitted.' }
+      try { await settled?.(outcome) } catch (e) {
+        if (scope.version === token) { setErr(`Could not record generation outcome: ${String(e)}`); setState('error') }
+      } finally { scope.generating = false }
+      if (submitted && scope.version === token) onBuilt?.()
+    }
   }
 
   const errCount = res?.errors ? Object.values(res.errors).reduce((a, b) => a + b, 0) : 0
   const canRun = !!spec && !!runId
+  const verdict = boardVerdict(res)
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex items-center gap-2 border-b border-border px-4 py-2">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2">
         <span className="font-mono text-[9px] uppercase tracking-wide text-muted-foreground">{asElectronics ? 'electronics · bespoke chip-down board' : 'chip-scale electronics · tscircuit'}</span>
-        {res && state === 'done' && (
-          <div className="flex overflow-hidden rounded-sm border border-border">
+        {res && !res.imported && state === 'done' && (
+          <div className="flex max-w-full shrink-0 overflow-x-auto rounded-sm border border-border">
             {(([['pcba', 'PCBA'], ['layout', 'Layout'], ['schematic', 'Schematic'], ['report', 'Report']]) as const).map(([v, label]) => (
               <button key={v} type="button" onClick={() => setView(v)}
                 className={cn('px-2.5 py-0.5 text-[11px]',
@@ -123,10 +194,10 @@ export function ChipScaleStage({ spec, runId, asElectronics }: { spec: any; runI
             ))}
           </div>
         )}
-        <button type="button" onClick={() => run()} disabled={!canRun || state === 'loading'}
+        <button type="button" onClick={() => run(state === 'error' && operation === 'generate' ? { keepCapabilities } : undefined)} disabled={!canRun || generationDisabled || state === 'generating'} title={generationDisabled ? 'Generation is managed by the active pipeline.' : undefined}
           className="ml-auto flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
-          {state === 'loading' ? <Loader2 className="size-3 animate-spin" /> : <CircuitBoard className="size-3" />}
-          {res ? 'Regenerate' : asElectronics ? 'Design the electronics' : 'Generate chip-scale board'}
+          {state === 'generating' ? <Loader2 className="size-3 animate-spin" /> : <CircuitBoard className="size-3" />}
+          {state === 'generating' ? 'Generating…' : state === 'error' && operation === 'generate' ? 'Retry generation' : res ? 'Regenerate' : asElectronics ? 'Design the electronics' : 'Generate chip-scale board'}
         </button>
       </div>
 
@@ -136,17 +207,37 @@ export function ChipScaleStage({ spec, runId, asElectronics }: { spec: any; runI
           The product engine emits a code-defined board; <span className="text-foreground">tscircuit</span> autoroutes it in-process into an earbud-scale board. Its real size flows into the fit-check + redesign loop.
         </p></div>
       )}
-      {state === 'loading' && <div className="p-5"><p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" /> emitting + autorouting the board…</p></div>}
-      {state === 'error' && <div className="p-5"><div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px] text-destructive">{err}</div></div>}
+      {state === 'loading' && <div role="status" className="p-5 text-sm text-muted-foreground">Loading saved board…</div>}
+      {state === 'generating' && <div className="p-5"><p role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" /> emitting + autorouting the board…</p></div>}
+      {state === 'missing' && <div role="status" className="p-5 text-sm text-muted-foreground">No saved chip-scale board for this run.</div>}
+      {state === 'error' && <div className="p-5"><div role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px] text-destructive">{err}</div></div>}
+      {(state === 'missing' || (state === 'error' && operation === 'read')) && (
+        <button type="button" onClick={() => setRetry((n) => n + 1)} className="mx-5 mb-3 self-start rounded-md border border-border px-3 py-1 text-xs">Retry loading board</button>
+      )}
 
-      {res && state === 'done' && (
+      {res?.imported && state === 'done' && (
+        <div className="space-y-3 overflow-auto p-5 text-sm">
+          <h2 className="font-semibold">Imported PCB</h2>
+          <p className="text-muted-foreground">Original KiCad board retained. Import is not engineering approval; no new synthesis or 3D export is started by opening this view.</p>
+          <p>{res.boardMm ? `${res.boardMm.w} × ${res.boardMm.h} mm` : 'Board dimensions unavailable'}{res.components !== undefined ? ` · ${res.components} components` : ''}</p>
+          <a className="inline-block rounded-md border border-border px-3 py-2" href={`/runs/${runId}/variant.kicad_pcb`} download>Download imported KiCad board</a>
+          <p className="text-xs text-muted-foreground">Use Files and Checks to inspect the saved analysis. Imported boards do not include the generated chip-scale layout or schematic.</p>
+        </div>
+      )}
+      {res && !res.imported && state === 'done' && (
         <div className="min-h-0 flex-1">
           {/* PCBA — the real populated chip-scale board in 3D (/api/board3d resolves
               this run's chipscale.kicad_pcb with 3D component models attached) */}
           {view === 'pcba' && (
             <div className="h-full w-full bg-[#0a0a0a]">
               <Board3D basePath={`/runs/${runId}/board`}
-                fallback={<div className="flex h-full items-center justify-center text-xs text-muted-foreground">rendering the PCBA…</div>} />
+                fallback={<div className="flex h-full flex-col items-center justify-center gap-3 p-5 text-center text-xs text-muted-foreground">
+                  <p>PCBA preview unavailable. Inspect the saved layout or board report instead.</p>
+                  <div className="flex flex-wrap justify-center gap-2">
+                    <button type="button" onClick={() => setView('layout')} className="rounded-md border border-border px-3 py-2 text-foreground">Open Layout</button>
+                    <button type="button" onClick={() => setView('report')} className="rounded-md border border-border px-3 py-2 text-foreground">Open Report</button>
+                  </div>
+                </div>} />
             </div>
           )}
           {/* Layout — the 2D routed board (copper) */}
@@ -168,9 +259,9 @@ export function ChipScaleStage({ spec, runId, asElectronics }: { spec: any; runI
           {view === 'report' && (
           <div className="h-full space-y-3 overflow-y-auto p-5">
           <div className={cn('rounded-md border px-3 py-2 text-[13px]',
-            res.ok ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+            verdict.state === 'passed' ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
               : 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400')}>
-            {res.ok ? '✓ routed clean' : `routed with ${errCount} placement/DRC issue(s)`} —
+            {verdict.headline}: {verdict.detail} ·
             <span className="font-mono"> {res.boardMm?.w}×{res.boardMm?.h}mm ({res.areaMm2}mm²)</span>,
             {' '}{res.components} components, {res.routedTraces} traces
           </div>
@@ -237,7 +328,8 @@ export function ChipScaleStage({ spec, runId, asElectronics }: { spec: any; runI
                     </div>
                     <button
                       onClick={() => run({ keepCapabilities: true })}
-                      disabled={!canRun}
+                      disabled={!canRun || generationDisabled}
+                      title={generationDisabled ? 'Generation is managed by the active pipeline.' : undefined}
                       className="mt-1.5 rounded border border-amber-500/50 px-2 py-1 text-[11px] font-medium hover:bg-amber-500/20 disabled:opacity-50"
                     >
                       Rebuild keeping it (larger board) →

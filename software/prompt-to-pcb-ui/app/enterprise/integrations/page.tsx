@@ -7,11 +7,12 @@
  * API enforcement are labelled as configuration records, not live functionality,
  * until wired.
  */
-import { useCallback, useEffect, useState } from 'react'
-import { AccessGate } from '@/components/access-gate'
+import { useState } from 'react'
+import { EnterpriseReadState, useEnterpriseRead } from '@/components/enterprise-read-state'
 import { cn } from '@/lib/utils'
 import { enterpriseAction } from '@/lib/enterprise-actions'
 
+// Existing enterprise dispatcher records are heterogeneous; retain their API shape.
 type Any = Record<string, any>
 
 const WEBHOOK_EVENTS = [
@@ -33,7 +34,7 @@ const CONN_STYLE: Record<string, string> = {
 }
 
 export default function IntegrationsPage() {
-  const [db, setDb] = useState<Any | null>(null)
+  const { db, error, refresh } = useEnterpriseRead()
   const [pick, setPick] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null)
@@ -53,10 +54,6 @@ export default function IntegrationsPage() {
   const sf = (k: string) => ssoForm[k] ?? ''
   const setF = (k: string, v: string) => setSsoForm((s) => ({ ...s, [k]: v }))
 
-  const refresh = useCallback(() => {
-    fetch('/api/enterprise', { cache: 'no-store' }).then((r) => r.json()).then(setDb).catch(() => {})
-  }, [])
-  useEffect(() => { refresh() }, [refresh])
 
   async function act(action: string, params: Any): Promise<Any> {
     setBusy(true); setMsg(null)
@@ -67,8 +64,7 @@ export default function IntegrationsPage() {
     return r.result ?? {}
   }
 
-  if (!db) return <div className="p-6 text-xs text-muted-foreground">Loading integrations…</div>
-  if (db.error) return <AccessGate error={db.error} />
+  if (!db) return <EnterpriseReadState error={error} retry={refresh} label="integrations" />
 
   const ig = db.organizations?.[0]?.integrations ?? {}
   const connectors: Any[] = ig.eda_connectors ?? []

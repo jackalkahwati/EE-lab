@@ -10,7 +10,7 @@
  *   RIGHT  the journey collapsed to a vertical phase rail + phase panel
  * Backed by the real panels + loadRealBoard + /api/runs.
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { acknowledgeStartDraft, readStartDraft, sessionDraftStorage } from '@/lib/start-draft'
 import { loadRealBoard, type RealBoard } from '@/lib/real-board'
@@ -18,7 +18,6 @@ import { ComposeChat } from '@/components/compose-chat'
 import { BoardCanvas } from '@/components/board-canvas'
 import { Board3D } from '@/components/board-3d'
 import { CodeViewer } from '@/components/code-viewer'
-import { BomTable } from '@/components/bom-table'
 import { BomWorkspace } from '@/components/bom-workspace'
 import { BoardChecks } from '@/components/board-checks'
 import { BoardSchematic } from '@/components/board-schematic'
@@ -35,6 +34,9 @@ import { FL1Loop } from '@/components/fl1-loop'
 import { ErrorBoundary } from '@/components/error-boundary'
 import { ReviewPanel } from '@/components/review-panel'
 import { RunOverview } from '@/components/run-overview'
+import { WorkspacePanes } from '@/components/workspace-panes'
+import { INITIAL_WORKSPACE_SESSION, rememberWorkspaceSession, promoteWorkspaceSession, pipelineSignature, workspaceBoardStatus, workspaceInitialPipeline, workspaceProgress, readWorkspaceTiming, workspacePipelineState, interruptWorkspacePipeline, workspaceStageLabel, workspaceRunId, workspaceOnshapeUrl, workspaceImportFileError, workspaceImportedMetadata, type WorkspacePipeline, type WorkspaceHistory, type WorkspaceSurface } from '@/lib/workspace-state'
+import type { BoardFacts } from '@/lib/verdict'
 import { RunTimeline } from '@/components/run-timeline'
 import { RevisionRail } from '@/components/revision-rail'
 import { WorkQueue } from '@/components/work-queue'
@@ -43,7 +45,6 @@ import { ArtifactExplorer, FilePreview } from '@/components/artifact-explorer'
 import { FL1ReadinessPanel } from '@/components/fl1-readiness-panel'
 import { BoardObjects } from '@/components/board-objects'
 import { ReviewsPill } from '@/components/board-reviews'
-import { IdStageView } from '@/components/id-stage-view'
 import { IdStage } from '@/components/id-stage'
 import { IdBriefPanel } from '@/components/id-brief-panel'
 import { ExploreStage } from '@/components/explore-stage'
@@ -51,17 +52,19 @@ import { MechanicalStage } from '@/components/mechanical-stage'
 import { SimulationStage } from '@/components/simulation-stage'
 import { DisciplineStage } from '@/components/discipline-stage'
 import { ChipScaleStage } from '@/components/chipscale-stage'
-import { PipelineLoader } from '@/components/pipeline-loader'
+import { AstraNativeStage } from '@/components/astra-native-stage'
+import { useAstraAvailability } from '@/components/astra-beta-status'
+import { astraArtifactUrl, buildAstraRunView } from '@/lib/astra-run-view'
 import { TerminalPanel, type TerminalTab } from '@/components/terminal-panel'
 import { StatusBar } from '@/components/status-bar'
 import { logLine, useProblemCount } from '@/lib/terminal-log'
-import { llmHeaders, LLM_PROVIDERS } from '@/components/llm-settings'
-import { runFullPipeline, PIPE_ORDER, type PipeStatus } from '@/lib/run-pipeline'
+import { LLMSettings, llmHeaders, LLM_PROVIDERS } from '@/components/llm-settings'
+import { beginManualTiming, runFullPipeline, PIPE_ORDER, type PipeStatus } from '@/lib/run-pipeline'
 import type { IdBrief } from '@/lib/id-brief'
 import type { ProductSpec } from '@/lib/product-spec'
 import {
   Activity, BookOpen, Box, ClipboardCheck, Code, Cpu, Eye, Factory, FolderTree, Gauge, History, LayoutDashboard, ListTree, Maximize2,
-  MessagesSquare, MoreHorizontal, Package, Palette, Plus, Receipt, ScrollText, ShieldCheck, Sparkles, Truck, Upload, Wrench, X,
+  MessagesSquare, Package, Palette, Plus, Receipt, ScrollText, ShieldCheck, Sparkles, Truck, Upload, Wrench, X,
 } from 'lucide-react'
 
 type Run = any
@@ -153,17 +156,6 @@ function runDot(status: string | undefined): string {
   return 'bg-muted-foreground/40'
 }
 
-/** Honest placeholder for a stage whose specialist module isn't built yet. */
-function StagePlaceholder({ title, Icon }: { title: string; Icon: any }) {
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-muted-foreground">
-      <Icon className="size-9 opacity-25" />
-      <span className="text-sm font-medium text-foreground">{title}</span>
-      <span className="max-w-xs text-xs">This module isn&apos;t built yet. When it is, its output will appear here in the pipeline — nothing is faked.</span>
-    </div>
-  )
-}
-
 /** One file-picker row for the import panel (hoisted so it doesn't remount). */
 function FilePickRow({ label, hint, accept, file, onPick }: {
   label: string; hint: string; accept: string; file: File | null; onPick: (f: File | null) => void
@@ -178,7 +170,7 @@ function FilePickRow({ label, hint, accept, file, onPick }: {
         ? <X className="size-3.5 shrink-0 text-muted-foreground hover:text-foreground"
             onClick={(e) => { e.preventDefault(); onPick(null) }} />
         : <Upload className="size-3.5 shrink-0 text-muted-foreground" />}
-      <input type="file" accept={accept} className="hidden"
+      <input type="file" aria-label={label} accept={accept} className="sr-only"
         onChange={(e) => onPick(e.target.files?.[0] ?? null)} />
     </label>
   )
@@ -190,18 +182,21 @@ function FilePickRow({ label, hint, accept, file, onPick }: {
  * /api/pipeline/import (same honest-verification core as the CLI/API); on
  * success it hands the created run back so the workspace opens it.
  */
-function ImportDesignPanel({ onImported }: { onImported: (r: any) => void }) {
+function ImportDesignPanel({ onImported, onBusyChange, canStart }: { onImported: (r: any) => void; onBusyChange?: (busy: boolean) => void; canStart?: () => boolean }) {
   const [pcb, setPcb] = useState<File | null>(null)
   const [step, setStep] = useState<File | null>(null)
   const [name, setName] = useState('')
   const [onshapeUrl, setOnshapeUrl] = useState('')
   const [busy, setBusy] = useState(false)
+  const busyRef = useRef(false)
   const [err, setErr] = useState<string | null>(null)
 
   const submitOnshape = async () => {
     const url = onshapeUrl.trim()
-    if (!/cad\.onshape\.com\/documents\//.test(url)) { setErr('Paste an Onshape assembly URL (…/documents/…/w/…/e/…)'); return }
-    setBusy(true); setErr(null)
+    if (!workspaceOnshapeUrl(url)) { setErr('Paste an Onshape assembly URL (…/documents/…/w/…/e/…)'); return }
+    if (busyRef.current || (canStart && !canStart())) { setErr('Finish or stop the current conversation operation before importing.'); return }
+    busyRef.current = true
+    setBusy(true); onBusyChange?.(true); setErr(null)
     try {
       const r = await fetch('/api/pipeline/import-onshape', {
         method: 'POST', headers: { 'content-type': 'application/json' },
@@ -209,15 +204,20 @@ function ImportDesignPanel({ onImported }: { onImported: (r: any) => void }) {
       })
       const d = await r.json().catch(() => null)
       if (!r.ok) { setErr(d?.error || `Onshape import failed (HTTP ${r.status})`); return }
+      if (!workspaceRunId(d?.runId)) { setErr('Import response did not include a valid run ID. Your inputs are unchanged.'); return }
       onImported(d)
     } catch (e: any) {
       setErr(e?.message || 'Onshape import failed')
-    } finally { setBusy(false) }
+    } finally { busyRef.current = false; setBusy(false); onBusyChange?.(false) }
   }
 
   const submit = async () => {
     if (!pcb && !step) { setErr('Choose a .kicad_pcb and/or a .step file first.'); return }
-    setBusy(true); setErr(null)
+    const fileError = workspaceImportFileError(pcb, 'pcb') ?? workspaceImportFileError(step, 'step')
+    if (fileError) { setErr(fileError); return }
+    if (busyRef.current || (canStart && !canStart())) { setErr('Finish or stop the current conversation operation before importing.'); return }
+    busyRef.current = true
+    setBusy(true); onBusyChange?.(true); setErr(null)
     try {
       const fd = new FormData()
       if (pcb) fd.append('pcb', pcb)
@@ -226,10 +226,11 @@ function ImportDesignPanel({ onImported }: { onImported: (r: any) => void }) {
       const r = await fetch('/api/pipeline/import', { method: 'POST', body: fd })
       const d = await r.json().catch(() => null)
       if (!r.ok) { setErr(d?.error || `Import failed (HTTP ${r.status})`); return }
+      if (!workspaceRunId(d?.runId)) { setErr('Import response did not include a valid run ID. Your inputs are unchanged.'); return }
       onImported(d)
     } catch (e: any) {
       setErr(e?.message || 'Import failed')
-    } finally { setBusy(false) }
+    } finally { busyRef.current = false; setBusy(false); onBusyChange?.(false) }
   }
 
   return (
@@ -239,16 +240,16 @@ function ImportDesignPanel({ onImported }: { onImported: (r: any) => void }) {
         <span className="text-sm font-medium text-foreground">Start from an existing design</span>
       </div>
       <p className="mb-3 text-[11px] leading-relaxed text-muted-foreground">
-        Upload a PCBA and/or a CAD assembly to seed a product. The board runs real DRC on
-        ingest and wears no green until it passes against your file; the assembly lands as
-        geometry with its fit check pending.
+        Upload a PCBA and/or a CAD assembly to seed a product. Board check results are
+        reported separately from import success. Imported STEP geometry is retained for
+        download; rendered preview and fit verification may be unavailable.
       </p>
       <div className="flex flex-col gap-2">
         <FilePickRow label="PCBA" hint="choose a .kicad_pcb" accept=".kicad_pcb" file={pcb}
           onPick={(f) => { setErr(null); setPcb(f) }} />
         <FilePickRow label="CAD assembly" hint="choose a .step / .stp" accept=".step,.stp,.STEP,.STP" file={step}
           onPick={(f) => { setErr(null); setStep(f) }} />
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (optional)"
+        <input aria-label="Imported design name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (optional)"
           className="border border-border bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none" />
         <button type="button" onClick={submit} disabled={busy || (!pcb && !step)}
           className="mt-1 flex items-center justify-center gap-2 bg-primary px-3 py-2 text-xs font-medium text-primary-foreground disabled:opacity-50">
@@ -261,7 +262,7 @@ function ImportDesignPanel({ onImported }: { onImported: (r: any) => void }) {
         <span className="h-px flex-1 bg-border" />or import live from Onshape<span className="h-px flex-1 bg-border" />
       </div>
       <div className="flex flex-col gap-2">
-        <input value={onshapeUrl} onChange={(e) => { setErr(null); setOnshapeUrl(e.target.value) }}
+        <input aria-label="Onshape assembly URL" value={onshapeUrl} onChange={(e) => { setErr(null); setOnshapeUrl(e.target.value) }}
           placeholder="Onshape assembly URL"
           className="border border-border bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none" />
         <button type="button" onClick={submitOnshape} disabled={busy || !onshapeUrl.trim()}
@@ -283,7 +284,35 @@ function ImportDesignPanel({ onImported }: { onImported: (r: any) => void }) {
 export default function Compose2Page() {
   const [runs, setRuns] = useState<Run[]>([])
   const [selectedId, setSelectedId] = useState('')
+  const astraMode = useAstraAvailability()
+  const selectedNative = runs.some((run) => run.id === selectedId && run.transport === 'astra-beta')
+  const nativeMode = astraMode.beta || selectedNative
+  // Until mode is known, do not mount or read a legacy exporter-backed surface.
+  const legacyMode = astraMode.availability.state === 'loaded' && !astraMode.availability.status.enabled && !selectedNative
+  const [sessionKey, setSessionKey] = useState(INITIAL_WORKSPACE_SESSION)
+  const sessionKeyRef = useRef(INITIAL_WORKSPACE_SESSION)
+  const runSessionsRef = useRef(new Map<string, string>())
+  const sessionContextsRef = useRef(new Map<string, { productSpec: ProductSpec | null; idBrief: IdBrief | null; builtDisc: Record<string, boolean> }>())
+  const [draftSessions, setDraftSessions] = useState([INITIAL_WORKSPACE_SESSION])
+  const chatBusyRef = useRef(false)
+  const importBusyRef = useRef(false)
+  const [importBusy, setImportBusy] = useState(false)
+  const [busyMessage, setBusyMessage] = useState('')
+  const [surface, setSurface] = useState<WorkspaceSurface>('preview')
+  const [inspectorOpen, setInspectorOpen] = useState(false)
+  const [followBuild, setFollowBuild] = useState(false)
+  const [boardFacts, setBoardFacts] = useState<{ runId: string; facts: BoardFacts } | null>(null)
+  const [artifactRevision, setArtifactRevision] = useState(0)
+  const [boardGenerating, setBoardGenerating] = useState(false)
+  const boardBusyRef = useRef(false)
+  const manualOwnerRef = useRef<{ token: symbol; runId: string; stage: Stage } | null>(null)
+  const [manualStage, setManualStage] = useState<Stage | null>(null)
+  const [stageRefreshRevision, setStageRefreshRevision] = useState(0)
+  const pageAliveRef = useRef(true)
+  const selectionEpochRef = useRef(0)
+  const onBusyChange = (busy: boolean) => { chatBusyRef.current = busy; if (!busy) setBusyMessage('') }
   const [realBoard, setRealBoard] = useState<RealBoard | null>(null)
+  const [boardReadError, setBoardReadError] = useState('')
   const [tab, setTab] = useState<Tab>('Overview')
   const [view, setView] = useState<'3d' | 'layout' | 'schematic'>('3d')
   // which pipeline stage the middle+right panes show; auto-advances as the
@@ -296,6 +325,11 @@ export default function Compose2Page() {
   // the RS485 board again. selectThreadFromList always cleared it; the two
   // "New design" handlers did not.
   const [productSpec, setProductSpec] = useState<ProductSpec | null>(null)
+  const [specResolvedRun, setSpecResolvedRun] = useState('')
+  const [retainedImportRun, setRetainedImportRun] = useState('')
+  const [specReadError, setSpecReadError] = useState('')
+  const [specReadRevision, setSpecReadRevision] = useState(0)
+  const importedRunsRef = useRef(new Set<string>())
   // Which discipline modules have been built this session (their tab produced a
   // real artifact). Drives the left-panel checkboxes so a built discipline shows
   // complete, not "module not built yet". Reset when the thread/design changes.
@@ -309,7 +343,11 @@ export default function Compose2Page() {
   // finish long after the user has switched threads, so every status update lands
   // in its own run's map entry and the UI only ever renders the entry for the run
   // currently selected — run A's pipeline can no longer narrate over run B.
-  const [pipeStatusByRun, setPipeStatusByRun] = useState<Record<string, Record<string, { status: PipeStatus; detail?: string }>>>({})
+  const [pipeStatusByRun, setPipeStatusByRun] = useState<Record<string, WorkspacePipeline>>({})
+  const [timingHistory, setTimingHistory] = useState<WorkspaceHistory | null>(null)
+  const [historyRevision, setHistoryRevision] = useState(0)
+  // Initial board observation is local state, never inferred from a saved RUNNING label.
+  const [initialPipelineByRun, setInitialPipelineByRun] = useState<Record<string, WorkspacePipeline>>({})
   // runId of the pipeline currently in flight (null when idle)
   const [pipelineRunId, setPipelineRunId] = useState<string | null>(null)
   // bottom Terminal panel + status bar
@@ -324,6 +362,11 @@ export default function Compose2Page() {
   const [pipeFeedbackByRun, setPipeFeedbackByRun] = useState<Record<string, { status: string; capabilityGaps: { gap: string }[]; remaining: string[] }>>({})
   const pipeAbort = useRef<AbortController | null>(null)
   const pipeStarted = useRef<Set<string>>(new Set())
+  const canChangeSelection = () => {
+    if (!chatBusyRef.current && !importBusyRef.current && !boardBusyRef.current && !pipeAbort.current) return true
+    setBusyMessage('Finish or stop the current operation before switching designs. You can still browse stages, files and details.')
+    return false
+  }
   // The pipeline's completion callbacks must read the selection AT FIRE TIME, not
   // the selection captured when the pipeline started (a stale closure): keep the
   // current selectedId in a ref for those async gates.
@@ -343,9 +386,10 @@ export default function Compose2Page() {
   // an FL-1 loop ECO gets dropped into the chat as a revision (single-pane flow)
   const [revisePrefill, setRevisePrefill] = useState('')
   const handoffIdRef = useRef<string | null>(null)
+  const handoffSeenRef = useRef(false)
   const onPrefillConsumed = () => {
     const id = handoffIdRef.current
-    if (id) acknowledgeStartDraft(sessionDraftStorage(), id)
+    if (id) { acknowledgeStartDraft(sessionDraftStorage(), id); handoffIdRef.current = null }
     setRevisePrefill('')
   }
   const stageRef = useRef<HTMLDivElement>(null)
@@ -374,64 +418,92 @@ export default function Compose2Page() {
     fetch('/api/runs').then((r) => (r.ok ? r.json() : { runs: [] }))
       .then(({ runs: disk }: { runs: Run[] }) => { if (Array.isArray(disk)) mergeRuns(disk); return disk })
       .catch(() => [])
-  const onRunComplete = async (runDir: string, id: string) => {
-    const disk = await refreshRuns()
-    // ALWAYS select the just-built run. It definitely exists (we hold its
-    // runDir), but /api/runs is eventually consistent — a freshly-built run can
-    // be missing from that list for a beat. The old code guarded setSelectedId
-    // on the run appearing in that list, so on the race it silently kept the
-    // PREVIOUS run selected, and every discipline tab then fetched the wrong
-    // run's artifacts and 404'd (showing an empty "Generate" state though the
-    // pipeline had built everything). If the list missed it, inject a minimal
-    // entry so selectedRun resolves to it instead of falling back to runs[0].
-    if (!(Array.isArray(disk) && disk.find((r: Run) => r.id === id))) {
-      setRuns((prev: Run[]) =>
-        prev.some((r) => r.id === id) ? prev : [{ id, runDir, real: true, name: id }, ...prev])
+  const readSavedBoard = async (runDir: string, id: string, epoch: number) => {
+    if (!legacyMode) return null
+    const unavailable = () => {
+      if (pageAliveRef.current && selectedIdRef.current === id && selectionEpochRef.current === epoch) {
+        setBoardReadError('This run is saved, but some board preview metadata could not be read. Import or generation is not being retried.')
+      }
     }
-    setSelectedId(id)
-    const d = await loadRealBoard(runDir); if (d) setRealBoard(d)
-    setNewDesign(false) // the freshly-built board now takes the stage
-    setStage('electronics') // show the real board first; ID advances the stage after
+    try { return await loadRealBoard(runDir, unavailable) } catch {
+      unavailable()
+      return null
+    }
   }
-  // an imported design (PCBA/CAD) seeds a run with no pipeline build; /api/runs
-  // skips boardless runs, so inject it like onRunComplete does and open it.
-  const handleImported = async (result: any) => {
-    const runId = result?.runId
-    if (!runId) return
-    const runDir = `/runs/${runId}`
-    setRuns((prev: Run[]) =>
-      prev.some((r) => r.id === runId) ? prev : [{ id: runId, runDir, real: true, name: result.name || runId }, ...prev])
-    setSelectedId(runId)
-    const d = await loadRealBoard(runDir); if (d) setRealBoard(d)
+  const onRunComplete = async (runDir: string, id: string, metadataRequired = false) => {
+    const origin = sessionKey
+    if (sessionKeyRef.current !== origin) return
+    if (metadataRequired) importedRunsRef.current.add(id)
+    promoteWorkspaceSession(runSessionsRef.current, id, origin)
+    selectedIdRef.current = id
+    setSelectedId(id)
     setNewDesign(false)
+    setDraftSessions((drafts) => drafts.filter((key) => key !== origin))
+    localRunsRef.current.add(id)
+    setInitialPipelineByRun((previous) => { const next = { ...previous }; delete next[id]; return next })
+    setTimingHistory(null); setHistoryRevision((revision) => revision + 1)
+    setRuns((prev: Run[]) => {
+      const entry = nativeMode
+        ? buildAstraRunView({ runId: id, spec: productSpecRef.current })
+        : { id, runDir, real: true, status: 'REVIEW REQUIRED', name: productSpecRef.current?.product || id }
+      return prev.some((run) => run.id === id)
+        ? prev.map((run) => run.id === id ? { ...run, ...entry, failure: undefined } : run)
+        : [entry, ...prev]
+    })
+    const epoch = selectionEpochRef.current
+    setArtifactRevision((revision) => revision + 1)
+    await refreshRuns()
+    if (!legacyMode || sessionKeyRef.current !== origin || selectedIdRef.current !== id || selectionEpochRef.current !== epoch) return
+    const board = await readSavedBoard(runDir, id, epoch)
+    if (sessionKeyRef.current === origin && selectedIdRef.current === id && selectionEpochRef.current === epoch) setRealBoard(board)
+  }
+  const handleImported = async (result: any) => {
+    const origin = sessionKey
+    const runId = result?.runId
+    if (!legacyMode || !runId || sessionKeyRef.current !== origin || chatBusyRef.current) return
+    promoteWorkspaceSession(runSessionsRef.current, runId, origin)
+    localRunsRef.current.add(runId)
+    importedRunsRef.current.add(runId)
+    const runDir = `/runs/${runId}`
+    selectedIdRef.current = runId
+    setSelectedId(runId)
+    setNewDesign(false)
+    productSpecRef.current = null
+    setProductSpec(null); setRetainedImportRun(''); setSpecResolvedRun(''); setBuiltDisc({}); setIdBrief(null); setBoardFacts(null)
+    setRealBoard(null)
+    setRuns((prev: Run[]) => prev.some((run) => run.id === runId) ? prev : [{ id: runId, runDir, real: true, name: result.name || runId }, ...prev])
     setStage(result?.imported?.pcb ? 'electronics' : 'mechanical')
+    setSurface('preview')
+    const epoch = selectionEpochRef.current
+    const board = await readSavedBoard(runDir, runId, epoch)
+    if (sessionKeyRef.current === origin && selectedIdRef.current === runId && selectionEpochRef.current === epoch) setRealBoard(board)
     refreshRuns()
   }
-  // the chat lifts up the ID brief when Industrial Design finishes; advancing to
-  // that stage so the form (wrapping the real board) is what's on screen.
-  const onIdBrief = (b: IdBrief | null) => {
-    setIdBrief(b)
-    setStage(b ? 'id' : 'electronics')
+  const onIdBrief = (brief: IdBrief | null) => {
+    if (sessionKeyRef.current === sessionKey) setIdBrief(brief)
+  }
+  const onProductSpec = (spec: ProductSpec | null) => {
+    if (sessionKeyRef.current !== sessionKey) return
+    productSpecRef.current = spec
+    setProductSpec(spec)
+    if (!spec) { setRetainedImportRun(''); setSpecResolvedRun(''); setSpecReadRevision((revision) => revision + 1); setBuiltDisc({}); setIdBrief(null); setBoardFacts(null); setRealBoard(null) }
   }
 
   // resizable panes (drag the dividers); persisted per browser
-  const [leftW, setLeftW] = useState(288)
   // left-pane mode: chat (conversation), threads (design list), files (run tree)
   const [leftView, setLeftView] = useState<'chat' | 'threads' | 'files'>('chat')
   // CENTER tab strip: pinned stage tabs + closable doc tabs (files/panels).
   // activeDoc null = the pinned stage view is showing.
   const [docTabs, setDocTabs] = useState<DocTab[]>([])
   const [activeDoc, setActiveDoc] = useState<string | null>(null)
-  const [addOpen, setAddOpen] = useState(false)
   // right-pane rail "More" (Advanced destinations) + center-strip "More" (advisory stages)
-  const [advOpen, setAdvOpen] = useState(false)
   // badge-don't-steal-focus: a stage finishing while not visible gets a dot
   const [badged, setBadged] = useState<Record<string, 'passed' | 'failed'>>({})
   const prevPipeRef = useRef<Record<string, string>>({})
   const openFileTab = (f: { name: string; path: string; size?: number }) => {
     const id = `file:${f.path}`
     setDocTabs((ts) => (ts.some((d) => d.id === id) ? ts : [...ts, { id, kind: 'file' as const, label: f.name, file: f }]))
-    setActiveDoc(id)
+    setActiveDoc(id); setFollowBuild(false); setSurface('preview')
   }
   const openPanelTab = (tb: Tab, label: string) => {
     const id = `panel:${tb}`
@@ -444,93 +516,79 @@ export default function Compose2Page() {
     setDocTabs(n)
     if (activeDoc === id) setActiveDoc(n[Math.min(i, n.length - 1)]?.id ?? null)
   }
-  const [rightW, setRightW] = useState(480)
-  const dragRef = useRef<null | 'left' | 'right'>(null)
-  // mirrors dragRef as state so the active Handle can stay highlighted while the
-  // pointer travels beyond it mid-drag
-  const [dragging, setDragging] = useState<null | 'left' | 'right'>(null)
-
   useEffect(() => {
-    const l = Number(localStorage.getItem('c2-leftW'))
-    const r = Number(localStorage.getItem('c2-rightW'))
-    if (l >= 200) setLeftW(l)
-    if (r >= 280) setRightW(r)
-    setTermCollapsed(localStorage.getItem('c2-termCollapsed') !== '0') // default collapsed
-    const onMove = (e: MouseEvent) => {
-      if (!dragRef.current) return
-      if (dragRef.current === 'left') setLeftW(Math.min(600, Math.max(200, e.clientX)))
-      else setRightW(Math.min(760, Math.max(280, window.innerWidth - e.clientX)))
-    }
-    const onUp = () => {
-      if (!dragRef.current) return
-      dragRef.current = null
-      setDragging(null)
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-      // persist current widths
-      setLeftW((w) => { localStorage.setItem('c2-leftW', String(w)); return w })
-      setRightW((w) => { localStorage.setItem('c2-rightW', String(w)); return w })
-    }
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
-    return () => {
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
-    }
+    try {
+      setTermCollapsed(localStorage.getItem('c2-termCollapsed') !== '0')
+      const provider = localStorage.getItem('fl-llm-provider') ?? ''
+      setLlmTiers([LLM_PROVIDERS.find((item) => item.id === provider)?.label ?? 'Platform default'])
+    } catch { setLlmTiers(['Platform default']) }
   }, [])
-
-  // Terminal panel collapse toggle, persisted alongside the pane widths
-  const toggleTerm = () => setTermCollapsed((c) => {
-    localStorage.setItem('c2-termCollapsed', c ? '0' : '1') // '0' = open
-    return !c
+  const toggleTerm = () => setTermCollapsed((collapsed) => {
+    try { localStorage.setItem('c2-termCollapsed', collapsed ? '0' : '1') } catch { /* optional */ }
+    return !collapsed
   })
 
-  // model tier for the status bar (client-only read of the llm-settings storage)
-  useEffect(() => {
-    const id = localStorage.getItem('fl-llm-provider') ?? ''
-    setLlmTiers([LLM_PROVIDERS.find((p) => p.id === id)?.label ?? 'Platform default'])
-  }, [])
-
-  const startDrag = (which: 'left' | 'right') => (e: React.MouseEvent) => {
-    e.preventDefault()
-    dragRef.current = which
-    setDragging(which)
-    document.body.style.cursor = 'col-resize'
-    document.body.style.userSelect = 'none'
+  const saveCurrentSession = () => rememberWorkspaceSession(sessionContextsRef.current, sessionKeyRef.current, { productSpec: productSpecRef.current, idBrief, builtDisc })
+  const changeSession = (key: string, id: string, preserveBrowsing = false) => {
+    if (key === sessionKeyRef.current && id === selectedIdRef.current) { if (!preserveBrowsing) setLeftView('chat'); return }
+    if (!canChangeSelection()) return
+    saveCurrentSession()
+    selectionEpochRef.current += 1
+    sessionKeyRef.current = key
+    selectedIdRef.current = id
+    setSessionKey(key); setSelectedId(id); setNewDesign(!id)
+    const context = sessionContextsRef.current.get(key)
+    productSpecRef.current = context?.productSpec ?? null
+    setProductSpec(context?.productSpec ?? null); setIdBrief(context?.idBrief ?? null); setBuiltDisc(context?.builtDisc ?? {})
+    setRetainedImportRun(''); setRealBoard(null); setBoardFacts(null); setBoardGenerating(false); setRevisePrefill(''); setStage('electronics')
+    if (!preserveBrowsing) setLeftView('chat')
+    setDocTabs([]); setActiveDoc(null); setBadged({}); setFollowBuild(false)
+    prevPipeRef.current = {}
+    setBusyMessage('')
   }
-  // Divider between panes: a 5px grab area (negative margins keep the layout at
-  // 1px — the pane's own border-border edge stays the visible line) that lights
-  // up amber on hover/drag, matching the terminal panel's drag edge.
-  const Handle = ({ which }: { which: 'left' | 'right' }) => (
-    <div
-      role="separator"
-      aria-orientation="vertical"
-      onMouseDown={startDrag(which)}
-      onDoubleClick={() => which === 'left' ? setLeftW(288) : setRightW(480)}
-      title="drag to resize · double-click to reset"
-      className={cn(
-        'relative z-10 -mx-0.5 w-[5px] shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-primary/40',
-        dragging === which && 'bg-primary/40',
-      )}
-    />
-  )
+  const selectThreadFromList = (id: string, preserveBrowsing = false) => {
+    if (!canChangeSelection()) return
+    // A removed ancestor alias needs a new identity even if the live revision
+    // originally started in that ancestor's saved-run conversation.
+    const key = runSessionsRef.current.get(id) ?? `run:${id}:${crypto.randomUUID()}`
+    runSessionsRef.current.set(id, key)
+    changeSession(key, id, preserveBrowsing)
+  }
+  const newSession = () => {
+    if (!canChangeSelection()) return
+    const key = `draft:${crypto.randomUUID()}`
+    setDraftSessions((drafts) => [...drafts, key].slice(-8))
+    changeSession(key, '')
+    setSurface('conversation')
+  }
+  const revise = (prompt: string) => {
+    if (!canChangeSelection()) return
+    setRevisePrefill(prompt); setLeftView('chat'); setSurface('conversation')
+  }
+  const showInspector = (next: Tab) => { setTab(next); setInspectorOpen(true); setSurface('details') }
 
   // /compose is authenticated by the proxy. Peek first, then acknowledge only
   // when ComposeChat has setTyped + focused. The ref survives StrictMode's
   // effect replay and keeps a late run-list response from restoring an old run.
   useEffect(() => {
-    if (handoffIdRef.current) return
+    if (handoffSeenRef.current) return
     const draft = readStartDraft(sessionDraftStorage())
     if (!draft) return
     handoffIdRef.current = draft.id
+    handoffSeenRef.current = true
     selectedIdRef.current = ''
     productSpecRef.current = null
     setSelectedId(''); setNewDesign(true); setRealBoard(null)
     setProductSpec(null); setIdBrief(null); setBuiltDisc({})
-    setStage('electronics'); setLeftView('chat'); setDocTabs([])
+    setStage('electronics'); setLeftView('chat'); setSurface('conversation'); setDocTabs([])
     setActiveDoc(null); setBadged({})
     setRevisePrefill(draft.prompt)
   }, [])
+
+  // URL restoration is a delayed user selection. Read the latest canonical
+  // handler without restarting the run-list request whenever a draft changes.
+  const selectThreadRef = useRef(selectThreadFromList)
+  useLayoutEffect(() => { selectThreadRef.current = selectThreadFromList })
 
   // load real runs from disk (same source as /compose)
   useEffect(() => {
@@ -547,9 +605,8 @@ export default function Compose2Page() {
           // ...UNLESS the URL names one. /compose?run=<id> was silently ignored,
           // so a run's URL could not be bookmarked, shared or reloaded back into.
           const want = new URLSearchParams(window.location.search).get('run')
-          if (!handoffIdRef.current && want && disk.some((r: Run) => r.id === want)) {
-            setSelectedId(want)
-            setNewDesign(false)
+          if (!handoffIdRef.current && want && !handoffSeenRef.current && disk.some((r: Run) => r.id === want) && selectionEpochRef.current === 0) {
+            selectThreadRef.current(want, true)
           }
         }
       }).catch(() => {})
@@ -586,13 +643,89 @@ export default function Compose2Page() {
   const selectedReal = selectedRun?.real
 
   useEffect(() => { productSpecRef.current = productSpec }, [productSpec])
-  useEffect(() => { selectedIdRef.current = selectedId }, [selectedId])
 
   // What the UI renders: the SELECTED run's pipeline state. A pipeline running
   // for a different run keeps streaming into its own map entry silently.
-  const pipeStatus = selectedId ? (pipeStatusByRun[selectedId] ?? {}) : {}
+  const { pipeline: pipeStatus, historyState } = useMemo(() => workspacePipelineState(
+    selectedId, pipeStatusByRun[selectedId] ?? initialPipelineByRun[selectedId], timingHistory,
+  ), [selectedId, pipeStatusByRun, initialPipelineByRun, timingHistory])
   const pipeFeedback = selectedId ? (pipeFeedbackByRun[selectedId] ?? null) : null
   const pipeRunning = !!pipelineRunId && pipelineRunId === selectedId
+  const metadataReady = !selectedRun?.real || !!productSpec || specResolvedRun === selectedId
+  const metadataReadyRef = useRef(metadataReady)
+  metadataReadyRef.current = metadataReady
+  const liveRunning = boardGenerating || pipeRunning || Object.values(initialPipelineByRun[selectedId] ?? {}).some((value) => value.status === 'running')
+
+  // The operation belongs to the workspace, not to the currently visible panel.
+  // The paired callbacks capture one token, so an obsolete view cannot release a
+  // newer operation or restore a previous attempt's success evidence.
+  const generationProps = (discipline: Stage) => {
+    const token = Symbol(discipline)
+    const runId = selectedId
+    let finishTiming: Awaited<ReturnType<typeof beginManualTiming>> | undefined
+    return {
+      generationDisabled: !legacyMode || pipeRunning || boardGenerating || importBusy || chatBusyRef.current || !metadataReady,
+      onBuildStart: async () => {
+        if (!legacyMode || !pageAliveRef.current || !metadataReadyRef.current || selectedIdRef.current !== runId || !runId
+          || boardBusyRef.current || pipeAbort.current || chatBusyRef.current || importBusyRef.current) return false
+        manualOwnerRef.current = { token, runId, stage: discipline }
+        boardBusyRef.current = true
+        setBoardGenerating(true); setManualStage(discipline)
+        setPipeStatusByRun((previous) => ({ ...previous, [runId]: {
+          ...(previous[runId] ?? pipeStatus),
+          [discipline]: { status: 'running', detail: 'Explicit manual attempt in progress.' },
+        } }))
+        try {
+          finishTiming = await beginManualTiming(runId, discipline)
+          if (!pageAliveRef.current || manualOwnerRef.current?.token !== token) {
+            await finishTiming({ status: 'unknown', detail: 'View closed before generation submission; no new work was submitted.' })
+            return false
+          }
+          if (discipline === 'electronics') { setBoardFacts(null); setRealBoard(null) }
+          return true
+        } catch {
+          if (pageAliveRef.current && manualOwnerRef.current?.token === token) {
+            manualOwnerRef.current = null; boardBusyRef.current = false
+            setBoardGenerating(false); setManualStage(null)
+            setBusyMessage('Could not preserve attempt history. Generation was not started. Retry history before trying again.')
+            setPipeStatusByRun((previous) => ({ ...previous, [runId]: { ...previous[runId], [discipline]: { status: 'unknown', detail: 'History could not be saved. This manual generation was not submitted.' } } }))
+          }
+          return false
+        }
+      },
+      onBuildSettled: async (result: { status: 'passed' | 'failed' | 'unknown'; detail?: string; artifactAvailable?: boolean }) => {
+        let persistenceError = false
+        try { await finishTiming?.(result) } catch { persistenceError = true }
+        if (!pageAliveRef.current || manualOwnerRef.current?.token !== token) return
+        if (persistenceError) result = { ...result, status: 'unknown', detail: 'Attempt history could not be saved. Reload will show an unfinished attempt; inspect artifacts before restarting.' }
+        manualOwnerRef.current = null
+        boardBusyRef.current = false
+        setBoardGenerating(false); setManualStage(null); setBusyMessage(persistenceError ? 'Attempt history could not be saved. Outcome remains unknown.' : '')
+        setPipeStatusByRun((previous) => ({ ...previous, [runId]: {
+          ...previous[runId], [discipline]: { status: result.status, detail: result.detail
+            || (result.status === 'unknown' ? 'Server outcome unknown. Inspect saved artifacts before restarting.' : 'Manual attempt settled. Artifact availability is separate from engineering approval.') },
+        } }))
+        if (selectedIdRef.current === runId) {
+          setArtifactRevision((revision) => revision + 1)
+          if (result.artifactAvailable) setBuiltDisc((previous) => ({ ...previous, [discipline]: true }))
+        }
+      },
+    }
+  }
+
+  // Independent of product/spec caches. Abort on selection/retry and check both
+  // identity and epoch so late A → B → A reads cannot restore an old snapshot.
+  useEffect(() => {
+    setTimingHistory(null)
+    if (!legacyMode || !selectedId) return
+    const controller = new AbortController()
+    const id = selectedId
+    const epoch = selectionEpochRef.current
+    void readWorkspaceTiming(id, controller.signal).then((history) => {
+      if (history && !controller.signal.aborted && selectedIdRef.current === id && selectionEpochRef.current === epoch) setTimingHistory(history)
+    })
+    return () => controller.abort()
+  }, [selectedId, historyRevision, legacyMode])
 
   useEffect(() => {
     // a stage transitioning to passed/failed while NOT the visible view gets a
@@ -605,6 +738,19 @@ export default function Compose2Page() {
       st !== prev[k] && (st === 'passed' || st === 'failed') && !(activeDoc === null && stage === k && !pipeRunning))
     if (hits.length) setBadged((b) => ({ ...b, ...Object.fromEntries(hits) }) as Record<string, 'passed' | 'failed'>)
   }, [pipeStatus, activeDoc, stage, pipeRunning])
+
+  // Client navigation must stop future scheduling too; beforeunload only covers
+  // document navigation. Already-submitted server work may continue.
+  useEffect(() => {
+    pageAliveRef.current = true
+    return () => {
+      pageAliveRef.current = false
+      pipeAbort.current?.abort()
+      pipeAbort.current = null
+      manualOwnerRef.current = null
+      boardBusyRef.current = false
+    }
+  }, [])
 
   // A tab close would silently kill the multi-minute pipeline — ask first while
   // ANY run's pipeline is in flight (not just the selected one).
@@ -624,12 +770,28 @@ export default function Compose2Page() {
   // disciplines still streaming to disk) is never clobbered by partial disk state.
   useEffect(() => {
     const id = selectedRun?.id
-    if (newDesign || !selectedRun?.real || !id || productSpecRef.current) return
+    if ((!legacyMode && !nativeMode) || newDesign || !selectedRun?.real || !id || productSpecRef.current) return
     let off = false
     const j = (p: string) => fetch(p, { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null)
     const head = (p: string) => fetch(p, { method: 'HEAD', cache: 'no-store' }).then((r) => r.ok).catch(() => false)
-    j(`/runs/${id}/product-spec.json`).then((s) => { if (!off && s?.product) setProductSpec(s) })
-    j(`/runs/${id}/disciplines/id-brief.json`).then((b) => { if (!off && b?.product) setIdBrief(b) })
+    setSpecReadError('')
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 15000)
+    void fetch(nativeMode ? astraArtifactUrl(id, 'product-spec.json') : `/runs/${id}/product-spec.json`, { cache: 'no-store', signal: controller.signal, redirect: 'error' }).then(async (response) => {
+      const value = response.ok ? await response.json() : null
+      if (off || selectedIdRef.current !== id) return
+      if (value && typeof value.product === 'string' && value.product.trim() && value.disciplines && typeof value.disciplines === 'object' && !Array.isArray(value.disciplines)) {
+        if (!productSpecRef.current) { productSpecRef.current = value; setProductSpec(value) }
+        setSpecResolvedRun(id)
+      } else if (workspaceImportedMetadata(value)) {
+        setRetainedImportRun(id)
+        setSpecReadError('')
+      } else if (response.status === 404 && !importedRunsRef.current.has(id)) setSpecResolvedRun(id)
+      else setSpecReadError('Saved design metadata could not be read. No export or generation was started.')
+    }).catch(() => { if (!off && selectedIdRef.current === id) setSpecReadError('Saved design metadata could not be read. No export or generation was started.') })
+      .finally(() => clearTimeout(timeout))
+    if (nativeMode) return () => { off = true; clearTimeout(timeout); controller.abort() }
+    j(`/runs/${id}/disciplines/id-brief.json`).then((b) => { if (!off && selectedIdRef.current === id && b?.product) setIdBrief(b) })
     const probes: [string, string][] = [
       ['electronics', `/runs/${id}/electronics/chipscale-board.json`],
       ['mechanical', `/runs/${id}/mechanical/mechanical.json`],
@@ -640,11 +802,10 @@ export default function Compose2Page() {
       ['validation', `/runs/${id}/disciplines/validation.json`],
     ]
     Promise.all(probes.map(([k, p]) => head(p).then((ok) => (ok ? k : null)))).then((found) => {
-      if (!off) setBuiltDisc(Object.fromEntries(found.filter(Boolean).map((k) => [k as string, true])))
+      if (!off && selectedIdRef.current === id) setBuiltDisc(Object.fromEntries(found.filter(Boolean).map((k) => [k as string, true])))
     })
-    return () => { off = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedRun?.id, selectedRun?.real, newDesign])
+    return () => { off = true; clearTimeout(timeout); controller.abort() }
+  }, [selectedRun?.id, selectedRun?.real, newDesign, specReadRevision, legacyMode, nativeMode])
 
   // Run the WHOLE pipeline end-to-end: chip-scale electronics -> mechanical ->
   // simulation -> feedback loop -> firmware -> mfg -> supply -> validation. Reuses
@@ -666,11 +827,16 @@ export default function Compose2Page() {
    * thread was never registered, so it did not appear in the run list either.
    */
   const onRunStart = (runId: string) => {
+    if (sessionKeyRef.current !== sessionKey) return
+    promoteWorkspaceSession(runSessionsRef.current, runId, sessionKey)
+    selectedIdRef.current = runId
+    setDraftSessions((drafts) => drafts.filter((key) => key !== sessionKey))
     localRunsRef.current.add(runId)
+    if (legacyMode) setInitialPipelineByRun((previous) => ({ ...previous, [runId]: workspaceInitialPipeline('RUNNING') }))
     setSelectedId(runId)
     setNewDesign(false)
     setRuns((prev: Run[]) => (prev.some((r) => r.id === runId) ? prev : [
-      {
+      nativeMode ? buildAstraRunView({ runId, spec: productSpecRef.current }) : {
         id: runId,
         name: productSpecRef.current?.product || 'building…',
         timestamp: new Date().toISOString().replace('T', ' ').slice(0, 16),
@@ -687,18 +853,31 @@ export default function Compose2Page() {
   }
 
   /** A started run ended badly. Keep it, and record WHY on the run itself. */
-  const onRunFailed = (runId: string, detail: string) => {
+  const onRunFailed = (runId: string, detail: string, outcome: 'failed' | 'disconnected' = 'failed', scope: 'initial' | 'targeted' = 'initial') => {
     localRunsRef.current.add(runId)
+    if (nativeMode) {
+      setRuns((previous: Run[]) => previous.map(run => run.id === runId ? { ...run, status: 'UNKNOWN', failure: detail } : run))
+      setArtifactRevision((revision) => revision + 1)
+      void refreshRuns()
+      return
+    }
+    const connectionLost = outcome === 'disconnected'
+    const failure = connectionLost ? `${detail} The server may still be working; inspect saved artifacts before starting another build.` : detail
+    if (scope === 'targeted') {
+      setInitialPipelineByRun((previous) => { const next = { ...previous }; delete next[runId]; return next })
+      setPipeStatusByRun((previous) => { const next = { ...previous }; delete next[runId]; return next })
+      setTimingHistory(null); setHistoryRevision((revision) => revision + 1)
+    } else setInitialPipelineByRun((previous) => ({ ...previous, [runId]: workspaceInitialPipeline(connectionLost ? 'NEEDS ATTENTION' : 'GATE FAILED', failure) }))
     setRuns((prev: Run[]) => prev.map((r) => (r.id === runId
-      ? ({ ...r, status: 'GATE FAILED', failure: detail } as unknown as Run)
+      ? ({ ...r, status: connectionLost ? 'NEEDS ATTENTION' : 'GATE FAILED', failure } as unknown as Run)
       : r)))
-    logLine({ source: 'pipeline', level: 'error', text: `run failed — ${detail}`, runId })
+    logLine({ source: 'pipeline', level: connectionLost ? 'warn' : 'error', text: `${connectionLost ? 'run updates disconnected' : 'run failed'} — ${detail}`, runId })
   }
 
   const runPipeline = async (runIdArg?: string) => {
     const runId = runIdArg || selectedRun?.id
     const spec = productSpecRef.current
-    if (!spec || !runId || pipeAbort.current) return
+    if (!legacyMode || !pageAliveRef.current || !spec || !runId || pipeAbort.current || boardBusyRef.current || importBusyRef.current || (!runIdArg && chatBusyRef.current)) return
     const ac = new AbortController()
     pipeAbort.current = ac
     setPipelineRunId(runId)
@@ -719,6 +898,7 @@ export default function Compose2Page() {
         // session-global view — so switching threads mid-run can't cross-narrate.
         // Each transition also lands in the bottom Terminal panel's log bus.
         onStage: (e) => {
+          if (ac.signal.aborted || !pageAliveRef.current) return
           logLine({
             source: 'pipeline',
             level: e.status === 'failed' ? 'error' : e.status === 'blocked' ? 'warn'
@@ -732,6 +912,7 @@ export default function Compose2Page() {
           }))
         },
       })
+      if (ac.signal.aborted || !pageAliveRef.current) return
       if (res.feedback) setPipeFeedbackByRun((prev) => ({ ...prev, [runId]: res.feedback! }))
       // Portfolio bridge: a completed run becomes an enterprise Programs board
       // (fire-and-forget; the sync is idempotent and reads only real artifacts).
@@ -749,17 +930,29 @@ export default function Compose2Page() {
       // time. If the user switched away, the artifacts are on disk — reselecting
       // the run rehydrates them (see the restore effect above).
       if (selectedIdRef.current === runId) {
-        if (res.updatedSpec) setProductSpec(res.updatedSpec)
+        if (res.updatedSpec) { productSpecRef.current = res.updatedSpec; setProductSpec(res.updatedSpec) }
         setBuiltDisc((prev) => {
           const next = { ...prev }
           for (const [k, v] of Object.entries(res.stages)) if (v?.status === 'passed') next[k] = true
           return next
         })
       }
-    } catch { /* aborted or fatal — status already reflects where it stopped */ }
-    finally { setPipelineRunId(null); setPipeStartedAt(null); pipeAbort.current = null }
+    } catch {
+      if (!pageAliveRef.current || pipeAbort.current !== ac) return
+      setPipeStatusByRun((previous) => ({ ...previous, [runId]: interruptWorkspacePipeline(previous[runId] ?? {}) }))
+    } finally {
+      if (!pageAliveRef.current || pipeAbort.current !== ac) return
+      setStageRefreshRevision((revision) => revision + 1)
+      // Even an unexpected sequencer exit cannot leave a confirmed live spinner.
+      setPipeStatusByRun((previous) => ({ ...previous, [runId]: interruptWorkspacePipeline(previous[runId] ?? {}) }))
+      setPipelineRunId(null); setPipeStartedAt(null); pipeAbort.current = null
+    }
   }
-  const stopPipeline = () => { pipeAbort.current?.abort(); setPipelineRunId(null); setPipeStartedAt(null) }
+  const stopPipeline = () => {
+    pipeAbort.current?.abort()
+    if (pipelineRunId) setPipeStatusByRun((previous) => ({ ...previous, [pipelineRunId]: interruptWorkspacePipeline(previous[pipelineRunId] ?? {}) }))
+    setPipelineRunId(null); setPipeStartedAt(null)
+  }
 
   // Auto-start the full pipeline the moment a PRODUCT's board finishes building.
   // compose-chat calls this with the exact runId it just built (from the build's
@@ -768,41 +961,42 @@ export default function Compose2Page() {
   // board gate-failed (the chip-scale board the pipeline builds is what matters).
   // `pipeStarted` guards to once per run.
   const onProductBuilt = (runId: string) => {
-    if (!runId || pipeStarted.current.has(runId)) return
+    if (!legacyMode || !runId || selectedIdRef.current !== runId || sessionKeyRef.current !== sessionKey || pipeStarted.current.has(runId)) return
     pipeStarted.current.add(runId)
     runPipeline(runId)
   }
 
   // load the selected run's own snapshot
   useEffect(() => {
-    if (!selectedReal) { setRealBoard(null); return }
+    setBoardReadError('')
+    if (!legacyMode || !selectedReal) { setRealBoard(null); return }
     let cancelled = false
-    loadRealBoard(selectedRunDir ?? '').then((d) => { if (!cancelled) setRealBoard(d) })
+    setRealBoard(null)
+    const id = selectedId
+    const epoch = selectionEpochRef.current
+    readSavedBoard(selectedRunDir ?? '', id, epoch).then((d) => { if (!cancelled && selectedIdRef.current === id && selectionEpochRef.current === epoch) setRealBoard(d) })
     return () => { cancelled = true }
-  }, [selectedReal, selectedRunDir])
+  }, [selectedId, selectedReal, selectedRunDir, artifactRevision, legacyMode])
 
   const real = realBoard && realBoard.base === (selectedRunDir ?? '') ? realBoard : null
   const isReal = selectedRun?.real === true && real !== null
 
-  // Single clear next step for the right-pane header. State-driven and honest:
-  // while a build runs → "Building…" (disabled). With a real board on screen we
-  // only promote "Order" when we have a positive pass signal and NO failed/
-  // blocked gate; otherwise the safe default is "Review & fix". No board → no
-  // action. Pass is derived from the pipeline status the workspace already reads
-  // (never fabricated) — if it's inconclusive we fall through to Review.
-  const boardExists = isReal && !!real
-  const pipeVals = Object.values(pipeStatus) as { status?: string }[]
-  const anyFailedGate = pipeVals.some((v) => v?.status === 'failed' || v?.status === 'blocked')
-  const anyPassedGate = pipeVals.some((v) => v?.status === 'passed')
-  const cleanPass = boardExists && anyPassedGate && !anyFailedGate
-  const primaryAction: { label: string; onClick: () => void; disabled?: boolean } | null =
-    pipeRunning
-      ? { label: 'Building…', onClick: () => {}, disabled: true }
-      : boardExists
-        ? (cleanPass
-            ? { label: 'Order / Get quote', onClick: () => setTab('Order') }
-            : { label: 'Review & fix', onClick: () => setTab('Review') })
-        : null
+  const refreshKey = `${selectedId}:${artifactRevision}:${pipelineSignature(pipeStatus)}`
+  useEffect(() => {
+    setBoardFacts(null)
+    if (!legacyMode || !selectedId || boardGenerating) return
+    const controller = new AbortController()
+    const id = selectedId
+    fetch(`/runs/${id}/electronics/chipscale-board.json`, { cache: 'no-store', signal: controller.signal })
+      .then((response) => response.ok ? response.json() : null)
+      .then((facts) => { if (!controller.signal.aborted && selectedIdRef.current === id && facts) setBoardFacts({ runId: id, facts }) })
+      .catch(() => {})
+    return () => controller.abort()
+  }, [selectedId, selectedReal, refreshKey, boardGenerating, legacyMode])
+  const boardStatus = legacyMode
+    ? workspaceBoardStatus(boardFacts?.runId === selectedId ? boardFacts.facts : null, !!selectedRun, liveRunning, failedRun?.failure)
+    : { label: nativeMode ? 'Native electronics only · inspect saved evidence' : 'Verifying workspace mode', detail: 'No legacy board or manufacturing approval is inferred.', action: null }
+  const progress = workspaceProgress(legacyMode ? pipeStatus : {}, legacyMode && liveRunning, historyState)
 
   // RIGHT — the active stage's detailed results. One shared block for BOTH
   // layout branches (blank slate + full workspace): resize handle + icon rail
@@ -810,7 +1004,9 @@ export default function Compose2Page() {
   // guard, so with no run selected the rail renders a clean empty state.
   // one panel switch shared by the RIGHT rail and CENTER doc tabs — same
   // components, same guards, two hosts
-  const panelBody = (tb: Tab) => (
+  const panelBody = (tb: Tab) => !legacyMode ? (
+    <div className="space-y-3 p-4 text-sm"><p>{nativeMode ? 'Native electronics evidence is available in Preview under Native checks and Files.' : 'Workspace mode has not been verified. Legacy panels are not loaded.'}</p><p className="text-xs text-muted-foreground">Mechanical, thermal, firmware, manufacturing, supply and system validation are not run in the electronics-only beta. No shipping approval is inferred.</p><button type="button" className="workspace-control" onClick={() => setSurface('preview')}>Open native preview</button></div>
+  ) : (
     <>
                   {(newDesign || !selectedRun) ? (
                     /* A run that FAILED is not an absence of a run. It used to
@@ -841,26 +1037,26 @@ export default function Compose2Page() {
                     <>
                       {tb === 'Overview' && (
                         <>
-                          <RunOverview runId={selectedRun.runDir ? selectedRun.id : null} run={selectedRun} />
+                          <RunOverview runId={selectedRun.runDir ? selectedRun.id : null} run={selectedRun} refreshKey={refreshKey} />
                           <RevisionRail
                             runId={selectedRun.runDir ? selectedRun.id : undefined}
-                            onSelectRun={(rid) => { setSelectedId(rid); setNewDesign(false); setIdBrief(null); setProductSpec(null); setStage('electronics'); setBuiltDisc({}) }}
+                            onSelectRun={selectThreadFromList}
                           />
                           <WorkQueue
                             runId={selectedRun.runDir ? selectedRun.id : undefined}
-                            onResolve={(prompt) => setRevisePrefill(prompt)}
+                            onResolve={revise}
                           />
                           <CommentsPanel runId={selectedRun.runDir ? selectedRun.id : undefined} />
                         </>
                       )}
                       {tb === 'Objects' && <BoardObjects real={real} />}
-                      {tb === 'Artifacts' && <ArtifactExplorer runId={selectedRun.runDir ? selectedRun.id : null} />}
+                      {tb === 'Artifacts' && <ArtifactExplorer revision={artifactRevision} runId={selectedRun.runDir ? selectedRun.id : null} />}
                       {tb === 'Code' && <CodeViewer key={isReal ? 'real' : 'seed'} files={isReal ? real?.ato : null} />}
                       {tb === 'BOM' && (
                         <BomWorkspace
                           lines={isReal ? real?.bom : null}
                           runId={selectedRun.runDir ? selectedRun.id : undefined}
-                          onResolve={(prompt) => setRevisePrefill(prompt)}
+                          onResolve={revise}
                         />
                       )}
                       {tb === 'Checks' && <BoardChecks real={real} />}
@@ -878,7 +1074,7 @@ export default function Compose2Page() {
                           <div className="border-t border-border">
                             <FL1Loop
                               runId={selectedRun.runDir ? selectedRun.id : null}
-                              onRevise={(eco) => setRevisePrefill(eco)}
+                              onRevise={revise}
                             />
                           </div>
                         </div>
@@ -904,7 +1100,7 @@ export default function Compose2Page() {
                             <BomWorkspace
                               lines={isReal ? real?.bom : null}
                               runId={selectedRun.runDir ? selectedRun.id : undefined}
-                              onResolve={(prompt) => setRevisePrefill(prompt)}
+                              onResolve={revise}
                             />
                           </PanelSection>
                           <PanelSection label="Assembly"><AssemblyPanel runId={selectedRun.runDir ? selectedRun.id : null} fabZip={null} /></PanelSection>
@@ -919,7 +1115,7 @@ export default function Compose2Page() {
                               <div className="border-t border-border">
                                 <FL1Loop
                                   runId={selectedRun.runDir ? selectedRun.id : null}
-                                  onRevise={(eco) => setRevisePrefill(eco)}
+                                  onRevise={revise}
                                 />
                               </div>
                             </div>
@@ -936,135 +1132,29 @@ export default function Compose2Page() {
   const activeDocTab = docTabs.find((d) => d.id === activeDoc) ?? null
 
   const rightPane = (
-    <>
-      <Handle which="right" />
-      <section style={{ width: rightW }} className="flex shrink-0 border-l border-border">
-        {stage === 'electronics' ? (
-          <>
-            <div className="flex w-12 shrink-0 flex-col border-r border-border bg-card/30">
-              <nav className="flex min-h-0 flex-1 flex-col overflow-y-auto py-1">
-                {VIEWS.map((v) => {
-                  const on = tab === v.tab
-                  return (
-                    <button key={v.tab} type="button" onClick={() => setTab(v.tab)} title={v.label}
-                      className={cn('relative flex w-full flex-col items-center gap-0.5 px-0.5 py-2 text-[8px]',
-                        on ? 'text-foreground' : 'text-muted-foreground hover:text-foreground')}>
-                      {/* VS Code-style active indicator: 2px amber left edge, no pill */}
-                      {on && <span aria-hidden className="absolute inset-y-1 left-0 w-0.5 bg-primary" />}
-                      <v.Icon className={cn('size-4', on && 'text-primary')} />
-                      <span className="leading-none">{v.label}</span>
-                    </button>
-                  )
-                })}
-              </nav>
-              {/* Advanced disclosure: the demoted-but-kept destinations, reachable
-                  from a single "More" affordance at the bottom of the rail. */}
-              <div className="relative shrink-0 border-t border-border">
-                {(() => { const advOn = ADVANCED_VIEWS.some((v) => v.tab === tab); return (
-                  <button type="button" onClick={() => setAdvOpen((o) => !o)} title="Advanced panels"
-                    className={cn('relative flex w-full flex-col items-center gap-0.5 px-0.5 py-2 text-[8px]',
-                      advOn ? 'text-foreground' : 'text-muted-foreground hover:text-foreground')}>
-                    {advOn && <span aria-hidden className="absolute inset-y-1 left-0 w-0.5 bg-primary" />}
-                    <MoreHorizontal className={cn('size-4', advOn && 'text-primary')} />
-                    <span className="leading-none">More</span>
-                  </button>
-                ) })()}
-                {advOpen && (
-                  <div className="absolute bottom-0 left-full z-30 ml-1 w-44 rounded-md border border-border bg-card py-1 shadow-lg">
-                    {ADVANCED_VIEWS.map((v) => (
-                      <button key={v.tab} type="button"
-                        onClick={() => { setTab(v.tab); setAdvOpen(false) }}
-                        className={cn('flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[11.5px]',
-                          tab === v.tab ? 'bg-accent/50 text-foreground' : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground')}>
-                        <v.Icon className="h-3.5 w-3.5" /> {v.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="flex min-w-0 flex-1 flex-col">
-              <div className="flex h-7 shrink-0 items-center justify-between gap-2 border-b border-border bg-card/50 pl-2.5 pr-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-                <span className="truncate">{ALL_VIEWS.find((v) => v.tab === tab)?.label ?? tab}</span>
-                {primaryAction && (
-                  <button type="button" onClick={primaryAction.onClick} disabled={primaryAction.disabled}
-                    className={cn('flex shrink-0 items-center rounded px-2 py-0.5 text-[10px] font-medium normal-case tracking-normal',
-                      primaryAction.disabled
-                        ? 'cursor-default bg-muted text-muted-foreground'
-                        : 'bg-primary text-primary-foreground hover:opacity-90')}>
-                    {primaryAction.label}
-                  </button>
-                )}
-              </div>
-              <div className="min-h-0 flex-1 overflow-y-auto">
-                <ErrorBoundary>
-                  {panelBody(tab)}
-                </ErrorBoundary>
-              </div>
-            </div>
-          </>
-        ) : (
-          <div className="flex min-w-0 flex-1 flex-col">
-            <div className="flex h-7 shrink-0 items-center border-b border-border bg-card/50 px-2.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-              {STAGES.find((s) => s.key === stage)?.label ?? stage}
-            </div>
-            <div className="min-h-0 flex-1 overflow-y-auto">
-            <ErrorBoundary>
-              {['firmware', 'manufacturing', 'supplyChain', 'validation'].includes(stage) ? (
-                <div className="flex h-full flex-col gap-3 p-4 text-[12px] text-muted-foreground">
-                  <div className="font-mono text-[9px] uppercase tracking-wide">specialist module</div>
-                  <p>A <span className="text-foreground">separate module</span> built on the shared generic engine: the product engine emits a structured artifact grounded in the spec + real board.</p>
-                  <p>Fidelity is honest — <span className="text-amber-600 dark:text-amber-400">generated / advisory</span>, not validated, compiled, or live-sourced. Each artifact carries its own fidelity label.</p>
-                </div>
-              ) : stage === 'explore' ? (
-                <div className="flex h-full flex-col gap-3 p-4 text-[12px] text-muted-foreground">
-                  <div className="font-mono text-[9px] uppercase tracking-wide">design-of-N</div>
-                  <p>The product engine turns your spec into a <span className="text-foreground">design problem</span> (variables · objectives · constraints), then the optimizer generates candidates, scores them, and picks the best off the Pareto frontier.</p>
-                  <p>Objectives with a real evaluator (cost, size, battery) are scored analytically. Objectives without one (audio, antenna, thermal…) are carried as <span className="text-amber-600 dark:text-amber-400">honest gaps</span> until their evaluator plugin lands — never faked.</p>
-                  <p>The selected design is what the discipline modules then build.</p>
-                </div>
-              ) : stage === 'id'
-                ? (idBrief ? <IdBriefPanel brief={idBrief} /> : <StagePlaceholder title="Industrial Design" Icon={Palette} />)
-                : stage === 'mechanical'
-                  ? (
-                    <div className="flex h-full flex-col gap-3 p-4 text-[12px] text-muted-foreground">
-                      <div className="font-mono text-[9px] uppercase tracking-wide">mechanical · CAD</div>
-                      <p>The product engine emits a <span className="text-foreground">mechanical build plan</span> (sketch · extrude · pocket · standoff · cutout) sized to the real board. A thin executor renders it in <span className="text-foreground">Onshape</span> and exports a real <span className="text-foreground">STEP</span> file.</p>
-                      <p>No fixed enclosure recipe — the plan (data) decides the form, so the same executor builds a shell, a bracket, or a potting box.</p>
-                      <p>Advisory CAD: a first-pass parametric part, <span className="text-amber-600 dark:text-amber-400">not tolerance/fit-validated</span>. Per-op failures are reported, never hidden.</p>
-                    </div>
-                  )
-                  : (
-                    <div className="flex h-full flex-col gap-3 p-4 text-[12px] text-muted-foreground">
-                      <div className="font-mono text-[9px] uppercase tracking-wide">simulation · physics</div>
-                      <p><span className="text-foreground">thermal</span> and <span className="text-foreground">drop</span> are real finite-element solves via <span className="text-foreground">scikit-fem</span> — a 2D FEM heat-conduction field and a Kirchhoff-plate modal FEM. Acoustics (sealed-box), RF (link budget) and battery (energy) are analytic. Each result is labeled by <span className="text-foreground">fidelity</span> and the tool that produced it.</p>
-                      <p>3D FEA is LIVE — <span className="text-amber-600 dark:text-amber-400">gmsh + CalculiX</span> solve the board and the real enclosure STEP. Still install-gated: <span className="text-amber-600 dark:text-amber-400">Elmer · openEMS · OpenFOAM</span>.</p>
-                      <p>The runner only reports metrics it can compute — nothing faked.</p>
-                    </div>
-                  )}
-            </ErrorBoundary>
-            </div>
-          </div>
-        )}
-      </section>
-    </>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 items-center gap-2 border-b border-border p-2">
+        <label className="min-w-0 flex-1 text-xs">
+          <span className="sr-only">Details panel</span>
+          <select aria-label="Details panel" value={tab} onChange={(event) => setTab(event.target.value)} className="workspace-control w-full">
+            {ALL_VIEWS.map((item) => <option key={item.tab} value={item.tab}>{item.label}</option>)}
+          </select>
+        </label>
+        <button type="button" aria-label="Close details" className="workspace-control" onClick={() => { setInspectorOpen(false); setSurface('preview') }}><X className="size-4" /></button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {legacyMode && stage === 'id' && idBrief && <details className="border-b border-border p-2 text-xs"><summary>Industrial design brief</summary><IdBriefPanel brief={idBrief} /></details>}
+        <ErrorBoundary key={`${selectedId}:${tab}`}>{panelBody(tab)}</ErrorBoundary>
+      </div>
+    </div>
   )
 
-  // Blank slate: shown on a fresh load (no run selected) and on a zero-run
-  // install. The conversation pane (resizable, like the workspace) + empty
-  // center + the same right rail in its empty state — describing a board builds
-  // one; the panels populate once it finishes. Past runs stay reachable from
-  // ---- left pane: icon bar + the three views (chat / threads / files) ------
-  const selectThreadFromList = (id: string) => {
-    setSelectedId(id); setNewDesign(false); setIdBrief(null); setProductSpec(null)
-    setStage('electronics'); setBuiltDisc({}); setLeftView('chat')
-    setDocTabs([]); setActiveDoc(null); setBadged({})
-  }
   const leftIcons = (
     <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border px-1.5">
       {([['chat', MessagesSquare, 'Chat'], ['threads', History, 'Threads'], ['files', FolderTree, 'Files']] as const).map(([v, Icon, label]) => (
         <button
           key={v}
+          aria-pressed={leftView === v}
           onClick={() => setLeftView(v)}
           title={label}
           className={cn(
@@ -1077,17 +1167,23 @@ export default function Compose2Page() {
           {leftView === v && <span aria-hidden className="absolute inset-x-1 bottom-0 h-0.5 rounded bg-primary" />}
         </button>
       ))}
+      <div className="ml-auto shrink-0"><LLMSettings /></div>
     </div>
   )
   const threadsPane = (
     <div className="flex min-h-0 flex-1 flex-col">
       <button
-        onClick={() => { setNewDesign(true); setBuiltDisc({}); setLeftView('chat'); setProductSpec(null); setIdBrief(null) }}
+        onClick={newSession}
         className="mx-2 mt-2 flex items-center gap-1.5 rounded border border-border px-2 py-1.5 text-xs text-muted-foreground hover:bg-accent/50"
       >
         <Plus className="h-3.5 w-3.5" /> New design
       </button>
       <div className="min-h-0 flex-1 overflow-auto py-1.5">
+        {draftSessions.filter((key) => !Array.from(runSessionsRef.current.values()).includes(key)).map((key, index) => (
+          <button key={key} type="button" onClick={() => changeSession(key, '')} className="flex w-full px-3 py-2 text-left text-xs text-muted-foreground hover:bg-accent" aria-current={sessionKey === key && !selectedId ? 'page' : undefined}>
+            Unsaved draft {index + 1}
+          </button>
+        ))}
         {runs.length === 0 && <div className="px-3 py-2 text-xs text-muted-foreground">No designs yet.</div>}
         {/* Every row used to be one truncated title and nothing else, so twenty
             designs read as twenty identical lines. status + timestamp already
@@ -1121,68 +1217,9 @@ export default function Compose2Page() {
   )
   const filesPane = (
     <div className="flex min-h-0 flex-1 flex-col">
-      <ArtifactExplorer runId={selectedRun?.runDir ? selectedRun.id : null} compact onOpen={openFileTab} />
+      {legacyMode ? <ArtifactExplorer revision={artifactRevision} runId={selectedRun?.runDir ? selectedRun.id : null} compact onOpen={openFileTab} /> : <div className="p-4 text-xs"><p>Native downloads are limited to verified manifest files.</p><button type="button" className="workspace-control mt-3" onClick={() => setSurface('preview')}>Open Preview, then Files</button></div>}
     </div>
   )
-
-  // the ☰ menu (real threads + select handler), so this is a clean start, not a
-  // dead end.
-  // The blank slate is for a session that has not started anything. Once a run
-  // exists — including one that failed and wrote nothing — the page renders the
-  // run, never the fresh-install screen. `selectedRun` resolves for a failed run
-  // because onRunStart registers it and mergeRuns keeps it, so this branch is
-  // now only reachable with genuinely no run selected.
-  if (!selectedRun) {
-    return (
-      <main className="flex h-[calc(100dvh-2.25rem)] flex-col overflow-hidden bg-background text-foreground">
-        <div className="flex min-h-0 flex-1 overflow-hidden">
-          <aside style={{ width: leftW }} className="flex shrink-0 flex-col border-r border-border">
-            {leftIcons}
-            {leftView === 'threads' && threadsPane}
-            {leftView === 'files' && filesPane}
-            {leftView === 'chat' && <ComposeChat
-              threads={runs.map((r) => ({ id: r.id, label: r.name || r.id }))}
-              activeId=""
-              newDesign
-              revisePrefill={revisePrefill}
-              onPrefillConsumed={onPrefillConsumed}
-              onSelectThread={(id) => { setSelectedId(id); setNewDesign(false); setIdBrief(null); setProductSpec(null); setStage('electronics'); setBuiltDisc({}) }}
-              onNew={() => {}}
-              onRunComplete={onRunComplete}
-          onRunStart={onRunStart}
-          onRunFailed={onRunFailed}
-              onIdBrief={onIdBrief}
-              onProductSpec={setProductSpec}
-              productSpec={productSpec}
-              onProductBuilt={onProductBuilt}
-            />}
-          </aside>
-          <Handle which="left" />
-          <div className="flex min-w-0 flex-1 items-center justify-center p-6 text-center text-sm text-muted-foreground">
-            Describe a board on the left to design your first one.
-          </div>
-          {rightPane}
-        </div>
-
-        <TerminalPanel
-          collapsed={termCollapsed}
-          onToggle={toggleTerm}
-          tab={termTab}
-          onTabChange={setTermTab}
-        />
-        <StatusBar
-          runId={pipelineRunId ?? (selectedId || null)}
-          runName={selectedRun?.name ?? null}
-          pipeline={pipelineRunId ? pipeStatusByRun[pipelineRunId] : pipeStatus}
-          running={!!pipelineRunId}
-          tiers={llmTiers}
-          problemCount={problemCount}
-          onProblemsClick={() => { setTermTab('problems'); if (termCollapsed) toggleTerm() }}
-          startedAt={pipeStartedAt}
-        />
-      </main>
-    )
-  }
 
   const boardBase = selectedRunDir ? `${selectedRunDir}/board` : '/board'
   // The run has a bespoke chip-scale board — point Layout + Schematic at ITS
@@ -1199,152 +1236,113 @@ export default function Compose2Page() {
   const ADVISORY_STAGES: Stage[] = ['mechanical', 'simulation']
   const stageMeta = (key: Stage) => {
     const needsSpec = ['explore', 'firmware', 'manufacturing', 'supplyChain', 'validation'].includes(key)
-    const avail = needsSpec ? !!productSpec : key === 'electronics' ? (!!selectedRun || !!productSpec) : key === 'id' ? (!!productSpec || !!idBrief || !!selectedRun) : true
+    const avail = needsSpec ? (!!productSpec || !!selectedRun) : key === 'electronics' ? (!!selectedRun || !!productSpec) : key === 'id' ? (!!productSpec || !!idBrief || !!selectedRun) : true
     const locked = !avail && (needsSpec || key === 'electronics' || key === 'id')
     return { needsSpec, avail, locked }
   }
   const clearBadge = (key: string) => setBadged((b) => { if (!(key in b)) return b; const n = { ...b }; delete n[key]; return n })
 
-  return (
-    <main className="flex h-[calc(100dvh-2.25rem)] flex-col overflow-hidden bg-background text-foreground">
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-      {/* LEFT — conversation (real interview + live agent step feed) */}
-      <aside style={{ width: leftW }} className="flex shrink-0 flex-col border-r border-border">
-        {leftIcons}
-        {leftView === 'threads' && threadsPane}
-        {leftView === 'files' && filesPane}
-        {leftView === 'chat' && <ComposeChat
-          threads={runs.map((r) => ({ id: r.id, label: r.name || r.id }))}
-          activeId={selectedId}
-          activeRunId={!newDesign && selectedRun?.real ? selectedRun.id : undefined}
-          activeName={selectedRun?.name}
-          newDesign={newDesign}
-          revisePrefill={revisePrefill}
-          onPrefillConsumed={onPrefillConsumed}
-          onSelectThread={(id) => { setSelectedId(id); setNewDesign(false); setIdBrief(null); setProductSpec(null); setStage('electronics'); setBuiltDisc({}) }}
-          onNew={() => { setNewDesign(true); setBuiltDisc({}); setProductSpec(null); setIdBrief(null) }}
-          builtDisciplines={builtDisc}
-          pipelineStatus={pipeStatus}
-          pipelineRunning={pipeRunning}
-          pipelineFeedback={pipeFeedback}
-          onRunPipeline={() => runPipeline()}
-          onStopPipeline={stopPipeline}
-          onProductBuilt={onProductBuilt}
-          onRunComplete={onRunComplete}
-              onRunStart={onRunStart}
-              onRunFailed={onRunFailed}
-          onIdBrief={onIdBrief}
-          onProductSpec={setProductSpec}
-          productSpec={productSpec}
-          onRename={async (id, name) => {
-            await fetch('/api/runs/rename', {
-              method: 'POST', headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ id, name }),
-            }).catch(() => {})
-            await refreshRuns()
-          }}
-        />}
-      </aside>
-
-      <Handle which="left" />
-
-      {/* CENTER — stage bar over the middle pane ONLY, then the active stage's
-          visualization. The right pane is a full-height sibling (like the left).
-          A file opened from the left Files tree takes over this pane (IDE
-          editor style) until closed. */}
-      <section className="relative flex min-w-0 flex-1 overflow-hidden">
-
-        {/* The pipeline IS the navigation. This replaced a horizontal strip of
-            nine stage tabs plus an overflow menu — a set of unrelated places,
-            for something that is an ordered sequence with a state per step. The
-            strip also needed 736px inside 392px, so a third of it sat off-screen
-            behind an invisible scroll. See components/run-timeline.tsx. */}
-        <RunTimeline
-          className="w-[10.25rem]"
-          active={activeDoc ? '' : stage}
-          onSelect={(k) => { setStage(k as Stage); setActiveDoc(null); clearBadge(k) }}
-          stages={STAGES.map((st) => {
-            const ps = (pipeStatus as Record<string, { status?: string; detail?: string }>)?.[st.key]
-            return {
-              key: st.key,
-              label: st.label,
-              Icon: st.Icon,
-              state: ps?.status as any,
-              detail: ps?.detail,
-              badged: badged[st.key],
-              locked: stageMeta(st.key).locked,
-              advisory: ADVISORY_STAGES.includes(st.key as Stage),
-            }
-          })}
-        />
-
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {/* Editor tabs for files opened from the Files tree. These ARE a tab
-            strip in the real sense — arbitrary documents, no order — so they
-            stayed one. */}
-        <div className="flex h-9 shrink-0 items-stretch overflow-x-auto bg-card/40">
-          {/* filler completes the tab strip's bottom border after the last tab */}
-          {docTabs.map((d) => {
-            const on = activeDoc === d.id
-            return (
-              <div key={d.id} className={cn('relative flex shrink-0 items-stretch border-b border-r border-border', on ? 'border-b-transparent bg-background' : 'bg-card/40')}>
-                {on && <span aria-hidden className="absolute inset-x-0 top-0 h-px bg-primary" />}
-                <button type="button" onClick={() => setActiveDoc(d.id)} title={d.kind === 'file' ? d.file?.path : d.label}
-                  className={cn('flex items-center gap-1.5 pl-3 pr-1 text-[11.5px]', on ? 'font-medium text-foreground' : 'text-muted-foreground hover:text-foreground')}>
-                  {d.label}
-                </button>
-                <button type="button" onClick={() => closeDoc(d.id)}
-                  className="flex items-center pl-0.5 pr-2 text-muted-foreground hover:text-foreground" title="Close">
-                  <X className="h-3 w-3" />
-                </button>
-              </div>
-            )
-          })}
-          <div className="relative flex shrink-0 items-center border-b border-border px-1">
-            <button type="button" onClick={() => setAddOpen((o) => !o)} title="Open a panel as a tab"
-              className="rounded p-1 text-muted-foreground hover:bg-accent/50 hover:text-foreground">
-              <Plus className="h-3.5 w-3.5" />
-            </button>
-            {addOpen && (
-              <div className="absolute left-0 top-full z-30 mt-1 max-h-80 w-40 overflow-y-auto rounded-md border border-border bg-card py-1 shadow-lg">
-                {ALL_VIEWS.map((v) => (
-                  <button key={v.tab} type="button"
-                    onClick={() => { openPanelTab(v.tab, v.label); setAddOpen(false) }}
-                    className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[11.5px] text-muted-foreground hover:bg-accent/50 hover:text-foreground">
-                    <v.Icon className="h-3.5 w-3.5" /> {v.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <div aria-hidden className="min-w-4 flex-1 border-b border-border" />
+  const conversation = <>
+    {leftIcons}
+    {leftView === 'threads' && threadsPane}
+    {leftView === 'files' && filesPane}
+    {!metadataReady && selectedRun?.real && <div role={specReadError ? 'alert' : 'status'} className="p-3 text-xs text-muted-foreground">{retainedImportRun === selectedId ? 'Imported files are available for inspection. Generation and chat revisions require a complete product specification; this import only contains retained-file metadata.' : specReadError || 'Loading saved design metadata. Sending is paused until the correct revision is available.'}{specReadError && <button type="button" className="workspace-control mt-2" onClick={() => setSpecReadRevision((revision) => revision + 1)}>Retry metadata</button>}</div>}
+    {/* One shell and one mounted chat: utility panes never reset the interview. */}
+    <div hidden={leftView !== 'chat'} inert={importBusy || boardGenerating} className="flex min-h-0 flex-1 flex-col">
+      <ComposeChat
+        sessionKey={sessionKey} onBusyChange={onBusyChange}
+        generationDisabled={boardGenerating || importBusy || !metadataReady || !!astraMode.generationBlocker || (selectedNative && !astraMode.beta)} canStartGeneration={() => !boardBusyRef.current && !importBusyRef.current && metadataReadyRef.current && !astraMode.generationBlocker && (!selectedNative || astraMode.beta)}
+        onRetryMetadata={() => setSpecReadRevision((revision) => revision + 1)}
+        onArtifactsChanged={(id) => { if (selectedIdRef.current === id) { setArtifactRevision((revision) => revision + 1); setStageRefreshRevision((revision) => revision + 1); setTimingHistory(null); setHistoryRevision((revision) => revision + 1); if (nativeMode) void refreshRuns() } }}
+        threads={runs.map((run) => ({ id: run.id, label: run.name || run.id }))}
+        activeId={selectedId}
+        activeRunId={!newDesign && selectedRun?.real ? selectedRun.id : undefined}
+        activeName={selectedRun?.name} newDesign={!selectedRun || newDesign}
+        revisePrefill={revisePrefill} onPrefillConsumed={onPrefillConsumed}
+        onSelectThread={selectThreadFromList} onNew={newSession}
+        builtDisciplines={legacyMode ? builtDisc : {}} pipelineStatus={legacyMode ? pipeStatus : {}} pipelineRunning={legacyMode && pipeRunning} pipelineHistoryState={legacyMode ? historyState : 'unavailable'}
+        pipelineFeedback={legacyMode ? pipeFeedback : null} onRunPipeline={legacyMode ? () => runPipeline() : undefined} onStopPipeline={legacyMode ? stopPipeline : undefined}
+        onProductBuilt={onProductBuilt} onRunComplete={onRunComplete} onRunStart={onRunStart} onRunFailed={onRunFailed}
+        onIdBrief={onIdBrief} onProductSpec={onProductSpec} productSpec={productSpec}
+        onRename={async (id, name) => {
+          if (!legacyMode) return
+          await fetch('/api/runs/rename', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, name }) }).catch(() => {})
+          await refreshRuns()
+        }}
+      />
+    </div>
+  </>
+  const preview = !legacyMode ? (
+    nativeMode && selectedId ? <ErrorBoundary key={`native:${selectedId}`}><AstraNativeStage runId={selectedId} refreshKey={`${artifactRevision}:${stageRefreshRevision}:${historyRevision}`} /></ErrorBoundary>
+      : <div className="workspace-start"><div className="workspace-start-copy"><h2>{nativeMode ? 'Select the supported BME280 breakout' : 'Verifying workspace mode'}</h2><p>{nativeMode ? 'Review the fixed requirements in Conversation, select the template, then explicitly generate it. Unrelated drafts are preserved and are not submitted. Saved native artifacts appear here. Other disciplines are not run.' : 'No board reader or exporter is loaded until the current mode is known.'}</p>{astraMode.availability.state === 'error' && <button type="button" className="workspace-control" onClick={astraMode.retryStatus}>Retry workspace status</button>}<button type="button" className="workspace-control" onClick={() => { setLeftView('chat'); setSurface('conversation') }}>Open conversation</button></div></div>
+  ) : <>
+    {selectedRun && <RunTimeline active={activeDoc ? '' : stage} historyState={historyState}
+      onSelect={(key) => { setStage(key as Stage); setActiveDoc(null); setFollowBuild(false); clearBadge(key) }}
+      stages={STAGES.map((item) => ({ ...item, state: pipeStatus[item.key]?.status, detail: pipeStatus[item.key]?.detail, badged: badged[item.key], locked: stageMeta(item.key).locked, advisory: ADVISORY_STAGES.includes(item.key) }))} />}
+    {selectedRun && <div className="workspace-progress">
+      <div className="workspace-progress-summary"><span className="text-foreground" role="status">{progress.label}</span>
+        {progress.total > 0 && <span> · {progress.passed} passed{progress.running > 0 ? ` · ${progress.running} running` : ''}{progress.failed > 0 ? ` · ${progress.failed} failed` : ''}{progress.blocked > 0 ? ` · ${progress.blocked} blocked` : ''}{progress.pending > 0 ? ` · ${progress.pending} pending` : ''}{progress.skipped > 0 ? ` · ${progress.skipped} skipped` : ''}{progress.unknown > 0 ? ` · ${progress.unknown} unknown` : ''}</span>}
+      </div>
+      {progress.total > 0 && <button type="button" className="workspace-control" aria-pressed={followBuild} onClick={() => setFollowBuild(!followBuild)}>{followBuild ? 'Back to preview' : 'Follow build'}</button>}
+      {(historyState === 'unavailable' || busyMessage.includes('history')) && <button type="button" className="workspace-control" onClick={() => { setTimingHistory(null); setHistoryRevision((revision) => revision + 1) }}>Retry history</button>}
+      {pipeRunning && <button type="button" className="workspace-control" title="Stop observing and scheduling stages. Server work already submitted may continue." onClick={stopPipeline}>Stop updates</button>}
+    </div>}
+    {boardReadError && <div role="alert" className="border-b border-border p-3 text-xs">{boardReadError}<button type="button" className="workspace-control mt-2" onClick={() => setArtifactRevision((revision) => revision + 1)}>Retry board metadata</button></div>}
+    {failedRun && <div role="status" className="border-b border-destructive/30 bg-destructive/5 px-3 py-2 text-xs"><p>{failedRun.failure}</p><button type="button" className="mt-2 underline underline-offset-2" onClick={() => { setLeftView('chat'); setSurface('conversation') }}>Open conversation to recover</button></div>}
+    {selectedRun && <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border p-1.5">
+      {docTabs.map((doc) => <div key={doc.id} className={cn('flex items-center rounded border border-border text-xs', activeDoc === doc.id && 'bg-accent')}>
+        <button type="button" className="px-2 py-1.5" onClick={() => { setActiveDoc(doc.id); setFollowBuild(false) }}>{doc.label}</button>
+        <button type="button" className="p-1.5" aria-label={`Close ${doc.label}`} onClick={() => closeDoc(doc.id)}><X className="size-3" /></button>
+      </div>)}
+      {activeDoc && <button type="button" className="workspace-control" onClick={() => setActiveDoc(null)}>Back to stage</button>}
+      <select aria-label="Open panel as document" value="" className="workspace-control ml-auto max-w-full" onChange={(event) => {
+        const item = ALL_VIEWS.find((view) => view.tab === event.target.value)
+        if (item) { openPanelTab(item.tab, item.label); setFollowBuild(false) }
+      }}><option value="">Open panel…</option>{ALL_VIEWS.map((item) => <option key={item.tab} value={item.tab}>{item.label}</option>)}</select>
+    </div>}
+    {!selectedRun ? <div className="workspace-start">
+      <div className="workspace-start-copy">
+        <span className="text-xs text-primary">From intent to inspectable engineering</span>
+        <h2>What do you want to build?</h2>
+        <p>Describe the product in Conversation. Include the job it should do, power source and any size or part constraints. Review the plan before starting a build.</p>
+        <div className="workspace-examples">
+          {['A USB-C temperature logger', 'A solar-powered soil sensor', 'A compact motor controller'].map((example) => <button type="button" key={example} onClick={() => revise(example)}>{example}</button>)}
         </div>
-
-        {/* active stage visualization (middle pane only). While the full pipeline
-            runs end-to-end, the middle pane shows the live pipeline loader (real
-            per-discipline progress) instead of the active stage. */}
-        {pipeRunning ? (
-          <PipelineLoader status={pipeStatus} />
-        ) : activeDocTab ? (
-          <div className="min-h-0 flex-1 overflow-hidden">
-            {activeDocTab.kind === 'file' && selectedRun?.runDir ? (
-              <FilePreview key={activeDocTab.id} runId={selectedRun.id} file={activeDocTab.file!} />
-            ) : activeDocTab.kind === 'panel' ? (
-              <div className="h-full overflow-y-auto"><ErrorBoundary>{panelBody(activeDocTab.panel!)}</ErrorBoundary></div>
-            ) : null}
-          </div>
-        ) : (
-        <>
+        <p className="mt-2 text-[11px]">Examples only fill the conversation. Nothing runs until you submit.</p>
+        <button type="button" className="workspace-control mt-4" onClick={() => { setLeftView('chat'); setSurface('conversation') }}>Open conversation</button>
+      </div>
+      <ImportDesignPanel key={sessionKey} onImported={handleImported} onBusyChange={(busy) => { importBusyRef.current = busy; setImportBusy(busy) }} canStart={() => !chatBusyRef.current && !boardBusyRef.current && !pipeAbort.current && !importBusyRef.current} />
+    </div> : followBuild ? <section aria-label="Build progress" className="min-h-0 flex-1 overflow-auto p-4">
+      <h2 className="text-sm font-medium">{progress.label}</h2>
+      {!liveRunning && <p className="mt-2 text-xs text-muted-foreground">Saved artifacts remain available. This view does not confirm that server work is running or cancelled.</p>}
+      <ul className="mt-4 space-y-3">{STAGES.filter((item) => item.key in pipeStatus).map((item) => <li key={item.key} className="text-xs">
+        <span className="font-medium">{item.label} · {workspaceStageLabel(pipeStatus[item.key]?.status, historyState)}</span>
+        {pipeStatus[item.key]?.detail && <p className="mt-1 text-muted-foreground">{pipeStatus[item.key].detail}</p>}
+      </li>)}</ul>
+    </section> : activeDocTab ? (
+      <div className="min-h-0 flex-1 overflow-hidden">
+        {activeDocTab.kind === 'file' && selectedRun?.runDir ? <FilePreview revision={artifactRevision} key={`${selectedId}:${activeDocTab.id}:${artifactRevision}`} runId={selectedRun.id} file={activeDocTab.file!} />
+          : activeDocTab.kind === 'panel' ? <div className="h-full overflow-y-auto"><ErrorBoundary key={`${selectedId}:${activeDocTab.id}`}>{panelBody(activeDocTab.panel!)}</ErrorBoundary></div> : null}
+      </div>
+    ) : null}
+    <div hidden={!selectedRun || followBuild || !!activeDocTab} inert={!selectedRun || followBuild || !!activeDocTab} className="min-h-0 flex-1 flex flex-col">
+    {selectedRun && (failedRun && !manualStage && !isReal && !boardFacts && stage === 'electronics' ? (
+      <div className="workspace-waiting"><h2 className="font-medium">No board artifact is available</h2><p>Saved files and diagnostics remain accessible. Review the reported issue in Conversation before starting another build.</p><button type="button" className="workspace-control" onClick={() => { setTermTab('problems'); if (termCollapsed) toggleTerm() }}>View problems</button></div>
+    ) : pipeRunning && !builtDisc[stage] && pipeStatus[stage]?.status !== 'passed' && !(stage === 'electronics' && boardFacts?.runId === selectedId) && !(stage === 'id' && idBrief) ? (
+      <div className="workspace-waiting"><h2 className="font-medium">{STAGES.find((item) => item.key === stage)?.label} output is not available yet</h2><p>The build is still working. You can inspect available stages or open Files without interrupting it.</p><button type="button" className="workspace-control" onClick={() => { setLeftView('files'); setSurface('conversation') }}>Browse files</button></div>
+    ) : <>
         {stage === 'explore' && (
               <ErrorBoundary><ExploreStage spec={productSpec} runId={selectedRun?.id} /></ErrorBoundary>
             )}
-            {stage === 'electronics' && (
+            {(stage === 'electronics' || manualStage === 'electronics') && <div hidden={stage !== 'electronics'} inert={stage !== 'electronics'} className="min-h-0 flex-1 flex flex-col">{
               // For a bespoke prompt (productSpec set) the real electronics is
               // the chip-scale synthesized bare-chip board, not the fixed RP2040
               // reference board — so lead with it. The reference board still
               // shows for the canned demo run (no productSpec).
-              productSpec ? (
-                <ErrorBoundary><ChipScaleStage spec={productSpec} runId={selectedRun?.id} asElectronics /></ErrorBoundary>
+              productSpec || retainedImportRun === selectedId ? (
+                <ErrorBoundary><ChipScaleStage key={`${selectedId}:${stageRefreshRevision}`} {...generationProps('electronics')} spec={productSpec} runId={selectedRun?.id} asElectronics /></ErrorBoundary>
+              ) : selectedRun?.real && specResolvedRun !== selectedId ? (
+                <div role={specReadError ? "alert" : "status"} className="workspace-waiting">{specReadError || 'Loading saved design metadata before opening its artifacts…'}{specReadError && <button type="button" className="workspace-control" onClick={() => setSpecReadRevision((revision) => revision + 1)}>Retry metadata</button>}</div>
               ) : (
               <>
                 <div className="flex items-center gap-3 border-b border-border px-3 py-2">
@@ -1356,7 +1354,7 @@ export default function Compose2Page() {
                         ~${Number(real.board.bomTotal).toFixed(2)} BOM
                       </span>
                     ) : null}
-                    <button type="button" onClick={() => setTab('Patterns')}
+                    <button type="button" onClick={() => showInspector('Patterns')}
                       className="flex shrink-0 items-center gap-1 border border-border px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
                       title="reusable patterns & ingested knowledge">
                       <BookOpen className="size-3" /> Knowledge
@@ -1380,16 +1378,7 @@ export default function Compose2Page() {
                 </div>
                 <div ref={stageRef} className="min-h-0 flex-1 bg-background">
                   <ErrorBoundary>
-                    {newDesign ? (
-                      <div className="flex h-full flex-col items-center justify-center gap-5 overflow-auto p-6 text-center text-muted-foreground">
-                        <div className="flex flex-col items-center gap-2">
-                          <Cpu className="size-9 opacity-25" />
-                          <span className="text-xs">New design — describe a board on the left to begin,<br />or start from an existing design below.</span>
-                        </div>
-                        <ImportDesignPanel onImported={handleImported} />
-                      </div>
-                    ) : (
-                      <>
+                    <>
                         {view === '3d' && (
                           <Board3D basePath={boardBase} fallback={
                             <div className="flex h-full items-center justify-center text-xs text-muted-foreground">no 3D model for this run</div>} />
@@ -1398,65 +1387,55 @@ export default function Compose2Page() {
                           hasChip
                             ? <div className="flex h-full items-center justify-center overflow-auto bg-white p-4">
                                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img src={`${chipPcbSvg}?t=${selectedRun.id}`} alt="chip-scale PCB layout" className="max-h-full w-auto" />
+                                <img src={`${chipPcbSvg}?t=${selectedRun?.id}`} alt="chip-scale PCB layout" className="max-h-full w-auto" />
                               </div>
-                            : <BoardCanvas key={selectedRun.id} run={selectedRun}
+                            : <BoardCanvas key={selectedRun?.id} run={selectedRun}
                                 realBoard={isReal ? real?.board : null} basePath={boardBase} />
                         )}
                         {view === 'schematic' && (
                           hasChip
                             ? <div className="flex h-full items-center justify-center overflow-auto bg-white p-4">
                                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img src={`${chipSchemSvg}?t=${selectedRun.id}`} alt="chip-scale schematic" className="max-h-full w-auto" />
+                                <img src={`${chipSchemSvg}?t=${selectedRun?.id}`} alt="chip-scale schematic" className="max-h-full w-auto" />
                               </div>
                             : <BoardSchematic runDir={selectedRunDir ?? null} />
                         )}
                       </>
-                    )}
                   </ErrorBoundary>
                 </div>
               </>
               )
-            )}
-            {stage === 'id' && (
+            }</div>}
+            {(stage === 'id' || manualStage === 'id') && <div hidden={stage !== 'id'} inert={stage !== 'id'} className="min-h-0 flex-1 flex flex-col">
               <ErrorBoundary>
-                <IdStage spec={productSpec} runId={selectedRun?.id} brief={idBrief} onBrief={setIdBrief} boardMm={isReal ? real?.board?.boardSize : undefined} />
+                <IdStage key={`${selectedId}:${stageRefreshRevision}`} {...generationProps('id')} spec={productSpec} runId={selectedRun?.id} brief={idBrief} onBrief={(brief) => { if (selectedIdRef.current === selectedId) setIdBrief(brief) }} boardMm={isReal ? real?.board?.boardSize : undefined} />
               </ErrorBoundary>
-            )}
-            {stage === 'mechanical' && (
-              <ErrorBoundary><MechanicalStage spec={productSpec} runId={selectedRun?.id} onBuilt={() => setBuiltDisc((b) => ({ ...b, mechanical: true }))} /></ErrorBoundary>
-            )}
-            {stage === 'simulation' && (
-              <ErrorBoundary><SimulationStage spec={productSpec} runId={selectedRun?.id} onBuilt={() => setBuiltDisc((b) => ({ ...b, simulation: true }))} /></ErrorBoundary>
-            )}
-            {(stage === 'firmware' || stage === 'manufacturing' || stage === 'supplyChain' || stage === 'validation') && (
-              <ErrorBoundary><DisciplineStage discipline={stage} spec={productSpec} runId={selectedRun?.id} onBuilt={() => setBuiltDisc((b) => ({ ...b, [stage]: true }))} /></ErrorBoundary>
-            )}
-        </>
-        )}
-      </div>
-          </section>
+            </div>}
+            {(stage === 'mechanical' || manualStage === 'mechanical') && <div hidden={stage !== 'mechanical'} inert={stage !== 'mechanical'} className="min-h-0 flex-1 flex flex-col">
+              <ErrorBoundary><MechanicalStage key={`${selectedId}:${stageRefreshRevision}`} {...generationProps('mechanical')} spec={productSpec} runId={selectedRun?.id} /></ErrorBoundary>
+            </div>}
+            {(stage === 'simulation' || manualStage === 'simulation') && <div hidden={stage !== 'simulation'} inert={stage !== 'simulation'} className="min-h-0 flex-1 flex flex-col">
+              <ErrorBoundary><SimulationStage key={`${selectedId}:${stageRefreshRevision}`} {...generationProps('simulation')} spec={productSpec} runId={selectedRun?.id} /></ErrorBoundary>
+            </div>}
+            {(['firmware', 'manufacturing', 'supplyChain', 'validation'] as const).map((discipline) => (stage === discipline || manualStage === discipline) && <div key={discipline} hidden={stage !== discipline} inert={stage !== discipline} className="min-h-0 flex-1 flex flex-col">
+              <ErrorBoundary><DisciplineStage key={`${selectedId}:${discipline}:${stageRefreshRevision}`} {...generationProps(discipline)} discipline={discipline} spec={productSpec} runId={selectedRun?.id} /></ErrorBoundary>
+            </div>)}
+    </>)}
+    </div>
+  </>
 
-          {rightPane}
-      </div>
-
-      {/* bottom Terminal panel + status bar — full width, below the 3-pane row */}
-      <TerminalPanel
-        collapsed={termCollapsed}
-        onToggle={toggleTerm}
-        tab={termTab}
-        onTabChange={setTermTab}
-      />
-      <StatusBar
-        runId={pipelineRunId ?? (selectedId || null)}
-        runName={selectedRun?.name ?? null}
-        pipeline={pipelineRunId ? pipeStatusByRun[pipelineRunId] : pipeStatus}
-        running={!!pipelineRunId}
-        tiers={llmTiers}
-        problemCount={problemCount}
-        onProblemsClick={() => { setTermTab('problems'); if (termCollapsed) toggleTerm() }}
-        startedAt={pipeStartedAt}
-      />
-    </main>
-  )
+  return <main className="compose-workspace bg-background text-foreground">
+    <a className="workspace-skip" href="#workspace-preview" onClick={() => setSurface('preview')}>Skip to design preview</a>
+    <header className="workspace-header">
+      <div className="workspace-header-title"><h1>{selectedRun?.name || productSpec?.product || 'New design'}</h1><p className="workspace-header-status" title={boardStatus.detail}>{boardStatus.label}</p></div>
+      <button type="button" className="workspace-control" onClick={newSession}><Plus className="mr-1 inline size-3.5" />New design</button>
+      {boardStatus.action && <button type="button" className="workspace-control workspace-primary" onClick={() => showInspector(boardStatus.action === 'Review manufacturing' ? 'Order' : 'Review')}>{boardStatus.action}</button>}
+    </header>
+    {(busyMessage || importBusy) && <div role="status" className="border-b border-border px-4 py-2 text-xs text-primary">{busyMessage || 'Import in progress. Conversation resumes when the import finishes.'}</div>}
+    <WorkspacePanes conversation={conversation} preview={preview} details={rightPane} surface={surface} onSurfaceChange={setSurface} inspectorOpen={inspectorOpen} onInspectorChange={setInspectorOpen} />
+    <TerminalPanel collapsed={termCollapsed} onToggle={toggleTerm} tab={termTab} onTabChange={setTermTab} />
+    {legacyMode ? <StatusBar runId={selectedId || null} runName={selectedRun?.name ?? null} pipeline={pipeStatus} running={liveRunning} historyState={historyState}
+      tiers={llmTiers} problemCount={problemCount} onProblemsClick={() => { setTermTab('problems'); if (termCollapsed) toggleTerm() }} startedAt={pipeRunning ? pipeStartedAt : null} />
+      : <footer className="border-t border-border px-4 py-2 text-xs text-muted-foreground">{nativeMode ? 'Astra beta · electronics only · saved checks are authoritative' : 'Workspace mode unverified'}{selectedId ? ` · ${selectedId}` : ''}</footer>}
+  </main>
 }

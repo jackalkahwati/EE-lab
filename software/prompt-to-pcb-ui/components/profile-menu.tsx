@@ -1,27 +1,28 @@
 'use client'
 
 /**
- * Account menu (header / sidebar). Enterprise-only: identity, a read-only
- * credit indicator, a link to workspace Settings (where org plan, billing,
- * usage, members, and security live), and sign out. Self-serve $49/mo + credit
- * packs were removed — Compose is licensed to orgs as board-program bundles,
- * and billing is managed by an admin in Settings, not bought from a popover.
+ * Account popover (header / sidebar): identity, read-only credits and sign out.
+ * Enterprise accounts link to workspace Settings; other plans link to the
+ * public plan comparison. Billing operations stay on their existing surfaces.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
+import { Popover } from '@base-ui/react/popover'
 import Link from 'next/link'
-import { CircleUserRound, Settings, Zap } from 'lucide-react'
+import { CircleUserRound, Settings, X, Zap } from 'lucide-react'
 
 interface Me {
   email: string
   credits: number
   monthlyCredits: number
+  plan: string
 }
 
 export function ProfileMenu({ variant = 'header' }: { variant?: 'header' | 'sidebar' }) {
   const [me, setMe] = useState<Me | null>(null)
   const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
+  const [signingOut, setSigningOut] = useState(false)
+  const [error, setError] = useState('')
 
   useEffect(() => {
     fetch('/api/auth/me')
@@ -30,27 +31,28 @@ export function ProfileMenu({ variant = 'header' }: { variant?: 'header' | 'side
       .catch(() => {})
   }, [])
 
-  useEffect(() => {
-    function onDoc(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', onDoc)
-    return () => document.removeEventListener('mousedown', onDoc)
-  }, [])
-
   async function signOut() {
-    await fetch('/api/auth/logout', { method: 'POST' })
-    window.location.href = '/login'
+    if (signingOut) return
+    setSigningOut(true)
+    setError('')
+    try {
+      const response = await fetch('/api/auth/logout', { method: 'POST' })
+      if (!response.ok) throw new Error('logout failed')
+      window.location.href = '/login'
+    } catch {
+      setError('Could not sign out. Please try again.')
+    } finally {
+      setSigningOut(false)
+    }
   }
 
   const initial = me?.email?.[0]?.toUpperCase()
 
   return (
-    <div className="relative" ref={ref}>
+    <Popover.Root open={open} onOpenChange={setOpen}>
       {variant === 'sidebar' ? (
-        <button
+        <Popover.Trigger
           type="button"
-          onClick={() => setOpen((v) => !v)}
           className="flex w-full items-center gap-2 rounded-sm border border-border bg-card px-2 py-1.5 text-left hover:border-primary/40"
           aria-label="Account"
         >
@@ -70,11 +72,10 @@ export function ProfileMenu({ variant = 'header' }: { variant?: 'header' | 'side
               {me ? `${me.credits} credits` : '…'}
             </span>
           </span>
-        </button>
+        </Popover.Trigger>
       ) : (
-        <button
+        <Popover.Trigger
           type="button"
-          onClick={() => setOpen((v) => !v)}
           className="flex items-center gap-1.5 rounded-full border border-border px-1.5 py-1 hover:border-primary/50"
           aria-label="Account"
         >
@@ -85,20 +86,22 @@ export function ProfileMenu({ variant = 'header' }: { variant?: 'header' | 'side
           ) : (
             <CircleUserRound className="size-5 text-muted-foreground" />
           )}
-        </button>
+        </Popover.Trigger>
       )}
 
-      {open && me && (
-        <div
-          className={
-            variant === 'sidebar'
-              ? 'absolute bottom-full left-0 z-50 mb-2 w-64 rounded-md border border-border bg-card p-3 shadow-xl'
-              : 'absolute right-0 top-9 z-50 w-64 rounded-md border border-border bg-card p-3 shadow-xl'
-          }
-        >
+      <Popover.Portal>
+        <Popover.Positioner side={variant === 'sidebar' ? 'top' : 'bottom'} align={variant === 'sidebar' ? 'start' : 'end'} sideOffset={8} className="z-[60]">
+        <Popover.Popup className="w-64 max-w-[calc(100vw-2rem)] rounded-md border border-border bg-card p-3 shadow-xl">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <Popover.Title className="text-xs font-semibold">Account</Popover.Title>
+            <Popover.Close aria-label="Close account" className="rounded-sm p-1 text-muted-foreground hover:bg-secondary">
+              <X className="size-4" />
+            </Popover.Close>
+          </div>
+          {me ? <>
           <p className="mb-0.5 truncate text-xs font-semibold text-foreground">{me.email}</p>
           <p className="mb-3 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
-            billing is managed per organization in Settings
+            {me.plan === 'enterprise' ? 'billing is managed per organization in Settings' : `${me.plan} plan`}
           </p>
 
           <div className="mb-3 flex items-center justify-between rounded-sm border border-border bg-background px-3 py-2">
@@ -109,26 +112,30 @@ export function ProfileMenu({ variant = 'header' }: { variant?: 'header' | 'side
           </div>
 
           <Link
-            href="/enterprise/settings"
+            href={me.plan === 'enterprise' ? '/enterprise/settings' : '/pricing'}
             onClick={() => setOpen(false)}
             className="mb-1.5 flex w-full items-center gap-1.5 rounded-sm border border-border px-3 py-2 text-xs text-foreground hover:border-primary/40 hover:bg-primary/5"
           >
             <Settings className="size-3.5 text-muted-foreground" />
-            Workspace settings
-            <span className="ml-auto font-mono text-[9px] text-muted-foreground">
+            {me.plan === 'enterprise' ? 'Workspace settings' : 'View plans'}
+            {me.plan === 'enterprise' && <span className="ml-auto font-mono text-[9px] text-muted-foreground">
               plan · usage · members
-            </span>
+            </span>}
           </Link>
 
           <button
             type="button"
             onClick={signOut}
+            disabled={signingOut}
             className="mt-2 w-full rounded-sm border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
           >
-            Sign out
+            {signingOut ? 'Signing out…' : 'Sign out'}
           </button>
-        </div>
-      )}
-    </div>
+          {error && <p role="alert" className="mt-2 text-xs text-destructive">{error}</p>}
+          </> : <p className="text-xs text-muted-foreground">Account details unavailable. <Link href="/login" className="underline">Sign in</Link></p>}
+        </Popover.Popup>
+        </Popover.Positioner>
+      </Popover.Portal>
+    </Popover.Root>
   )
 }

@@ -1,0 +1,71 @@
+{
+  "schema": "astra-native-pins/v1",
+  "tools": {
+    "sandbox": {
+      "path": "/usr/bin/sandbox-exec",
+      "canonicalPath": "/usr/bin/sandbox-exec",
+      "sha256": "3d9652e2c286c8aadbb841320b9453cf27a2a4deaef248ac05f7698615046dfd"
+    },
+    "kicadCli": {
+      "path": "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli",
+      "canonicalPath": "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli",
+      "sha256": "04d9e61cad2e80cf7ad6c3da06417a6d7e8e2cdd23efc99957a1184e604d6657"
+    },
+    "bundledPython": {
+      "path": "/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/Current/bin/python3",
+      "canonicalPath": "/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3.9",
+      "sha256": "6307a64bcf29c98c9af9472855d72cddf8e4eabe396117422d1faaafabb88719"
+    },
+    "pythonRuntime": {
+      "path": "/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/Resources/Python.app/Contents/MacOS/Python",
+      "canonicalPath": "/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/Resources/Python.app/Contents/MacOS/Python",
+      "sha256": "4474fd9f740ce29f07d3a0fc71f82d96684947cc5ce870231a3a55c7bd019a3d"
+    },
+    "flroute": {
+      "path": "/Volumes/T9 Backup/compose-ux-tmp-bQ4c59/flroute-centered-final-g9czyrjn/target/release/flroute",
+      "sha256": "5a254b0624c1aeaa2c51eca7afe5b29ee3a24c9fd19d8ea58f5c14b78b551991"
+    }
+  },
+  "libraries": {
+    "pcbPlugin": {
+      "path": "/Applications/KiCad/KiCad.app/Contents/PlugIns/_pcbnew.kiface",
+      "sha256": "55f9c413c89676c126b64125a4a71d6a58a5309e0bdd3155f4d0375c59904245"
+    }
+  },
+  "scripts": {
+    "native": "5f8137f16f9fb470774c4ce96e0bba4e0d0d0018a54c2e89c5469dcee9bfeeb5",
+    "probe": "8f9b60c3d0b9ed8231938d8d47c6f47eedbc1349c9e3065a928db66995a7554e"
+  },
+  "runtimeDirectoryData": [
+    "/Applications/KiCad/KiCad.app"
+  ],
+  "runtimeFiles": [
+    "/",
+    "/Applications/KiCad/KiCad.app/Contents/Info.plist",
+    "/dev/null",
+    "/dev/random",
+    "/dev/urandom",
+    "/private/etc/localtime",
+    "/private/etc/ssl/openssl.cnf"
+  ],
+  "machServices": [],
+  "runtimeRoots": [
+    "/System/Library",
+    "/usr/lib",
+    "/System/Volumes/Preboot/Cryptexes/OS/System/Library/dyld",
+    "/System/Volumes/Preboot/Cryptexes/OS/usr/lib",
+    "/Applications/KiCad/KiCad.app/Contents/Frameworks",
+    "/Applications/KiCad/KiCad.app/Contents/PlugIns",
+    "/Applications/KiCad/KiCad.app/Contents/Resources"
+  ],
+  "assetRoots": [
+    "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints/Package_LGA.pretty",
+    "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints/Capacitor_SMD.pretty",
+    "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints/Resistor_SMD.pretty",
+    "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints/Connector_PinHeader_2.54mm.pretty",
+    "/Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels/Package_LGA.3dshapes",
+    "/Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels/Capacitor_SMD.3dshapes",
+    "/Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels/Resistor_SMD.3dshapes",
+    "/Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels/Connector_PinHeader_2.54mm.3dshapes"
+  ]
+}

@@ -1,8 +1,8 @@
 'use client'
 
 /**
- * Left drawer nav for the enterprise console. Collapsible: icon-only by default,
- * toggle to an expanded rail with labels (preference persisted per browser).
+ * Enterprise navigation: horizontal scroll strip on mobile, left rail on desktop.
+ * Icon-only by default; label visibility is persisted per browser.
  * Rendered once by app/enterprise/layout.tsx so every section inherits it.
  */
 import Link from 'next/link'
@@ -36,26 +36,28 @@ export function EnterpriseSidebar() {
 
   // restore the saved expand/collapse preference
   useEffect(() => {
-    const v = localStorage.getItem(PREF_KEY)
-    if (v !== null) setExpanded(v === '1')
+    try {
+      const v = localStorage.getItem(PREF_KEY)
+      if (v !== null) setExpanded(v === '1')
+    } catch { /* Keep the default when browser preferences are unavailable. */ }
   }, [])
 
   const toggle = () =>
     setExpanded((v) => {
       const next = !v
-      localStorage.setItem(PREF_KEY, next ? '1' : '0')
+      try { localStorage.setItem(PREF_KEY, next ? '1' : '0') } catch { /* Toggle still works for this visit. */ }
       return next
     })
 
   const active = (href: string) =>
-    href === '/enterprise' ? pathname === '/enterprise' : pathname.startsWith(href)
+    pathname === href || (href !== '/enterprise' && pathname.startsWith(`${href}/`))
 
   return (
     <nav
       aria-label="Enterprise sections"
       className={cn(
-        'sticky top-9 flex h-[calc(100dvh-2.25rem)] shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border bg-card/30 py-2 transition-[width] duration-150',
-        expanded ? 'w-48' : 'w-14',
+        'flex w-full min-w-0 shrink-0 items-center gap-0.5 overflow-x-auto border-b border-border bg-card/30 py-2 sm:sticky sm:top-9 sm:h-[calc(100dvh-2.25rem)] sm:flex-col sm:items-stretch sm:overflow-x-hidden sm:overflow-y-auto sm:border-r sm:border-b-0 sm:transition-[width] sm:duration-150',
+        expanded ? 'sm:w-48' : 'sm:w-14',
       )}
     >
       <button
@@ -64,7 +66,7 @@ export function EnterpriseSidebar() {
         aria-label={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
         aria-expanded={expanded}
         title={expanded ? 'Collapse' : 'Expand'}
-        className="mx-1.5 mb-1 flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-secondary/50 hover:text-foreground"
+        className="mx-1.5 flex shrink-0 items-center gap-2.5 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-secondary/50 hover:text-foreground sm:mb-1"
       >
         {expanded ? (
           <PanelLeftClose className="size-4 shrink-0" />
@@ -81,8 +83,10 @@ export function EnterpriseSidebar() {
             key={href}
             href={href}
             title={expanded ? undefined : label}
+            aria-label={label}
+            aria-current={on ? 'page' : undefined}
             className={cn(
-              'mx-1.5 flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-xs',
+              'mx-1.5 flex shrink-0 items-center gap-2.5 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs',
               on
                 ? 'bg-secondary font-medium text-foreground'
                 : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground')}

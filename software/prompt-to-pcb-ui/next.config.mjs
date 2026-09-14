@@ -1,3 +1,9 @@
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const betaSystemFonts = process.env.FL_ASTRA_BETA === '1'
+const sourceRoot = path.dirname(fileURLToPath(import.meta.url))
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // `next build` and `next dev` share `.next` by default, so a build run while
@@ -5,6 +11,18 @@ const nextConfig = {
   // build into a scratch dir instead (e.g. NEXT_DIST_DIR=.next-build npm run
   // build). Unset -> normal `.next`, so deploy/deploy.sh is unaffected.
   distDir: process.env.NEXT_DIST_DIR || '.next',
+  // This bare internal alias is outside tsconfig's @/* mapping, whose Next
+  // resolver otherwise wins before webpack aliases. Both bundlers agree.
+  webpack(config) {
+    config.resolve.alias['firstlight-app-fonts$'] = path.join(sourceRoot,
+      betaSystemFonts ? 'lib/app-fonts-system.ts' : 'lib/app-fonts.ts')
+    return config
+  },
+  turbopack: {
+    resolveAlias: {
+      'firstlight-app-fonts': betaSystemFonts ? './lib/app-fonts-system.ts' : './lib/app-fonts.ts',
+    },
+  },
   // netlistsvg + its elkjs dep are CommonJS bundles that break under webpack;
   // keep them external so /api/schematic require()s them at runtime (works).
   serverExternalPackages: ['netlistsvg', 'elkjs'],

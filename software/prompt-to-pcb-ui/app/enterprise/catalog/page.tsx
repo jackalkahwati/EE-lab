@@ -11,9 +11,22 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
 
-type Any = Record<string, any>
+type CapabilityEntry = { family: string; tier: number; evidence_state: string; run_evidence?: string[] }
+type RegistryState =
+  | { status: 'loading' }
+  | { status: 'ready'; entries: CapabilityEntry[] }
+  | { status: 'missing' | 'error'; message: string }
 
-// Real, stable board-program templates (C7). Each starts a genuine Compose run.
+function isCapabilityEntry(value: unknown): value is CapabilityEntry {
+  if (!value || typeof value !== 'object') return false
+  const entry = value as Record<string, unknown>
+  return typeof entry.family === 'string' && typeof entry.tier === 'number'
+    && typeof entry.evidence_state === 'string'
+    && (entry.run_evidence === undefined || (Array.isArray(entry.run_evidence)
+      && entry.run_evidence.every(item => typeof item === 'string')))
+}
+
+// Stable board-program drafts (C7). /start handles the private fragment handoff.
 const TEMPLATES = [
   { name: 'Environmental Telemetry Node', cls: 'MCU + I2C sensor + LoRa/GNSS optional', prompt: 'environmental telemetry node with an MCU, a BME280 sensor, a debug header and test points' },
   { name: 'Industrial IO Controller', cls: 'MCU + CAN/RS485 + GPIO + protection', prompt: 'industrial IO controller with an MCU, CAN transceiver, GPIO expansion, power protection and status LEDs' },
@@ -34,13 +47,42 @@ const EVIDENCE_STYLE: Record<string, string> = {
 }
 
 export default function CatalogPage() {
-  const [reg, setReg] = useState<Any | null>(null)
+  const [registry, setRegistry] = useState<RegistryState>({ status: 'loading' })
+  const [attempt, setAttempt] = useState(0)
   useEffect(() => {
-    fetch('/runs/fl1-backplane-v1/data/compose-package-capability-registry.json', { cache: 'no-store' })
-      .then((r) => (r.ok ? r.json() : null)).then(setReg).catch(() => setReg(null))
-  }, [])
+    const controller = new AbortController()
+    let current = true
+    let timedOut = false
+    setRegistry({ status: 'loading' })
+    const timeout = setTimeout(() => { timedOut = true; controller.abort() }, 15000)
+    async function load() {
+      try {
+        const response = await fetch('/runs/fl1-backplane-v1/data/compose-package-capability-registry.json', {
+          cache: 'no-store', signal: controller.signal,
+        })
+        if (response.status === 404) {
+          if (current) setRegistry({ status: 'missing', message: 'The capability registry is not available. Templates are still available above.' })
+          return
+        }
+        if (!response.ok) throw new Error(`Capability registry request failed (HTTP ${response.status}).`)
+        const data: unknown = await response.json()
+        if (!data || typeof data !== 'object' || !('entries' in data)
+          || !Array.isArray(data.entries) || !data.entries.every(isCapabilityEntry)) {
+          throw new Error('The capability registry response could not be read.')
+        }
+        controller.signal.throwIfAborted()
+        if (current) setRegistry({ status: 'ready', entries: data.entries })
+      } catch {
+        if (current) setRegistry({ status: 'error', message: timedOut
+          ? 'The capability registry took too long to respond. Try again.'
+          : 'Could not load the capability registry. Check your connection and try again.' })
+      } finally { clearTimeout(timeout) }
+    }
+    void load()
+    return () => { current = false; clearTimeout(timeout); controller.abort() }
+  }, [attempt])
 
-  const entries: Any[] = reg?.entries ?? []
+  const entries = registry.status === 'ready' ? registry.entries : []
   const byTier = [1, 2, 3].map((t) => ({ tier: t, rows: entries.filter((e) => e.tier === t) }))
 
   return (
@@ -55,7 +97,7 @@ export default function CatalogPage() {
         <h2 className="mb-2 text-xs font-semibold">Board-program templates</h2>
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
           {TEMPLATES.map((t) => (
-            <Link key={t.name} href={`/compose?prompt=${encodeURIComponent(t.prompt)}`}
+            <Link key={t.name} href={`/start#prompt=${encodeURIComponent(t.prompt)}`} prefetch={false}
               className="flex flex-col rounded-md border border-border bg-card/40 p-3 transition-colors hover:border-primary/40 hover:bg-primary/5">
               <span className="text-xs font-semibold leading-tight">{t.name}</span>
               <span className="mt-1 flex-1 text-[10px] text-muted-foreground">{t.cls}</span>
@@ -64,8 +106,8 @@ export default function CatalogPage() {
           ))}
         </div>
         <p className="mt-1.5 text-[9px] text-muted-foreground">
-          Templates instantiate real Compose runs through the full gate chain —
-          unsupported variants block honestly, they are not faked.
+          Templates open a draft for review in Compose. Nothing is submitted until
+          you choose to start. Unsupported variants still block at the existing gates.
         </p>
       </div>
 
@@ -75,8 +117,20 @@ export default function CatalogPage() {
           Component &amp; package capability
           {entries.length > 0 && <span className="ml-2 font-mono text-[10px] text-muted-foreground">{entries.length} families</span>}
         </h2>
-        {entries.length === 0 && (
-          <p className="rounded-md border border-border p-3 text-muted-foreground">Capability registry not loaded.</p>
+        {registry.status === 'loading' && (
+          <p role="status" className="rounded-md border border-border p-3 text-muted-foreground">Loading capability registry…</p>
+        )}
+        {(registry.status === 'missing' || registry.status === 'error') && (
+          <div className="rounded-md border border-border p-3">
+            <p role={registry.status === 'error' ? 'alert' : 'status'} className="text-muted-foreground">{registry.message}</p>
+            <button type="button" onClick={() => setAttempt(value => value + 1)}
+              className="mt-2 rounded-sm bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground">
+              Try again
+            </button>
+          </div>
+        )}
+        {registry.status === 'ready' && entries.length === 0 && (
+          <p className="rounded-md border border-border p-3 text-muted-foreground">No capability families are listed in this registry.</p>
         )}
         {entries.length > 0 && (
           <div className="grid gap-3 lg:grid-cols-3">
@@ -95,7 +149,7 @@ export default function CatalogPage() {
                       <div className={cn('font-mono text-[9px]', EVIDENCE_STYLE[e.evidence_state] ?? 'text-muted-foreground')}>
                         {e.evidence_state?.replace(/_/g, ' ')}
                       </div>
-                      {e.run_evidence?.length > 0 && (
+                      {e.run_evidence && e.run_evidence.length > 0 && (
                         <div className="mt-0.5 text-[9px] text-muted-foreground break-words">evidence: {e.run_evidence.join(', ')}</div>
                       )}
                     </div>

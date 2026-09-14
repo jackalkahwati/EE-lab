@@ -6,6 +6,8 @@
  */
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { astraConfigured, astraErrorResponse } from '@/lib/astra-beta'
+import { ASTRA_MANIFEST, authorizeAstraRun, publishedAstraFile, readAstraManifest } from '@/lib/astra-artifacts'
 
 export const dynamic = 'force-dynamic'
 
@@ -53,6 +55,38 @@ export async function GET(req: Request) {
   const url = new URL(req.url)
   const runId = url.searchParams.get('run') ?? ''
   if (!RUN_ID.test(runId)) return Response.json({ error: 'bad run id' }, { status: 400 })
+  if (astraConfigured()) {
+    try {
+      const root = authorizeAstraRun(req, runId)
+      const names = ['astra-policy.json', 'product-spec.json', 'timing.json']
+      try {
+        const manifest = await readAstraManifest(root, runId)
+        names.push(ASTRA_MANIFEST, ...manifest.artifacts.map(item => item.path))
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      }
+      const tree: FileNode[] = []
+      let files = 0
+      for (const relative of names) {
+        let buffer: Buffer
+        try { buffer = await publishedAstraFile(req, runId, relative) }
+        catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT' && !relative.includes('/')) continue
+          throw error
+        }
+        const segments = relative.split('/')
+        let children = tree
+        for (const segment of segments.slice(0, -1)) {
+          let dir = children.find(node => node.name === segment && node.dir)
+          if (!dir) { dir = { name: segment, path: segment, dir: true, children: [] }; children.push(dir) }
+          children = dir.children!
+        }
+        children.push({ name: segments[segments.length - 1], path: relative, dir: false, size: buffer.length })
+        files++
+      }
+      return Response.json({ runId, files, tree }, { headers: { 'cache-control': 'private, no-store' } })
+    } catch (error) { return astraErrorResponse(error) }
+  }
   const root = path.join(process.cwd(), 'public', 'runs', runId)
   try {
     const st = await fs.stat(root)

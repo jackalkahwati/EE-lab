@@ -20,6 +20,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import toolchain  # toolchain path resolver (env-overridable, macOS defaults)
+from llm_json import assert_python_inference_allowed
 
 
 def _first_json(text):
@@ -41,6 +42,7 @@ def _first_json(text):
 
 
 def _anthropic(system, user, images):
+    assert_python_inference_allowed()
     import anthropic
     client = anthropic.Anthropic()
     content = []
@@ -67,6 +69,7 @@ def _claude_bin():
 
 
 def _claude_cli(system, user, images):
+    assert_python_inference_allowed()
     img_lines = "\n".join("Read this image file: %s" % p for p in images)
     prompt = "%s\n\n%s\n\n%s\n\nReply with ONLY the JSON object." % (system, img_lines, user)
     # The CLI must auth via the Max subscription. If the child sees a (possibly
@@ -84,6 +87,8 @@ def _claude_cli(system, user, images):
 
 
 def main():
+    # Policy denial is terminal, not an unavailable/empty-images verdict.
+    assert_python_inference_allowed()
     req = json.load(sys.stdin)
     system, user = req.get("system", ""), req.get("user", "")
     images = [p for p in req.get("images", []) if os.path.exists(p)]

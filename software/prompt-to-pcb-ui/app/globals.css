@@ -120,3 +120,66 @@
 .stage-pulse {
   animation: stage-pulse 1.2s ease-in-out infinite;
 }
+
+/* Compose chrome only. Board artwork and engineering SVGs keep their own scale. */
+.compose-workspace { height: calc(100dvh - 2.25rem - var(--preview-banner-height, 0px)); min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.compose-workspace :is(button, select, input, textarea, [role='separator']):focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.compose-workspace button:disabled { cursor: not-allowed; }
+.workspace-header { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.workspace-header-title { flex: 1; min-width: 140px; }
+.workspace-header h1 { font-size: 15px; font-weight: 600; line-height: 1.4; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: 48vw; }
+.workspace-header-status { font-size: 11px; color: var(--muted-foreground); }
+.workspace-control { min-height: 32px; border: 1px solid var(--border); border-radius: 5px; padding: 5px 10px; font-size: 12px; background: var(--card); }
+.workspace-primary { background: var(--primary); color: var(--primary-foreground); border-color: transparent; }
+.workspace-panes { display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; }
+.workspace-surface-nav { display: flex; align-items: center; gap: 4px; padding: 5px 12px; border-bottom: 1px solid var(--border); background: var(--card); }
+.workspace-surface-nav button { font-size: 12px; min-height: 32px; padding: 5px 10px; border-radius: 4px; color: var(--muted-foreground); }
+.workspace-surface-nav button[aria-pressed='true'] { color: var(--foreground); background: var(--accent); }
+.workspace-surface-hint { margin-left: auto; font-size: 10px; color: var(--muted-foreground); }
+.workspace-pane-row { display: flex; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
+.workspace-conversation, .workspace-details { display: flex; flex-direction: column; flex-shrink: 0; min-height: 0; min-width: 0; overflow: hidden; background: var(--card); }
+.workspace-conversation { border-right: 1px solid var(--border); }
+.workspace-details { border-left: 1px solid var(--border); }
+.workspace-preview { container: workspace-preview / inline-size; display: flex; flex: 1; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; }
+.compose-workspace [hidden] { display: none !important; }
+.workspace-separator { flex: 0 0 5px; background: var(--background); cursor: col-resize; touch-action: none; }
+.workspace-separator:hover, .workspace-separator:focus-visible { background: var(--primary); }
+.workspace-timeline { flex-shrink: 0; border-bottom: 1px solid var(--border); background: var(--card); padding: 8px 12px; }
+.workspace-stage-picker { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--muted-foreground); }
+.workspace-stage-picker select { min-height: 32px; max-width: 100%; min-width: 0; border: 1px solid var(--border); background: var(--background); border-radius: 4px; padding: 4px 8px; color: var(--foreground); }
+.workspace-stage-detail { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.workspace-stage-grid { display: none; }
+@container workspace-preview (min-width: 700px) {
+  .workspace-stage-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px 8px; margin-top: 6px; }
+  .workspace-stage-grid button { display: flex; gap: 6px; align-items: center; min-width: 0; min-height: 28px; border-radius: 4px; padding: 3px 6px; font-size: 11px; text-align: left; color: var(--muted-foreground); }
+  .workspace-stage-grid button:hover { background: var(--accent); }
+  .workspace-stage-grid button[aria-current] { background: var(--accent); color: var(--foreground); }
+  .workspace-stage-grid button:disabled { opacity: .5; }
+  .workspace-stage-state { margin-left: auto; font-size: 9px; color: var(--muted-foreground); }
+}
+.workspace-progress { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 11px; }
+.workspace-progress-summary { flex: 1; min-width: 150px; color: var(--muted-foreground); }
+.workspace-start { display: flex; flex: 1; min-height: 0; flex-direction: column; align-items: center; gap: 24px; overflow-y: auto; padding: clamp(20px, 4vw, 56px) 20px; }
+.workspace-start-copy { width: 100%; max-width: 560px; }
+.workspace-start h2 { margin: 8px 0 12px; font-size: clamp(22px, 2.2vw, 32px); font-weight: 500; line-height: 1.2; letter-spacing: -.025em; }
+.workspace-start p { font-size: 13px; line-height: 1.7; color: var(--muted-foreground); }
+.workspace-examples { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.workspace-examples button { text-align: left; font-size: 12px; border: 1px solid var(--border); border-radius: 5px; padding: 8px 10px; background: var(--card); }
+.workspace-waiting { display: flex; flex: 1; flex-direction: column; align-items: flex-start; justify-content: center; gap: 10px; min-height: 180px; padding: 32px; font-size: 13px; }
+.workspace-waiting p { color: var(--muted-foreground); max-width: 480px; line-height: 1.6; }
+.workspace-skip { position: fixed; top: -80px; left: 12px; z-index: 100; background: var(--primary); color: var(--primary-foreground); padding: 10px; border-radius: 4px; }
+.workspace-skip:focus { top: 8px; }
+@media (max-width: 759px) {
+  .workspace-header { gap: 8px; padding: 10px 12px; }
+  .workspace-header h1 { max-width: 65vw; font-size: 14px; }
+  .workspace-header-title { flex-basis: 100%; }
+  .workspace-surface-nav { padding: 4px 8px; }
+  .workspace-surface-nav button { flex: 1; min-height: 38px; padding: 5px 4px; }
+  .workspace-surface-hint { display: none; }
+  .workspace-start { gap: 20px; padding: 24px 16px; }
+  .workspace-stage-detail { display: none; }
+  .workspace-preview { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .compose-workspace *, .stage-pulse { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+}

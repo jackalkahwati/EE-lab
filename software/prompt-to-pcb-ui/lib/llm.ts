@@ -11,6 +11,10 @@
  *   used with the user's key. User keys are never logged or persisted.
  */
 
+import { astraConfigured, astraWorkspace } from './astra-beta'
+import { AstraError, assertAstraActive, currentAstraExecution } from './astra-execution'
+import { astraTextCall } from './astra-transport'
+
 export interface LLMOverride {
   provider?: string
   apiKey?: string
@@ -291,6 +295,16 @@ export async function callLLMText(
   user: string,
   override?: LLMOverride,
 ): Promise<{ text: string; provider: string }> {
+  // Beta execution is fail-closed and precedes every key, model, and provider
+  // override. Client conflicts are rejected at the authenticated request gate;
+  // internal pipeline model defaults cannot redirect a fixed Astra workflow.
+  const astra = currentAstraExecution()
+  if (astraConfigured() || astra) {
+    if (!astra) throw new AstraError('policy', 'Astra beta requires an active authorized workflow.')
+    assertAstraActive(astra)
+    const workspace = astraWorkspace()
+    return { text: await astraTextCall(system, user, workspace), provider: 'astra-beta (Bedrock)' }
+  }
   // Local subscription mode: route calls through the Claude Code CLI (Max
   // subscription, not metered API). Routes pass the platform ANTHROPIC_API_KEY
   // as an override, so treat an override key that MATCHES the env key as

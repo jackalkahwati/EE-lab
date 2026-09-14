@@ -7,14 +7,12 @@
  * and blocked claims render verbatim from the store; architecture_only and
  * routed_in_sandbox are never dressed up as built or validated hardware.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
 import { PortfolioSummary } from '@/components/portfolio-summary'
 import { StatusStrip } from '@/components/status-strip'
 import { ConsoleWidgets } from '@/components/console-widgets'
-import { AccessGate } from '@/components/access-gate'
-
-type Db = Record<string, any>
+import { EnterpriseReadState, useEnterpriseRead } from '@/components/enterprise-read-state'
 
 const READINESS_STYLE: Record<string, string> = {
   architecture_only: 'border-border bg-muted/30 text-muted-foreground',
@@ -48,24 +46,17 @@ function Badge({ s }: { s: string }) {
 const TABS = ['Runs', 'Evidence', 'Approvals', 'Usage', 'Risks'] as const
 
 export default function EnterprisePage() {
-  const [db, setDb] = useState<Db | null>(null)
+  const { db, error, refresh } = useEnterpriseRead()
   const [wsId, setWsId] = useState<string | null>(null)
   const [progId, setProgId] = useState<string | null>(null)
   const [boardId, setBoardId] = useState<string | null>(null)
   const [tab, setTab] = useState<(typeof TABS)[number]>('Runs')
 
-  const refresh = useCallback(() => {
-    fetch('/api/enterprise', { cache: 'no-store' })
-      .then((r) => r.json())
-      .then((d) => {
-        setDb(d)
-        if (!wsId && d.workspaces?.[0]) setWsId(d.workspaces[0].workspace_id)
-      })
-  }, [wsId])
-  useEffect(() => { refresh() }, [refresh])
+  useEffect(() => {
+    if (!wsId && db?.workspaces?.[0]) setWsId(db.workspaces[0].workspace_id)
+  }, [db, wsId])
 
-  if (!db) return <div className="p-6 text-xs text-muted-foreground">Loading enterprise workspace…</div>
-  if (db.error) return <AccessGate error={db.error} />
+  if (!db) return <EnterpriseReadState error={error} retry={refresh} label="enterprise workspace" />
 
   const workspaces = db.workspaces ?? []
   const ws = workspaces.find((w: any) => w.workspace_id === wsId)

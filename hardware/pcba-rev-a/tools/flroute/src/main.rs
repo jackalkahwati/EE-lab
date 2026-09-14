@@ -144,6 +144,9 @@ struct AbsPin {
     x: f64,
     y: f64,
     pad: PadInfo,
+    // Only a single known-layer rectangle under an orthogonal transform is
+    // eligible for the bounded native fixed pad-to-via terminal proof.
+    fixed_seed_rect: bool,
 }
 
 struct Net {
@@ -156,6 +159,9 @@ struct Routed {
     paths: Vec<(usize, Vec<(usize, usize)>)>, // (layer, cells)
     vias: Vec<(usize, usize)>,
 }
+
+#[cfg(test)]
+mod fixed_terminal_tests;
 
 static ATTEMPTED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
@@ -220,12 +226,237 @@ fn seg_box_dist(ax: f64, ay: f64, bx: f64, by: f64, x0: f64, y0: f64, x1: f64, y
             return 0.0;
         }
     }
-    // else: min of box-corner-to-segment over the 4 corners
+    // Minimum includes segment endpoints against box edges, not only box
+    // corners against the segment (parallel short segments can miss corners).
     let mut m = f64::MAX;
+    for (x, y) in [(ax, ay), (bx, by)] {
+        m = m.min((x - x.clamp(x0, x1)).powi(2) + (y - y.clamp(y0, y1)).powi(2));
+    }
     for &(cx, cy) in &[(x0, y0), (x1, y0), (x1, y1), (x0, y1)] {
         m = m.min(pt_seg_d2(cx, cy, ax, ay, bx, by));
     }
     m.sqrt()
+}
+
+// Fixed-terminal support intentionally accepts only the native, reviewed
+// pad -> one straight fixed wire -> fixed through-via pattern. No occupancy
+// halo, disconnected island or inferred bounding box establishes connectivity.
+#[derive(Clone, Debug)]
+struct FixedWire {
+    net: String,
+    layer: usize,
+    width: f64,
+    pts: Vec<(f64, f64)>,
+    fixed: bool,
+}
+
+#[derive(Clone, Debug)]
+struct FixedVia {
+    net: String,
+    x: f64,
+    y: f64,
+    radius: f64,
+    drill_radius: f64,
+    fixed: bool,
+}
+
+#[derive(Clone)]
+struct FixedEntry {
+    cell: usize,
+    via: FixedVia,
+}
+
+// Return an integer-SES connector only for a used, matching original entry.
+// KiCad 10.0.5 connectivity DRC accepts a same-layer track ending exactly at
+// the via center (drc_test_provider_connectivity.cpp, lines 221-252).
+fn fixed_center_connector(
+    entry: &FixedEntry, cell: usize, net: &str, used: bool,
+    grid_ses: (i64, i64), resolution: f64, width: f64,
+) -> Option<[(i64, i64); 2]> {
+    if !used || entry.cell != cell || entry.via.net != net || resolution <= 0.0 {
+        return None;
+    }
+    let v = &entry.via;
+    // Existing native via centers must be exactly representable. Rounding
+    // applies ONLY to this native center, not existing grid serialization.
+    let sx = v.x * resolution;
+    let sy = v.y * resolution;
+    if (sx - sx.round()).abs() > 1e-6 || (sy - sy.round()).abs() > 1e-6 {
+        return None;
+    }
+    let center = (sx.round() as i64, sy.round() as i64);
+    if grid_ses == center { return None; }
+    let p = (grid_ses.0 as f64 / resolution, grid_ses.1 as f64 / resolution);
+    if !via_contains_cap(v, p.0, p.1, width) || width / 2.0 >= v.radius - 1.0 {
+        return None;
+    }
+    // The disk is convex: endpoint-cap containment proves the entire capsule
+    // lies inside its outer land; annular overlap is proven at the grid cap.
+    Some([grid_ses, center])
+}
+
+fn center_connector_ses(layer: &str, width: i64, [a, b]: [(i64, i64); 2]) -> String {
+    format!("        (wire (path {} {} {} {} {} {}))\n", layer, width, a.0, a.1, b.0, b.1)
+}
+
+#[derive(Default)]
+struct FixedCopper {
+    wires: Vec<FixedWire>,
+    vias: Vec<FixedVia>,
+}
+
+fn finite_num(s: &Sx) -> Option<f64> {
+    s.sym().parse::<f64>().ok().filter(|v| v.is_finite())
+}
+
+fn is_fixed(s: &Sx) -> bool {
+    s.kid("type").map(|t| t.list().get(1).map(Sx::sym)) == Some(Some("fix"))
+}
+
+// KiCad's DSN has no independent drill/plating field. The wiring `via`,
+// exact native through-span/drill identifier and matching round shapes are
+// the supported convention, NOT independent proof of a physical plated hole.
+// The native prepare/export receipt and final native DRC own that proof.
+fn native_through_radius(ps: &Sx, name: &str, layers: &[String]) -> Option<f64> {
+    if layers.len() < 2 || layers.len() > 8 {
+        return None;
+    }
+    if ps.kid("plated").is_some() || ps.kid("hole").is_some() {
+        return None; // unreviewed alternate stack semantics, including plated off
+    }
+    let prefix = format!("Via[0-{}]_", layers.len() - 1);
+    let dims = name.strip_prefix(&prefix)?.strip_suffix("_um")?;
+    let (dia, drill) = dims.split_once(':')?;
+    let dia: f64 = dia.parse().ok()?;
+    let drill: f64 = drill.parse().ok()?;
+    if !dia.is_finite() || !drill.is_finite() || drill <= 0.0 || dia <= drill {
+        return None;
+    }
+    let mut seen = HashSet::new();
+    for shape in ps.kids("shape") {
+        let inner = shape.list().get(1)?;
+        let v = inner.list();
+        if inner.tag() != "circle" || !(v.len() == 3 || v.len() == 5) {
+            return None;
+        }
+        let l = layers.iter().position(|l| l == v[1].sym())?;
+        if !seen.insert(l) || finite_num(&v[2])? != dia {
+            return None;
+        }
+        if v.len() == 5 && (finite_num(&v[3])? != 0.0 || finite_num(&v[4])? != 0.0) {
+            return None;
+        }
+    }
+    (seen.len() == layers.len()).then_some(dia / 2.0)
+}
+
+fn read_fixed_copper(root: &Sx, layers: &[String]) -> Option<FixedCopper> {
+    let mut copper = FixedCopper::default();
+    let Some(wiring) = root.kid("wiring") else { return Some(copper); };
+    let lib = root.kid("library")?;
+    for item in wiring.list().iter().skip(1) {
+        let net = item.kid("net")?.list().get(1)?.sym().to_string();
+        if net.is_empty() { return None; }
+        match item.tag() {
+            "wire" => {
+                let path = item.kid("path")?.list();
+                if path.len() < 7 || (path.len() - 3) % 2 != 0 { return None; }
+                let layer = layers.iter().position(|l| l == path[1].sym())?;
+                let width = finite_num(&path[2])?;
+                if width <= 0.0 { return None; }
+                let mut pts = Vec::new();
+                for pair in path[3..].chunks_exact(2) {
+                    pts.push((finite_num(&pair[0])?, finite_num(&pair[1])?));
+                }
+                copper.wires.push(FixedWire { net, layer, width, pts, fixed: is_fixed(item) });
+            }
+            "via" => {
+                let v = item.list();
+                let name = v.get(1)?.sym();
+                let ps = lib.kids("padstack").find(|ps| ps.list().get(1).map(Sx::sym) == Some(name))?;
+                if item.kid("plated").is_some() { return None; }
+                let radius = native_through_radius(ps, name, layers)?;
+                copper.vias.push(FixedVia {
+                    net, x: finite_num(v.get(2)?)?, y: finite_num(v.get(3)?)?, radius,
+                    drill_radius: name.strip_suffix("_um")?.rsplit_once(':')?.1.parse::<f64>().ok()? / 2.0,
+                    fixed: is_fixed(item),
+                });
+            }
+            _ => return None,
+        }
+    }
+    Some(copper)
+}
+
+fn fixed_rect_stack(ps: &Sx, layers: &[String]) -> bool {
+    let shapes: Vec<_> = ps.kids("shape").collect();
+    if shapes.len() != 1 { return false; }
+    let Some(rect) = shapes[0].list().get(1) else { return false; };
+    let v = rect.list();
+    rect.tag() == "rect" && v.len() == 6
+        && layers.iter().any(|l| l == v[1].sym())
+        && v[2..].iter().all(|v| finite_num(v).is_some())
+        && rect.num(2) < rect.num(4) && rect.num(3) < rect.num(5)
+}
+
+fn connected_fixed_vias<'a>(ap: &AbsPin, net: &str, copper: &'a FixedCopper) -> Vec<&'a FixedVia> {
+    if !ap.fixed_seed_rect { return Vec::new(); }
+    let (px, py) = (ap.x + ap.pad.ox, ap.y + ap.pad.oy);
+    copper.vias.iter().filter(|via| {
+        via.fixed && via.net == net && copper.wires.iter().any(|w| {
+            if !w.fixed || w.net != net || w.pts.len() != 2 || ap.pad.layers & (1 << w.layer) == 0 {
+                return false;
+            }
+            // Full endpoint cap inside the actual rectangular pad; the other
+            // cap inside the via disk. This is stronger than mere overlap.
+            [(w.pts[0], w.pts[1]), (w.pts[1], w.pts[0])].iter().any(|&(p, v)| {
+                (p.0 - px).abs() + w.width / 2.0 <= ap.pad.hw
+                    && (p.1 - py).abs() + w.width / 2.0 <= ap.pad.hh
+                    && (v.0 - via.x).hypot(v.1 - via.y) + w.width / 2.0 < via.radius
+                    && (p.0 - via.x).hypot(p.1 - via.y) > via.radius + w.width / 2.0
+            })
+        })
+    }).collect()
+}
+
+// The emitted grid endpoint is quantized to SES coordinates before this test.
+// Its entire round trace cap must fit in existing via copper. No added bridge,
+// copied locked wire, copied via, or endpoint snap is needed or permitted.
+fn via_contains_cap(via: &FixedVia, x: f64, y: f64, width: f64) -> bool {
+    let reach = (x - via.x).hypot(y - via.y) + width / 2.0;
+    reach < via.radius - 1.0 && reach > via.drill_radius + 1.0
+}
+
+fn clears_existing_vias(x: f64, y: f64, radius: f64, clearance: f64, copper: &FixedCopper) -> bool {
+    // Deliberately conservative copper-to-copper spacing, including SAME net.
+    // Since both validated drills are smaller than their copper, this also
+    // prevents duplicate/overlapping holes without guessing drill clearance.
+    copper.vias.iter().all(|v| (x-v.x).hypot(y-v.y) >= v.radius + radius + clearance)
+}
+
+fn fixed_segment_clear(
+    a: (f64, f64), b: (f64, f64), layer: usize, net: &str, width: f64, clearance: f64,
+    copper: &FixedCopper, pins: &HashMap<String, AbsPin>, pin_net: &HashMap<String, u16>, nid: u16,
+) -> bool {
+    for (pname, p) in pins {
+        if pin_net.get(pname) == Some(&nid) || p.pad.layers & (1 << layer) == 0 { continue; }
+        let (x, y) = (p.x + p.pad.ox, p.y + p.pad.oy);
+        // Pad boxes are conservative for unsupported/rounded pad shapes.
+        if seg_box_dist(a.0, a.1, b.0, b.1, x-p.pad.hw, y-p.pad.hh, x+p.pad.hw, y+p.pad.hh)
+            < clearance + width / 2.0 { return false; }
+    }
+    for w in &copper.wires {
+        if w.net == net || w.layer != layer { continue; }
+        for s in w.pts.windows(2) {
+            if seg_seg_dist(a.0, a.1, b.0, b.1, s[0].0, s[0].1, s[1].0, s[1].1)
+                < clearance + (width + w.width) / 2.0 { return false; }
+        }
+    }
+    for v in &copper.vias {
+        if v.net != net && pt_seg_d2(v.x, v.y, a.0, a.1, b.0, b.1).sqrt()
+            < clearance + width / 2.0 + v.radius { return false; }
+    }
+    true
 }
 
 fn main() {
@@ -521,6 +752,10 @@ fn main() {
                     AbsPin {
                         x: cx + rx,
                         y: cy + ry,
+                        fixed_seed_rect: side == "front"
+                            && ((crot + pin.rot) / 90.0 - ((crot + pin.rot) / 90.0).round()).abs() < 1e-9
+                            && lib.kids("padstack").find(|ps| ps.list().get(1).map(Sx::sym) == Some(pin.padstack.as_str()))
+                                .map(|ps| fixed_rect_stack(ps, &layers)).unwrap_or(false),
                         pad,
                     },
                 );
@@ -869,6 +1104,61 @@ fn main() {
         );
     }
 
+    // Native fixed copper adds alternatives to the ORIGINAL pin group only.
+    // An unsupported wiring/stack shape disables this extension entirely;
+    // existing occupancy and original-pad routing remain unchanged.
+    let fixed_copper = read_fixed_copper(&root, &layers);
+    let mut fixed_entries: HashMap<String, Vec<FixedEntry>> = HashMap::new();
+    if let Some(copper) = &fixed_copper {
+        for net in &nets {
+            if skip.contains(&net.name) { continue; }
+            let nid = net_id_of[&net.name];
+            for pname in &net.pins {
+                let Some(ap) = abs_pins.get(pname) else { continue; };
+                let mut cells = Vec::new();
+                for via in connected_fixed_vias(ap, &net.name, copper) {
+                    let (cx, cy) = to_cell(via.x, via.y);
+                    // One nearest cell is the deliberately bounded interface.
+                    // Test actual quantized SES coords, not an ideal float.
+                    let x = ((bx0 + cx as f64 * pitch) * resolution).trunc() / resolution;
+                    let y = ((by0 + cy as f64 * pitch) * resolution).trunc() / resolution;
+                    if x < bx0 || x > bx1 || y < by0 || y > by1
+                        || !via_contains_cap(via, x, y, width) { continue; }
+                    for l in 0..nl {
+                        let c = idx(cx, cy, l);
+                        if routable[l] && (owner[c] == 0 || owner[c] == nid)
+                            && fixed_segment_clear((x,y), (x,y), l, &net.name, width, clearance,
+                                copper, &abs_pins, &pin_net, nid) {
+                            cells.push(FixedEntry { cell: c, via: via.clone() });
+                        }
+                    }
+                }
+                cells.sort_unstable_by_key(|e| e.cell);
+                cells.dedup_by_key(|e| e.cell);
+                if !cells.is_empty() {
+                    eprintln!("fixed terminals: {} ({}) {} connected via-layer entries", pname, net.name, cells.len());
+                    fixed_entries.insert(pname.clone(), cells);
+                }
+            }
+        }
+    } else {
+        eprintln!("fixed terminals: unsupported wiring/stack; no fixed-copper promotion");
+    }
+
+    // Existing via sites are already copper, not permission to drill another
+    // hole at a nearby grid center (even for the same net).
+    let routing_via_radius = lib.kids("padstack")
+        .find(|ps| ps.list().get(1).map(Sx::sym) == Some(via_name.as_str()))
+        .and_then(|ps| native_through_radius(ps, &via_name, &layers));
+    let new_via_clear = |x: usize, y: usize| -> bool {
+        let Some(copper) = &fixed_copper else { return true; };
+        if fixed_entries.is_empty() { return true; }
+        let Some(radius) = routing_via_radius else { return false; };
+        let px = ((bx0 + x as f64 * pitch) * resolution).trunc() / resolution;
+        let py = ((by0 + y as f64 * pitch) * resolution).trunc() / resolution;
+        clears_existing_vias(px, py, radius, clearance, copper)
+    };
+
     // ---------- fanout stubs for fine-pitch pads -----------------------------------
     // At cell granularity a fine-pitch pad can be walled in by neighbor pads'
     // clearance halos even though a straight outward escape lane is DRC-legal
@@ -934,8 +1224,8 @@ fn main() {
     }
     let mut new_stubs = 0usize;
     for (pname, ap) in &abs_pins {
-        if stub_end.contains_key(pname) {
-            continue;
+        if stub_end.contains_key(pname) || fixed_entries.contains_key(pname) {
+            continue; // never duplicate a qualified native fixed escape
         }
         let nid = match pin_net.get(pname) {
             Some(&n) if n != u16::MAX => n,
@@ -1410,6 +1700,11 @@ fn main() {
                 if let Some(&sc) = stub_end.get(p) {
                     cells.push(sc); // routed continuation point of the fanout stub
                 }
+                if let Some(extra) = fixed_entries.get(p) {
+                    // Preserve the original pad and its group/name; these are
+                    // physically equivalent alternatives, not additional pins.
+                    cells.extend(extra.iter().map(|e| e.cell));
+                }
                 if !cells.is_empty() {
                     cells.sort();
                     cells.dedup();
@@ -1571,7 +1866,7 @@ fn main() {
                     if y + 1 < gh {
                         push(idx(x, y + 1, l), step, &mut dist, &mut prev, &mut heap);
                     }
-                    if nl > 1 {
+                    if nl > 1 && new_via_clear(x, y) {
                         // via: ring must be pad-free on all layers (hard rule)
                         let mut via_hard_ok = true;
                         'ring: for dy in -via_keep..=via_keep {
@@ -1994,7 +2289,7 @@ fn main() {
                             nbrs.push(idx(x, y + 1, l));
                         }
                         // layer hop only where a via could legally sit
-                        let mut via_ok = true;
+                        let mut via_ok = new_via_clear(x, y);
                         'vr: for dy in -via_keep..=via_keep {
                             for dx in -via_keep..=via_keep {
                                 let nx = x as isize + dx;
@@ -2488,10 +2783,17 @@ fn main() {
         true
     };
     let mut snaps_relaxed = 0u32;
+    let mut emitted_segments: Vec<((f64, f64), (f64, f64), usize, u16)> = Vec::new();
+    let mut guarded_segments: Vec<usize> = Vec::new();
     for r in &results {
         let r_nid = net_id_of.get(&r.name).copied().unwrap_or(u16::MAX);
         out.push_str(&format!("      (net \"{}\"\n", r.name));
         let entry = pin_entry.get(&r.name);
+        let fixed_for_net: Vec<&FixedEntry> = nets.iter().find(|n| n.name == r.name).into_iter()
+            .flat_map(|n| n.pins.iter()).filter_map(|p| fixed_entries.get(p))
+            .flatten().collect();
+        let fixed_cells: HashSet<usize> = fixed_for_net.iter().map(|e| e.cell).collect();
+        let mut center_connectors: HashSet<(usize, [(i64, i64); 2])> = HashSet::new();
         // cells used more than once are tree junctions (or via sites): moving
         // a wire end there would break the join
         let mut use_count: HashMap<(usize, usize, usize), u32> = HashMap::new();
@@ -2554,7 +2856,8 @@ fn main() {
                 };
                 let inv = 1.0 / resolution;
                 if let (Some(&(x0, y0)), Some(&(x1, y1))) = (cells.first(), cells.last()) {
-                    if use_count.get(&(x0, y0, *layer)).copied().unwrap_or(0) <= 1 {
+                    if use_count.get(&(x0, y0, *layer)).copied().unwrap_or(0) <= 1
+                        && !fixed_cells.contains(&idx(x0, y0, *layer)) {
                         if let Some(&(px, py, hw, hh)) = m.get(&(x0, y0, *layer)) {
                             let cand = snap(x0, y0, px, py, hw, hh);
                             let adj = pts.get(1).copied();
@@ -2569,7 +2872,8 @@ fn main() {
                             }
                         }
                     }
-                    if use_count.get(&(x1, y1, *layer)).copied().unwrap_or(0) <= 1 {
+                    if use_count.get(&(x1, y1, *layer)).copied().unwrap_or(0) <= 1
+                        && !fixed_cells.contains(&idx(x1, y1, *layer)) {
                         if let Some(&(px, py, hw, hh)) = m.get(&(x1, y1, *layer)) {
                             let cand = snap(x1, y1, px, py, hw, hh);
                             let n = pts.len();
@@ -2587,6 +2891,38 @@ fn main() {
                     }
                 }
             }
+            // A connector is tied to the actual USED path endpoint and its
+            // layer-indexed original-pad entry, never to a nearby arbitrary via.
+            for (cell, point) in [(cells.first(), pts.first()), (cells.last(), pts.last())] {
+                if let (Some(&(x, y)), Some(&(sx, sy))) = (cell, point) {
+                    let c = idx(x, y, *layer);
+                    for e in fixed_for_net.iter().filter(|e| e.cell == c) {
+                        let grid_ses = (sx as i64, sy as i64); // same serialization as this wire
+                        if let Some(connector) = fixed_center_connector(e, c, &r.name, true,
+                            grid_ses, resolution, width) {
+                            center_connectors.insert((*layer, connector));
+                        } else {
+                            // A used off-center entry must never silently lose
+                            // its required connector if representability fails.
+                            let center = (e.via.x * resolution, e.via.y * resolution);
+                            if (grid_ses.0 as f64 - center.0).abs() > 1e-6
+                                || (grid_ses.1 as f64 - center.1).abs() > 1e-6 {
+                                eprintln!("fixed terminal emission rejected: {} connector geometry/precision; SES not written", r.name);
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+                }
+            }
+            // Keep exact emitted (integer SES) geometry for a final clearance
+            // gate. For fixed-terminal nets validate every segment, including
+            // simplified first/last segments, against fixed and emitted copper.
+            for s in pts.windows(2) {
+                let a = (s[0].0.trunc() / resolution, s[0].1.trunc() / resolution);
+                let b = (s[1].0.trunc() / resolution, s[1].1.trunc() / resolution);
+                if !fixed_cells.is_empty() { guarded_segments.push(emitted_segments.len()); }
+                emitted_segments.push((a, b, *layer, r_nid));
+            }
             out.push_str(&format!(
                 "        (wire (path {} {}",
                 layers[*layer],
@@ -2597,7 +2933,28 @@ fn main() {
             }
             out.push_str("))\n");
         }
+        let mut connectors: Vec<_> = center_connectors.into_iter().collect();
+        connectors.sort_unstable();
+        for (layer, [a, b]) in connectors {
+            let pa = (a.0 as f64 / resolution, a.1 as f64 / resolution);
+            let pb = (b.0 as f64 / resolution, b.1 as f64 / resolution);
+            // The native fixed wire may already reach this center on this
+            // layer. Do not emit a duplicate of any existing/routed segment.
+            let duplicate_fixed = fixed_copper.as_ref().into_iter().flat_map(|c| c.wires.iter())
+                .filter(|w| w.net == r.name && w.layer == layer)
+                .any(|w| w.pts.windows(2).any(|s| (s[0] == pa && s[1] == pb) || (s[0] == pb && s[1] == pa)));
+            let duplicate_emitted = emitted_segments.iter().any(|&(c,d,l,n)| n == r_nid && l == layer
+                && ((c == pa && d == pb) || (c == pb && d == pa)));
+            if duplicate_fixed || duplicate_emitted { continue; }
+            guarded_segments.push(emitted_segments.len());
+            emitted_segments.push((pa, pb, layer, r_nid));
+            out.push_str(&center_connector_ses(&layers[layer], (width * resolution) as i64, [a, b]));
+        }
         for &(x, y) in &r.vias {
+            if !new_via_clear(x, y) {
+                eprintln!("fixed terminal emission rejected: new via on {} overlaps existing via clearance; SES not written", r.name);
+                std::process::exit(1);
+            }
             let (fx, fy) = cell_xy(x, y);
             out.push_str(&format!(
                 "        (via \"{}\" {} {})\n",
@@ -2623,6 +2980,12 @@ fn main() {
                 if !used.contains(&(cx, cy, *l)) {
                     continue;
                 }
+                for s in pts.windows(2) {
+                    let q = |p: (f64, f64)| ((p.0 * resolution).trunc() / resolution,
+                        (p.1 * resolution).trunc() / resolution);
+                    if !fixed_cells.is_empty() { guarded_segments.push(emitted_segments.len()); }
+                    emitted_segments.push((q(s[0]), q(s[1]), *l, r_nid));
+                }
                 out.push_str(&format!(
                     "        (wire (path {} {}",
                     layers[*l],
@@ -2645,6 +3008,31 @@ fn main() {
         "snap clearance gate: {} terminal snaps relaxed to grid endpoints",
         snaps_relaxed
     );
+    if !guarded_segments.is_empty() {
+        let copper = fixed_copper.as_ref().expect("qualified fixed terminal copper");
+        let emitted_via_radius = lib.kids("padstack")
+            .find(|ps| ps.list().get(1).map(Sx::sym) == Some(via_name.as_str()))
+            .and_then(|ps| native_through_radius(ps, &via_name, &layers))
+            .expect("qualified native routing via");
+        for &si in &guarded_segments {
+            let (a, b, l, nid) = emitted_segments[si];
+            let net = &nets[(nid - 1) as usize].name;
+            let clears_fixed = fixed_segment_clear(a, b, l, net, width, clearance,
+                copper, &abs_pins, &pin_net, nid);
+            let clears_tracks = emitted_segments.iter().all(|&(c, d, ll, other)| {
+                other == nid || ll != l || seg_seg_dist(a.0, a.1, b.0, b.1, c.0, c.1, d.0, d.1) >= clearance + width
+            });
+            let clears_vias = results.iter().all(|r| r.name == *net || r.vias.iter().all(|&(x, y)| {
+                let p = cell_xy(x, y);
+                pt_seg_d2(p.0.trunc() / resolution, p.1.trunc() / resolution, a.0, a.1, b.0, b.1).sqrt()
+                    >= clearance + width / 2.0 + emitted_via_radius
+            }));
+            if !(clears_fixed && clears_tracks && clears_vias) {
+                eprintln!("fixed terminal emission rejected: {} layer {} segment {:?}->{:?} fails exact clearance; SES not written", net, layers[l], a, b);
+                std::process::exit(1);
+            }
+        }
+    }
     fs::write(&args[2], out).expect("write ses");
 
     eprintln!(

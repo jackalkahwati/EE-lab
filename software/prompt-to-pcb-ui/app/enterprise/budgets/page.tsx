@@ -5,20 +5,16 @@
  * alerts, and cost allocation by board tag. Credits only; fab dollars remain
  * $0 until real orders exist (see Cost & Usage). No spend is implied.
  */
-import { useEffect, useState } from 'react'
-import { AccessGate } from '@/components/access-gate'
+import { EnterpriseReadState, useEnterpriseRead } from '@/components/enterprise-read-state'
 import { cn } from '@/lib/utils'
 
+// Existing enterprise dispatcher records are heterogeneous; retain their API shape.
 type Any = Record<string, any>
 const WARN = 0.8
 
 export default function BudgetsPage() {
-  const [db, setDb] = useState<Any | null>(null)
-  useEffect(() => {
-    fetch('/api/enterprise', { cache: 'no-store' }).then((r) => r.json()).then(setDb).catch(() => {})
-  }, [])
-  if (!db) return <div className="p-6 text-xs text-muted-foreground">Loading budgets…</div>
-  if (db.error) return <AccessGate error={db.error} />
+  const { db, error, refresh } = useEnterpriseRead()
+  if (!db) return <EnterpriseReadState error={error} retry={refresh} label="budgets" />
 
   const programs: Any[] = db.programs ?? []
   const boards: Any[] = db.boards ?? []

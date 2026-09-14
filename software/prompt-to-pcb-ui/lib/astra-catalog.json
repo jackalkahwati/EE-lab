@@ -1,0 +1,725 @@
+{
+  "version": 1,
+  "id": "bme280-3v3-i2c-0x76-v1",
+  "reviewStatus": "electrical-contract-and-exact-assets-only; native execution and physical validation not qualified",
+  "provenance": {
+    "installedRoot": "/Applications/KiCad/KiCad.app/Contents/SharedSupport",
+    "installedVersion": "10.0.1",
+    "footprintCoordinates": "KiCad footprint local coordinates, millimetres; rotations in degrees; pad size precedes pad rotation",
+    "modelCoordinates": "KiCad model offset in millimetres, unitless scale, rotations in degrees, copied without approximation",
+    "manufacturerDocument": {
+      "url": "https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bme280-ds002.pdf",
+      "sha256": "a2ccdb449fec94380742fe8eec851a11d9bd4142252d332b34682b4deecd7d89",
+      "coverRevision": "1.24 February 2024, BST-BME280-DS001-24",
+      "bodyFooterRevision": "1.23 January 2022, BST-BME280-DS001-23 (publisher PDF inconsistency retained)",
+      "sections": [
+        "p2 supply ranges and package",
+        "6.1/6.2 pp32-33 interface straps and address",
+        "7.1 p38 clockwise pin-out and Table35",
+        "7.2 p39 Figure17 I2C circuit and component values",
+        "7.5/7.6 pp42-43 package and landing pattern"
+      ]
+    },
+    "limitations": [
+      "KiCad library STEP models describe nominal library geometry, not supplier qualification.",
+      "Passive and header requirements are generic engineering specifications; no supplier MPN, stock, price or availability is asserted.",
+      "4.7k pull-ups are an application choice subject to bus capacitance, host sink and timing limits, not a universal I2C guarantee.",
+      "The 2mm decoupler pad-distance rule is a project layout constraint, not a numeric Bosch specification."
+    ]
+  },
+  "assets": {
+    "bme280": {
+      "catalogId": "bme280",
+      "footprint": {
+        "libraryPath": "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints/Package_LGA.pretty",
+        "name": "Bosch_LGA-8_2.5x2.5mm_P0.65mm_ClockwisePinNumbering",
+        "path": "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints/Package_LGA.pretty/Bosch_LGA-8_2.5x2.5mm_P0.65mm_ClockwisePinNumbering.kicad_mod",
+        "sha256": "14464b7a437e7efb0fa9947b89a7d3825242f3ed82d649fe2ca45fad5d3dda86",
+        "bytes": 5397,
+        "formatVersion": "20260206",
+        "source": "(footprint \"Bosch_LGA-8_2.5x2.5mm_P0.65mm_ClockwisePinNumbering\"\n\t(version 20260206)\n\t(generator \"pcbnew\")\n\t(generator_version \"10.0\")\n\t(layer \"F.Cu\")\n\t(descr \"LGA-8\")\n\t(tags \"lga land grid array\")\n\t(property \"Reference\" \"REF**\"\n\t\t(at 0.015 -2.465 0)\n\t\t(layer \"F.SilkS\")\n\t\t(uuid \"2ef059b1-f65d-4ea6-893e-c7c932b151ef\")\n\t\t(effects\n\t\t\t(font\n\t\t\t\t(size 1 1)\n\t\t\t\t(thickness 0.15)\n\t\t\t)\n\t\t)\n\t)\n\t(property \"Value\" \"Bosch_LGA-8_2.5x2.5mm_P0.65mm_ClockwisePinNumbering\"\n\t\t(at 0.015 2.535 0)\n\t\t(layer \"F.Fab\")\n\t\t(uuid \"c21d078a-0c04-4681-a1d1-27b25d639d6b\")\n\t\t(effects\n\t\t\t(font\n\t\t\t\t(size 1 1)\n\t\t\t\t(thickness 0.15)\n\t\t\t)\n\t\t)\n\t)\n\t(property \"Datasheet\" \"\"\n\t\t(at 0 0 0)\n\t\t(unlocked yes)\n\t\t(layer \"F.Fab\")\n\t\t(hide yes)\n\t\t(uuid \"861c1bd2-5973-4e56-9b74-a7bc9cc05fcc\")\n\t\t(effects\n\t\t\t(font\n\t\t\t\t(size 1.27 1.27)\n\t\t\t\t(thickness 0.15)\n\t\t\t)\n\t\t)\n\t)\n\t(property \"Description\" \"\"\n\t\t(at 0 0 0)\n\t\t(unlocked yes)\n\t\t(layer \"F.Fab\")\n\t\t(hide yes)\n\t\t(uuid \"894a44e0-85c7-44a3-bafe-c0d2ad492b7d\")\n\t\t(effects\n\t\t\t(font\n\t\t\t\t(size 1.27 1.27)\n\t\t\t\t(thickness 0.15)\n\t\t\t)\n\t\t)\n\t)\n\t(attr smd)\n\t(duplicate_pad_numbers_are_jumpers no)\n\t(fp_line\n\t\t(start -1.35 1.35)\n\t\t(end -1.35 1.2)\n\t\t(stroke\n\t\t\t(width 0.1)\n\t\t\t(type solid)\n\t\t)\n\t\t(layer \"F.SilkS\")\n\t\t(uuid \"d5511550-e82b-4fdd-903e-bdce5d15e3b4\")\n\t)\n\t(fp_line\n\t\t(start -1.35 1.36)\n\t\t(end -1.2 1.36)\n\t\t(stroke\n\t\t\t(width 0.1)\n\t\t\t(type solid)\n\t\t)\n\t\t(layer \"F.SilkS\")\n\t\t(uuid \"df854839-cb92-4d75-8cbf-e71848ae56d8\")\n\t)\n\t(fp_line\n\t\t(start 1.2 -1.35)\n\t\t(end 1.35 -1.35)\n\t\t(stroke\n\t\t\t(width 0.1)\n\t\t\t(type solid)\n\t\t)\n\t\t(layer \"F.SilkS\")\n\t\t(uuid \"dd2af098-e7aa-4fdd-853a-678cb82e1ac0\")\n\t)\n\t(fp_line\n\t\t(start 1.35 -1.35)\n\t\t(end 1.35 -1.2)\n\t\t(stroke\n\t\t\t(width 0.1)\n\t\t\t(type solid)\n\t\t)\n\t\t(layer \"F.SilkS\")\n\t\t(uuid \"0e936bb6-18df-430b-bc3b-f2c95e6259a0\")\n\t)\n\t(fp_line\n\t\t(start 1.35 1.35)\n\t\t(end 1.2 1.35)\n\t\t(stroke\n\t\t\t(width 0.1)\n\t\t\t(type solid)\n\t\t)\n\t\t(layer \"F.SilkS\")\n\t\t(uuid \"7fb8d232-6a2b-492d-af2b-f7dff9699bae\")\n\t)\n\t(fp_line\n\t\t(start 1.35 1.35)\n\t\t(end 1.35 1.2)\n\t\t(stroke\n\t\t\t(width 0.1)\n\t\t\t(type solid)\n\t\t)\n\t\t(layer \"F.SilkS\")\n\t\t(uuid \"3ea88de0-259f-4213-917c-3587cbaf6a12\")\n\t)\n\t(fp_poly\n\t\t(pts\n\t\t\t(xy -1.35 -1.35) (xy -1.71 -1.35) (xy -1.35 -1.71) (xy -1.35 -1.35)\n\t\t)\n\t\t(stroke\n\t\t\t(width 0.12)\n\t\t\t(type solid)\n\t\t)\n\t\t(fill yes)\n\t\t(layer \"F.SilkS\")\n\t\t(uuid \"f3c84094-12e9-454c-be5c-e58e5e12eb86\")\n\t)\n\t(fp_line\n\t\t(start -1.41 -1.54)\n\t\t(end 1.41 -1.54)\n\t\t(stroke\n\t\t\t(width 0.05)\n\t\t\t(type solid)\n\t\t)\n\t\t(layer \"F.CrtYd\")\n\t\t(uuid \"8d3df581-0c50-4d0d-8ecc-5fae78fb3b24\")\n\t)\n\t(fp_line\n\t\t(start -1.41 1.54)\n\t\t(end -1.41 -1.54)\n\t\t(stroke\n\t\t\t(width 0.05)\n\t\t\t(type solid)\n\t\t)\n\t\t(layer \"F.CrtYd\")\n\t\t(uuid \"432cfad3-628f-4d32-a169-31d04df142cd\")\n\t)\n\t(fp_line\n\t\t(start 1.41 -1.54)\n\t\t(end 1.41 1.54)\n\t\t(stroke\n\t\t\t(width 0.05)\n\t\t\t(type solid)\n\t\t)\n\t\t(layer \"F.CrtYd\")\n\t\t(uuid \"4c9132c5-3c6d-44ea-ae85-cc09c28c10ad\")\n\t)\n\t(fp_line\n\t\t(start 1.41 1.54)\n\t\t(end -1.41 1.54)\n\t\t(stroke\n\t\t\t(width 0.05)\n\t\t\t(type solid)\n\t\t)\n\t\t(layer \"F.CrtYd\")\n\t\t(uuid \"2773d3db-aa1b-470f-be5b-e51f664f49ce\")\n\t)\n\t(fp_line\n\t\t(start -1.25 -0.5)\n\t\t(end -0.5 -1.25)\n\t\t(stroke\n\t\t\t(width 0.1)\n\t\t\t(type solid)\n\t\t)\n\t\t(layer \"F.Fab\")\n\t\t(uuid \"fdec881e-26d3-424c-b704-6e6d6f84977a\")\n\t)\n\t(fp_line\n\t\t(start -1.25 1.25)\n\t\t(end -1.25 -0.5)\n\t\t(stroke\n\t\t\t(width 0.1)\n\t\t\t(type solid)\n\t\t)\n\t\t(layer \"F.Fab\")\n\t\t(uuid \"fedece91-839b-48bc-9647-8fc1565aa199\")\n\t)\n\t(fp_line\n\t\t(start -0.5 -1.25)\n\t\t(end 1.25 -1.25)\n\t\t(stroke\n\t\t\t(width 0.1)\n\t\t\t(type solid)\n\t\t)\n\t\t(layer \"F.Fab\")\n\t\t(uuid \"d4f23ed4-45ca-438c-9b31-19cc8865dc58\")\n\t)\n\t(fp_line\n\t\t(start 1.25 -1.25)\n\t\t(end 1.25 1.25)\n\t\t(stroke\n\t\t\t(width 0.1)\n\t\t\t(type solid)\n\t\t)\n\t\t(layer \"F.Fab\")\n\t\t(uuid \"25d352c0-8ada-4b1b-a853-40fae59a7425\")\n\t)\n\t(fp_line\n\t\t(start 1.25 1.25)\n\t\t(end -1.25 1.25)\n\t\t(stroke\n\t\t\t(width 0.1)\n\t\t\t(type solid)\n\t\t)\n\t\t(layer \"F.Fab\")\n\t\t(uuid \"f7126508-f7f0-470d-9104-488ac6f40583\")\n\t)\n\t(fp_text user \"${REFERENCE}\"\n\t\t(at 0 0 180)\n\t\t(layer \"F.Fab\")\n\t\t(uuid \"caa4ee9b-215e-4994-be0f-802917aa696c\")\n\t\t(effects\n\t\t\t(font\n\t\t\t\t(size 0.5 0.5)\n\t\t\t\t(thickness 0.075)\n\t\t\t)\n\t\t)\n\t)\n\t(pad \"1\" smd rect\n\t\t(at -0.975 -1.025 90)\n\t\t(size 0.5 0.35)\n\t\t(layers \"F.Cu\" \"F.Mask\" \"F.Paste\")\n\t\t(uuid \"2ca5349a-d4e1-4c30-84d4-e20e221c8854\")\n\t)\n\t(pad \"2\" smd rect\n\t\t(at -0.325 -1.025 90)\n\t\t(size 0.5 0.35)\n\t\t(layers \"F.Cu\" \"F.Mask\" \"F.Paste\")\n\t\t(uuid \"45b5bdf4-2a83-41f4-86cf-5c718831ea33\")\n\t)\n\t(pad \"3\" smd rect\n\t\t(at 0.325 -1.025 90)\n\t\t(size 0.5 0.35)\n\t\t(layers \"F.Cu\" \"F.Mask\" \"F.Paste\")\n\t\t(uuid \"4bd053f4-40e6-480b-aedc-8cf529952e1b\")\n\t)\n\t(pad \"4\" smd rect\n\t\t(at 0.975 -1.025 90)\n\t\t(size 0.5 0.35)\n\t\t(layers \"F.Cu\" \"F.Mask\" \"F.Paste\")\n\t\t(uuid \"5ea17325-ab22-40b0-9e3b-ad8d966ba5f9\")\n\t)\n\t(pad \"5\" smd rect\n\t\t(at 0.975 1.025 90)\n\t\t(size 0.5 0.35)\n\t\t(layers \"F.Cu\" \"F.Mask\" \"F.Paste\")\n\t\t(uuid \"b732e7be-e744-481d-b742-e650c0511f4d\")\n\t)\n\t(pad \"6\" smd rect\n\t\t(at 0.325 1.025 90)\n\t\t(size 0.5 0.35)\n\t\t(layers \"F.Cu\" \"F.Mask\" \"F.Paste\")\n\t\t(uuid \"08bf1a71-33e4-40fd-8705-5fa271ccdb8f\")\n\t)\n\t(pad \"7\" smd rect\n\t\t(at -0.325 1.025 90)\n\t\t(size 0.5 0.35)\n\t\t(layers \"F.Cu\" \"F.Mask\" \"F.Paste\")\n\t\t(uuid \"7a0a042c-c0c8-4aa4-a05f-4fe19de7bc6f\")\n\t)\n\t(pad \"8\" smd rect\n\t\t(at -0.975 1.025 90)\n\t\t(size 0.5 0.35)\n\t\t(layers \"F.Cu\" \"F.Mask\" \"F.Paste\")\n\t\t(uuid \"1babf453-3a82-491c-a2dc-b1ad71de665b\")\n\t)\n\t(embedded_fonts no)\n\t(model \"${KICAD10_3DMODEL_DIR}/Package_LGA.3dshapes/Bosch_LGA-8_2.5x2.5mm_P0.65mm_ClockwisePinNumbering.step\"\n\t\t(offset\n\t\t\t(xyz 0.01500000025 -0.03500000059 0)\n\t\t)\n\t\t(scale\n\t\t\t(xyz 1 1 1)\n\t\t)\n\t\t(rotate\n\t\t\t(xyz 0 0 0)\n\t\t)\n\t)\n)\n"
+      },
+      "models": [
+        {
+          "path": "/Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels/Package_LGA.3dshapes/Bosch_LGA-8_2.5x2.5mm_P0.65mm_ClockwisePinNumbering.step",
+          "sha256": "52ce10ea1a6ad1544c3399c9b5fe10717df6e95598d13bdee97aa508af643ef0",
+          "bytes": 74162,
+          "sourceReference": "${KICAD10_3DMODEL_DIR}/Package_LGA.3dshapes/Bosch_LGA-8_2.5x2.5mm_P0.65mm_ClockwisePinNumbering.step",
+          "offsetMm": [
+            0.01500000025,
+            -0.03500000059,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "rotationDeg": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "padNumbers": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8"
+      ],
+      "pads": [
+        {
+          "number": "1",
+          "type": "smd",
+          "shape": "rect",
+          "atMm": [
+            -0.975,
+            -1.025
+          ],
+          "rotationDeg": 90.0,
+          "sizeMm": [
+            0.5,
+            0.35
+          ],
+          "layers": [
+            "F.Cu",
+            "F.Mask",
+            "F.Paste"
+          ]
+        },
+        {
+          "number": "2",
+          "type": "smd",
+          "shape": "rect",
+          "atMm": [
+            -0.325,
+            -1.025
+          ],
+          "rotationDeg": 90.0,
+          "sizeMm": [
+            0.5,
+            0.35
+          ],
+          "layers": [
+            "F.Cu",
+            "F.Mask",
+            "F.Paste"
+          ]
+        },
+        {
+          "number": "3",
+          "type": "smd",
+          "shape": "rect",
+          "atMm": [
+            0.325,
+            -1.025
+          ],
+          "rotationDeg": 90.0,
+          "sizeMm": [
+            0.5,
+            0.35
+          ],
+          "layers": [
+            "F.Cu",
+            "F.Mask",
+            "F.Paste"
+          ]
+        },
+        {
+          "number": "4",
+          "type": "smd",
+          "shape": "rect",
+          "atMm": [
+            0.975,
+            -1.025
+          ],
+          "rotationDeg": 90.0,
+          "sizeMm": [
+            0.5,
+            0.35
+          ],
+          "layers": [
+            "F.Cu",
+            "F.Mask",
+            "F.Paste"
+          ]
+        },
+        {
+          "number": "5",
+          "type": "smd",
+          "shape": "rect",
+          "atMm": [
+            0.975,
+            1.025
+          ],
+          "rotationDeg": 90.0,
+          "sizeMm": [
+            0.5,
+            0.35
+          ],
+          "layers": [
+            "F.Cu",
+            "F.Mask",
+            "F.Paste"
+          ]
+        },
+        {
+          "number": "6",
+          "type": "smd",
+          "shape": "rect",
+          "atMm": [
+            0.325,
+            1.025
+          ],
+          "rotationDeg": 90.0,
+          "sizeMm": [
+            0.5,
+            0.35
+          ],
+          "layers": [
+            "F.Cu",
+            "F.Mask",
+            "F.Paste"
+          ]
+        },
+        {
+          "number": "7",
+          "type": "smd",
+          "shape": "rect",
+          "atMm": [
+            -0.325,
+            1.025
+          ],
+          "rotationDeg": 90.0,
+          "sizeMm": [
+            0.5,
+            0.35
+          ],
+          "layers": [
+            "F.Cu",
+            "F.Mask",
+            "F.Paste"
+          ]
+        },
+        {
+          "number": "8",
+          "type": "smd",
+          "shape": "rect",
+          "atMm": [
+            -0.975,
+            1.025
+          ],
+          "rotationDeg": 90.0,
+          "sizeMm": [
+            0.5,
+            0.35
+          ],
+          "layers": [
+            "F.Cu",
+            "F.Mask",
+            "F.Paste"
+          ]
+        }
+      ]
+    },
+    "cap-100nf-0402": {
+      "catalogId": "cap-100nf-0402",
+      "footprint": {
+        "libraryPath": "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints/Capacitor_SMD.pretty",
+        "name": "C_0402_1005Metric",
+        "path": "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints/Capacitor_SMD.pretty/C_0402_1005Metric.kicad_mod",
+        "sha256": "0403382fc4583ed510b461b1fa4a36dfaec6f4c0d9b1a67e6b0027837a54e1b5",
+        "bytes": 1936,
+        "formatVersion": "20260206",
+        "source": "(footprint \"C_0402_1005Metric\"\n\t(version 20260206)\n\t(generator \"kicad-footprint-generator\")\n\t(layer \"F.Cu\")\n\t(descr \"Capacitor SMD 0402 (1005 Metric), square (rectangular) end terminal, IPC-7351 nominal, (Body size source: IPC-SM-782 page 76, https://www.pcb-3d.com/wordpress/wp-content/uploads/ipc-sm-782a_amendment_1_and_2.pdf)\")\n\t(tags \"capacitor\")\n\t(property \"Reference\" \"REF**\"\n\t\t(at 0 -1.16 0)\n\t\t(layer \"F.SilkS\")\n\t\t(effects\n\t\t\t(font\n\t\t\t\t(size 1 1)\n\t\t\t\t(thickness 0.15)\n\t\t\t)\n\t\t)\n\t)\n\t(property \"Value\" \"C_0402_1005Metric\"\n\t\t(at 0 1.16 0)\n\t\t(layer \"F.Fab\")\n\t\t(effects\n\t\t\t(font\n\t\t\t\t(size 1 1)\n\t\t\t\t(thickness 0.15)\n\t\t\t)\n\t\t)\n\t)\n\t(property \"KiLib_Generator\" \"SMD_2terminal_chip_molded\"\n\t\t(at 0 0 0)\n\t\t(layer \"F.SilkS\")\n\t\t(hide yes)\n\t\t(effects\n\t\t\t(font\n\t\t\t\t(size 1 1)\n\t\t\t\t(thickness 0.15)\n\t\t\t)\n\t\t)\n\t)\n\t(attr smd)\n\t(duplicate_pad_numbers_are_jumpers no)\n\t(fp_line\n\t\t(start -0.107836 -0.36)\n\t\t(end 0.107836 -0.36)\n\t\t(stroke\n\t\t\t(width 0.12)\n\t\t\t(type solid)\n\t\t)\n\t\t(layer \"F.SilkS\")\n\t)\n\t(fp_line\n\t\t(start -0.107836 0.36)\n\t\t(end 0.107836 0.36)\n\t\t(stroke\n\t\t\t(width 0.12)\n\t\t\t(type solid)\n\t\t)\n\t\t(layer \"F.SilkS\")\n\t)\n\t(fp_rect\n\t\t(start -0.91 -0.46)\n\t\t(end 0.91 0.46)\n\t\t(stroke\n\t\t\t(width 0.05)\n\t\t\t(type solid)\n\t\t)\n\t\t(fill no)\n\t\t(layer \"F.CrtYd\")\n\t)\n\t(fp_rect\n\t\t(start -0.5 -0.25)\n\t\t(end 0.5 0.25)\n\t\t(stroke\n\t\t\t(width 0.1)\n\t\t\t(type solid)\n\t\t)\n\t\t(fill no)\n\t\t(layer \"F.Fab\")\n\t)\n\t(fp_text user \"${REFERENCE}\"\n\t\t(at 0 0 0)\n\t\t(layer \"F.Fab\")\n\t\t(effects\n\t\t\t(font\n\t\t\t\t(size 0.25 0.25)\n\t\t\t\t(thickness 0.04)\n\t\t\t)\n\t\t)\n\t)\n\t(pad \"1\" smd roundrect\n\t\t(at -0.48 0)\n\t\t(size 0.56 0.62)\n\t\t(layers \"F.Cu\" \"F.Mask\" \"F.Paste\")\n\t\t(roundrect_rratio 0.25)\n\t)\n\t(pad \"2\" smd roundrect\n\t\t(at 0.48 0)\n\t\t(size 0.56 0.62)\n\t\t(layers \"F.Cu\" \"F.Mask\" \"F.Paste\")\n\t\t(roundrect_rratio 0.25)\n\t)\n\t(embedded_fonts no)\n\t(model \"${KICAD10_3DMODEL_DIR}/Capacitor_SMD.3dshapes/C_0402_1005Metric.step\"\n\t\t(offset\n\t\t\t(xyz 0 0 0)\n\t\t)\n\t\t(scale\n\t\t\t(xyz 1 1 1)\n\t\t)\n\t\t(rotate\n\t\t\t(xyz 0 0 0)\n\t\t)\n\t)\n)\n"
+      },
+      "models": [
+        {
+          "path": "/Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels/Capacitor_SMD.3dshapes/C_0402_1005Metric.step",
+          "sha256": "03e44c4b2b727b8d4b6b1fd598cbd12dd5e614f1dfeefa96a92a07e3a3b312a2",
+          "bytes": 43502,
+          "sourceReference": "${KICAD10_3DMODEL_DIR}/Capacitor_SMD.3dshapes/C_0402_1005Metric.step",
+          "offsetMm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "rotationDeg": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "padNumbers": [
+        "1",
+        "2"
+      ],
+      "pads": [
+        {
+          "number": "1",
+          "type": "smd",
+          "shape": "roundrect",
+          "atMm": [
+            -0.48,
+            0.0
+          ],
+          "rotationDeg": 0,
+          "sizeMm": [
+            0.56,
+            0.62
+          ],
+          "layers": [
+            "F.Cu",
+            "F.Mask",
+            "F.Paste"
+          ],
+          "roundrectRatio": 0.25
+        },
+        {
+          "number": "2",
+          "type": "smd",
+          "shape": "roundrect",
+          "atMm": [
+            0.48,
+            0.0
+          ],
+          "rotationDeg": 0,
+          "sizeMm": [
+            0.56,
+            0.62
+          ],
+          "layers": [
+            "F.Cu",
+            "F.Mask",
+            "F.Paste"
+          ],
+          "roundrectRatio": 0.25
+        }
+      ]
+    },
+    "res-4k7-0402": {
+      "catalogId": "res-4k7-0402",
+      "footprint": {
+        "libraryPath": "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints/Resistor_SMD.pretty",
+        "name": "R_0402_1005Metric",
+        "path": "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints/Resistor_SMD.pretty/R_0402_1005Metric.kicad_mod",
+        "sha256": "e05c7605248c220836f642ed1f526133edf0374acdfd5bb2631e58b4e377acfb",
+        "bytes": 1937,
+        "formatVersion": "20260206",
+        "source": "(footprint \"R_0402_1005Metric\"\n\t(version 20260206)\n\t(generator \"kicad-footprint-generator\")\n\t(layer \"F.Cu\")\n\t(descr \"Resistor SMD 0402 (1005 Metric), square (rectangular) end terminal, IPC-7351 nominal, (Body size source: IPC-SM-782 page 72, https://www.pcb-3d.com/wordpress/wp-content/uploads/ipc-sm-782a_amendment_1_and_2.pdf)\")\n\t(tags \"resistor\")\n\t(property \"Reference\" \"REF**\"\n\t\t(at 0 -1.17 0)\n\t\t(layer \"F.SilkS\")\n\t\t(effects\n\t\t\t(font\n\t\t\t\t(size 1 1)\n\t\t\t\t(thickness 0.15)\n\t\t\t)\n\t\t)\n\t)\n\t(property \"Value\" \"R_0402_1005Metric\"\n\t\t(at 0 1.17 0)\n\t\t(layer \"F.Fab\")\n\t\t(effects\n\t\t\t(font\n\t\t\t\t(size 1 1)\n\t\t\t\t(thickness 0.15)\n\t\t\t)\n\t\t)\n\t)\n\t(property \"KiLib_Generator\" \"SMD_2terminal_chip_molded\"\n\t\t(at 0 0 0)\n\t\t(layer \"F.SilkS\")\n\t\t(hide yes)\n\t\t(effects\n\t\t\t(font\n\t\t\t\t(size 1 1)\n\t\t\t\t(thickness 0.15)\n\t\t\t)\n\t\t)\n\t)\n\t(attr smd)\n\t(duplicate_pad_numbers_are_jumpers no)\n\t(fp_line\n\t\t(start -0.153641 -0.38)\n\t\t(end 0.153641 -0.38)\n\t\t(stroke\n\t\t\t(width 0.12)\n\t\t\t(type solid)\n\t\t)\n\t\t(layer \"F.SilkS\")\n\t)\n\t(fp_line\n\t\t(start -0.153641 0.38)\n\t\t(end 0.153641 0.38)\n\t\t(stroke\n\t\t\t(width 0.12)\n\t\t\t(type solid)\n\t\t)\n\t\t(layer \"F.SilkS\")\n\t)\n\t(fp_rect\n\t\t(start -0.93 -0.47)\n\t\t(end 0.93 0.47)\n\t\t(stroke\n\t\t\t(width 0.05)\n\t\t\t(type solid)\n\t\t)\n\t\t(fill no)\n\t\t(layer \"F.CrtYd\")\n\t)\n\t(fp_rect\n\t\t(start -0.525 -0.27)\n\t\t(end 0.525 0.27)\n\t\t(stroke\n\t\t\t(width 0.1)\n\t\t\t(type solid)\n\t\t)\n\t\t(fill no)\n\t\t(layer \"F.Fab\")\n\t)\n\t(fp_text user \"${REFERENCE}\"\n\t\t(at 0 0 0)\n\t\t(layer \"F.Fab\")\n\t\t(effects\n\t\t\t(font\n\t\t\t\t(size 0.26 0.26)\n\t\t\t\t(thickness 0.04)\n\t\t\t)\n\t\t)\n\t)\n\t(pad \"1\" smd roundrect\n\t\t(at -0.51 0)\n\t\t(size 0.54 0.64)\n\t\t(layers \"F.Cu\" \"F.Mask\" \"F.Paste\")\n\t\t(roundrect_rratio 0.25)\n\t)\n\t(pad \"2\" smd roundrect\n\t\t(at 0.51 0)\n\t\t(size 0.54 0.64)\n\t\t(layers \"F.Cu\" \"F.Mask\" \"F.Paste\")\n\t\t(roundrect_rratio 0.25)\n\t)\n\t(embedded_fonts no)\n\t(model \"${KICAD10_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_0402_1005Metric.step\"\n\t\t(offset\n\t\t\t(xyz 0 0 0)\n\t\t)\n\t\t(scale\n\t\t\t(xyz 1 1 1)\n\t\t)\n\t\t(rotate\n\t\t\t(xyz 0 0 0)\n\t\t)\n\t)\n)\n"
+      },
+      "models": [
+        {
+          "path": "/Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels/Resistor_SMD.3dshapes/R_0402_1005Metric.step",
+          "sha256": "91507e5af4251cb4ef38e04889c9b98da29904432bd83786bba13ae9b605eacb",
+          "bytes": 40756,
+          "sourceReference": "${KICAD10_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_0402_1005Metric.step",
+          "offsetMm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "rotationDeg": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "padNumbers": [
+        "1",
+        "2"
+      ],
+      "pads": [
+        {
+          "number": "1",
+          "type": "smd",
+          "shape": "roundrect",
+          "atMm": [
+            -0.51,
+            0.0
+          ],
+          "rotationDeg": 0,
+          "sizeMm": [
+            0.54,
+            0.64
+          ],
+          "layers": [
+            "F.Cu",
+            "F.Mask",
+            "F.Paste"
+          ],
+          "roundrectRatio": 0.25
+        },
+        {
+          "number": "2",
+          "type": "smd",
+          "shape": "roundrect",
+          "atMm": [
+            0.51,
+            0.0
+          ],
+          "rotationDeg": 0,
+          "sizeMm": [
+            0.54,
+            0.64
+          ],
+          "layers": [
+            "F.Cu",
+            "F.Mask",
+            "F.Paste"
+          ],
+          "roundrectRatio": 0.25
+        }
+      ]
+    },
+    "header-1x04": {
+      "catalogId": "header-1x04",
+      "footprint": {
+        "libraryPath": "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints/Connector_PinHeader_2.54mm.pretty",
+        "name": "PinHeader_1x04_P2.54mm_Vertical",
+        "path": "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints/Connector_PinHeader_2.54mm.pretty/PinHeader_1x04_P2.54mm_Vertical.kicad_mod",
+        "sha256": "571d2d16b49795f8f9a91f96cc83fd2adf49890cd66c377189c44204ebd03c29",
+        "bytes": 3051,
+        "formatVersion": "20260206",
+        "source": "(footprint \"PinHeader_1x04_P2.54mm_Vertical\"\n\t(version 20260206)\n\t(generator \"kicad-footprint-generator\")\n\t(layer \"F.Cu\")\n\t(descr \"Through hole straight pin header, 1x04, 2.54mm pitch, single row\")\n\t(tags \"Through hole pin header THT 1x04 2.54mm single row\")\n\t(property \"Reference\" \"REF**\"\n\t\t(at 0 -2.38 0)\n\t\t(layer \"F.SilkS\")\n\t\t(effects\n\t\t\t(font\n\t\t\t\t(size 1 1)\n\t\t\t\t(thickness 0.15)\n\t\t\t)\n\t\t)\n\t)\n\t(property \"Value\" \"PinHeader_1x04_P2.54mm_Vertical\"\n\t\t(at 0 10 0)\n\t\t(layer \"F.Fab\")\n\t\t(effects\n\t\t\t(font\n\t\t\t\t(size 1 1)\n\t\t\t\t(thickness 0.15)\n\t\t\t)\n\t\t)\n\t)\n\t(property \"KiLib_Generator\" \"connector/pin_header_socket\"\n\t\t(at 0 0 0)\n\t\t(layer \"F.SilkS\")\n\t\t(hide yes)\n\t\t(effects\n\t\t\t(font\n\t\t\t\t(size 1 1)\n\t\t\t\t(thickness 0.15)\n\t\t\t)\n\t\t)\n\t)\n\t(attr through_hole)\n\t(duplicate_pad_numbers_are_jumpers no)\n\t(fp_line\n\t\t(start -1.38 -1.38)\n\t\t(end 0 -1.38)\n\t\t(stroke\n\t\t\t(width 0.12)\n\t\t\t(type solid)\n\t\t)\n\t\t(layer \"F.SilkS\")\n\t)\n\t(fp_line\n\t\t(start -1.38 0)\n\t\t(end -1.38 -1.38)\n\t\t(stroke\n\t\t\t(width 0.12)\n\t\t\t(type solid)\n\t\t)\n\t\t(layer \"F.SilkS\")\n\t)\n\t(fp_line\n\t\t(start -1.38 1.27)\n\t\t(end -1.38 9)\n\t\t(stroke\n\t\t\t(width 0.12)\n\t\t\t(type solid)\n\t\t)\n\t\t(layer \"F.SilkS\")\n\t)\n\t(fp_line\n\t\t(start -1.38 1.27)\n\t\t(end 1.38 1.27)\n\t\t(stroke\n\t\t\t(width 0.12)\n\t\t\t(type solid)\n\t\t)\n\t\t(layer \"F.SilkS\")\n\t)\n\t(fp_line\n\t\t(start -1.38 9)\n\t\t(end 1.38 9)\n\t\t(stroke\n\t\t\t(width 0.12)\n\t\t\t(type solid)\n\t\t)\n\t\t(layer \"F.SilkS\")\n\t)\n\t(fp_line\n\t\t(start 1.38 1.27)\n\t\t(end 1.38 9)\n\t\t(stroke\n\t\t\t(width 0.12)\n\t\t\t(type solid)\n\t\t)\n\t\t(layer \"F.SilkS\")\n\t)\n\t(fp_rect\n\t\t(start -1.77 -1.77)\n\t\t(end 1.77 9.39)\n\t\t(stroke\n\t\t\t(width 0.05)\n\t\t\t(type solid)\n\t\t)\n\t\t(fill no)\n\t\t(layer \"F.CrtYd\")\n\t)\n\t(fp_line\n\t\t(start -1.27 -0.635)\n\t\t(end -0.635 -1.27)\n\t\t(stroke\n\t\t\t(width 0.1)\n\t\t\t(type solid)\n\t\t)\n\t\t(layer \"F.Fab\")\n\t)\n\t(fp_line\n\t\t(start -1.27 8.89)\n\t\t(end -1.27 -0.635)\n\t\t(stroke\n\t\t\t(width 0.1)\n\t\t\t(type solid)\n\t\t)\n\t\t(layer \"F.Fab\")\n\t)\n\t(fp_line\n\t\t(start -0.635 -1.27)\n\t\t(end 1.27 -1.27)\n\t\t(stroke\n\t\t\t(width 0.1)\n\t\t\t(type solid)\n\t\t)\n\t\t(layer \"F.Fab\")\n\t)\n\t(fp_line\n\t\t(start 1.27 -1.27)\n\t\t(end 1.27 8.89)\n\t\t(stroke\n\t\t\t(width 0.1)\n\t\t\t(type solid)\n\t\t)\n\t\t(layer \"F.Fab\")\n\t)\n\t(fp_line\n\t\t(start 1.27 8.89)\n\t\t(end -1.27 8.89)\n\t\t(stroke\n\t\t\t(width 0.1)\n\t\t\t(type solid)\n\t\t)\n\t\t(layer \"F.Fab\")\n\t)\n\t(fp_text user \"${REFERENCE}\"\n\t\t(at 0 3.81 90)\n\t\t(layer \"F.Fab\")\n\t\t(effects\n\t\t\t(font\n\t\t\t\t(size 1 1)\n\t\t\t\t(thickness 0.15)\n\t\t\t)\n\t\t)\n\t)\n\t(pad \"1\" thru_hole rect\n\t\t(at 0 0)\n\t\t(size 1.7 1.7)\n\t\t(drill 1)\n\t\t(layers \"*.Cu\" \"*.Mask\")\n\t\t(remove_unused_layers no)\n\t)\n\t(pad \"2\" thru_hole circle\n\t\t(at 0 2.54)\n\t\t(size 1.7 1.7)\n\t\t(drill 1)\n\t\t(layers \"*.Cu\" \"*.Mask\")\n\t\t(remove_unused_layers no)\n\t)\n\t(pad \"3\" thru_hole circle\n\t\t(at 0 5.08)\n\t\t(size 1.7 1.7)\n\t\t(drill 1)\n\t\t(layers \"*.Cu\" \"*.Mask\")\n\t\t(remove_unused_layers no)\n\t)\n\t(pad \"4\" thru_hole circle\n\t\t(at 0 7.62)\n\t\t(size 1.7 1.7)\n\t\t(drill 1)\n\t\t(layers \"*.Cu\" \"*.Mask\")\n\t\t(remove_unused_layers no)\n\t)\n\t(embedded_fonts no)\n\t(model \"${KICAD10_3DMODEL_DIR}/Connector_PinHeader_2.54mm.3dshapes/PinHeader_1x04_P2.54mm_Vertical.step\"\n\t\t(offset\n\t\t\t(xyz 0 0 0)\n\t\t)\n\t\t(scale\n\t\t\t(xyz 1 1 1)\n\t\t)\n\t\t(rotate\n\t\t\t(xyz 0 0 0)\n\t\t)\n\t)\n)\n"
+      },
+      "models": [
+        {
+          "path": "/Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels/Connector_PinHeader_2.54mm.3dshapes/PinHeader_1x04_P2.54mm_Vertical.step",
+          "sha256": "a74079b8d06bda78847623b39ee1855ffd1d9a8c1e896b349e4f1dc2056d44d9",
+          "bytes": 145684,
+          "sourceReference": "${KICAD10_3DMODEL_DIR}/Connector_PinHeader_2.54mm.3dshapes/PinHeader_1x04_P2.54mm_Vertical.step",
+          "offsetMm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "rotationDeg": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "padNumbers": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "pads": [
+        {
+          "number": "1",
+          "type": "thru_hole",
+          "shape": "rect",
+          "atMm": [
+            0.0,
+            0.0
+          ],
+          "rotationDeg": 0,
+          "sizeMm": [
+            1.7,
+            1.7
+          ],
+          "layers": [
+            "*.Cu",
+            "*.Mask"
+          ],
+          "drillMm": 1.0
+        },
+        {
+          "number": "2",
+          "type": "thru_hole",
+          "shape": "circle",
+          "atMm": [
+            0.0,
+            2.54
+          ],
+          "rotationDeg": 0,
+          "sizeMm": [
+            1.7,
+            1.7
+          ],
+          "layers": [
+            "*.Cu",
+            "*.Mask"
+          ],
+          "drillMm": 1.0
+        },
+        {
+          "number": "3",
+          "type": "thru_hole",
+          "shape": "circle",
+          "atMm": [
+            0.0,
+            5.08
+          ],
+          "rotationDeg": 0,
+          "sizeMm": [
+            1.7,
+            1.7
+          ],
+          "layers": [
+            "*.Cu",
+            "*.Mask"
+          ],
+          "drillMm": 1.0
+        },
+        {
+          "number": "4",
+          "type": "thru_hole",
+          "shape": "circle",
+          "atMm": [
+            0.0,
+            7.62
+          ],
+          "rotationDeg": 0,
+          "sizeMm": [
+            1.7,
+            1.7
+          ],
+          "layers": [
+            "*.Cu",
+            "*.Mask"
+          ],
+          "drillMm": 1.0
+        }
+      ]
+    }
+  },
+  "parts": {
+    "U1": {
+      "catalogId": "bme280",
+      "kind": "chip",
+      "mpn": "BME280",
+      "value": "BME280",
+      "specification": {
+        "manufacturer": "Bosch Sensortec",
+        "salesPartNumber": "0 273 141 185",
+        "package": "LGA-8 2.5x2.5x0.93mm clockwise top-view pin numbering",
+        "vddRangeV": [
+          1.71,
+          3.6
+        ],
+        "vddioRangeV": [
+          1.2,
+          3.6
+        ],
+        "pinFunctions": {
+          "1": "GND",
+          "2": "CSB",
+          "3": "SDI/SDA",
+          "4": "SCK/SCL",
+          "5": "SDO",
+          "6": "VDDIO",
+          "7": "GND",
+          "8": "VDD"
+        },
+        "qualification": "Datasheet electrical identity; procurement and physical validation not performed"
+      }
+    },
+    "J1": {
+      "catalogId": "header-1x04",
+      "kind": "connector",
+      "mpn": "",
+      "value": "1x04 2.54mm vertical header",
+      "specification": {
+        "qualification": "Generic engineering requirement, no supplier MPN selected",
+        "pins": 4,
+        "pitchMm": 2.54,
+        "style": "Through-hole vertical straight single row",
+        "minimumVoltageRatingV": 12,
+        "minimumCurrentRatingA": 0.1,
+        "pinFunctions": {
+          "1": "3V3 input",
+          "2": "GND",
+          "3": "SDA",
+          "4": "SCL"
+        },
+        "mechanicalRequirement": "Procured header must match pinned footprint and nominal STEP envelope"
+      }
+    },
+    "C1": {
+      "catalogId": "cap-100nf-0402",
+      "kind": "capacitor",
+      "mpn": "",
+      "value": "100nF",
+      "specification": {
+        "qualification": "Generic engineering requirement, no supplier MPN selected",
+        "capacitanceF": 1e-07,
+        "tolerancePercent": 10,
+        "minimumVoltageRatingV": 10,
+        "dielectric": "X7R",
+        "package": "0402 imperial / 1005 metric",
+        "minimumEffectiveCapacitanceFAt3V3": 7e-08,
+        "operatingTemperatureC": [
+          -40,
+          85
+        ],
+        "purpose": "Decouple U1.8 to GND"
+      }
+    },
+    "C2": {
+      "catalogId": "cap-100nf-0402",
+      "kind": "capacitor",
+      "mpn": "",
+      "value": "100nF",
+      "specification": {
+        "qualification": "Generic engineering requirement, no supplier MPN selected",
+        "capacitanceF": 1e-07,
+        "tolerancePercent": 10,
+        "minimumVoltageRatingV": 10,
+        "dielectric": "X7R",
+        "package": "0402 imperial / 1005 metric",
+        "minimumEffectiveCapacitanceFAt3V3": 7e-08,
+        "operatingTemperatureC": [
+          -40,
+          85
+        ],
+        "purpose": "Decouple U1.6 to GND"
+      }
+    },
+    "R1": {
+      "catalogId": "res-4k7-0402",
+      "kind": "resistor",
+      "mpn": "",
+      "value": "4.7k",
+      "specification": {
+        "qualification": "Generic engineering requirement, no supplier MPN selected",
+        "resistanceOhm": 4700,
+        "tolerancePercent": 1,
+        "minimumPowerRatingW": 0.0625,
+        "minimumWorkingVoltageV": 25,
+        "package": "0402 imperial / 1005 metric",
+        "operatingTemperatureC": [
+          -40,
+          85
+        ],
+        "purpose": "SDA pull-up to 3V3"
+      }
+    },
+    "R2": {
+      "catalogId": "res-4k7-0402",
+      "kind": "resistor",
+      "mpn": "",
+      "value": "4.7k",
+      "specification": {
+        "qualification": "Generic engineering requirement, no supplier MPN selected",
+        "resistanceOhm": 4700,
+        "tolerancePercent": 1,
+        "minimumPowerRatingW": 0.0625,
+        "minimumWorkingVoltageV": 25,
+        "package": "0402 imperial / 1005 metric",
+        "operatingTemperatureC": [
+          -40,
+          85
+        ],
+        "purpose": "SCL pull-up to 3V3"
+      }
+    }
+  },
+  "contract": {
+    "power": "External regulated 3.3V only; no regulator, battery, 5V or level shifting",
+    "inputVoltageV": [
+      3.135,
+      3.465
+    ],
+    "i2cAddress": "0x76",
+    "i2cClockHzMax": 100000,
+    "externalBusCapacitancePfMax": 100,
+    "hostRequirements": [
+      "3.3V-compatible open-drain I2C host with common ground",
+      "No independently powered signal drive while sensor supply is off",
+      "Additional external pull-ups require a new sink-current and timing review"
+    ],
+    "canonicalNets": [
+      {
+        "name": "3V3",
+        "pins": [
+          "C1.1",
+          "C2.1",
+          "J1.1",
+          "R1.1",
+          "R2.1",
+          "U1.2",
+          "U1.6",
+          "U1.8"
+        ]
+      },
+      {
+        "name": "GND",
+        "pins": [
+          "C1.2",
+          "C2.2",
+          "J1.2",
+          "U1.1",
+          "U1.5",
+          "U1.7"
+        ]
+      },
+      {
+        "name": "SDA",
+        "pins": [
+          "J1.3",
+          "R1.2",
+          "U1.3"
+        ]
+      },
+      {
+        "name": "SCL",
+        "pins": [
+          "J1.4",
+          "R2.2",
+          "U1.4"
+        ]
+      }
+    ],
+    "layoutConstraints": {
+      "decouplers": [
+        {
+          "capacitor": "C1",
+          "supplyPin": "C1.1",
+          "sensorSupplyPin": "U1.8",
+          "groundPin": "C1.2",
+          "maxPadDistanceMm": 2,
+          "layer": "F.Cu"
+        },
+        {
+          "capacitor": "C2",
+          "supplyPin": "C2.1",
+          "sensorSupplyPin": "U1.6",
+          "groundPin": "C2.2",
+          "maxPadDistanceMm": 2,
+          "layer": "F.Cu"
+        }
+      ],
+      "notes": [
+        "Measure pad-center distances on final native board, not reference-origin distances.",
+        "Keep decoupler ground returns short; DRC and layout inspection remain required.",
+        "Keep sensor vent unobstructed; no enclosure or environmental qualification implied."
+      ]
+    }
+  }
+}

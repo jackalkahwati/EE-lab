@@ -21,6 +21,12 @@ import { normalizeIdBrief } from '@/lib/id-brief'
 import { registryFootprint, registrySaveFootprint } from '@/lib/parts-registry'
 import { composeSubsystems, splitForGeneration } from '@/lib/subsystem-compose.mjs'
 import { withKeepalive } from '@/lib/keepalive'
+import { AstraError, assertAstraActive, buildAstraNativeEnv, currentAstraExecution, isAstraError, runAstraProcess } from '@/lib/astra-execution'
+import { astraConfigured, astraErrorResponse, astraWorkflow, astraWorkspace } from '@/lib/astra-beta'
+import { astraLocalPartsPrompt, preflightAstraElectronics, validateAstraLocalNetlist } from '@/lib/astra-local-parts'
+import { buildAstraNative, prepareAstraNativeJob } from '@/lib/astra-native'
+import { readAstraBody } from '@/lib/astra-body'
+import { validateAstraSpecification } from '@/lib/astra-design-contract'
 
 export const dynamic = 'force-dynamic'
 // A realistic multi-sensor chip-scale board (~14 parts) takes ~3.5 min through the
@@ -136,17 +142,24 @@ async function emitPartsNets(userMsg: string, override?: LLMOverride, model: str
     model,
     ...override,
   }
+  const astra = currentAstraExecution()
+  if (astra) { assertAstraActive(astra); await preflightAstraElectronics() }
   let lastErr: unknown
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < (astra ? 1 : 2); attempt++) {
     try {
-      const { text } = await callLLMText(SYSTEM, attempt === 0 ? userMsg : userMsg + '\n\nReply with ONLY the JSON object.', opts)
+      const { text } = await callLLMText(astra ? astraLocalPartsPrompt() : SYSTEM, attempt === 0 ? userMsg : userMsg + '\n\nReply with ONLY the JSON object.', opts)
+      if (astra) assertAstraActive(astra)
       const o = JSON.parse(firstJson(text))
+      if (astra) return validateAstraLocalNetlist(o)
       if (Array.isArray(o.parts) && o.parts.length) return {
         parts: o.parts, nets: Array.isArray(o.nets) ? o.nets : [], gnd: Array.isArray(o.gnd) ? o.gnd.map(String) : [],
         note: typeof o.note === 'string' ? o.note : undefined,
         droppedCapabilities: Array.isArray(o.droppedCapabilities) ? o.droppedCapabilities.map(String).filter(Boolean) : undefined,
       }
-    } catch (e) { lastErr = e }
+    } catch (e) {
+      if (isAstraError(e) || astra) throw e
+      lastErr = e
+    }
   }
   throw lastErr ?? new Error('parts model failed')
 }
@@ -244,6 +257,7 @@ async function emitPartsNetsHierarchical(
   try {
     plan = await planSubsystems(userMsg, opts, minParts)
   } catch (e) {
+    if (isAstraError(e) || currentAstraExecution()) throw e
     log(`hierarchical: plan call failed (${String(e).slice(0, 120)}) — using the flat path`)
     return null
   }
@@ -279,6 +293,7 @@ async function emitPartsNetsHierarchical(
         requires: Array.isArray(o.requires) ? o.requires : [],
       }
     } catch (e) {
+      if (isAstraError(e) || currentAstraExecution()) throw e
       log(`hierarchical: subsystem "${brief.name}" failed (${String(e).slice(0, 100)})`)
       return null
     }
@@ -375,6 +390,7 @@ const exists = (p: string) => fs.access(p).then(() => true).catch(() => false)
  *  Returns how many parts got a real footprint. Shared by the LLM candidate
  *  path and the planner-spec path — the planner's parts carry real LCSC ids. */
 async function attachRealFootprints(parts: any[]): Promise<number> {
+  if (currentAstraExecution()) throw new AstraError('policy', 'External footprint resolution is unsupported in Astra beta.')
   const ids = [...new Set(parts.map((p: any) => (p?.lcsc ? String(p.lcsc) : '')).filter(Boolean))]
   const mods = new Map<string, string>()
   await Promise.all(ids.map(async (id) => { const m = await fetchFootprint(id); if (m) mods.set(id, m) }))
@@ -390,6 +406,7 @@ async function attachRealFootprints(parts: any[]): Promise<number> {
  *  run_board {parts, nets, gnd} netlist via synth.py's bridge. Returns null on
  *  any failure so the caller falls back to the LLM part-set. */
 function plannerNetlist(designPath: string): Promise<{ parts: any[]; nets: any[]; gnd: string[] } | null> {
+  if (currentAstraExecution()) throw new AstraError('policy', 'Native planner bridge is unsupported in Astra beta.')
   return new Promise((resolve) => {
     const py = spawn(process.env.FL_PYTHON || 'python3', [path.join(PLANNER_DIR, 'synth.py'), '--netlist', designPath], { cwd: PLANNER_DIR, timeout: 90_000 })
     let out = ''
@@ -412,8 +429,36 @@ function plannerNetlist(designPath: string): Promise<{ parts: any[]; nets: any[]
 // maxDuration=600. The pipeline's early build overlaps other stages anyway.
 const FIRST_BUILD_WALL_MS = 600_000 // measured: the 22-27 part real-footprint boards need 300s of ladder + the post-pour repairs; 450s starved those repairs on prod
 const ROUTE_ENVELOPE_MS = 1_200_000 // first build + grow rungs; see handlePost
-function runBoard(payload: object, svgPath: string, timeoutMs = FIRST_BUILD_WALL_MS, signal?: AbortSignal): Promise<any> {
+async function runBoard(payload: object, svgPath: string, timeoutMs = FIRST_BUILD_WALL_MS, signal?: AbortSignal): Promise<any> {
   const script = path.join(process.cwd(), '..', '..', 'tools', 'tscircuit', 'run_board.mjs')
+  const astra = currentAstraExecution()
+  if (astra) {
+    assertAstraActive(astra)
+    // The current runner is NOT approved. No native process can start until the
+    // audited catalog/model/offline/descendant contract replaces this blocker.
+    await preflightAstraElectronics()
+    const workspace = astraWorkspace()
+    const outputRoot = path.join(workspace.root, 'public', 'runs') + path.sep
+    if (!path.resolve(svgPath).startsWith(outputRoot)) throw new AstraError('policy', 'Board output must be in the owned Astra workspace.')
+    const env = buildAstraNativeEnv({ home: workspace.home, toolPaths: [process.execPath] })
+    const result = await runAstraProcess(astra, process.execPath, [script], {
+      cwd: workspace.root, env: { ...env, FL_WALL_MS: String(timeoutMs), FL_ASTRA_EXECUTION_POLICY: 'unsupported' },
+      input: JSON.stringify({ ...payload, svgPath }), timeoutMs, maxOutputBytes: 8 * 1024 * 1024,
+    })
+    assertAstraActive(astra)
+    if (result.code !== 0) throw new AstraError('process', 'Native board runner exited unsuccessfully.')
+    let value: any
+    try { value = JSON.parse(result.stdout.trim().split('\n').pop() || '') }
+    catch { throw new AstraError('output', 'Native board runner returned invalid JSON.') }
+    if (!value || typeof value !== 'object' || Array.isArray(value) || typeof value.ok !== 'boolean') {
+      throw new AstraError('output', 'Native board runner returned an invalid result.')
+    }
+    // Artifact presence or a naked ok flag is never an electronics pass.
+    if (value.ok && !(value.drc?.available === true && value.drc.errors === 0 && value.drcRepair?.unrouted === 0 && value.routedTraces > 0)) {
+      throw new AstraError('output', 'Native success lacks DRC and connectivity evidence.')
+    }
+    return value
+  }
   return new Promise((resolve, reject) => {
     // process.execPath, not 'node': run_board.mjs is an EXTERNAL tool (two dirs
     // up, outside the Next root) that we shell out to, never import. A literal
@@ -571,8 +616,10 @@ function hierarchyMode(bodyFlag: unknown): 'off' | 'auto' | 'on' {
 
 /** One full board candidate: part-set engine → real footprints → routed board. */
 async function buildCandidate(userMsg: string, req: Request, dir: string, svgName: string, timeoutMs: number, boardOpts: BoardOpts, model?: string, hierarchical?: unknown) {
-  const override = resolvePlanModel(req).override
-  const mode = hierarchyMode(hierarchical)
+  const astra = currentAstraExecution()
+  if (astra) { assertAstraActive(astra); await preflightAstraElectronics() }
+  const override = astra ? undefined : resolvePlanModel(req).override
+  const mode = astra ? 'off' : hierarchyMode(hierarchical)
   const designTrail: string[] = []
   const log = (m: string) => { designTrail.push(m) }
 
@@ -586,8 +633,9 @@ async function buildCandidate(userMsg: string, req: Request, dir: string, svgNam
   if (!designed) designed = await emitPartsNets(userMsg, override, model)
 
   const { parts, nets, gnd, note, droppedCapabilities } = designed
-  const realFootprints = await attachRealFootprints(parts)
-  const result = await runBoard({ parts, nets, gnd, ...boardOpts }, path.join(dir, svgName), timeoutMs, req.signal ?? undefined)
+  const realFootprints = astra ? parts.length : await attachRealFootprints(parts)
+  const result = await runBoard({ parts, nets, gnd, ...boardOpts }, path.join(dir, svgName), timeoutMs, astra ? undefined : req.signal ?? undefined)
+  if (astra) assertAstraActive(astra)
   return { parts, nets, gnd, maxLayers: undefined as number | undefined, note, droppedCapabilities, realFootprints, result, svgName, designTrail }
 }
 
@@ -608,6 +656,42 @@ const csGlobal = globalThis as unknown as { __csInflight?: Map<string, CsInfligh
  * filler when the handler is still working. See lib/keepalive.ts.
  */
 export async function POST(req: Request): Promise<Response> {
+  if (astraConfigured() || currentAstraExecution() || req.headers.has('x-fl-astra-workflow') || new URL(req.url).searchParams.has('astraWorkflow')) {
+    try {
+      const astra = currentAstraExecution()
+      // A direct request cannot acquire/reset a workflow budget here. Only the
+      // authorized pipeline, already inside the building operation, may enter.
+      if (!astra || !astraConfigured()) throw new AstraError('policy', 'Astra electronics requires its active pipeline workflow.')
+      const workflow = astraWorkflow(req)
+      if (workflow.execution !== astra || workflow.phase !== 'building' || !workflow.busy) {
+        throw new AstraError('policy', 'Astra electronics requires its active pipeline workflow.')
+      }
+      assertAstraActive(astra)
+      await preflightAstraElectronics()
+      const body = await readAstraBody(req)
+      if (!body || typeof body !== 'object' || Array.isArray(body) || !('runId' in body)
+        || typeof body.runId !== 'string' || body.runId !== workflow.runId || !workflow.spec
+        || Object.keys(body).some(key => !['runId', 'spec'].includes(key))
+        || ('spec' in body && JSON.stringify(body.spec) !== JSON.stringify(workflow.spec))) {
+        throw new AstraError('policy', 'Astra electronics requires the stored specification and owned run.')
+      }
+      if (runAccess(req, body.runId).access !== 'owner') throw new AstraError('policy', 'Astra electronics run ownership mismatch.')
+      const specification = validateAstraSpecification(workflow.spec, workflow.templateId)
+      const tools = await prepareAstraNativeJob(astra)
+      assertAstraActive(astra)
+      const { text } = await callLLMText(astraLocalPartsPrompt(), JSON.stringify(specification))
+      assertAstraActive(astra)
+      let proposal
+      try { proposal = validateAstraLocalNetlist(JSON.parse(firstJson(text))) }
+      catch (error) {
+        if (isAstraError(error)) throw error
+        throw new AstraError('output', 'Astra returned an invalid local netlist. No repair call was submitted.')
+      }
+      const result = await buildAstraNative(astra, body.runId, proposal, tools)
+      assertAstraActive(astra)
+      return Response.json(result)
+    } catch (error) { return astraErrorResponse(error) }
+  }
   return withKeepalive(handlePost(req))
 }
 
@@ -628,6 +712,14 @@ async function handlePost(req: Request) {
   const runId = typeof body.runId === 'string' ? body.runId : undefined
   if (!spec?.product) return Response.json({ error: 'missing product spec' }, { status: 400 })
   if (!runId || !RUN_ID.test(runId)) return Response.json({ error: 'missing/invalid runId' }, { status: 400 })
+  const astra = currentAstraExecution()
+  if (astra) {
+    const workflow = astraWorkflow(req)
+    if (workflow.execution !== astra || workflow.runId !== runId) throw new AstraError('policy', 'Astra run ownership mismatch.')
+    if (body.keepCapabilities || body.plannerOnly || body.hierarchical) throw new AstraError('policy', 'Astra supports one flat electronics candidate only.')
+    assertAstraActive(astra)
+    await preflightAstraElectronics()
+  }
   // Ownership: this route writes public/runs/<runId>/. Only the run's owner
   // (or the platform admin) may build into it; the pipeline's in-process call
   // and lib/v1-jobs both forward the owner's session cookie, so they qualify.
@@ -637,8 +729,11 @@ async function handlePost(req: Request) {
     if (access.access !== 'owner' && !isAdminRequest(req)) {
       return Response.json({ error: 'run belongs to another account' }, { status: 403 })
     }
-    const gate = assertCanSpend(req)
-    if (gate) return gate
+    // Astra provider charges are separate from platform credit accounting.
+    if (!astra) {
+      const gate = assertCanSpend(req)
+      if (gate) return gate
+    }
   }
   const keepCapabilities = body.keepCapabilities === true
   // plannerOnly: the pipeline route's EARLY server-side kick. It only carries a
@@ -652,6 +747,7 @@ async function handlePost(req: Request) {
   // an in-flight default build (it would return the wrong tradeoff).
   const existing = !keepCapabilities ? inflight.get(runId) : undefined
   if (existing) {
+    if (astra) throw new AstraError('busy', 'An electronics build is already active for this run.')
     try {
       const r = await existing.promise
       // Join the in-flight result — unless it was a planner-only attempt that
@@ -668,8 +764,11 @@ async function handlePost(req: Request) {
   const entry: CsInflight = { plannerOnly, promise }
   inflight.set(runId, entry)
   try {
-    return Response.json(await promise)
+    const result = await promise
+    if (astra) assertAstraActive(astra)
+    return Response.json(result)
   } catch (err) {
+    if (astra || isAstraError(err)) return astraErrorResponse(err)
     return Response.json({ ok: false, error: String(err) }, { status: 500 })
   } finally {
     if (inflight.get(runId) === entry) inflight.delete(runId)
@@ -687,6 +786,12 @@ async function buildChipScale(
   routeStart: number,
 ): Promise<any> {
   const { keepCapabilities, plannerOnly, hierarchical } = flags
+  const astra = currentAstraExecution()
+  if (astra) {
+    assertAstraActive(astra)
+    await preflightAstraElectronics()
+    if (keepCapabilities || plannerOnly || hierarchical) throw new AstraError('policy', 'Astra supports one flat electronics candidate only.')
+  }
   {
     const b = spec.budgets ?? {}
     const elec = spec.disciplines?.electronics
@@ -703,7 +808,7 @@ async function buildChipScale(
         : '') +
       `List the minimal chip-scale part set + nets.` +
       // Phase 2: engineer-locked decisions are HARD inputs to the part planner.
-      pinsPromptFor(runId, ['electronics'])
+      (astra ? '' : pinsPromptFor(runId, ['electronics']))
 
     const dir = path.join(process.cwd(), 'public', 'runs', runId, 'electronics')
     await fs.mkdir(dir, { recursive: true })
@@ -722,7 +827,7 @@ async function buildChipScale(
     // boards for round products (measured on run-e93c6e0d: "round matte puck"
     // spec → rect board). The spec is always available at overlap time.
     let idText = ''
-    try {
+    if (!astra) try {
       const brief = normalizeIdBrief(JSON.parse(
         await fs.readFile(path.join(process.cwd(), 'public', 'runs', runId, 'disciplines', 'id-brief.json'), 'utf8')))
       idText = [brief.formFactor, ...(brief.keyFeatures ?? []), ...(brief.constraints ?? [])].filter(Boolean).join(' ')
@@ -750,7 +855,7 @@ async function buildChipScale(
     let boardSource: 'planner' | 'planner-merged' | 'llm' = 'llm'
     let plannerHonest: { dropped?: unknown[]; notes?: unknown[] } | null = null
     const dataDir = path.join(process.cwd(), 'public', 'runs', runId, 'data')
-    if (!keepCapabilities) {
+    if (!astra && !keepCapabilities) {
       let nl: { parts: any[]; nets: any[]; gnd?: string[]; honest?: any; maxLayers?: number | null } | null = null
       let src: 'planner' | 'planner-merged' = 'planner'
       try {
@@ -806,7 +911,7 @@ async function buildChipScale(
     // converges or a sane ceiling says the density is a real design wall (→ the
     // board should be split). Every part is kept. Bounded by the route wall so it
     // can't run away. This is automatic: overcrowding → grow → retry, no human ask.
-    if (DENSITY_REPLAN && !keepCapabilities && boardSource !== 'llm' && densityFailed(cand.result)) {
+    if (!astra && DENSITY_REPLAN && !keepCapabilities && boardSource !== 'llm' && densityFailed(cand.result)) {
       const first = cand.result
       const payload = { parts: cand.parts, nets: cand.nets, gnd: cand.gnd ?? [], ...((cand as { maxLayers?: number }).maxLayers ? { maxLayers: (cand as { maxLayers?: number }).maxLayers } : {}) }
       // grow ladder: each rung is a wider board + roomier channels than the last.
@@ -826,7 +931,10 @@ async function buildChipScale(
         let grown: any
         try {
           grown = await runBoard({ ...payload, ...boardOpts, maxW: rung.maxW, gapLadder: rung.gapLadder }, path.join(dir, svgName), budget, req.signal ?? undefined)
-        } catch (e) { growTrail.push({ rung: i + 1, error: String(e).slice(0, 160) }); continue }
+        } catch (e) {
+          if (isAstraError(e)) throw e
+          growTrail.push({ rung: i + 1, error: String(e).slice(0, 160) }); continue
+        }
         growTrail.push({ rung: i + 1, maxW: rung.maxW, boardMm: grown?.boardMm ?? null, drc: grown?.drc?.errors ?? null, ok: !!grown?.ok,
           // the selection below ranks by drcScore (opens weigh more than clearance nits): record what it saw
           drcScore: typeof grown?.drcScore === 'number' ? grown.drcScore : null, errorTypes: grown?.drc?.errorTypes ?? null, unrouted: grown?.drcRepair?.unrouted ?? null, layers: grown?.layers ?? null })
@@ -860,7 +968,7 @@ async function buildChipScale(
     // non-essential parts), then re-route. Keep whichever board is genuinely
     // better and report exactly what the re-plan changed (computed from the part
     // sets, not the model's say-so). One bounded iteration so it can't run away.
-    if (DENSITY_REPLAN && !keepCapabilities && boardSource === 'llm' && densityFailed(cand.result)) {
+    if (!astra && DENSITY_REPLAN && !keepCapabilities && boardSource === 'llm' && densityFailed(cand.result)) {
       const first = cand.result
       // Budget arithmetic: measured from ROUTE ENTRY (routeStart above), so the
       // first pass's real cost (LLM emit + up to 285s route) is already counted.
@@ -922,6 +1030,7 @@ async function buildChipScale(
               req, dir, `chipscale-replan${rung}.svg`, 220_000, boardOpts, REPLAN_MODEL)
             return { rung, cand: c, ms: Date.now() - tA, error: null as string | null }
           } catch (e) {
+            if (isAstraError(e)) throw e
             return { rung, cand: null as Awaited<ReturnType<typeof buildCandidate>> | null, ms: Date.now() - tA, error: String(e) }
           }
         }))
@@ -982,6 +1091,7 @@ async function buildChipScale(
       cand = best
     }
 
+    if (astra) assertAstraActive(astra)
     const { parts, result, realFootprints } = cand
     if (result?.error) return { ok: false, error: result.error }
 
@@ -1044,7 +1154,7 @@ async function buildChipScale(
     // injection is prompt-level and therefore NEVER trusted. A violated pin
     // fails the honest gate in run-pipeline.
     const pinViolations: string[] = []
-    try {
+    if (!astra) try {
       const hay = [
         JSON.stringify(parts ?? []),
         await fs.readFile(path.join(process.cwd(), 'public', 'runs', runId, 'data', 'ato.json'), 'utf8').catch(() => ''),
@@ -1070,7 +1180,8 @@ async function buildChipScale(
     //
     // (Persist is still skipped on an aborted request: a cancelled run must not
     // get a board written under it after the caller walked away.)
-    if (result.boardMm && !req.signal?.aborted) {
+    if (astra) assertAstraActive(astra)
+    if (result.boardMm && (astra || !req.signal?.aborted)) {
       // Persist the part set too, so downstream disciplines (supply chain BOM,
       // manufacturing, validation) can ground on the REAL chip-scale parts (the
       // BLE SoC + mics + PMIC), not the flroute reference board's placeholder BOM.
@@ -1083,13 +1194,40 @@ async function buildChipScale(
       //   mountingHoles: [{x, y, diaMm}] — non-plated screw holes actually
       //     drilled in the .kicad_pcb, in BOARD-CENTERED mm (+x right, +y up).
       //     The enclosure should put its bosses/standoffs exactly there.
-      await fs.writeFile(path.join(dir, 'chipscale-board.json'),
-        JSON.stringify({ ok: !!result.ok && pinViolations.length === 0, pinViolations, drcScore: result.drcScore ?? null, boardMm: result.boardMm, areaMm2: result.areaMm2, components: result.components, routedTraces: result.routedTraces, realFootprints, parts: partList, boardShape: result.boardShape ?? null, mountingHoles: result.mountingHoles ?? [], drc: result.drc ?? null, drcRepair: result.drcRepair ?? null, layers: result.layers ?? result.drcRepair?.layers ?? null, layersRequested: result.layersRequested ?? result.drcRepair?.layersRequested ?? null, designConvergence, boardSource, plannerHonest }))
-      // the routed .kicad_pcb for the 3D render (the real chip-down board)
-      if (result.kicadPcb) await fs.writeFile(path.join(dir, 'chipscale.kicad_pcb'), result.kicadPcb)
+      const verdict = JSON.stringify({ ok: !!result.ok && pinViolations.length === 0, pinViolations, drcScore: result.drcScore ?? null, boardMm: result.boardMm, areaMm2: result.areaMm2, components: result.components, routedTraces: result.routedTraces, realFootprints, parts: partList, boardShape: result.boardShape ?? null, mountingHoles: result.mountingHoles ?? [], drc: result.drc ?? null, drcRepair: result.drcRepair ?? null, layers: result.layers ?? result.drcRepair?.layers ?? null, layersRequested: result.layersRequested ?? result.drcRepair?.layersRequested ?? null, designConvergence, boardSource, plannerHonest })
+      if (astra) {
+        const published = path.join(dir, 'chipscale-board.json')
+        const pending = path.join(dir, '.astra-chipscale-board.pending.json')
+        try {
+          // Geometry first, verdict last. A failed geometry write must never
+          // leave a reusable success artifact, including cancellation mid-write.
+          if (result.kicadPcb) await fs.writeFile(path.join(dir, 'chipscale.kicad_pcb'), result.kicadPcb)
+          assertAstraActive(astra)
+          await fs.writeFile(pending, verdict)
+          assertAstraActive(astra)
+          await fs.rename(pending, published)
+          assertAstraActive(astra)
+        } catch (error) {
+          await Promise.all([pending, published].map((file) => fs.rm(file, { force: true })))
+          throw error
+        }
+      } else {
+        await fs.writeFile(path.join(dir, 'chipscale-board.json'), verdict)
+        // the routed .kicad_pcb for the 3D render (the real chip-down board)
+        if (result.kicadPcb) await fs.writeFile(path.join(dir, 'chipscale.kicad_pcb'), result.kicadPcb)
+      }
     }
 
 
+    if (astra) {
+      try { assertAstraActive(astra) }
+      catch (error) {
+        // A cancellation during an awaited file write cannot leave a reusable
+        // success verdict. Native geometry may remain, but is not a passed run.
+        await fs.rm(path.join(dir, 'chipscale-board.json'), { force: true })
+        throw error
+      }
+    }
     return {
       ok: !!result.ok && pinViolations.length === 0,
       pinViolations,

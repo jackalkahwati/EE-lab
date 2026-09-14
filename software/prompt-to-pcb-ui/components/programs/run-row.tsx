@@ -1,7 +1,7 @@
 /**
  * One run inside a program's history: short id, date, board dims, honest DRC
- * chip, disciplines on disk, direct artifact links, and an "Open in Compose"
- * jump (Compose restores runs from its own ☰ history menu).
+ * chip, disciplines on disk, direct artifact links, and a contextual
+ * "Open in Compose" jump that restores this run.
  */
 import Link from 'next/link'
 import type { RunSummary } from '@/lib/programs'
@@ -46,7 +46,7 @@ export function RunRow({ run }: { run: RunSummary }) {
           </a>
         ))}
         <Link
-          href="/compose"
+          href={`/compose?run=${encodeURIComponent(run.dir)}`}
           className="rounded-sm border border-primary/40 bg-primary/10 px-1.5 py-0.5 text-primary hover:bg-primary/20"
         >
           Open in Compose

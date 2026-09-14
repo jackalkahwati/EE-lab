@@ -13,10 +13,10 @@
  */
 import { useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
-import type { PipeStatus } from '@/lib/run-pipeline'
+import { workspaceProgress, type WorkspacePipeline, type WorkspaceHistoryState } from '@/lib/workspace-state'
 import { AlertCircle, CheckCircle2, Timer } from 'lucide-react'
 
-type StageMap = Record<string, { status: PipeStatus; detail?: string }>
+type StageMap = WorkspacePipeline
 
 /** run-3f2a91b4-… → 3f2a91b4 */
 function shortRunId(id: string): string {
@@ -32,7 +32,8 @@ function fmtElapsed(ms: number): string {
   return h > 0 ? `${h}:${p(m)}:${p(sec)}` : `${m}:${p(sec)}`
 }
 
-export function StatusBar({ runId, runName, pipeline, running, tiers, problemCount, onProblemsClick, startedAt }: {
+export function StatusBar({ runId, runName, pipeline, running, tiers, problemCount, onProblemsClick, startedAt, historyState = 'none' }: {
+  historyState?: WorkspaceHistoryState
   /** the run on screen (or in flight) — shown shortened */
   runId?: string | null
   /** the board's name, so the bar reads "Desk Air Quality Monitor · dc5d77ab"
@@ -60,22 +61,17 @@ export function StatusBar({ runId, runName, pipeline, running, tiers, problemCou
     return () => clearInterval(t)
   }, [startedAt])
 
-  const stages = Object.values(pipeline ?? {})
-  const counts = {
-    running: stages.filter((s) => s.status === 'running').length,
-    passed: stages.filter((s) => s.status === 'passed').length,
-    failed: stages.filter((s) => s.status === 'failed').length,
-    blocked: stages.filter((s) => s.status === 'blocked').length,
-    total: stages.length,
-  }
-  const done = stages.length > 0 && !running && counts.running === 0
-  const allClean = done && counts.failed === 0 && counts.blocked === 0
+  const counts = workspaceProgress(pipeline ?? {}, !!running, historyState)
+  const active = running || counts.running > 0
+  const allClean = counts.total > 0 && !active && counts.passed === counts.total
+  const settled = counts.passed + counts.failed + counts.blocked + counts.skipped
+  const pipelineLabel = counts.label
 
   // overall state dot — colors consistent with pipeline-loader's dotColor()
-  const dot = running || counts.running > 0
+  const dot = active
     ? 'bg-primary animate-pulse'
     : counts.failed > 0 ? 'bg-red-400'
-      : counts.blocked > 0 ? 'bg-amber-400'
+      : counts.blocked > 0 || counts.unknown > 0 || (counts.passed > 0 && !allClean) ? 'bg-amber-400'
         : allClean ? 'bg-emerald-400'
           : 'bg-muted-foreground/40'
 
@@ -86,10 +82,10 @@ export function StatusBar({ runId, runName, pipeline, running, tiers, problemCou
   )
 
   return (
-    <div className="flex h-6 w-full shrink-0 items-center gap-3 overflow-hidden border-t border-border bg-card/50 px-2 font-mono text-[10px] text-muted-foreground">
+    <div className="flex min-h-6 w-full shrink-0 items-center gap-3 whitespace-nowrap border-t border-border bg-card/50 px-2 font-mono text-[10px] text-muted-foreground">
       {/* LEFT — run + pipeline state */}
-      <div className="flex min-w-0 items-center gap-3">
-        <span className="flex items-center gap-1.5">
+      <div className="flex min-w-0 flex-1 items-center gap-3 overflow-x-auto py-1">
+        <span className="hidden shrink-0 items-center gap-1.5 sm:flex">
           <Dot className={dot} />
           {runId ? (
             <span className="flex min-w-0 items-center gap-1.5" title={runName ? `${runName} · ${runId}` : runId}>
@@ -98,18 +94,15 @@ export function StatusBar({ runId, runName, pipeline, running, tiers, problemCou
             </span>
           ) : <span>no run</span>}
         </span>
-        {counts.total > 0 && (
-          <span className="flex items-center gap-2 tabular-nums">
-            {running || counts.running > 0 ? (
-              <span className="text-foreground/70">
-                pipeline running · {counts.passed + counts.failed + counts.blocked}/{counts.total}
-              </span>
-            ) : (
-              <span>{allClean ? 'pipeline done' : 'pipeline stopped'}</span>
-            )}
-            <span className="flex items-center gap-1"><Dot className="bg-emerald-400" />{counts.passed}</span>
-            {counts.failed > 0 && <span className="flex items-center gap-1"><Dot className="bg-red-400" />{counts.failed}</span>}
-            {counts.blocked > 0 && <span className="flex items-center gap-1"><Dot className="bg-amber-400" />{counts.blocked}</span>}
+        {(counts.total > 0 || runId || active) && (
+          <span className="flex shrink-0 items-center gap-2 tabular-nums">
+            <span role="status" className="text-foreground/70">{pipelineLabel}{active && counts.total > 0 ? ` · ${settled}/${counts.total}` : ''}</span>
+            {counts.passed > 0 && <span className="flex items-center gap-1"><Dot className="bg-emerald-400" />{counts.passed} passed</span>}
+            {counts.failed > 0 && <span className="flex items-center gap-1"><Dot className="bg-red-400" />{counts.failed} failed</span>}
+            {counts.blocked > 0 && <span className="flex items-center gap-1"><Dot className="bg-amber-400" />{counts.blocked} blocked</span>}
+            {counts.pending > 0 && <span>{counts.pending} pending</span>}
+            {counts.skipped > 0 && <span>{counts.skipped} skipped</span>}
+            {counts.unknown > 0 && <span>{counts.unknown} unknown</span>}
           </span>
         )}
       </div>

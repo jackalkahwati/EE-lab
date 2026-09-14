@@ -5,17 +5,14 @@
  * audited action tail plus run outcomes. A recognizable "what just happened"
  * timeline; every item traces to a real audited action or a real run.
  */
-import { useEffect, useMemo, useState } from 'react'
-import { AccessGate } from '@/components/access-gate'
+import { useMemo } from 'react'
+import { EnterpriseReadState, useEnterpriseRead } from '@/components/enterprise-read-state'
 import { cn } from '@/lib/utils'
 
 type Any = Record<string, any>
 
 export default function ActivityPage() {
-  const [db, setDb] = useState<Any | null>(null)
-  useEffect(() => {
-    fetch('/api/enterprise', { cache: 'no-store' }).then((r) => r.json()).then(setDb).catch(() => {})
-  }, [])
+  const { db, error, refresh } = useEnterpriseRead()
 
   const events = useMemo(() => {
     if (!db) return []
@@ -35,8 +32,7 @@ export default function ActivityPage() {
     return ev.filter((e) => e.at).sort((a, b) => String(b.at).localeCompare(String(a.at)))
   }, [db])
 
-  if (!db) return <div className="p-6 text-xs text-muted-foreground">Loading activity…</div>
-  if (db.error) return <AccessGate error={db.error} />
+  if (!db) return <EnterpriseReadState error={error} retry={refresh} label="activity" />
 
   const TONE: Record<string, string> = {
     emerald: 'text-emerald-500', amber: 'text-amber-500',

@@ -6,11 +6,12 @@
  * logged-in user; permission denials and the audit trail are real. History is
  * immutable — only 'requested' approvals can be decided.
  */
-import { useCallback, useEffect, useState } from 'react'
-import { AccessGate } from '@/components/access-gate'
+import { useEffect, useState } from 'react'
+import { EnterpriseReadState, useEnterpriseRead } from '@/components/enterprise-read-state'
 import { cn } from '@/lib/utils'
 import { currentActor, enterpriseAction } from '@/lib/enterprise-actions'
 
+// Existing enterprise dispatcher records are heterogeneous; retain their API shape.
 type Any = Record<string, any>
 const PENDING = ['pending', 'requested', 'awaiting']
 
@@ -20,19 +21,19 @@ const STATUS_STYLE: Record<string, string> = {
 }
 
 export default function ApprovalsPage() {
-  const [db, setDb] = useState<Any | null>(null)
+  const { db, error, refresh } = useEnterpriseRead()
   const [busy, setBusy] = useState<string | null>(null)
   const [msg, setMsg] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null)
   const [pick, setPick] = useState('')
   const [me, setMe] = useState('')
 
-  const refresh = useCallback(() => {
-    fetch('/api/enterprise', { cache: 'no-store' }).then((r) => r.json()).then(setDb).catch(() => {})
+  useEffect(() => {
+    let current = true
+    currentActor().then(actor => { if (current) setMe(actor) })
+    return () => { current = false }
   }, [])
-  useEffect(() => { refresh(); currentActor().then(setMe) }, [refresh])
 
-  if (!db) return <div className="p-6 text-xs text-muted-foreground">Loading approvals…</div>
-  if (db.error) return <AccessGate error={db.error} />
+  if (!db) return <EnterpriseReadState error={error} retry={refresh} label="approvals" />
 
   const boards: Any[] = db.boards ?? []
   const boardName = (id: string) => boards.find((b) => b.board_id === id)?.name ?? id

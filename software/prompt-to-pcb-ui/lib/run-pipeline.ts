@@ -78,8 +78,11 @@ function jsonHeaders(h?: Record<string, string>) {
 }
 
 async function postJson(url: string, body: unknown, opts: RunOpts): Promise<any> {
+  opts.signal?.throwIfAborted()
   const r = await fetch(`${opts.baseUrl ?? ''}${url}`, { method: 'POST', headers: jsonHeaders(opts.headers), body: JSON.stringify(body), signal: opts.signal })
-  return r.json()
+  const data = await r.json()
+  opts.signal?.throwIfAborted()
+  return data
 }
 
 /** dirtyOnly: ask the server whether a stage's artifact is current. Fail open
@@ -259,7 +262,7 @@ function deepEqual(a: unknown, b: unknown): boolean {
  *  docs) pushes a SECOND entry rather than overwriting the first — the record is
  *  a timeline of attempts, not a map, so nothing is lost. */
 export type StageTiming = {
-  stage: PipeStage
+  stage: PipeStage | 'id'
   startedAt: string
   endedAt?: string
   ms?: number
@@ -277,6 +280,55 @@ export type RunTiming = {
   stages: StageTiming[]
 }
 
+export type ManualAttemptResult = { status: 'passed' | 'failed' | 'unknown'; detail?: string; artifactAvailable?: boolean }
+
+/** A manual attempt must record its running marker before submitting work. The
+ * existing timing endpoint replaces a complete document, so reject unreadable or
+ * full history rather than overwrite it. The workspace serializes local jobs;
+ * this is not a cross-tab/server job lock. */
+export async function beginManualTiming(runId: string, stage: string, read: typeof fetch = fetch) {
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(runId)) throw new Error('Invalid run identity')
+  if (![...PIPE_ORDER, 'id'].includes(stage)) throw new Error('Invalid manual stage')
+  const signal = AbortSignal.timeout(10000)
+  const response = await read(`/runs/${encodeURIComponent(runId)}/timing.json`, { cache: 'no-store', signal })
+  const raw: unknown = response.ok ? await response.json() : null
+  signal.throwIfAborted()
+  if (!response.ok && response.status !== 404) throw new Error('Timing history could not be read')
+  const date = (value: unknown): value is string => typeof value === 'string' && value.length <= 40 && Number.isFinite(Date.parse(value))
+  const statuses = new Set(['pending', 'running', 'passed', 'failed', 'blocked', 'skipped'])
+  const prior = raw as RunTiming | null
+  if (raw !== null && (!prior || typeof prior !== 'object' || prior.runId !== runId || !date(prior.startedAt)
+    || (prior.finishedAt !== undefined && (!date(prior.finishedAt) || Date.parse(prior.finishedAt) < Date.parse(prior.startedAt)))
+    || (prior.totalMs !== undefined && (!Number.isFinite(prior.totalMs) || prior.totalMs < 0))
+    || !Array.isArray(prior.stages) || prior.stages.length >= 200 || !prior.stages.every(item => item && typeof item.stage === 'string'
+      && item.stage.length > 0 && item.stage.length <= 40 && statuses.has(item.status) && date(item.startedAt)
+      && (item.endedAt === undefined || date(item.endedAt) && Date.parse(item.endedAt) >= Date.parse(item.startedAt)) && (item.ms === undefined || Number.isFinite(item.ms) && item.ms >= 0)
+      && (item.unfinished === undefined || typeof item.unfinished === 'boolean') && (item.detail === undefined || typeof item.detail === 'string')))) {
+    throw new Error('Timing history is invalid or full; manual generation was not started')
+  }
+  if (response.ok && raw === null) throw new Error('Timing history is invalid')
+  const start = Math.max(Date.now(), ...(prior?.stages.map(item => Date.parse(item.startedAt)) ?? []))
+  const attempt = { stage, status: 'running', startedAt: new Date(start).toISOString(), detail: 'Explicit manual attempt in progress.' }
+  const document = { runId, startedAt: prior?.startedAt ?? attempt.startedAt, stages: [...(prior?.stages ?? []), attempt] }
+  const write = async () => {
+    const result = await read('/api/runs/timing', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(document), keepalive: true, signal: AbortSignal.timeout(10000) })
+    if (!result.ok) throw new Error('Timing history could not be saved')
+  }
+  await write()
+  let completion: Promise<void> | undefined
+  return (result: ManualAttemptResult) => {
+    if (completion) return completion
+    Object.assign(attempt, { status: result.status === 'unknown' ? 'running' : result.status,
+      endedAt: new Date(Math.max(start, Date.now())).toISOString(), ms: Math.max(0, Date.now() - start),
+      unfinished: result.status === 'unknown', detail: result.detail ?? (result.status === 'unknown' ? 'Observation ended; server outcome unknown.' : 'Manual attempt settled; not physical approval.') })
+    completion = write()
+    return completion
+  }
+}
+
+type RunTimer = ReturnType<typeof createTimer>
+
 /**
  * Best-effort wall-clock recorder for the run, persisted to
  * public/runs/<id>/timing.json via /api/runs/timing.
@@ -293,8 +345,6 @@ export type RunTiming = {
  *
  * Every path is swallowed: telemetry must never break or stall the pipeline.
  */
-type RunTimer = ReturnType<typeof createTimer>
-
 function createTimer(runId: string, baseUrl?: string, headers?: Record<string, string>) {
   const t0 = Date.now()
   const startedAt = new Date(t0).toISOString()
@@ -409,6 +459,9 @@ async function runPipelineStages(opts: RunOpts, timer: RunTimer): Promise<Pipeli
     (spec.disciplines as any)?.[stage]?.status !== 'not_applicable'
 
   const set = (stage: PipeStage, status: PipeStatus, detail?: string) => {
+    // An aborted observation is not a terminal result. Leave its timing attempt
+    // open so finish() persists unfinished:true, restored as outcome unknown.
+    if (signal?.aborted) return
     stages[stage] = { status, detail }
     // every stage transition already funnels through here, so this is the one
     // place timing has to hook. Guarded: a telemetry fault must never take the
@@ -420,11 +473,12 @@ async function runPipelineStages(opts: RunOpts, timer: RunTimer): Promise<Pipeli
     onStage({ stage, status, detail })
   }
   const aborted = () => signal?.aborted
-  // A user Stop lands here as an AbortError thrown out of fetch. That is not a
-  // failure of the stage — report it as 'skipped: stopped by user', never as
-  // 'failed' wearing exception text.
-  const setCaught = (stage: PipeStage, e: unknown) =>
-    aborted() ? set(stage, 'skipped', 'stopped by user') : set(stage, 'failed', String(e))
+  // Abort stops client observation/scheduling, not server execution. The timer
+  // retains the open attempt and marks it unfinished on exit, never skipped.
+  const setCaught = (stage: PipeStage, e: unknown) => {
+    if (!aborted()) set(stage, 'failed', String(e))
+  }
+  if (aborted()) return { stages }
 
   // ---- 1. Electronics (chip-scale board) — MUST be first (grounding) ----
   if (applicable('electronics')) {
@@ -639,8 +693,8 @@ async function runPipelineStages(opts: RunOpts, timer: RunTimer): Promise<Pipeli
         if (ev.status === 'failed' && isRerun) staleAfterRerun(stage, ev.detail)
         else set(stage, ev.status, ev.detail)
       } catch (e) {
-        if (aborted()) set(stage, 'skipped', 'stopped by user') // user Stop, not a failure (and not stale)
-        else if (isRerun) staleAfterRerun(stage, String(e))
+        if (aborted()) return // unfinished attempt; server outcome is unknown
+        if (isRerun) staleAfterRerun(stage, String(e))
         else set(stage, 'failed', String(e))
       }
     }))

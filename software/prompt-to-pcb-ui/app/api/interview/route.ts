@@ -213,6 +213,9 @@ function firstJsonObject(text: string): string {
  * withKeepalive returns fast responses untouched. See lib/keepalive.ts.
  */
 export async function POST(req: Request): Promise<Response> {
+  if (process.env.FL_ASTRA_ROOT || (process.env.FL_ASTRA_BETA !== undefined && process.env.FL_ASTRA_BETA !== '0') || req.headers.has('x-fl-astra-workflow') || new URL(req.url).searchParams.has('astraWorkflow')) {
+    return Response.json({ error: 'Astra beta uses the product interview and stored electronics specification; the legacy board interview is not supported.' }, { status: 409 })
+  }
   return withKeepalive(handlePost(req))
 }
 
